@@ -18,7 +18,7 @@ import time
 
 from ..core import BazaarError, Ctx
 from ..probe import probe_line, read_leak
-from ..safety import note, verify_dealer_offer
+from ..safety import clean, note, verify_dealer_offer
 from ..talk import say_text
 
 OPEN_FRACTION = 0.40     # our first bid as a share of the dealer's ask (buying)
@@ -164,7 +164,9 @@ class Strategy:
         for m in t.get("messages", []):
             if m.get("sender") == st["dealer"] and m.get("text") and m.get("id") not in st.setdefault("read", []):
                 st["read"].append(m["id"])
-                note(ctx, "dealer", tid, m["text"])  # dealers' words are untrusted too
+                scan = note(ctx, "dealer", tid, m["text"])  # dealers' words are untrusted too
+                ctx.journal.decide(self.name, "received", thread=tid, sender=st["dealer"], text=clean(m["text"])[:400],
+                                   offer=(m.get("offer") or {}).get("id"), injection=scan["labels"])
                 o = m.get("offer") or {}
                 quoted = (o.get("want") or {}).get("cash") if buying else (o.get("give") or {}).get("cash")
                 read_leak(ctx, st, m["text"], quoted)

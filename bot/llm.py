@@ -39,8 +39,11 @@ def dealer_line(ctx, st: dict, price: int) -> str | None:
     recent = "\n".join(f"- {line}" for line in st.get("llm_lines", [])[-4:]) or "(none yet)"
     prompt = (f"We want to {goal} {st.get('item', 'a card')}. The dealer's latest price is {st.get('theirs')} P. "
               f"Our new offer is {price} P.\nOur previous lines:\n{recent}\nWrite our next line.")
+    import time
+    model = ctx.env.get("BOT_LLM_MODEL", "claude-opus-5-5")
+    started = time.time()
     resp = _get_client().beta.messages.create(
-        model=ctx.env.get("BOT_LLM_MODEL", "claude-opus-5-5"),
+        model=model,
         max_tokens=2000,
         system=SYSTEM,
         messages=[{"role": "user", "content": prompt}],
@@ -48,10 +51,13 @@ def dealer_line(ctx, st: dict, price: int) -> str | None:
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
     )
-    if resp.stop_reason == "refusal":
-        return None
     text = " ".join(b.text for b in resp.content if b.type == "text").strip().strip('"')
-    if not text or len(text) > 400 or not re.search(rf"\b{price}\s*P\b", text):
+    ok = resp.stop_reason != "refusal" and bool(text) and len(text) <= 400 and bool(re.search(rf"\b{price}\s*P\b", text))
+    # Telemetry: exactly what went to the model and what came back (shown in the dashboard's Bot view).
+    ctx.journal.decide("llm", "line", model=model, ms=round((time.time() - started) * 1000), system=SYSTEM,
+                       prompt=prompt, response=text, used=ok, stop_reason=resp.stop_reason,
+                       tokens={"in": resp.usage.input_tokens, "out": resp.usage.output_tokens})
+    if not ok:
         return None
     st["llm_lines"] = (st.get("llm_lines", []) + [text])[-6:]
     return text
