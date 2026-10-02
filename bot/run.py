@@ -82,7 +82,9 @@ def main():
         try:
             clock = b.clock()
             if clock.get("paused") or clock.get("doors") != "open":
-                journal.flush(mode="waiting", live=args.live, clock=clock)
+                op = control.state()
+                journal.flush(mode="waiting", live=args.live, armed=args.live and op["armed"], real=real,
+                              operator=op, tick=clock.get("tick"), clock=clock)
                 time.sleep(min(60, max(5, clock.get("next_tick_in") or 30)))
                 continue
             if clock["tick"] == last_tick and not args.once:
