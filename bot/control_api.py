@@ -220,6 +220,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "stats": read_json(PRACTICE / "stats.json", {}),
                                     "episodes": n, "latest": eps[0] if eps else None,
                                     "start_cash": 400,
+                                    "current": read_json(PRACTICE / "current.json"),
                                     "averages": {"dealer_capture": avg("dealer_capture"), "duel_score": avg("duel_score"),
                                                  "market_gain": avg("market_gain"), "networth_gain": avg("networth_gain")},
                                     # oldest first, for charts: how each practice game ended

@@ -90,7 +90,17 @@ def episode(n: int, combo: dict, args) -> dict:
     bot = subprocess.Popen([PY, "-m", "bot.run", "--live"], cwd=REPO, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        time.sleep(args.ticks * args.tick + 2)
+        # Publish the game in progress for the dashboard (bot/sim/practice/current.json).
+        started, end = time.strftime("%Y-%m-%d %H:%M:%S"), time.time() + args.ticks * args.tick + 2
+        while time.time() < end:
+            try:
+                live = get(f"http://127.0.0.1:{port}/sim/state")
+                cur = {"episode": n, "combo": combo, "started_at": started, "days": days, "tick": live["tick"],
+                       "cash": live["cash"], "networth": live["networth"], "networth_start": start["networth"]}
+                (OUT / "current.json").write_text(json.dumps(cur))
+            except (OSError, ValueError, KeyError):
+                pass
+            time.sleep(2)
         state = get(f"http://127.0.0.1:{port}/sim/state")
     finally:
         bot.terminate()
