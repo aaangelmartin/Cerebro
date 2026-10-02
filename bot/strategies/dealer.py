@@ -114,13 +114,18 @@ class Strategy:
         best = None
         for ref, c in v.cards.items():
             if c["released"] and c["rarity"] in sells and v.count(ref) == 0:
-                # Abuela really settles near her list price (~0.95 of it, seen on 2 Oct), whatever the team.
-                gain = v.next_copy(ref) - sells[c["rarity"]] * param(ctx, "EXPECT", 0.95)
-                if best is None or gain > best[0]:
-                    best = (gain, ref, v.next_copy(ref))
-        if best and best[0] > 0 and cash > 40:
+                value, list_price = v.next_copy(ref), sells[c["rarity"]]
+                # Abuela settles near her list price for teams that barely haggle (~0.95, seen on 2 Oct);
+                # a hard haggle can go lower. Rank by what a good haggle could win, and never pay more
+                # than the card is worth to us (limit just under its value): a walk-away costs nothing,
+                # and every negotiated deal also scores on the dealer ladder and counts towards level 2.
+                gain = value - list_price * param(ctx, "HAGGLE_TARGET", 0.7)
+                limit = min(int(value * VALUE_MARGIN), int(value) - 1)
+                if limit >= 1 and limit <= cash and (best is None or gain > best[0]):
+                    best = (gain, ref, limit)
+        if best and best[0] > 0:
             options.append((best[0], {"goal": "buy", "topic": {"buy": {"card": best[1]}}, "item": best[1],
-                                      "limit": int(best[2] * VALUE_MARGIN)}))
+                                      "limit": best[2]}))
         # A pack, at most PACKS_PER_HOUR an hour.
         packs = [m for m in menu.get("sells", []) if m.get("pack")]
         recent_packs = [d for d in recent if d.get("goal") == "buy" and d.get("pack")]
