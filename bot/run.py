@@ -98,6 +98,7 @@ def main():
                       control=control if armed else None,
                       wallet=Wallet(memory.setdefault("_wallet", {}), env, me))
             ctx.shared = memory.setdefault("_shared", {})
+            ctx.budget.restore(memory.setdefault("_budget", {}))
             for s in strategies:
                 ctx.memory = memory.setdefault(s.name, {})
                 try:
@@ -107,6 +108,7 @@ def main():
                 except Exception as e:  # noqa: BLE001 - one bad strategy must not stop the others
                     journal.error(s.name, e)
                     traceback.print_exc()
+            ctx.budget.save(memory["_budget"])
             save_memory(memory)
             from .intel import write as write_intel
             write_intel(ctx, memory, DATA / "intel.json")

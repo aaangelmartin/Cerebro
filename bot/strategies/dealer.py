@@ -27,6 +27,7 @@ from ..talk import say_text
 OPEN_FRACTION = 0.40     # our first bid as a share of the dealer's ask (buying)
 OPEN_MULTIPLE = 3.0      # our first ask as a multiple of the dealer's bid (selling)
 CONCEDE = 0.22           # share of the remaining gap we give up per message
+SELL_FLOOR_OF_BOOK = 0.6  # selling to a dealer: never below this share of book (forces them off their opening bid)
 SELL_CONCEDE = 0.12      # selling: smaller steps (team advice, 2 Oct: open ~3x the dealer's bid, concede slowly)
 VALUE_MARGIN = 0.85      # never pay more than this share of what the item is worth to us
 MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for teammates
@@ -170,7 +171,11 @@ class Strategy:
                     and s["id"] not in in_threads:
                 options.append((book - s["loss"] + (100 if s["id"] in granted else 0),
                                 {"goal": "sell", "topic": {"sell": {"assets": [s["id"]]}},
-                                 "item": s["ref"], "limit": max(1, round(s["loss"]) + 1)}))
+                                 "item": s["ref"],
+                                 # Floor well above what we lose: a deal at the dealer's opening bid
+                                 # scores nothing on the ladder (it is not a negotiated deal).
+                                 "limit": max(1, round(s["loss"]) + 1,
+                                              round(param(ctx, "SELL_FLOOR_OF_BOOK", SELL_FLOOR_OF_BOOK) * book))}))
                 break
         # Buy the card we value most among the rarities the dealer sells, if we do not hold it yet.
         sells = {m.get("rarity"): m.get("list_price") for m in menu.get("sells", []) if m.get("rarity")}
@@ -278,6 +283,9 @@ class Strategy:
         limit, theirs_p, ours = st["limit"], st["theirs"], st.get("ours")
         acceptable = theirs_p <= limit if buying else theirs_p >= limit
         close_enough = ours is not None and (theirs_p <= ours + 1 if buying else theirs_p >= ours - 1)
+        # Their opening price is worth no ladder points: make them move at least once.
+        if theirs_p == st["first"] and not st.get("final") and len(st.get("said", [])) < 2:
+            close_enough = False
 
         if offer and acceptable and (st.get("final") or close_enough):
             ok, why = verify_dealer_offer(offer, dealer=st["dealer"], buying=buying, expect_type=self.expect_type(st),

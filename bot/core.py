@@ -143,6 +143,22 @@ class TickBudget:
         self.max_offers = lim.get("max_open_offers_per_team", 30)
         self.messaged: set = set()  # thread/duel ids we already spoke in this tick
 
+    def restore(self, state: dict):
+        """Carry what we already said this tick across bot passes and restarts.
+
+        The game allows one message per side per tick; a pass that overruns the tick, or a restart,
+        used to send a second one and get wait_for_tick (16 wasted rounds on 2 Oct)."""
+        if state.get("tick") == self.tick:
+            self.messaged |= {tuple(k) for k in state.get("messaged", [])}
+            self.accepts = min(self.accepts, state.get("accepts", self.accepts))
+        else:
+            state.clear()
+        state["tick"] = self.tick
+
+    def save(self, state: dict):
+        state["messaged"] = [list(k) for k in self.messaged]
+        state["accepts"] = self.accepts
+
     def can_accept(self) -> bool:
         return self.accepts > 0
 
