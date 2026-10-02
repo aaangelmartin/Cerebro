@@ -7,6 +7,8 @@ server itself trusts its callers, so it only listens on 127.0.0.1. Writes need t
 X-Dashboard: 1 (as the gateway's console writes do).
 
 Live (the real bot, data in bot/data):
+  GET  /bot/live/view                   a plain live page: what the bot sees and does right now
+  GET  /bot/live/snapshot               everything that page shows, in one JSON
   GET  /bot/live/status                 status.json + control.json
   GET  /bot/live/decisions?limit=&strategy=&action=   newest first
   GET  /bot/live/llm?limit=             prompts sent to Claude and its replies
@@ -62,6 +64,72 @@ def tail_jsonl(path: Path, limit: int, keep=lambda r: True) -> list:
     return out
 
 
+def snapshot(control: Control) -> dict:
+    """Everything the bot sees right now, in one plain shape for the live view (bot/view.html)."""
+    status = read_json(LIVE / "status.json", {})
+    intel = read_json(LIVE / "intel.json", {})
+    memory = read_json(LIVE / "memory.json", {})
+    decisions = tail_jsonl(LIVE / "decisions.jsonl", 600)
+    me_id = "t10"
+    dealer = memory.get("dealer", {})
+    names = {r: c.get("name") for r, c in (intel.get("cards") or {}).items()}
+
+    # Conversations: the bot's open dealer threads, with every line said and heard.
+    lines: dict[int, list] = {}
+    for d in reversed(decisions):
+        if d.get("strategy") != "dealer":
+            continue
+        if d.get("action") == "say" and d.get("args"):
+            tid = d["args"][0]
+            lines.setdefault(tid, []).append({"at": d["at"], "from": "bot", "text": d["args"][1] if len(d["args"]) > 1 else "",
+                                              "price": (d.get("kwargs") or {}).get("price"), "dry_run": d.get("dry_run")})
+        elif d.get("action") == "received":
+            lines.setdefault(d.get("thread"), []).append({"at": d["at"], "from": d.get("sender"), "text": d.get("text"),
+                                                          "injection": d.get("injection")})
+    conversations = []
+    for tid, t in (dealer.get("threads") or {}).items():
+        tid_i = int(tid)
+        conversations.append({
+            "thread": tid_i, "with": t.get("dealer"), "kind": "dealer", "status": t.get("status"), "goal": t.get("goal"),
+            "item": t.get("item"), "item_name": names.get(t.get("item"), t.get("item")), "limit": t.get("limit"),
+            "first": t.get("first"), "ours": t.get("ours"), "theirs": t.get("theirs"), "final": t.get("final"),
+            "leak": t.get("leak"), "history": t.get("history", []), "lines": lines.get(tid_i, [])[-12:],
+            "closed_reason": t.get("closed_reason")})
+    conversations.sort(key=lambda c: (c["status"] != "open", -c["thread"]))
+
+    duel_state = (status.get("strategies") or {}).get("duels") or {}
+    sent = [{"at": d["at"], "to": "dealer" if d["strategy"] == "dealer" else d["strategy"], "thread": (d.get("args") or [None])[0],
+             "text": (d.get("args") or [None, ""])[1] if len(d.get("args") or []) > 1 else d.get("kwargs", {}).get("text", ""),
+             "price": (d.get("kwargs") or {}).get("price"), "dry_run": d.get("dry_run")}
+            for d in decisions if d.get("action") in ("say", "duel say", "message")][:30]
+    moves = [d for d in decisions if d.get("action") in (
+        "deal", "accept", "accept (buy)", "accept (swap)", "sold", "trade settled", "listed", "would list", "open thread",
+        "would open", "walk away", "cancel (reprice)", "operator rejected", "refuse malformed offer", "use leaked limit",
+        "possible leak", "injection attempt seen", "accepted", "result")][:40]
+
+    cards = intel.get("cards") or {}
+    wallet = status.get("wallet") or {}
+    owned = set(wallet.get("owned") or [])
+    market = memory.get("market", {})
+    listings = [{"offer": k, **v, "name": names.get(v.get("ref"), v.get("ref"))} for k, v in (market.get("listings") or {}).items()]
+    return {
+        "updated": status.get("updated"), "tick": status.get("tick"), "mode": status.get("mode"),
+        "armed": status.get("armed"), "real": status.get("real"), "control": control.state(),
+        "wallet": wallet, "team": {"cash": status.get("cash"), "score": status.get("score")},
+        "conversations": conversations, "duels": duel_state, "sent": sent, "moves": moves,
+        "want": [{"ref": r, **{k: c.get(k) for k in ("name", "rarity", "value", "book", "max_buy", "why", "priority", "market")}}
+                 for r, c in sorted(cards.items(), key=lambda kv: kv[1].get("priority") or 99) if c.get("role") in ("target", "buy")][:15],
+        "listings": listings,
+        "owned_cards": [{"id": i} for i in sorted(owned)],
+        "to_sell": [{"ref": r, **{k: c.get(k) for k in ("name", "value", "min_sell", "why", "market")}}
+                    for r, c in cards.items() if c.get("role") == "sell"],
+        "pending": [p for p in control.proposals(20) if p.get("status") == "pending"],
+        "errors": (status.get("errors") or [])[-5:], "suspicious": status.get("suspicious") or [],
+        "dealer_deals": (dealer.get("deals") or [])[-10:], "market_gain": sum(t.get("gain", 0) for t in market.get("trades", [])
+                                                                             if t.get("status") == "done"),
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     control = Control(LIVE)
 
@@ -79,6 +147,16 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[-1] for k, v in parse_qs(parts.query).items()}
         limit = max(1, min(int(q.get("limit", 100)) if q.get("limit", "").isdigit() else 100, 1000))
         p = parts.path
+        if p == "/bot/live/view":
+            body = (ROOT / "view.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
+        if p == "/bot/live/snapshot":
+            return self.reply(200, snapshot(self.control))
         if p == "/bot/live/status":
             return self.reply(200, {"status": read_json(LIVE / "status.json", {}), "control": self.control.state()})
         if p == "/bot/live/decisions":
