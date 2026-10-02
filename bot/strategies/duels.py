@@ -141,6 +141,8 @@ def observe(duel: dict, tick: int, st: dict) -> dict:
     deadline = None
     if _num(duel.get("ticks_left")) is not None:
         deadline = tick + _num(duel["ticks_left"])
+    elif _num(duel.get("deadline_tick")) is not None:  # the real game's field (seen 2 Oct)
+        deadline = _num(duel["deadline_tick"])
     elif _num(duel.get("deadline")) is not None:
         dl = _num(duel["deadline"])
         deadline = dl if dl >= tick else tick + dl  # absolute tick, or ticks remaining
@@ -374,7 +376,7 @@ class Strategy:
         plans = []
         seen = set()
         for d in live:
-            did = d.get("id")
+            did = (d.get("id") if d.get("id") is not None else d.get("duel"))
             if did is None:
                 continue
             seen.add(str(did))
@@ -387,7 +389,7 @@ class Strategy:
             self.scan_messages(ctx, d, st, our_ids)
             obs = observe(d, tick, st)
             self.learn_scenario(mem, d, obs, st)
-            decay = _num(d.get("decay")) or mem.get("decay") or 0.06
+            decay = _num(d.get("decay_per_round")) or _num(d.get("decay")) or mem.get("decay") or 0.06
             plan = decide(obs, st, PARAMS, decay)
             plan["duel"], plan["obs"] = did, obs
             if plan["accept"]:
@@ -450,7 +452,7 @@ class Strategy:
             except Exception:  # noqa: BLE001 - safety is optional; fall back to "do not look"
                 continue
             if res.get("suspicious"):
-                entry = {"source": "duel", "id": d.get("id"), "labels": res.get("labels", []), "text": cleaned,
+                entry = {"source": "duel", "id": (d.get("id") if d.get("id") is not None else d.get("duel")), "labels": res.get("labels", []), "text": cleaned,
                          "tick": ctx.clock.get("tick")}
                 sus = ctx.shared.setdefault("suspicious", [])
                 if not any(e.get("source") == "duel" and e.get("id") == entry["id"] and e.get("text") == cleaned
@@ -536,7 +538,7 @@ class Strategy:
         if not gone:
             return
         try:
-            done = {str(d.get("id")): d for d in ctx.b.duels(done=True).get("duels", [])}
+            done = {str((d.get("id") if d.get("id") is not None else d.get("duel"))): d for d in ctx.b.duels(done=True).get("duels", [])}
         except BazaarError as e:
             ctx.journal.error(self.name, e)
             return
