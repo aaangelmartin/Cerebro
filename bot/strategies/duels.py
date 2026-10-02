@@ -47,6 +47,7 @@ PARAMS = {
 }
 
 DEFAULT_TICKS = 12
+DECAY_PER_ROUND = 0.06  # each round of talk costs this share of the margin (confirmed 2 Oct)
 DAYS_MAX = 10
 
 LINES = [
@@ -468,9 +469,12 @@ class Strategy:
         st["scanned"] = len(msgs)
 
     def learn_scenario(self, mem: dict, d: dict, obs: dict, st: dict):
-        """Every pair plays the same scenario twice with roles swapped: once we have seen an item's limit
-        from both sides, the other side's limit is the rival's limit and the pie is known exactly."""
-        key = d.get("scenario") or d.get("scenario_id") or d.get("item") or d.get("name")
+        """When the game gives an explicit scenario id and we have seen it from both sides, the other
+        side's limit is the rival's and the pie is known exactly.
+
+        The item name is NOT a scenario id: the practice session (2 Oct) reused "Taxi Blanco" with
+        buyer limits 73/124/151 and seller limits 100/61/56, so keying on it invents false limits."""
+        key = d.get("scenario") or d.get("scenario_id")
         if key is None or obs["limit"] is None or obs["role"] not in ("seller", "buyer"):
             return
         sc = mem.setdefault("scenarios", {}).setdefault(str(key), {})
@@ -554,7 +558,16 @@ class Strategy:
                     st["status"] = "unknown"
                 continue
             st["status"] = str(d.get("status", "closed"))
+            # Points = margin x (1 - decay) ^ rounds, confirmed to the decimal on the practice session.
+            price, limit, rounds = _num(d.get("price")), _num(d.get("your_limit")), _num(d.get("rounds")) or 0
+            margin = None
+            if price is not None and limit is not None:
+                margin = (price - limit) if d.get("role") == "seller" else (limit - price)
             res = {"duel": k, "role": d.get("role"), "limit": d.get("your_limit"), "status": d.get("status"),
-                   "price": d.get("price"), "days": d.get("days"), "captured": d.get("you_captured")}
+                   "price": d.get("price"), "days": d.get("days"), "captured": d.get("you_captured"),
+                   "item": d.get("item"), "rival": d.get("rival"), "rounds": rounds, "margin": margin,
+                   "points": d.get("result"), "practice": st.get("practice"),
+                   "lost_to_decay": round(margin - margin * (1 - DECAY_PER_ROUND) ** rounds, 2) if margin else None,
+                   "our_offers": st.get("sent", [])[-8:], "rival_offers": st.get("rival_s", [])[-8:]}
             mem["results"].append(res)
             ctx.journal.decide(self.name, "result", raw=json.loads(json.dumps(redact(d), default=str)), **res)
