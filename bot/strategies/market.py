@@ -39,10 +39,10 @@ FIRST_COPY_MARKUP = 1.25   # a first copy (only in sets we value < 1.0) sells at
 MAX_ASK_FRACTION = 1.5     # never ask more than 1.5x book (nobody buys it and it blocks a slot)
 
 # --- buying / swapping -------------------------------------------------------
-BUY_MIN_GAIN = 3           # P of private value, at least
-BUY_MIN_MARGIN = 0.25      # gain >= 25 % of what we give up (cash + fee + cards)
+BUY_MIN_GAIN = 1           # P of private value, at least (team: take every profitable trade, 2 Oct)
+BUY_MIN_MARGIN = 0.0       # no share threshold: the best trade of each tick wins anyway
 CASH_RESERVE = 10          # never let a trade take the bot's wallet below this
-MAX_SPEND_SHARE = 0.5      # one trade spends at most this share of the cash above the reserve
+MAX_SPEND_SHARE = 0.9      # one trade may use most of the wallet: a LAV/MAL rare is worth 91-112 P to us
 MAX_VENUE_BOARDS = 3       # boards read per tick
 VENUES_REFRESH = 20        # ticks between /api/venues reads
 PENDING_TIMEOUT = 4        # ticks to wait for an accepted trade to show up in /api/me

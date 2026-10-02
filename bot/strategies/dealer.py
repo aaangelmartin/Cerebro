@@ -29,7 +29,8 @@ OPEN_MULTIPLE = 2.2      # our first ask as a multiple of the dealer's bid (sell
 CONCEDE = 0.22           # share of the remaining gap we give up per message
 VALUE_MARGIN = 0.85      # never pay more than this share of what the item is worth to us
 MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for teammates
-PACKS_PER_HOUR = 0       # packs are worth ~25 P to us and cost 26-30: not worth it (team decision, 2 Oct)
+PACKS_PER_HOUR = 3       # Abuela's hourly allotment; only bought at PACK_MAX_PRICE or less
+PACK_MAX_PRICE = 22      # packs are worth ~25 P to us: profitable only well under her 26-30 P ask (team, 2 Oct)
 
 
 PRACTICE_BEST = Path(__file__).resolve().parent.parent / "sim" / "practice" / "best.json"
@@ -190,11 +191,13 @@ class Strategy:
         # A pack, at most PACKS_PER_HOUR an hour.
         packs = [m for m in menu.get("sells", []) if m.get("pack")]
         recent_packs = [d for d in recent if d.get("goal") == "buy" and d.get("pack")]
-        if packs and len(recent_packs) < param(ctx, "PACKS_PER_HOUR", PACKS_PER_HOUR) and cash > 60:
+        pack_limit = int(min(param(ctx, "PACK_MAX_PRICE", PACK_MAX_PRICE), math.ceil(v.pack_value(packs[0]["pack"])) - 1)) \
+            if packs else 0
+        if packs and len(recent_packs) < param(ctx, "PACKS_PER_HOUR", PACKS_PER_HOUR) and 0 < pack_limit <= cash \
+                and mem.get("floors", {}).get(f"{dealer}:{packs[0]['pack']}", 0) <= pack_limit:
             pv = v.pack_value(packs[0]["pack"])
-            options.append((pv - packs[0].get("list_price", 26) * param(ctx, "EXPECT", 0.95),
-                            {"goal": "buy", "pack": True, "topic": {"buy": {"pack": packs[0]["pack"]}},
-                             "item": packs[0]["pack"], "limit": int(pv * VALUE_MARGIN)}))
+            options.append((pv - pack_limit, {"goal": "buy", "pack": True, "topic": {"buy": {"pack": packs[0]["pack"]}},
+                                              "item": packs[0]["pack"], "limit": pack_limit}))
         if not options:
             return None
         # Alternate goals so one kind of deal does not crowd out the others.
