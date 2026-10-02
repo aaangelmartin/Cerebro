@@ -111,7 +111,8 @@ class Strategy:
         best = None
         for ref, c in v.cards.items():
             if c["released"] and c["rarity"] in sells and v.count(ref) == 0:
-                gain = v.next_copy(ref) - sells[c["rarity"]] * 0.6
+                # Abuela really settles near her list price (~0.95 of it, seen on 2 Oct), whatever the team.
+                gain = v.next_copy(ref) - sells[c["rarity"]] * param(ctx, "EXPECT", 0.95)
                 if best is None or gain > best[0]:
                     best = (gain, ref, v.next_copy(ref))
         if best and best[0] > 0 and cash > 40:
@@ -122,7 +123,7 @@ class Strategy:
         recent_packs = [d for d in recent if d.get("goal") == "buy" and d.get("pack")]
         if packs and len(recent_packs) < PACKS_PER_HOUR and cash > 60:
             pv = v.pack_value(packs[0]["pack"])
-            options.append((pv - packs[0].get("list_price", 26) * 0.6,
+            options.append((pv - packs[0].get("list_price", 26) * param(ctx, "EXPECT", 0.95),
                             {"goal": "buy", "pack": True, "topic": {"buy": {"pack": packs[0]["pack"]}},
                              "item": packs[0]["pack"], "limit": int(pv * VALUE_MARGIN)}))
         if not options:
