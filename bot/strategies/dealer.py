@@ -14,8 +14,10 @@ and while anyone on the team has a thread open with a dealer the bot waits (one 
 
 from __future__ import annotations
 
+import json
 import math
 import time
+from pathlib import Path
 
 from ..core import BazaarError, Ctx
 from ..probe import probe_line, read_leak
@@ -30,10 +32,29 @@ MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for team
 PACKS_PER_HOUR = 2       # Abuela allows 3
 
 
-def param(ctx: Ctx, name: str, default: float) -> float:
-    """A tuning knob, overridable with BOT_DEALER_<NAME> (the practice trainer uses this)."""
+PRACTICE_BEST = Path(__file__).resolve().parent.parent / "sim" / "practice" / "best.json"
+MIN_GAMES = 10  # only trust a practice combination after this many games
+
+
+def practice_params() -> dict:
+    """The best dealer knobs the practice trainer has found so far, if it has played them enough."""
     try:
-        return float(ctx.env.get(f"BOT_DEALER_{name}", default))
+        top = json.loads(PRACTICE_BEST.read_text()).get("top") or []
+    except (OSError, ValueError):
+        return {}
+    for row in top:
+        if row.get("n", 0) >= MIN_GAMES:
+            return {kv.split("=")[0]: float(kv.split("=")[1]) for kv in row["combo"].split(",")}
+    return {}
+
+
+def param(ctx: Ctx, name: str, default: float) -> float:
+    """A tuning knob: BOT_DEALER_<NAME> if set (the trainer sets it), else what practice found best,
+    else the default."""
+    try:
+        if f"BOT_DEALER_{name}" in ctx.env:
+            return float(ctx.env[f"BOT_DEALER_{name}"])
+        return float(practice_params().get(name, default))
     except ValueError:
         return default
 
@@ -81,6 +102,10 @@ class Strategy:
                 self.open(ctx, dealer, plan)
 
         ctx.journal.set(self.name, {
+            "params": {k: param(ctx, k, d) for k, d in (("OPEN_FRACTION", OPEN_FRACTION), ("CONCEDE", CONCEDE),
+                                                           ("OPEN_MULTIPLE", OPEN_MULTIPLE))},
+            "params_from": "env" if any(k.startswith("BOT_DEALER_") for k in ctx.env) else
+                           ("practice" if practice_params() else "default"),
             "open": [{"thread": k, **{x: v[x] for x in ("dealer", "goal", "item", "first", "ours", "theirs")
                                       if x in v}} for k, v in mem["threads"].items() if v.get("status") == "open"],
             "deals": mem["deals"][-10:],
