@@ -7,7 +7,7 @@ through ngrok:
   They may read an allowlist of routes and send the manual console's actions,
   which must carry the X-Dashboard header.
 - Bots use the official SDK unchanged, pointed at this server:
-  BAZAAR_URL=<ngrok url> BAZAAR_KEY=<GATEWAY_TOKEN>. Their X-Team-Key is
+  BAZAAR_URL=<ngrok url> BAZAAR_KEY=<their personal token>. Their X-Team-Key is
   swapped for the real team key here. They may call any non-admin route.
 
 Every upstream call goes through one rate limiter per budget: keyed calls stay
@@ -51,7 +51,12 @@ def load_env(path):
 ENV = {**load_env(ROOT.parent / ".env"), **os.environ}
 BASE = ENV.get("BAZAAR_BASE_URL", "https://bazaar.causaprima.ai").rstrip("/")
 TEAM_KEY = ENV.get("BAZAAR_TEAM_KEY", "")
-GATEWAY_TOKEN = ENV.get("GATEWAY_TOKEN", "")
+# Personal gateway tokens, "name:token,name:token"; GATEWAY_TOKEN is the owner's.
+GATEWAY_TOKENS = dict(
+    reversed(item.strip().split(":", 1)) for item in ENV.get("GATEWAY_TOKENS", "").split(",") if ":" in item
+)
+if ENV.get("GATEWAY_TOKEN"):
+    GATEWAY_TOKENS[ENV["GATEWAY_TOKEN"]] = "owner"
 DASHBOARD_AUTH = f"{ENV.get('DASHBOARD_USER', '')}:{ENV.get('DASHBOARD_PASSWORD', '')}"
 
 # Public reads are fetched without the key; the rest of the dashboard's reads need it.
@@ -136,7 +141,7 @@ def fetch(path_qs, method="GET", body=None, keyed=True, extra_headers=None):
 
 
 # Dashboard reads share a short cache; concurrent misses wait for one upstream fetch.
-SLOW = {"/api/catalog": 60, "/api/schedule": 30, "/api/dealers": 20}
+SLOW = {"/openapi.json": 600, "/api/catalog": 60, "/api/schedule": 30, "/api/dealers": 20}
 CACHE_TTL = 4
 _cache, _locks, _locks_guard = {}, {}, threading.Lock()
 
@@ -242,10 +247,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def client(self):
-        """'bot' for the gateway token, 'dashboard' for basic auth, else None."""
+        """'bot:<name>' for a gateway token, 'dashboard' for basic auth, else None."""
         token = self.headers.get("X-Team-Key", "")
-        if GATEWAY_TOKEN and token and hmac.compare_digest(token, GATEWAY_TOKEN):
-            return "bot"
+        for known, name in GATEWAY_TOKENS.items():
+            if token and hmac.compare_digest(token, known):
+                return f"bot:{name}"
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Basic ") and DASHBOARD_AUTH != ":":
             try:
@@ -270,6 +276,12 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
+        if path == "/gateway/whoami":
+            return self.send_json(200, json.dumps({"client": client, "team": "t10"}).encode())
+        if path == "/openapi.json":
+            return self.send_json(*cached_fetch("/openapi.json", keyed=False))
+        if path == "/gateway/guide":
+            return self.send_file(DOCS / "GATEWAY_API.md", "text/markdown; charset=utf-8")
         if path in ("/events", "/api/events/stream"):
             return self.stream()
         if path in NOTES:
@@ -283,10 +295,10 @@ class Handler(SimpleHTTPRequestHandler):
         if path.startswith("/api/admin"):
             return self.send_error(403)
         if is_public(path):
-            if client == "bot":
+            if (client or "").startswith("bot"):
                 return self.send_json(*fetch(self.path, keyed=False))
             return self.send_json(*cached_fetch(self.path, keyed=False))
-        if client == "bot":
+        if (client or "").startswith("bot"):
             return self.send_json(*fetch(self.path, extra_headers=self.broker_header()))
         if is_private_read(path):
             return self.send_json(*cached_fetch(self.path, keyed=True))
@@ -392,8 +404,8 @@ class Server(ThreadingHTTPServer):
 if __name__ == "__main__":
     if not TEAM_KEY:
         print("warning: BAZAAR_TEAM_KEY is empty in .env")
-    if not GATEWAY_TOKEN:
-        print("warning: GATEWAY_TOKEN is empty in .env; bots cannot use the gateway")
+    if not GATEWAY_TOKENS:
+        print("warning: no gateway tokens in .env; bots cannot use the gateway")
     threading.Thread(target=team_stream, daemon=True).start()
     threading.Thread(target=feed_poller, daemon=True).start()
     print(f"The Bazaar gateway -> http://127.0.0.1:{PORT}")
