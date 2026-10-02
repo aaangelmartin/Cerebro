@@ -384,6 +384,9 @@ class Strategy:
             if st is None:
                 st = mem["duels"][str(did)] = {"first_tick": tick, "duel_ticks": duel_ticks, "status": "open"}
                 ctx.journal.decide(self.name, "first sight", duel=did, raw=redact(d))
+            # The first duel session of the weekend is the practice round (RULES.md); /api/duels has no flag.
+            st["practice"] = bool(d["practice"]) if "practice" in d else d.get("session") == 1
+            st["item"] = d.get("item")
             if str(d.get("status", "open")).lower() not in ("open", "live", "active", "running", "negotiating"):
                 continue
             self.scan_messages(ctx, d, st, our_ids)
@@ -429,7 +432,9 @@ class Strategy:
             "tick": tick,
             "live": [{"duel": pl["duel"], "role": pl["obs"]["role"], "limit": pl["obs"]["limit"],
                       "rival": pl["obs"]["rival"], "ours": pl["offer"], "left": pl["left"],
-                      "pie_est": round(pl.get("pie") or 0, 1), "accept": pl["accept"], "why": pl["why"]}
+                      "pie_est": round(pl.get("pie") or 0, 1), "accept": pl["accept"], "why": pl["why"],
+                      "practice": mem["duels"].get(str(pl["duel"]), {}).get("practice"),
+                      "item": mem["duels"].get(str(pl["duel"]), {}).get("item")}
                      for pl in plans],
             "results": mem["results"][-12:],
         })
