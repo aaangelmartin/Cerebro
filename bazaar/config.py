@@ -1,0 +1,73 @@
+"""Settings for the whole bazaar package: paths, gateway, models, budgets. Read once at import."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent          # bazaar/
+REPO = ROOT.parent
+
+
+def _load_env(path: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    return env
+
+
+ENV = {**_load_env(REPO / ".env"), **os.environ}
+
+# --- paths -----------------------------------------------------------------
+DATA = Path(ENV.get("BAZAAR_DATA_DIR") or ROOT / "data")
+LIVE = DATA / "live"            # everything the running bot writes
+FRIDAY = DATA / "friday"        # read-only material from Friday
+LAB = DATA / "lab"              # lessons, hypotheses, backtests, shadow runs
+STOP_FILE = ROOT / "STOP"       # touch to stop every write at once
+for _d in (LIVE, LAB):
+    _d.mkdir(parents=True, exist_ok=True)
+
+# --- gateway (the only door to the Bazaar) ----------------------------------
+GATEWAY_URL = ENV.get("BAZAAR_GATEWAY_URL", "http://127.0.0.1:8787").rstrip("/")
+GATEWAY_TOKEN = ENV.get("BAZAAR_GATEWAY_TOKEN") or ENV.get("GATEWAY_TOKEN", "")
+PUBLIC_URL = "https://bazaar.causaprima.ai"
+# Real writes need this AND the operator's arm switch. Tests and sims never set it.
+ALLOW_REAL = ENV.get("BAZAAR_ALLOW_REAL") == "1"
+
+# --- models -----------------------------------------------------------------
+OPUS = "claude-opus-5-5"
+SONNET = "claude-sonnet-5-5"
+HAIKU = "claude-haiku-4-5-20251001"
+DEGRADE_LADDER = [OPUS, SONNET, HAIKU]
+# USD per million tokens (input, output). Cache reads cost 10% of input, cache writes 125%.
+PRICES = {OPUS: (4.0, 20.0), SONNET: (2.0, 10.0), HAIKU: (1.0, 5.0)}
+
+
+def anthropic_keys() -> list[tuple[str, str]]:
+    """[(label, key)] for the router: ANTHROPIC_API_KEY_A/_B/_C, else ANTHROPIC_API_KEY."""
+    keys = [(s, ENV[f"ANTHROPIC_API_KEY_{s}"]) for s in "ABC" if ENV.get(f"ANTHROPIC_API_KEY_{s}")]
+    if not keys and ENV.get("ANTHROPIC_API_KEY"):
+        keys = [("A", ENV["ANTHROPIC_API_KEY"])]
+    return keys
+
+
+KEY_CAP_USD = float(ENV.get("BAZAAR_KEY_CAP_USD", "100"))     # hard cap per key, whole weekend
+DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "100"))     # all keys together, per Madrid day
+DEGRADE_AT = 0.8                                               # share of the day cap that steps the model down
+
+# --- timing -----------------------------------------------------------------
+DECISION_DEADLINE = 0.55        # share of the tick after which the fallback is sent
+RACE_DAYS = {"sun"}             # days when Opus races Sonnet (decision: only Sunday's 15 s ticks)
+
+# --- money rails --------------------------------------------------------------
+CASH_RESERVE = int(ENV.get("BAZAAR_CASH_RESERVE", "40"))
+MAX_SPEND_PER_DEAL = int(ENV.get("BAZAAR_MAX_SPEND_PER_DEAL", "120"))
+MAX_SPEND_PER_HOUR = int(ENV.get("BAZAAR_MAX_SPEND_PER_HOUR", "250"))
+BIG_DEAL_P = 60                 # buys above this go to the council
+
+# --- ports --------------------------------------------------------------------
+API_PORT = int(ENV.get("BAZAAR_API_PORT", "8791"))   # control + telemetry for the new dashboard
+SIM_PORT = int(ENV.get("BAZAAR_SIM_PORT", "8797"))   # the fake Bazaar for tests
