@@ -86,6 +86,7 @@ class Strategy:
 
         self.reconcile(ctx, team_offers)
         venues, boards = self.read_boards(ctx)
+        ctx.shared["boards"] = boards  # for the intel snapshot (bot/intel.py)
         self.learn_aliases(ctx, boards)
         accepted = self.buy_or_swap(ctx, venues, boards)
         listed = self.sell(ctx, boards, team_offers)
