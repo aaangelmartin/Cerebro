@@ -2,6 +2,12 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 21:00 — Control del bot desde el dashboard
+
+- El bot real corre **desarmado**. Desde el apartado Bot del dashboard se puede soltar y elegir modo: automático, revisión o manual. En revisión y manual, cada acción se puede aprobar, editar o rechazar antes de enviarse.
+- Telemetría completa: decisiones con su razonamiento, prompts enviados a Claude, mensajes recibidos con detección de injection y una visión del bot por carta (`intel.json`).
+- Investigación de técnicas de negociación en `docs/NEGOTIATION.md`. Contra el Abuela simulado, las nuevas tácticas apenas mejoran el regateo actual (0,847 frente a 0,839 del rango); la prueba de verdad será contra los dealers reales.
+
 ## 2026-10-02 20:45 — Bot listo para pruebas (rama `feat/bot`)
 
 - El bot tiene tres estrategias: dealers, mercado y duelos. Todas pasan por la pasarela y por defecto solo simulan. Jugar de verdad requiere `BOT_ALLOW_REAL=1`. Detalles en `docs/BOT.md`.

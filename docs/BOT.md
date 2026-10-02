@@ -27,6 +27,25 @@ BOT_GATEWAY_URL=http://127.0.0.1:8797 BOT_GATEWAY_TOKEN=sim BOT_DATA_DIR=bot/sim
 
 El Bazaar simulado parte de una instantánea de solo lectura del catálogo y de nuestra mano reales. Abuela tiene límite secreto, paciencia y oferta final, y cede solo si cedemos. El mercado tiene vendedores y compradores sintéticos. En los duelos, el rival a veces manda textos con prompt injection.
 
+## Control del operador (apartado Bot del dashboard)
+
+El bot real arranca con `BOT_ALLOW_REAL=1 .venv/bin/python -m bot.run --live` pero **desarmado**: decide y registra sin enviar nada. Se controla con la API `bot/control_api.py` (127.0.0.1:8790), que la pasarela del dashboard expone en `/bot/*` solo a usuarios con sesión iniciada:
+
+| Modo (una vez armado) | Qué pasa con cada acción |
+|---|---|
+| `auto` | Se envía al momento. |
+| `review` | Espera `review_seconds` como propuesta. Se puede aprobar, editar (precio o texto) o rechazar; si nadie la toca, se envía. |
+| `manual` | Solo se envía si alguien la aprueba. |
+
+- **Soltar al bot:** `POST /bot/live/control {"armed": true}`.
+- **Parada:** `{"armed": false}`, que surte efecto en el siguiente tick, o `touch bot/STOP` para pararlo en seco.
+- **Override:** `POST /bot/live/pending/<id> {"decision": "approve"|"reject"|"edit", "kwargs": {"price": 12}}`.
+- **Telemetría:** `/bot/live/decisions`, `/bot/live/llm` (prompts enviados a Claude y sus respuestas), `/bot/live/inbox` (mensajes recibidos con etiquetas de injection) y `/bot/live/pending`.
+- **Entrenamiento, siempre separado del modo real:** `/bot/practice/summary`, `/bot/practice/episodes` y `/bot/practice/decisions`.
+- **Visión del bot por carta:** `bot/data/intel.json` se escribe en cada tick con el papel de cada carta (target, buy, sell, keep o ignore), su valor, los precios máximo y mínimo, el mercado, la conversación abierta y el porqué.
+
+Las técnicas de negociación investigadas y cómo las aplica el bot están en [`NEGOTIATION.md`](NEGOTIATION.md).
+
 ## Estrategias
 
 | Módulo | Qué hace |
