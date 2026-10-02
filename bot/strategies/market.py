@@ -350,6 +350,8 @@ class Strategy:
                 loss = copies[0]["your_value"] if copies[0].get("your_value") is not None else v.spare_value(ref)
                 out.append({**copies[0], "loss": float(loss), "first": True})
         busy = self.team_listed_assets | self.out_reserved | set(ctx.shared.get("reserved", []))
+        # Cards the team lent the bot are sold to dealers by negotiation (ladder points), not listed here.
+        busy |= set((ctx.wallet.s.get("granted") if ctx.wallet else None) or [])
         mine = [{**a, "loss": float(v.spare_value(a["ref"])), "first": v.count(a["ref"]) == 1}
                 for a in ctx.me.get("assets", []) if a.get("kind") == "card" and ctx.mine(a["id"])]
         seen = {a["id"] for a in out}

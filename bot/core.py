@@ -207,6 +207,7 @@ class Wallet:
         self.s.setdefault("owned", [])
         self.s.setdefault("claims", [])  # refs bought from a dealer whose new asset id we have not seen yet
         self.s.setdefault("ledger", [])
+        self.s.setdefault("granted", [])  # team cards the team handed to the bot to sell; their money stays the team's
         held = {a["id"]: a for a in me.get("assets", [])}
         if "baseline" not in self.s:  # what the team owned when the bot first started: never the bot's
             self.s["baseline"] = sorted(held)
@@ -216,6 +217,7 @@ class Wallet:
             if new:
                 owned.add(new[0])
                 self.s["claims"].remove(claim)
+        owned |= {i for i in self.s["granted"] if i in held}
         self.s["owned"] = sorted(i for i in owned if i in held)
 
     def cash(self, team_cash: float) -> float:
@@ -227,9 +229,11 @@ class Wallet:
         return set(self.s["owned"])
 
     def record(self, kind: str, amount: float, *, why: str, ids_in=(), ids_out=(), claim: str | None = None):
+        if kind == "earn" and ids_out and set(ids_out) <= set(self.s.get("granted", [])):
+            kind = "team"  # sold a card the team lent: the money is the team's, not the bot's budget
         if kind == "spend":
             self.s["spent"] += amount
-        else:
+        elif kind == "earn":
             self.s["earned"] += amount
         owned = set(self.s["owned"]) | set(ids_in)
         owned -= set(ids_out)
