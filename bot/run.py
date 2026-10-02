@@ -97,8 +97,9 @@ def main():
                     traceback.print_exc()
             save_memory(memory)
             last_tick = clock["tick"]
-            journal.flush(mode="running", live=args.live, tick=clock["tick"], cash=me.get("cash"),
-                          level=me.get("level"), score=me.get("score"))
+            journal.flush(mode="running", live=args.live, real=real, tick=clock["tick"], cash=me.get("cash"),
+                          level=me.get("level"), score=me.get("score"),
+                          suspicious=ctx.shared.get("suspicious", [])[-10:])
             if args.once:
                 return
         except BazaarError as e:
