@@ -14,6 +14,7 @@ and while anyone on the team has a thread open with a dealer the bot waits (one 
 
 from __future__ import annotations
 
+import math
 import time
 
 from ..core import BazaarError, Ctx
@@ -120,7 +121,12 @@ class Strategy:
                 # than the card is worth to us (limit just under its value): a walk-away costs nothing,
                 # and every negotiated deal also scores on the dealer ladder and counts towards level 2.
                 gain = value - list_price * param(ctx, "HAGGLE_TARGET", 0.7)
-                limit = min(int(value * VALUE_MARGIN), int(value) - 1)
+                # Strictly below what the card is worth to us: buying at the dealer's floor is still a
+                # gain, and a deal at the floor captures (almost) the dealer's whole price range.
+                limit = math.ceil(value) - 1
+                floor = mem.get("floors", {}).get(f"{dealer}:{ref}")
+                if floor is not None and floor > limit:
+                    continue  # we already saw this dealer's last word on this card: out of our reach
                 if limit >= 1 and limit <= cash and (best is None or gain > best[0]):
                     best = (gain, ref, limit)
         if best and best[0] > 0:
@@ -212,7 +218,10 @@ class Strategy:
                 self.record(ctx, st, tid, theirs_p)
             return
         if st.get("final") and not acceptable:
-            ctx.journal.decide(self.name, "walk away", thread=tid, theirs=theirs_p, limit=limit)
+            ref = (st["topic"].get("buy") or {}).get("card") or st.get("item")
+            ctx.memory.setdefault("floors", {})[f"{st['dealer']}:{ref}"] = theirs_p
+            ctx.journal.decide(self.name, "walk away", thread=tid, theirs=theirs_p, limit=limit,
+                               remembered_floor=theirs_p)
             if not ctx.dry_run:
                 ctx.b.close_thread(tid)
             st["status"] = "walked"
