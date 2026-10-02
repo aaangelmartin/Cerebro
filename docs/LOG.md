@@ -2,6 +2,30 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 21:05 — Por qué vamos primeros (29,13 puntos)
+
+- **De dónde salen:** el desglose de `/api/me` es `neg_points` 2,0, `ladder_points` 0,053, duelos 0 y mercado 0. Casi todo viene de la **ganancia en valor privado**, no de la escalera. Los regateos acabaron cerca del precio de Abuela, así que la escalera aporta poco.
+- **Qué hicimos:** 5 acuerdos.
+
+  | Carta | Precio | Valor para nosotros |
+  |---|---|---|
+  | LAV-08 | 17 | 40 |
+  | LAV-06 | 24 | 40 |
+  | LAV-07 | 24 | 40 |
+  | LAV-02 (en El Rastro, a t06) | ~12 con comisión | 16 |
+  | MAL-07 | 23 | 32,5 |
+
+  El valor de la colección pasó de 233,9 a 402,4 (+168,5) gastando unos 102 P: unos **+66 P netos** de valor privado.
+- **La clave:** Abuela vende igual a todos (las poco comunes por unos 23–24 P, cerca de su valor de libro de 25), pero para nosotros LAV vale ×1,6 y MAL ×1,3. Cada carta de LAV o MAL que no tenemos es ganancia pura. Las repetidas no, porque la 2.ª copia vale el 25 %.
+- `/api/me/value` no incluye el bonus de página. El catálogo dice `page_bonus` 0,25, que parece aplicarse a la página entera al completarla.
+- **A explotar:**
+  1. **Comprar a Abuela** las comunes de LAV y MAL que faltan: LAV-04 y LAV-05 valen 16 cada una, y MAL-01 y MAL-03, 13. Ya tenemos todas las poco comunes de LAV y MAL.
+  2. **Raras de LAV y MAL en el mercado:** LAV-09 y LAV-10 valen **112** cada una para nosotros, y MAL-09 y MAL-10, 91. Comprarlas por debajo de unos 85–95 P es ganancia grande, y además nos acercan a completar las páginas de Lavapiés y Malasaña.
+  3. **Épicas y legendarias de LAV:** LAV-11 vale **288** y LAV-12 unos 720. Hay que estar atentos a nuevos dealers (habrá uno que vende 1 legendaria por equipo y hora) y al mercado.
+  4. **Vender lo que vale poco para nosotros** a quien lo valore más: repetidas (MAL-02, MAL-05, MAL-06 ×2, LAT-04) y cartas de LAT (×0,5) y SAL (×0,9). Por ejemplo SAL-10, que para nosotros vale 63 y para un equipo con SAL ×1,6 valdría 112.
+  5. **Cupo de Abuela:** 8 acuerdos por equipo y hora y una conversación a la vez. Hay que usarlo entero cada hora.
+- **Escalera:** regatear mejor sigue sumando (cuentan los 3 mejores acuerdos), pero pesa mucho menos que la ganancia en valor.
+
 ## 2026-10-02 21:00 — Control del bot desde el dashboard
 
 - El bot real corre **desarmado**. Desde el apartado Bot del dashboard se puede soltar y elegir modo: automático, revisión o manual. En revisión y manual, cada acción se puede aprobar, editar o rechazar antes de enviarse.
