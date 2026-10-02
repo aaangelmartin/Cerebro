@@ -59,8 +59,8 @@ def test_parse():
 
 def test_tick_paths():
     duels = [
-        {"id": 1, "role": "seller", "your_limit": 50, "rival_offer": None, "deadline": 112, "item": "X"},
-        {"id": 2, "role": "buyer", "your_limit": 90, "rival_offer": {"price": 70}, "deadline": 101, "item": "X"},
+        {"id": 1, "role": "seller", "your_limit": 50, "rival_offer": None, "deadline": 112, "item": "X", "scenario": "S1"},
+        {"id": 2, "role": "buyer", "your_limit": 90, "rival_offer": {"price": 70}, "deadline": 101, "item": "X", "scenario": "S1"},
         {"id": 3, "role": "buyer", "your_limit": 80, "rival_offer": {"price": 60, "days": 2}, "deadline": 112,
          "issues": ["price", "days"], "your_days_weight": -1.5},
         {"id": 4, "role": "weird"},  # missing fields: skipped quietly
@@ -75,7 +75,10 @@ def test_tick_paths():
     assert said[3][1] is not None                 # days always sent when issues include days
     assert said[3][0] <= 80                       # buyer never bids above value
     assert 5 in said and said[5][0] >= 51         # never concede below cost
-    assert mem["scenarios"]["X"] == {"seller": 50, "buyer": 90}
+    # Keyed on the game's scenario id, never on the item name: the same item appears in
+    # unrelated scenarios with different limits (practice session, 2 Oct).
+    assert mem["scenarios"]["S1"] == {"seller": 50, "buyer": 90}
+    assert "X" not in mem["scenarios"]
 
 
 def test_limits_fuzz():

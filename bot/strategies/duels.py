@@ -35,12 +35,13 @@ PARAMS = {
     "PRIOR_RATIO": 0.5,    # prior: rival limit ~ our limit * (1 + r) (seller) or / (1 + r) (buyer)
     "OPEN": 1.25,          # first offer, as a multiple of the pie estimate (asks above it: anchors)
     "OPEN_KNOWN": 0.95,    # first offer when the pie is known exactly (mirrored scenario)
-    "TARGET": 0.62,        # share of the pie we aim at by ALPHA of the duel
+    "OPEN_OF_LIMIT": 0.20, # first offer at limit +/- this share (a floor: a big pie still anchors higher)
+    "TARGET": 0.50,        # share of the pie we aim at by ALPHA of the duel
     "ALPHA": 0.40,         # when (share of the deadline) we reach TARGET
     "BETA": 0.8,           # curve shape before ALPHA (1 linear, <1 concede early, >1 hold then concede)
-    "END": 0.20,           # share of the pie we still ask for at the deadline
+    "END": 0.30,           # share of the pie we still ask for at the deadline
     "LOOKAHEAD": 2,        # rounds we expect it would take to get our own next offer accepted
-    "LAST_TICKS": 2,       # within this many ticks of the deadline accept anything inside our limit
+    "LAST_TICKS": 3,       # within this many ticks of the deadline accept anything inside our limit
     "MIN_SURPLUS": 1,      # never offer or accept less than this over our limit
     "OBS_WEIGHT": 3.0,     # how fast observed rival offers replace the prior (n / (n + OBS_WEIGHT))
     "Q_CAP": 0.75,         # cap on the rival's geometric concession ratio when extrapolating
@@ -282,7 +283,10 @@ def decide(obs: dict, st: dict, p: dict = PARAMS, decay: float = 0.06) -> dict:
     # Utility we ask for this tick.
     x = min(1.0, k / max(1e-9, p["ALPHA"] * T))
     open_mult = p["OPEN_KNOWN"] if st.get("rival_limit") is not None else p["OPEN"]
-    u_open, u_tgt, u_end = open_mult * pie_total, p["TARGET"] * pie_total, p["END"] * pie_total
+    u_tgt, u_end = p["TARGET"] * pie_total, p["END"] * pie_total
+    # Open at limit +/- OPEN_OF_LIMIT (fast, robust when the pie estimate is poor), but never below
+    # this tick's target, so the concession curve only ever falls. Decay costs 6 % of the margin a round.
+    u_open = max(p["OPEN_OF_LIMIT"] * abs(limit), open_mult * pie_total)
     if x < 1.0:
         u = u_open - (u_open - u_tgt) * (x ** p["BETA"])
     else:
@@ -304,7 +308,9 @@ def decide(obs: dict, st: dict, p: dict = PARAMS, decay: float = 0.06) -> dict:
         inside = rs >= (p["MIN_SURPLUS"] if not use_days else 0) and ru >= p["MIN_SURPLUS"]
         my_next = s_ask + days_gain
         if known and inside:
-            if ru >= my_next * (1 - decay) ** p["LOOKAHEAD"]:
+            if ru >= u:  # meets this round's threshold: take it, every extra round costs decay
+                accept, why = True, f"rival gives {ru:.1f} >= this round's target {u:.1f}"
+            elif ru >= my_next * (1 - decay) ** p["LOOKAHEAD"]:
                 accept, why = True, f"rival gives {ru:.1f} >= our next {my_next:.1f} discounted"
             elif left <= p["LAST_TICKS"]:
                 accept, why = True, f"deadline in {left}: take {ru:.1f}"
