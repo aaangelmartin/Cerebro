@@ -8,6 +8,7 @@ Every 15 s it checks each service and starts it again if it is down:
   ngrok        the public tunnel to the gateway
   control-api  bot/control_api.py on :8790 (the dashboard's Bot tabs)
   bot          the real bot (python -m bot.run --live); it keeps its arm switch and wallet
+  recorder     bot/recorder.py, which saves the public feed and leaderboard to bot/data/history/
   practice     the practice trainer against the fake Bazaar
 
 It also keeps the Mac awake (caffeinate) while it runs, and logs to bot/data/supervise.log.
@@ -70,6 +71,8 @@ SERVICES = [
     # -u only on the real bot: the practice trainer spawns its own "python -m bot.run --live".
     ("bot", lambda: running(r"-u -m bot\.run --live$"),
      lambda: start("bot", [PY, "-u", "-m", "bot.run", "--live"], {"BOT_ALLOW_REAL": "1"})),
+    ("recorder", lambda: running(r"-m bot\.recorder"),
+     lambda: start("recorder", [PY, "-u", "-m", "bot.recorder"])),
     ("practice", lambda: running(r"-m bot\.sim\.practice"),
      lambda: start("practice", [PY, "-u", "-m", "bot.sim.practice", "--ticks", "40", "--tick", "1.0", "--probe"])),
 ]
