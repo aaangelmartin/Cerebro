@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Bazaar · Nuestro álbum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="top">
+  <div class="wrap strip" role="status" aria-live="polite">
+    <span class="live" id="live"><i></i><span id="live-txt">Conectando…</span></span>
+    <span id="tick-cd" class="muted"></span>
+    <span id="gw" class="hchip" hidden></span>
+    <span id="health" class="hchip" hidden></span>
+    <span class="grow"></span>
+    <span class="upd" title="Los datos se actualizan solos">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#27325A" stroke-width="3"/><circle class="p" id="upd-ring" cx="8" cy="8" r="6" fill="none" stroke="#8E99B8" stroke-width="3" stroke-dasharray="37.7" stroke-dashoffset="0"/></svg>
+      <span id="updated">Sin datos todavía</span>
+    </span>
+    <a class="bigbtn" id="bigbtn" href="#big">Pantalla grande</a>
+  </div>
+  <nav class="wrap tabs" id="tabs" aria-label="Secciones"></nav>
+</div>
+<div class="err-banner" id="err"><div class="wrap" id="err-txt"></div></div>
+<main id="app"></main>
+<div id="drawer-root"></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
