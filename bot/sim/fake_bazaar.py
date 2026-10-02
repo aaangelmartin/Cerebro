@@ -41,7 +41,7 @@ class ApiError(Exception):
 
 
 class World:
-    def __init__(self, catalog, me, tick_seconds, seed=None, duels=True, days=False):
+    def __init__(self, catalog, me, tick_seconds, seed=None, duels=True, days=False, cash=400):
         self.rng = random.Random(seed)
         self.lock = threading.RLock()
         self.catalog = catalog
@@ -50,7 +50,7 @@ class World:
         self.tick, self.tick_seconds = 0, tick_seconds
         self.next_tick_at = time.time() + tick_seconds
         self.me = {k: v for k, v in me.items() if k not in ("assets", "score")}
-        self.cash = me["cash"]
+        self.cash = cash  # practice always starts from the same 400 P, whatever the real team has now
         self.assets = {a["id"]: dict(a) for a in me["assets"]}
         self.next_id = 10_000
         self.threads, self.offers, self.pending = {}, {}, []
@@ -513,8 +513,20 @@ def _feed(w, m, q, b): return {"events": w.events[-int(q.get("limit", 150)):]}
 def _lb(w, m, q, b): return {"teams": [], "rounds": []}
 @route("GET", r"/api/levels")
 def _levels(w, m, q, b): return {"levels": []}
+def _collection_value(w):
+    total, seen = 0.0, {}
+    for a in sorted(w.assets.values(), key=lambda a: a["id"]):
+        if a["kind"] == "card":
+            n = seen.get(a["ref"], 0)
+            total += w.value(a["ref"], n)
+            seen[a["ref"]] = n + 1
+    return round(total, 2)
+
+
 @route("GET", r"/sim/state")
 def _state(w, m, q, b): return {"tick": w.tick, "cash": w.cash, "settled": w.settled,
+                                "collection_value": _collection_value(w),
+                                "networth": round(w.cash + _collection_value(w), 2),
                                 "assets": len(w.assets), "duels": [w.duel_view(d) for d in w.duels.values()]}
 
 
@@ -575,9 +587,11 @@ def main():
     ap.add_argument("--days", action="store_true", help="duels negotiate delivery days too")
     ap.add_argument("--no-duels", action="store_true")
     ap.add_argument("--refresh", action="store_true", help="retake the snapshot from the live gateway")
+    ap.add_argument("--cash", type=int, default=400, help="starting cash (practice uses 400 fictitious P)")
     args = ap.parse_args()
     snap = snapshot(args)
-    world = World(snap["catalog"], snap["me"], args.tick, args.seed, duels=not args.no_duels, days=args.days)
+    world = World(snap["catalog"], snap["me"], args.tick, args.seed, duels=not args.no_duels, days=args.days,
+                  cash=args.cash)
 
     def ticker():
         while True:

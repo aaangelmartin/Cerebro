@@ -45,6 +45,7 @@ GRID = {
 }
 COMBOS = [dict(zip(GRID, vals)) for vals in itertools.product(*GRID.values())]
 EPSILON = 0.3
+START_CASH = 400  # every practice game starts from the same 400 fictitious primas
 
 
 def key(combo: dict) -> str:
@@ -77,14 +78,15 @@ def episode(n: int, combo: dict, args) -> dict:
     shutil.rmtree(data, ignore_errors=True)
     days = n % 2 == 1
     sim = subprocess.Popen([PY, "-m", "bot.sim.fake_bazaar", "--port", str(port), "--tick", str(args.tick),
-                            "--seed", str(n)] + (["--days"] if days else []), cwd=REPO,
+                            "--seed", str(n), "--cash", str(START_CASH)] + (["--days"] if days else []), cwd=REPO,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env = {**os.environ, "BOT_GATEWAY_URL": f"http://127.0.0.1:{port}", "BOT_GATEWAY_TOKEN": "sim",
-           "BOT_DATA_DIR": str(data), "BOT_PROBE": "1" if args.probe else "0", "ANTHROPIC_API_KEY": "",
+           "BOT_DATA_DIR": str(data), "BOT_BUDGET": str(START_CASH), "BOT_PROBE": "1" if args.probe else "0", "ANTHROPIC_API_KEY": "",
            **{f"BOT_DEALER_{k}": str(v) for k, v in combo.items()}}
     data.mkdir(parents=True, exist_ok=True)
     (data / "control.json").write_text(json.dumps({"armed": True, "mode": "auto"}))  # practice plays unattended
     time.sleep(1.5)
+    start = get(f"http://127.0.0.1:{port}/sim/state")
     bot = subprocess.Popen([PY, "-m", "bot.run", "--live"], cwd=REPO, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -110,7 +112,9 @@ def episode(n: int, combo: dict, args) -> dict:
     return {"episode": n, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "days": days, "combo": combo,
             "dealer_capture": round(dealer, 3), "dealer_deals": len(captures),
             "duel_score": round(duel, 3), "duels_closed": sum(1 for d in duels if d["status"] == "deal"),
-            "duels": len(duels), "market_gain": market_gain, "cash_end": state["cash"], "errors": errors}
+            "duels": len(duels), "market_gain": market_gain, "cash_start": start["cash"], "cash_end": state["cash"],
+            "networth_start": start["networth"], "networth_end": state["networth"],
+            "networth_gain": round(state["networth"] - start["networth"], 2), "errors": errors}
 
 
 def main():
@@ -139,7 +143,7 @@ def main():
         (OUT / "stats.json").write_text(json.dumps(stats, indent=1))
         ranking = sorted(({"combo": k, **v} for k, v in stats.items()), key=lambda r: -r["mean"])
         (OUT / "best.json").write_text(json.dumps({"updated": res["at"], "episodes": n, "top": ranking[:5]}, indent=1))
-        print(f"ep {n} {key(combo)} dealer {res['dealer_capture']} ({res['dealer_deals']} deals) "
+        print(f"ep {n} networth {res['networth_start']}->{res['networth_end']} ({res['networth_gain']:+}) dealer {res['dealer_capture']} ({res['dealer_deals']} deals) "
               f"duels {res['duel_score']} ({res['duels_closed']}/{res['duels']}) market +{res['market_gain']} "
               f"errors {res['errors']}", flush=True)
         n += 1

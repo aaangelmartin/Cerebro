@@ -180,8 +180,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"best": read_json(PRACTICE / "best.json", {}),
                                     "stats": read_json(PRACTICE / "stats.json", {}),
                                     "episodes": n, "latest": eps[0] if eps else None,
+                                    "start_cash": 400,
                                     "averages": {"dealer_capture": avg("dealer_capture"), "duel_score": avg("duel_score"),
-                                                 "market_gain": avg("market_gain")},
+                                                 "market_gain": avg("market_gain"), "networth_gain": avg("networth_gain")},
+                                    # oldest first, for charts: how each practice game ended
+                                    "series": [{k: e.get(k) for k in ("episode", "at", "networth_start", "networth_end",
+                                                                      "networth_gain", "dealer_capture", "duel_score",
+                                                                      "market_gain", "cash_end")}
+                                               for e in reversed(eps[:200])],
                                     "running": not (ROOT / "sim" / "STOP_PRACTICE").exists()})
         if p == "/bot/practice/episodes":
             return self.reply(200, {"episodes": tail_jsonl(PRACTICE / "episodes.jsonl", limit)})
