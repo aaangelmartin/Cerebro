@@ -25,8 +25,9 @@ from ..safety import clean, note, verify_dealer_offer
 from ..talk import say_text
 
 OPEN_FRACTION = 0.40     # our first bid as a share of the dealer's ask (buying)
-OPEN_MULTIPLE = 2.2      # our first ask as a multiple of the dealer's bid (selling)
+OPEN_MULTIPLE = 3.0      # our first ask as a multiple of the dealer's bid (selling)
 CONCEDE = 0.22           # share of the remaining gap we give up per message
+SELL_CONCEDE = 0.12      # selling: smaller steps (team advice, 2 Oct: open ~3x the dealer's bid, concede slowly)
 VALUE_MARGIN = 0.85      # never pay more than this share of what the item is worth to us
 MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for teammates
 PACKS_PER_HOUR = 3       # Abuela's hourly allotment; only bought at PACK_MAX_PRICE or less
@@ -163,8 +164,8 @@ class Strategy:
         candidates.sort(key=lambda a: (a["id"] not in granted, a["loss"]))
         for s in candidates:
             book = (v.cards.get(s["ref"]) or {}).get("book", 10)
-            if s["loss"] >= 0.8 * book:
-                continue  # worth nearly its book value to us: a dealer will never pay enough for it
+            if s["loss"] >= book:
+                continue  # worth more than its book value to us: keep it
             if s.get("rarity") in buys and s["id"] not in mem.get("sold_ids", []) and s["id"] not in self.listed \
                     and s["id"] not in in_threads:
                 options.append((book - s["loss"] + (100 if s["id"] in granted else 0),
@@ -312,7 +313,9 @@ class Strategy:
                     else max(limit, round(first * param(ctx, "OPEN_MULTIPLE", OPEN_MULTIPLE))))
         else:
             gap = (theirs_p - ours) if buying else (ours - theirs_p)
-            step = max(1, round(gap * param(ctx, "CONCEDE", CONCEDE)))
+            # Selling: concede slowly (dealers rise slowly when the seller comes down in small steps).
+            knob = ("CONCEDE", CONCEDE) if buying else ("SELL_CONCEDE", SELL_CONCEDE)
+            step = max(1, round(gap * param(ctx, *knob)))
             ours = ours + step if buying else ours - step
         leak = st.get("leak")
         if leak is not None and (ours < leak < theirs_p if buying else theirs_p < leak < ours):
