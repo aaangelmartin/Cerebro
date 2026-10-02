@@ -2,6 +2,14 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 20:30 — DECISIÓN: usamos la deducción de manos rivales
+
+- Decidido por el equipo: la vista de rivales reconstruye la mano inicial de cada equipo.
+- **Patrón confirmado:** cartas 1–270 = 18 equipos × 15. El equipo `tNN` tiene los ids `(NN−1)×15+1 … NN×15`, y la carta 15 de cada bloque es su rara. La carta 15 es LAT-09, que coincide con la carta más rara del Team 1 en el leaderboard; la nuestra, la 150, es SAL-10. La 271 no existe todavía.
+- Si el historial de una carta solo tiene el reparto inicial, la sigue teniendo su equipo. Si tiene más entradas, ha cambiado de manos y el nuevo dueño es anónimo.
+- La pasarela escanea las cartas con nuestra clave a como mucho 2 peticiones/s, para dejar margen a los bots, y publica el resultado en `/intel/rivals`.
+- **Ojo:** `/api/cards/{id}` sin clave devuelve `bad_key` y cuenta como clave errónea (20 por ráfaga y luego una cada 2 s). Usar siempre la pasarela.
+
 ## 2026-10-02 20:15 — Pasarela única del equipo
 
 - Solo el PC de Ángel habla con el Bazaar. El dashboard y los bots de los demás pasan por su pasarela (ngrok), con un token propio en `BAZAAR_KEY`. Detalles en el README.
