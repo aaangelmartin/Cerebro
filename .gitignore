@@ -12,3 +12,5 @@ bot/STOP
 bot/sim/snapshot.json
 bot/sim/data*/
 __pycache__/
+bot/sim/practice/
+bot/sim/STOP_PRACTICE

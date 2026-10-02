@@ -154,15 +154,16 @@ class World:
                 ask = {"common": 10, "uncommon": 25}.get(self.cards[ref]["rarity"], 70) + r.randint(-3, 5)
                 t["item"], t["give"] = self.cards[ref]["name"], {"types": [f"card:{ref}"]}
                 t["ref"] = ref
-            t.update(side="sell", ask=ask, limit=round(ask * r.uniform(0.55, 0.8)))
+            t.update(side="sell", ask=ask, open=ask, limit=round(ask * r.uniform(0.55, 0.8)))
         else:
             ids = topic.get("sell", {}).get("assets", [])
             a = self.assets.get(ids[0]) if ids else None
             if not a or a["kind"] != "card" or a["rarity"] not in ("common", "uncommon"):
                 raise ApiError(400, "not_buying", "Abuela buys commons and uncommons")
             book = self.cards[a["ref"]]["book"]
-            t.update(item=a["name"], side="buy", sell_ids=ids, bid=max(1, round(book * r.uniform(0.3, 0.5))),
-                     limit=round(book * r.uniform(0.6, 0.9)))
+            bid = max(1, round(book * r.uniform(0.3, 0.5)))
+            t.update(item=a["name"], side="buy", sell_ids=ids, bid=bid, open=bid,
+                     limit=max(bid + 1, round(book * r.uniform(0.6, 0.9))))
         self.threads[tid] = t
         self.pending.append((self.dealer_speak, (t, "Hola, cariño, have you eaten?")))
         return {"id": tid, **self.thread_view(t)}
@@ -266,7 +267,10 @@ class World:
                 self.assets.pop(aid, None)
             self.cash += price
         t["status"], t["deal_price"] = "deal", price
-        self.settled.append({"tick": self.tick, "thread": t["id"], "price": price, "side": t["side"]})
+        span = abs(t["open"] - t["limit"]) or 1
+        capture = (t["open"] - price) / span if t["side"] == "sell" else (price - t["open"]) / span
+        self.settled.append({"tick": self.tick, "thread": t["id"], "price": price, "side": t["side"],
+                             "open": t["open"], "limit": t["limit"], "capture": round(max(0.0, min(1.0, capture)), 3)})
         self.event("settlement", parties=[t["with"], TEAM], price=price)
 
     def thread_view(self, t):

@@ -29,6 +29,14 @@ MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for team
 PACKS_PER_HOUR = 2       # Abuela allows 3
 
 
+def param(ctx: Ctx, name: str, default: float) -> float:
+    """A tuning knob, overridable with BOT_DEALER_<NAME> (the practice trainer uses this)."""
+    try:
+        return float(ctx.env.get(f"BOT_DEALER_{name}", default))
+    except ValueError:
+        return default
+
+
 class Strategy:
     name = "dealer"
 
@@ -197,10 +205,11 @@ class Strategy:
             return
         first = st["first"]
         if ours is None:
-            ours = max(1, round(first * OPEN_FRACTION)) if buying else max(limit, round(first * OPEN_MULTIPLE))
+            ours = (max(1, round(first * param(ctx, "OPEN_FRACTION", OPEN_FRACTION))) if buying
+                    else max(limit, round(first * param(ctx, "OPEN_MULTIPLE", OPEN_MULTIPLE))))
         else:
             gap = (theirs_p - ours) if buying else (ours - theirs_p)
-            step = max(1, round(gap * CONCEDE))
+            step = max(1, round(gap * param(ctx, "CONCEDE", CONCEDE)))
             ours = ours + step if buying else ours - step
         leak = st.get("leak")
         if leak is not None and (ours < leak < theirs_p if buying else theirs_p < leak < ours):

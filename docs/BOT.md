@@ -23,6 +23,8 @@ BOT_GATEWAY_URL=http://127.0.0.1:8797 BOT_GATEWAY_TOKEN=sim BOT_DATA_DIR=bot/sim
 .venv/bin/python -m bot.tests.sim_duels                           # torneo de duelos contra 7 tipos de rival
 ```
 
+**Entrenamiento continuo:** `.venv/bin/python -m bot.sim.practice --probe` juega una partida tras otra contra el Bazaar simulado. Cada partida usa una semilla nueva y una de cada dos tiene duelos con días. Prueba combinaciones de los parámetros de regateo (`BOT_DEALER_OPEN_FRACTION`, `BOT_DEALER_CONCEDE`, `BOT_DEALER_OPEN_MULTIPLE`) y se queda con las mejores. Los resultados van a `bot/sim/practice/episodes.jsonl` y la clasificación a `bot/sim/practice/best.json`. Se para con `touch bot/sim/STOP_PRACTICE`. Durante el entrenamiento Claude va desactivado para no gastar créditos. Ojo: los dealers simulados siguen nuestro modelo de los reales, así que los parámetros ganadores hay que contrastarlos con el juego real.
+
 El Bazaar simulado parte de una instantánea de solo lectura del catálogo y de nuestra mano reales. Abuela tiene límite secreto, paciencia y oferta final, y cede solo si cedemos. El mercado tiene vendedores y compradores sintéticos. En los duelos, el rival a veces manda textos con prompt injection.
 
 ## Estrategias
