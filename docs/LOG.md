@@ -2,6 +2,14 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 20:45 — Bot listo para pruebas (rama `feat/bot`)
+
+- El bot tiene tres estrategias: dealers, mercado y duelos. Todas pasan por la pasarela y por defecto solo simulan. Jugar de verdad requiere `BOT_ALLOW_REAL=1`. Detalles en `docs/BOT.md`.
+- **Abuela abre a 17 P** y casi todos los equipos aceptan ese precio, que no puntúa en la escalera ni desbloquea el siguiente dealer. El bot regatea.
+- `catalog.values.copy_marginals` = [1.0, 0.25, 0.1]: la 2.ª copia vale el 25 % y la 3.ª el 10 %. `your_value` en `/api/me` es el valor de la *última* copia, repetido en todas.
+- **Ofertas:** las de Abuela caducan a los 2 ticks. En los libros de órdenes los vendedores salen con **seudónimo** (`m5e679080`), no con el id de equipo.
+- **Prompt injection:** las defensas y su test pasan. Las sondas contra dealers están listas pero desactivadas (`BOT_PROBE=1`).
+
 ## 2026-10-02 20:30 — DECISIÓN: usamos la deducción de manos rivales
 
 - Decidido por el equipo: la vista de rivales reconstruye la mano inicial de cada equipo.
