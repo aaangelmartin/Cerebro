@@ -154,13 +154,22 @@ class Strategy:
         options = []
         # Sell our cheapest spare if the dealer buys that rarity.
         buys = {m.get("rarity") for m in menu.get("buys", [])}
-        for s in v.spares() + [a for a in ctx.me.get("assets", []) if a.get("kind") == "card" and ctx.mine(a["id"])]:
-            if not ctx.mine(s["id"]):
-                continue  # the team's own cards are not the bot's to sell
-            s.setdefault("loss", v.spare_value(s["ref"]))
-            if s.get("rarity") in buys and s["id"] not in mem.get("sold_ids", []) and s["id"] not in self.listed:
-                options.append((s.get("book", 10) - s["loss"], {"goal": "sell", "topic": {"sell": {"assets": [s["id"]]}},
-                                                                "item": s["ref"], "limit": max(1, round(s["loss"]) + 1)}))
+        granted = set((ctx.wallet.s.get("granted") if ctx.wallet else None) or [])
+        in_threads = {aid for t in mem["threads"].values() if t.get("status") == "open" and t.get("goal") == "sell"
+                      for aid in t["topic"]["sell"]["assets"]}
+        candidates = [{**a, "loss": v.spare_value(a["ref"])} for a in ctx.me.get("assets", [])
+                      if a.get("kind") == "card" and ctx.mine(a["id"])]
+        # Cards the team lent us first (that is what they are for), then the cheapest to us.
+        candidates.sort(key=lambda a: (a["id"] not in granted, a["loss"]))
+        for s in candidates:
+            book = (v.cards.get(s["ref"]) or {}).get("book", 10)
+            if s["loss"] >= 0.8 * book:
+                continue  # worth nearly its book value to us: a dealer will never pay enough for it
+            if s.get("rarity") in buys and s["id"] not in mem.get("sold_ids", []) and s["id"] not in self.listed \
+                    and s["id"] not in in_threads:
+                options.append((book - s["loss"] + (100 if s["id"] in granted else 0),
+                                {"goal": "sell", "topic": {"sell": {"assets": [s["id"]]}},
+                                 "item": s["ref"], "limit": max(1, round(s["loss"]) + 1)}))
                 break
         # Buy the card we value most among the rarities the dealer sells, if we do not hold it yet.
         sells = {m.get("rarity"): m.get("list_price") for m in menu.get("sells", []) if m.get("rarity")}
