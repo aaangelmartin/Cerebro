@@ -2,6 +2,14 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 22:35 — Qué hace el Team 13 (1.º, 30/30 en negociación)
+
+- **Más acuerdos que nadie:** 22, frente a nuestros 16. En los últimos ticks **vende a los dealers las cartas que valen poco para ellos**: SAL-01 por 5 P y SAL-02 por 6 P a Abuela; LAT-09 (rara) por 46 P y MAL-06 por 15 P a El Chato. Cada venta negociada es un acuerdo de escalera y, si el precio supera su valor privado, también suma ganancia de valor.
+- **Anuncian en El Rastro** lo que les sobra (MAL-06, LAV-03, MAL-01, LAT-04).
+- **Ya tienen mercado propio:** `v03` "Mercado Trece · 1% fee", con mecanismo `board` y fianza de 250, abierto en el tick 129. También tienen mercado t06 (v01, 0,5 %), t12 (v02, 0 %) y t02 (v04, `auto`, 0 %). Nadie tiene todavía puntos de mercado: el primer Market Test es a la hora 3,0, el sábado.
+- **Abuela hace regalos:** "gift from Abuela Carmen", una LAT-05 al Team 13. Los regalos no puntúan.
+- **Para nosotros:** seguir vendiendo a los dealers las 7 cartas cedidas (el bot ya lo hace) y abrir el mercado propio antes del Market Test.
+
 ## 2026-10-02 22:05 — El bot vendió SAL-10 por error (corregido)
 
 - **Qué pasó:** en el tick 98 el bot aceptó una puja del Team 13 de 70 P por **SAL-10, que era del equipo**. Respetaba la regla de "solo vende lo suyo" al anunciar cartas, pero no al aceptar pujas.
