@@ -31,6 +31,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .control import Control
+from .core import load_env
+from .llm import status as llm_status
 
 ROOT = Path(__file__).resolve().parent
 LIVE = Path(os.environ.get("BOT_DATA_DIR") or ROOT / "data")
@@ -109,6 +111,7 @@ def snapshot(control: Control) -> dict:
 
     cards = intel.get("cards") or {}
     wallet = status.get("wallet") or {}
+    now = _now(decisions, conversations, status)
     owned = set(wallet.get("owned") or [])
     market = memory.get("market", {})
     listings = [{"offer": k, **v, "name": names.get(v.get("ref"), v.get("ref"))} for k, v in (market.get("listings") or {}).items()]
@@ -125,9 +128,45 @@ def snapshot(control: Control) -> dict:
                     for r, c in cards.items() if c.get("role") == "sell"],
         "pending": [p for p in control.proposals(20) if p.get("status") == "pending"],
         "errors": (status.get("errors") or [])[-5:], "suspicious": status.get("suspicious") or [],
+        "llm": {k: v for k, v in llm_status(load_env()).items() if k != "key"}, "now": now,
         "dealer_deals": (dealer.get("deals") or [])[-10:], "market_gain": sum(t.get("gain", 0) for t in market.get("trades", [])
                                                                              if t.get("status") == "done"),
     }
+
+
+PHRASES = {
+    "say": lambda d: f"Ofreciendo {(d.get('kwargs') or {}).get('price')} P en la conversación {(d.get('args') or ['?'])[0]}",
+    "open thread": lambda d: f"Abriendo conversación con {(d.get('args') or ['?'])[0]}",
+    "would open": lambda d: f"Abriría conversación con {d.get('dealer')} para {d.get('goal')} {d.get('item')}",
+    "accept": lambda d: f"Aceptando la oferta {(d.get('args') or ['?'])[0]}",
+    "deal": lambda d: f"Trato cerrado: {d.get('goal')} {d.get('item')} a {d.get('price')} P",
+    "walk away": lambda d: f"Se retira de la conversación {d.get('thread')}",
+    "would list": lambda d: f"Pondría a la venta {d.get('ref')} a {d.get('ask')} P",
+    "listed": lambda d: f"Puesto a la venta {d.get('ref')} a {d.get('ask')} P",
+    "buy chosen": lambda d: f"Va a comprar {', '.join(d.get('in_refs') or [])} por {d.get('cash_out')} P (+{d.get('gain')} de valor)",
+    "sold": lambda d: f"Vendido {', '.join(d.get('gave') or [])} por {d.get('got_cash')} P",
+    "received": lambda d: f"Leyendo el mensaje de {d.get('sender')}",
+    "use leaked limit": lambda d: f"Usando el límite que reveló el dealer: {d.get('leak')} P",
+}
+
+
+def _now(decisions: list, conversations: list, status: dict) -> dict:
+    """A one-line human summary of what the bot is doing, and what it is looking at."""
+    doing = None
+    for d in decisions[:15]:
+        f = PHRASES.get(d.get("action"))
+        if f:
+            try:
+                doing = f(d) + (" (simulado, el bot está desarmado)" if d.get("dry_run") else "")
+            except Exception:  # noqa: BLE001
+                continue
+            doing_at = d.get("at")
+            break
+    if doing is None:
+        doing, doing_at = ("Esperando: desarmado, sin acciones" if not status.get("armed") else "Esperando el siguiente tick"), None
+    looking = [f"conversación {c['thread']} ({c.get('item_name') or c.get('item')})" for c in conversations
+               if c.get("status") == "open"][:4]
+    return {"doing": doing, "at": doing_at, "looking_at": looking, "tick": status.get("tick")}
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -62,6 +62,11 @@ def main():
                          "BOT_GATEWAY_URL at the simulator (python3 -m bot.sim.fake_bazaar).")
     b = make_client(env)
     journal = Journal()
+    if env.get("BOT_LLM") != "off":
+        from .llm import check as check_llm
+        llm = check_llm(env)
+        print(f"Claude: model {llm['model']} · key {'OK' if llm.get('key_ok') else 'NOT OK: ' + str(llm.get('last_error'))}",
+              flush=True)
     control = Control(DATA)
     strategies = load_strategies([s.strip() for s in args.only.split(",") if s.strip()])
     memory = load_memory()

@@ -81,7 +81,7 @@ def episode(n: int, combo: dict, args) -> dict:
                             "--seed", str(n), "--cash", str(START_CASH)] + (["--days"] if days else []), cwd=REPO,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env = {**os.environ, "BOT_GATEWAY_URL": f"http://127.0.0.1:{port}", "BOT_GATEWAY_TOKEN": "sim",
-           "BOT_DATA_DIR": str(data), "BOT_BUDGET": str(START_CASH), "BOT_PROBE": "1" if args.probe else "0", "ANTHROPIC_API_KEY": "",
+           "BOT_DATA_DIR": str(data), "BOT_BUDGET": str(START_CASH), "BOT_PROBE": "1" if args.probe else "0", "ANTHROPIC_API_KEY": "", "BOT_LLM": "off",
            **{f"BOT_DEALER_{k}": str(v) for k, v in combo.items()}}
     data.mkdir(parents=True, exist_ok=True)
     (data / "control.json").write_text(json.dumps({"armed": True, "mode": "auto"}))  # practice plays unattended
