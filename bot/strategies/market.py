@@ -230,7 +230,8 @@ class Strategy:
         out_ids, loss, used = [], 0.0, set()
         for ref in out_refs:
             c = v.cards.get(ref)
-            have = [a for a in v.held.get(ref, []) if a["id"] not in used
+            # Only cards the bot bought itself may be handed over: the team's cards are never the bot's.
+            have = [a for a in v.held.get(ref, []) if a["id"] not in used and ctx.mine(a["id"])
                     and a["id"] not in self.team_listed_assets and a["id"] not in self.out_reserved]
             if not c or not have:
                 return None

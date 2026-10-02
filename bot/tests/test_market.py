@@ -67,6 +67,30 @@ def make_ctx(b, assets, cash=400, memory=None):
                journal=j, dry_run=False, env={}, memory=memory if memory is not None else {})
 
 
+class TeamCardsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        core.DATA = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_never_hands_over_a_team_card_to_a_bid(self):
+        # A rival bids 9 P for LAT-01 (worth 5 to us): a good sale, but the card is the team's, not the bot's.
+        b = FakeB([offer(9, give_cash=9, want_types=["card:LAT-01"])])
+        ctx = make_ctx(b, [card(150, "LAT-01")])
+        ctx.wallet = core.Wallet({"budget": 150, "baseline": [150]}, {}, ctx.me)
+        Strategy().tick(ctx)
+        self.assertEqual([c for c in b.calls if c[0] == "accept"], [])
+
+    def test_hands_over_a_bot_card_to_a_good_bid(self):
+        b = FakeB([offer(9, give_cash=9, want_types=["card:LAT-01"])])
+        ctx = make_ctx(b, [card(150, "LAT-01")])
+        ctx.wallet = core.Wallet({"budget": 150, "baseline": [], "owned": [150]}, {}, ctx.me)
+        Strategy().tick(ctx)
+        self.assertEqual([c for c in b.calls if c[0] == "accept"], [("accept", 9, [150])])
+
+
 class MarketTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
