@@ -2,6 +2,28 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 22:45 — Duelos de práctica: fórmula de puntuación confirmada
+
+Con los 7 acuerdos de la sesión de práctica queda confirmado, al decimal:
+
+**puntos = margen × (1 − decay) ^ rondas**, con `decay` = 0,06 por ronda.
+
+El margen es `precio − nuestro coste` si vendemos, o `nuestro valor − precio` si compramos.
+
+| Duelo | Papel | Límite | Precio | Rondas | Margen | Puntos |
+|---|---|---|---|---|---|---|
+| 211 | compra | 151 | 114 | 1 | 37 | 34,8 |
+| 173 | compra | 87 | 59 | 0 | 28 | 28,0 |
+| 257 | compra | 132 | 103 | 3 | 29 | 24,1 |
+| 60 | compra | 124 | 105 | 6 | 19 | 13,1 |
+| 78 | vende | 91 | 110 | 10 | 19 | 10,2 |
+| 77 | compra | 173 | 163 | 7 | 10 | 6,5 |
+| 59 | vende | 61 | 66 | 4 | 5 | 3,9 |
+
+**Lo que implica:** alargar una ronda más solo compensa si esa ronda mejora el margen **más de un 6 %**. En el duelo 78 el bot negoció 10 rondas y perdió casi la mitad del valor (19 → 10,2). Los duelos cerrados en 0–3 rondas dieron 24–35 puntos.
+
+**Sin acuerdo = 0 puntos**, igual que no jugar. En los duelos 5 y 6 el rival no hizo ninguna oferta.
+
 ## 2026-10-02 22:35 — Qué hace el Team 13 (1.º, 30/30 en negociación)
 
 - **Más acuerdos que nadie:** 22, frente a nuestros 16. En los últimos ticks **vende a los dealers las cartas que valen poco para ellos**: SAL-01 por 5 P y SAL-02 por 6 P a Abuela; LAT-09 (rara) por 46 P y MAL-06 por 15 P a El Chato. Cada venta negociada es un acuerdo de escalera y, si el precio supera su valor privado, también suma ganancia de valor.
