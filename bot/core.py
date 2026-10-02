@@ -164,9 +164,13 @@ class Journal:
         self.status_path = DATA / "status.json"
         self.decisions_path = DATA / "decisions.jsonl"
         self.status: dict = {"strategies": {}, "errors": []}
+        self.last: dict = {}  # the latest decision per strategy: the reasoning shown next to a proposal
 
     def decide(self, strategy: str, action: str, **info):
         rec = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "strategy": strategy, "action": action, **info}
+        if action not in ("received", "operator rejected") and strategy not in ("llm", "safety"):
+            # The reasoning shown next to a proposal: the strategy's latest decisions before acting.
+            self.last[strategy] = (self.last.get(strategy, []) + [rec])[-3:]
         with self.decisions_path.open("a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print(f"[{rec['at']}] {strategy}: {action} {json.dumps(info, ensure_ascii=False)[:300]}", flush=True)
@@ -201,11 +205,25 @@ class Ctx:
     env: dict
     memory: dict = field(default_factory=dict)  # per-strategy state that survives ticks (and restarts)
     shared: dict = field(default_factory=dict)  # state shared by all strategies, e.g. "reserved" asset ids
+    control: object = None  # bot.control.Control when the operator can review actions
 
     def write(self, strategy: str, action: str, fn, *args, **kwargs):
-        """Run a game action, or only log it in dry-run. Returns the API result (None in dry-run)."""
-        self.journal.decide(strategy, action, dry_run=self.dry_run, args=[a for a in args if not callable(a)],
-                            kwargs=kwargs)
+        """Run a game action, or only log it in dry-run. Returns the API result (None in dry-run).
+
+        Live, the action first goes through the operator's gate (bot/control.py): in review or
+        manual mode it waits as a proposal that can be approved, edited or rejected. A rejection
+        raises BazaarError("operator_rejected"), which strategies treat like any refused request."""
+        context = {"reasoning": list(getattr(self.journal, "last", {}).get(strategy, []))}
+        self.journal.decide(strategy, action, dry_run=self.dry_run, args=list(args), kwargs=kwargs)
         if self.dry_run:
             return None
+        if self.control is not None:
+            from .control import OperatorRejected
+            deadline = time.time() + max(1.0, float(self.clock.get("next_tick_in") or 10) - 1.5)
+            try:
+                args, kwargs = self.control.gate(strategy, action, list(args), kwargs, context, deadline)
+            except OperatorRejected as e:
+                self.journal.decide(strategy, "operator rejected", proposed=action, why=str(e))
+                raise BazaarError("operator_rejected", str(e)) from None
+            args = tuple(args)
         return fn(*args, **kwargs)

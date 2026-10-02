@@ -17,6 +17,7 @@ import json
 import time
 import traceback
 
+from .control import Control
 from .core import DATA, REAL_GATEWAY, STOP_FILE, BazaarError, Ctx, Journal, TickBudget, Values, gateway_url, load_env, make_client
 
 DEFAULT_STRATEGIES = ["duels", "dealer", "market"]  # priority order: duels decay fastest
@@ -60,6 +61,7 @@ def main():
                          "BOT_GATEWAY_URL at the simulator (python3 -m bot.sim.fake_bazaar).")
     b = make_client(env)
     journal = Journal()
+    control = Control(DATA)
     strategies = load_strategies([s.strip() for s in args.only.split(",") if s.strip()])
     memory = load_memory()
     catalog, catalog_at = None, 0.0
@@ -83,8 +85,11 @@ def main():
             if catalog is None or time.time() - catalog_at > 300:
                 catalog, catalog_at = b.catalog(), time.time()
             me = b.me()
+            op = control.state()
+            armed = args.live and op["armed"]  # live play needs --live AND the operator's arm switch
             ctx = Ctx(b=b, me=me, clock=clock, catalog=catalog, values=Values(me, catalog),
-                      budget=TickBudget(clock), journal=journal, dry_run=not args.live, env=env)
+                      budget=TickBudget(clock), journal=journal, dry_run=not armed, env=env,
+                      control=control if armed else None)
             ctx.shared = memory.setdefault("_shared", {})
             for s in strategies:
                 ctx.memory = memory.setdefault(s.name, {})
@@ -96,8 +101,11 @@ def main():
                     journal.error(s.name, e)
                     traceback.print_exc()
             save_memory(memory)
+            from .intel import write as write_intel
+            write_intel(ctx, memory, DATA / "intel.json")
             last_tick = clock["tick"]
-            journal.flush(mode="running", live=args.live, real=real, tick=clock["tick"], cash=me.get("cash"),
+            journal.flush(mode="running" if armed else "disarmed", live=args.live, armed=armed,
+                          operator=op, real=real, tick=clock["tick"], cash=me.get("cash"),
                           level=me.get("level"), score=me.get("score"),
                           suspicious=ctx.shared.get("suspicious", [])[-10:])
             if args.once:

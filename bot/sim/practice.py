@@ -82,6 +82,8 @@ def episode(n: int, combo: dict, args) -> dict:
     env = {**os.environ, "BOT_GATEWAY_URL": f"http://127.0.0.1:{port}", "BOT_GATEWAY_TOKEN": "sim",
            "BOT_DATA_DIR": str(data), "BOT_PROBE": "1" if args.probe else "0", "ANTHROPIC_API_KEY": "",
            **{f"BOT_DEALER_{k}": str(v) for k, v in combo.items()}}
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "control.json").write_text(json.dumps({"armed": True, "mode": "auto"}))  # practice plays unattended
     time.sleep(1.5)
     bot = subprocess.Popen([PY, "-m", "bot.run", "--live"], cwd=REPO, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
