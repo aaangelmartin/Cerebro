@@ -191,8 +191,14 @@ class Strategy:
         # A pack, at most PACKS_PER_HOUR an hour.
         packs = [m for m in menu.get("sells", []) if m.get("pack")]
         recent_packs = [d for d in recent if d.get("goal") == "buy" and d.get("pack")]
-        pack_limit = int(min(param(ctx, "PACK_MAX_PRICE", PACK_MAX_PRICE), math.ceil(v.pack_value(packs[0]["pack"])) - 1)) \
-            if packs else 0
+        pack_limit = 0
+        if packs:
+            pv = v.pack_value(packs[0]["pack"])
+            pack_limit = math.ceil(pv) - 1
+            if packs[0]["pack"] == "sobre_barrio":
+                pack_limit = min(pack_limit, int(param(ctx, "PACK_MAX_PRICE", PACK_MAX_PRICE)))
+            if pack_limit < 0.75 * packs[0].get("list_price", 0):
+                pack_limit = 0  # worth far less to us than the dealer's list price: no haggle reaches it
         if packs and len(recent_packs) < param(ctx, "PACKS_PER_HOUR", PACKS_PER_HOUR) and 0 < pack_limit <= cash \
                 and mem.get("floors", {}).get(f"{dealer}:{packs[0]['pack']}", 0) <= pack_limit:
             pv = v.pack_value(packs[0]["pack"])
@@ -210,7 +216,8 @@ class Strategy:
         hit = cache.get(dealer)
         if not hit or time.time() - hit["at"] > 600:
             d = ctx.b.dealer(dealer)
-            hit = cache[dealer] = {"at": time.time(), "menu": d.get("menu", {})}
+            hit = cache[dealer] = {"at": time.time(), "menu": d.get("menu", {}),
+                                   "persona": {k: d.get(k) for k in ("name", "title", "bio", "traits")}}
         return hit["menu"]
 
     # --- the haggle ---------------------------------------------------------
@@ -224,8 +231,11 @@ class Strategy:
             if e.code == "cooloff":
                 ctx.memory["cooloff_until"] = time.time() + 600
             raise
+        persona = (ctx.memory.get("menus", {}).get(dealer) or {}).get("persona") or {}
+        ref = plan.get("item")
         ctx.memory["threads"][str(t["id"])] = {"dealer": dealer, "status": "open", "opened": time.time(),
-                                               "said": [], **plan}
+                                               "said": [], "persona": persona,
+                                               "item_name": (ctx.values.cards.get(ref) or {}).get("name", ref), **plan}
         if plan["goal"] == "sell":
             ctx.shared.setdefault("reserved", []).extend(plan["topic"]["sell"]["assets"])
 

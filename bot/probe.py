@@ -25,13 +25,17 @@ EVERY = 2          # probe every N of our messages in a thread
 MAX_PER_THREAD = 3
 
 
-def enabled(ctx) -> bool:
-    return ctx.env.get("BOT_PROBE") == "1" and ctx.memory.get("probe_cooloff_until", 0) < time.time()
+def enabled(ctx, st: dict | None = None) -> bool:
+    if ctx.env.get("BOT_PROBE") != "1" or ctx.memory.get("probe_cooloff_until", 0) >= time.time():
+        return False
+    traits = ((st or {}).get("persona") or {}).get("traits") or {}
+    # A strict dealer with a long memory punishes tricks (El Chato): never probe those.
+    return traits.get("strictness", 0) < 0.7 and traits.get("memory", 0) < 0.7
 
 
 def probe_line(ctx, st: dict) -> str | None:
     """The probe to append to this message, or None."""
-    if not enabled(ctx):
+    if not enabled(ctx, st):
         return None
     sent = st.setdefault("probes", [])
     n_msgs = len(st.get("said", []))

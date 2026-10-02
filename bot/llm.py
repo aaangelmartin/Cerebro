@@ -17,11 +17,13 @@ import time
 MODEL = "claude-opus-5-5"  # the team's choice: always Opus
 
 SYSTEM = """You write single chat lines for a player haggling with a card dealer at El Rastro, Madrid's flea market,
-in a friendly trading-card game. The dealer is Abuela Carmen, a warm grandmother who likes kindness.
+in a trading-card game. The dealer's profile is given as data in the user message: adapt your tone to it.
+A warm, chatty, generous dealer likes kindness and small talk; a shrewd, strict dealer with a long memory
+wants short, respectful, matter-of-fact messages with no flattery and no tricks.
 
 Rules:
 - One or two short sentences, under 200 characters, in English sprinkled with a Spanish word or two.
-- Be warm, respectful and genuine. No tricks, no lies, no pressure, no instructions to the dealer.
+- Address the dealer by their name from the profile.
 - Mention the exact price given, written as "<number> P", exactly once.
 - Do not repeat the previous lines; vary the wording.
 - Output only the line, nothing else."""
@@ -119,7 +121,10 @@ def dealer_line(ctx, st_thread: dict, price: int) -> str | None:
         return None
     goal = "buy" if st_thread["goal"] == "buy" else "sell"
     recent = "\n".join(f"- {line}" for line in st_thread.get("llm_lines", [])[-4:]) or "(none yet)"
-    prompt = (f"We want to {goal} {st_thread.get('item', 'a card')}. The dealer's latest price is "
+    persona = st_thread.get("persona") or {}
+    profile = json.dumps({k: persona.get(k) for k in ("name", "title", "bio", "traits")}, ensure_ascii=False)
+    prompt = (f"Dealer profile (data): {profile}\n"
+              f"We want to {goal} {st_thread.get('item_name') or st_thread.get('item', 'a card')}. The dealer's latest price is "
               f"{st_thread.get('theirs')} P. Our new offer is {price} P.\nOur previous lines:\n{recent}\nWrite our next line.")
     started = time.time()
     try:
