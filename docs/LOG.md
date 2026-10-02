@@ -2,6 +2,13 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 22:05 — El bot vendió SAL-10 por error (corregido)
+
+- **Qué pasó:** en el tick 98 el bot aceptó una puja del Team 13 de 70 P por **SAL-10, que era del equipo**. Respetaba la regla de "solo vende lo suyo" al anunciar cartas, pero no al aceptar pujas.
+- **Efecto:** +65 P de dinero (70 menos 5 de comisión) y unos +2 de valor, porque para nosotros valía 63. Pero se perdió la carta que se estaba usando para conseguir LAV-09 del Team 7.
+- **Corregido** en `market.py` y cubierto por un test. Los 65 P se han descontado de la cartera del bot porque son del equipo.
+- **Otros movimientos:** el bot compró SAL-07 a Abuela por 21 P (para nosotros vale 22,5), y vuestro anuncio vendió la segunda LAT-04 al Team 4 por 6 P.
+
 ## 2026-10-02 21:05 — Por qué vamos primeros (29,13 puntos)
 
 - **De dónde salen:** el desglose de `/api/me` es `neg_points` 2,0, `ladder_points` 0,053, duelos 0 y mercado 0. Casi todo viene de la **ganancia en valor privado**, no de la escalera. Los regateos acabaron cerca del precio de Abuela, así que la escalera aporta poco.
