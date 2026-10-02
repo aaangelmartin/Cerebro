@@ -7,3 +7,8 @@ __pycache__/
 .DS_Store
 sdk/*.zip
 dashboard/actions.log
+bot/data/
+bot/STOP
+bot/sim/snapshot.json
+bot/sim/data*/
+__pycache__/
