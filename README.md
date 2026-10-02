@@ -15,22 +15,29 @@ python3 dashboard/server.py
 # -> http://127.0.0.1:8787
 ```
 
-Para compartir el dashboard con el equipo:
+Para compartirlo con el equipo:
 
 ```bash
-set -a; . ./.env; set +a
-ngrok http 8787 --basic-auth "$DASHBOARD_USER:$DASHBOARD_PASSWORD"
+ngrok http 8787        # la autenticación la hace el propio servidor
 ```
 
-El dashboard solo lee: el servidor añade la clave del equipo y solo deja pasar una lista cerrada de rutas `GET` de la API, además de `docs/LOG.md` y `docs/BAZAAR.md`.
+## Pasarela: una sola máquina habla con el Bazaar
 
-## Usar el SDK
+`dashboard/server.py` corre en el PC de Ángel y es la **única** máquina que habla con la API del Bazaar. El resto del equipo (el dashboard y los bots) habla con esa máquina a través de ngrok:
 
-```bash
-set -a; . ./.env; set +a
-export BAZAAR_KEY="$BAZAAR_TEAM_KEY"
-python3 sdk/bazaar-kit/starter_agent.py   # ojo: compra y abre un sobre de verdad
-```
+- **Dashboard (navegador):** usuario y contraseña (`DASHBOARD_USER` y `DASHBOARD_PASSWORD`). Lee una lista cerrada de rutas y envía las acciones de la consola manual, que llevan la cabecera `X-Dashboard: 1`.
+- **Bots:** usan el SDK oficial sin cambios, apuntando a la pasarela. La pasarela cambia el token por la clave real, que nunca sale de su máquina:
+
+  ```bash
+  export BAZAAR_URL=https://<url-de-ngrok>
+  export BAZAAR_KEY=<GATEWAY_TOKEN>      # pedírselo a Ángel, NO es la clave del equipo
+  python3 sdk/bazaar-kit/starter_agent.py   # ojo: compra y abre un sobre de verdad
+  ```
+
+  Pueden usar cualquier ruta salvo `/api/admin/*`. La cabecera `X-Broker-Key` se reenvía tal cual.
+- **Tiempo real:** `GET /events` (o `/api/events/stream` desde el SDK) es un stream SSE único que reparte los eventos privados del equipo y el feed público. Así no se gastan los 6 streams que permite el Bazaar por clave.
+- **Límite de peticiones:** la pasarela no deja pasar más de 4,5 peticiones/s con la clave (el Bazaar permite 5). Si os pasáis, las peticiones esperan en vez de fallar. Las lecturas públicas van sin clave y tienen su propio límite.
+- **Registro:** cada escritura queda en `dashboard/actions.log` (no se sube al repo), con quién la hizo (`dashboard` o `bot`), la petición y la respuesta.
 
 ## Cómo trabajamos
 

@@ -2,6 +2,24 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-02 20:15 — Pasarela única del equipo
+
+- Solo el PC de Ángel habla con el Bazaar. El dashboard y los bots de los demás pasan por su pasarela (ngrok), con un token propio en `BAZAAR_KEY`. Detalles en el README.
+- La pasarela mantiene un único stream de eventos y lo reparte en `/events`. El Bazaar permite como máximo 6 streams por clave, y desde nuestra IP ya daba `too_many_streams` sin clave.
+- Las lecturas públicas van sin clave, así el límite de 5 peticiones/s de la clave queda para lo privado y los bots.
+
+## 2026-10-02 20:00 — Qué se puede saber de los rivales
+
+- **Público:**
+  - El leaderboard da, por equipo: puntos (negociación y mercado), nivel, huecos llenos del álbum, páginas completas, carta más rara, número de acuerdos y mercado propio.
+  - El feed muestra qué equipo abre conversación con qué dealer y con qué tema (por ejemplo, `buy pack`).
+  - Los libros de órdenes de los mercados muestran qué se vende y qué se pide.
+  - El catálogo muestra cuántas copias hay acuñadas de cada carta.
+- **Oculto:** el dinero de los rivales, sus valores privados y el dueño de cada carta (`/api/cards/{id}` devuelve `"owner": "a team"`).
+- **Patrón detectado:** las cartas iniciales se repartieron en bloques de 15 ids seguidos por equipo, y el nuestro es justo 136–150 = (10−1)×15+1 … 10×15. Si se cumple para todos, se podría deducir la mano inicial de cada rival y, con el historial, si la sigue teniendo. Es una fuga que los organizadores probablemente no buscaban: **decidir en equipo si se usa** (o si se les avisa).
+- Afinidades de los rivales: todos tienen los mismos seis multiplicadores (1.6, 1.3, 1.1, 0.9, 0.7, 0.5), pero en otro orden.
+- Seis equipos (t16, t06, t09, t14, t13 y t16 otra vez) ya negocian con Abuela un `sobre_barrio`, con el juego todavía en pausa. Nosotros aún no.
+
 ## 2026-10-02 19:45 — Dashboard compartido con el equipo
 
 - Dashboard local (`dashboard/`) publicado por ngrok con usuario y contraseña. Solo hace lecturas y deja pasar una lista cerrada de rutas.
