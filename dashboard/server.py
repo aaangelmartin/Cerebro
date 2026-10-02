@@ -48,7 +48,7 @@ def load_env(path):
     return env
 
 
-ENV = {**load_env(ROOT.parent / ".env"), **os.environ}
+ENV = {**load_env(Path(os.environ.get("DASHBOARD_ENV_FILE") or ROOT.parent / ".env")), **os.environ}
 BASE = ENV.get("BAZAAR_BASE_URL", "https://bazaar.causaprima.ai").rstrip("/")
 TEAM_KEY = ENV.get("BAZAAR_TEAM_KEY", "")
 # Personal gateway tokens, "name:token,name:token"; GATEWAY_TOKEN is the owner's.
@@ -85,6 +85,7 @@ OPEN_WITHOUT_AUTH = {"/api/clock", "/api/health"}  # the SDK reads the clock wit
 MAX_BODY = 64 * 1024
 ACTIONS_LOG = ROOT / "actions.log"
 DOCS = ROOT.parent / "docs"
+BOT_DATA = Path(ENV.get("BOT_DATA_DIR") or ROOT.parent / "bot" / "data")  # written by the team's bot
 NOTES = {f"/notes/{name}": DOCS / name for name in ("LOG.md", "BAZAAR.md")}
 # Front-end modules: dashboard/static/<name>.(js|css|svg), one level of subfolders.
 STATIC = re.compile(r"/static/(?:[\w-]+/)?[\w.-]+\.(js|css|svg)")
@@ -119,7 +120,9 @@ class Bucket:
             time.sleep(wait)
 
 
-KEYED = Bucket(rate=4.5, burst=15)  # the team key allows 5/s, bursts of 20
+# The team key allows 5/s (bursts of 20); a dev server runs slower so the live gateway keeps the budget.
+KEYED = Bucket(rate=float(ENV.get("GATEWAY_KEYED_RATE", "4.5")), burst=15)
+READ_ONLY = ENV.get("DASHBOARD_READ_ONLY") == "1"  # dev servers refuse every write
 KEYLESS = Bucket(rate=20, burst=30)  # keyless reads allow 60/s per address
 
 
@@ -158,6 +161,26 @@ def cached_fetch(path_qs, keyed):
         if status == 200:
             _cache[path_qs] = (time.monotonic(), status, body)
         return status, body
+
+
+# The bot's own control API (bot/control_api.py), reachable only from this machine.
+BOT_CONTROL = ENV.get("BOT_CONTROL_URL", "http://127.0.0.1:8790").rstrip("/")
+BOT_CONTROL_PREFIXES = ("/bot/live/", "/bot/practice/")
+
+
+def bot_control(path_qs, body=None):
+    headers = {"Accept": "application/json", "X-Dashboard": "1"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(BOT_CONTROL + path_qs, data=body, method="POST" if body is not None else "GET",
+                                 headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except urllib.error.URLError as e:
+        return 502, json.dumps({"error": "bot_offline", "message": str(e.reason)}).encode()
 
 
 def log_action(client, method, path, body, status, resp):
@@ -223,6 +246,53 @@ def team_stream():
         backoff = min(backoff * 2, 30)
 
 
+class History:
+    """Leaderboard snapshots over time, kept in memory and appended to dashboard/data/leaderboard.jsonl."""
+
+    def __init__(self, path, size=2000):
+        self.path, self.snaps, self.lock = path, collections.deque(maxlen=size), threading.Lock()
+        if path.exists():
+            for line in path.read_text().splitlines()[-size:]:
+                try:
+                    self.snaps.append(json.loads(line))
+                except ValueError:
+                    pass
+
+    def add(self, snap):
+        with self.lock:
+            last = self.snaps[-1] if self.snaps else None
+            if last and last["teams"] == snap["teams"] and last["tick"] == snap["tick"]:
+                return
+            self.snaps.append(snap)
+            self.path.parent.mkdir(exist_ok=True)
+            with self.path.open("a") as f:
+                f.write(json.dumps(snap) + "\n")
+
+    def dump(self):
+        with self.lock:
+            return list(self.snaps)
+
+
+HISTORY = History(ROOT / "data" / "leaderboard.jsonl")
+
+
+def leaderboard_recorder():
+    """Snapshots the public leaderboard every minute (keyless) for the rivals analytics."""
+    keep = ("score", "negotiating", "market", "level", "album_filled", "pages_complete", "deals", "rank", "venue")
+    while True:
+        status, body = fetch("/api/leaderboard", keyed=False)
+        if status == 200:
+            try:
+                lb = json.loads(body)
+                HISTORY.add({
+                    "at": int(time.time()), "tick": lb.get("tick"), "round": lb.get("round"),
+                    "teams": {t["team"]: {k: t.get(k) for k in keep} for t in lb.get("teams", [])},
+                })
+            except (ValueError, KeyError, TypeError):
+                pass
+        time.sleep(60)
+
+
 def feed_poller():
     """Republishes new public feed events, oldest first."""
     seen = 0
@@ -276,6 +346,19 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
+        if path == "/bot/status":
+            return self.send_file(BOT_DATA / "status.json", "application/json")
+        if path.startswith(BOT_CONTROL_PREFIXES):
+            if client != "dashboard":
+                return self.send_error(403)
+            return self.send_json(*bot_control(self.path))
+        if path == "/bot/intel":
+            return self.send_file(BOT_DATA / "intel.json", "application/json")
+        if path == "/bot/decisions":
+            return self.send_json(200, json.dumps({"decisions": tail_jsonl(
+                BOT_DATA / "decisions.jsonl", _int(_query(self.path).get("limit"), 50))}).encode())
+        if path == "/intel/history":
+            return self.send_json(200, json.dumps({"snapshots": HISTORY.dump()}).encode())
         if path == "/gateway/whoami":
             return self.send_json(200, json.dumps({"client": client, "team": "t10"}).encode())
         if path == "/openapi.json":
@@ -321,6 +404,10 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None:
             return self.deny()
+        if path.startswith(BOT_CONTROL_PREFIXES):
+            return self.bot_write(client, path)
+        if READ_ONLY:
+            return self.send_json(403, b'{"error":"read_only","message":"this dev server never writes"}')
         if not path.startswith("/api/") or path.startswith("/api/admin"):
             return self.send_error(403)
         if client == "dashboard":
@@ -338,6 +425,20 @@ class Handler(SimpleHTTPRequestHandler):
         log_action(client, method, path, body, status, resp)
         self.send_json(status, resp)
 
+    def bot_write(self, client, path):
+        """Arming, mode and approvals for the bot: dashboard users only, never bot tokens."""
+        if client != "dashboard" or self.headers.get("X-Dashboard") != "1":
+            return self.send_error(403)
+        if READ_ONLY:
+            return self.send_json(403, b'{"error":"read_only","message":"this dev server never writes"}')
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY:
+            return self.send_error(413)
+        body = self.rfile.read(length) if length else b"{}"
+        status, resp = bot_control(self.path, body)
+        log_action(client, "POST", path, body, status, resp)
+        self.send_json(status, resp)
+
     def broker_header(self):
         key = self.headers.get("X-Broker-Key")
         return {"X-Broker-Key": key} if key else {}
@@ -350,6 +451,7 @@ class Handler(SimpleHTTPRequestHandler):
             since = -1
         if since < 0:  # a new listener gets recent history
             since = max(0, HUB.seq - 200)
+        named = self.path.startswith("/api/events/stream")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -365,7 +467,9 @@ class Handler(SimpleHTTPRequestHandler):
                     self.wfile.write(b": keepalive\n\n")
                 for e in events:
                     since = e["seq"]
-                    self.wfile.write(f"id: {e['seq']}\nevent: {e['type']}\ndata: {json.dumps(e)}\n\n".encode())
+                    # Browsers listen with onmessage, which only sees unnamed events; bots get the type as the name.
+                    name = f"event: {e['type']}\n" if named else ""
+                    self.wfile.write(f"id: {e['seq']}\n{name}data: {json.dumps(e)}\n\n".encode())
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass
@@ -390,7 +494,29 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        pass
+        if ENV.get("DASHBOARD_LOG") == "1":  # request log for debugging a browser
+            print(f"{time.strftime('%H:%M:%S')} {self.headers.get('User-Agent', '')[:40]!r} "
+                  f"auth={'y' if self.headers.get('Authorization') else 'n'} {fmt % args}", flush=True)
+
+
+def _int(value, default):
+    try:
+        return max(1, min(int(value), 1000))
+    except (TypeError, ValueError):
+        return default
+
+
+def tail_jsonl(path, limit):
+    """The last `limit` JSON lines of a file, newest first."""
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text().splitlines()[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out[::-1]
 
 
 def _query(path):
@@ -408,5 +534,6 @@ if __name__ == "__main__":
         print("warning: no gateway tokens in .env; bots cannot use the gateway")
     threading.Thread(target=team_stream, daemon=True).start()
     threading.Thread(target=feed_poller, daemon=True).start()
+    threading.Thread(target=leaderboard_recorder, daemon=True).start()
     print(f"The Bazaar gateway -> http://127.0.0.1:{PORT}")
     Server(("127.0.0.1", PORT), Handler).serve_forever()
