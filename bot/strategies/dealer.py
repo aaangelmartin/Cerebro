@@ -29,7 +29,7 @@ OPEN_MULTIPLE = 2.2      # our first ask as a multiple of the dealer's bid (sell
 CONCEDE = 0.22           # share of the remaining gap we give up per message
 VALUE_MARGIN = 0.85      # never pay more than this share of what the item is worth to us
 MAX_DEALS_PER_HOUR = 7   # Abuela allows 8 per team per hour; leave one for teammates
-PACKS_PER_HOUR = 2       # Abuela allows 3
+PACKS_PER_HOUR = 0       # packs are worth ~25 P to us and cost 26-30: not worth it (team decision, 2 Oct)
 
 
 PRACTICE_BEST = Path(__file__).resolve().parent.parent / "sim" / "practice" / "best.json"
@@ -57,6 +57,32 @@ def param(ctx: Ctx, name: str, default: float) -> float:
         return float(practice_params().get(name, default))
     except ValueError:
         return default
+
+
+# Floors seen on 2 Oct with Abuela, as a share of her list price: uncommons closed at 23-24 P and she
+# would not go below 21-24 P (list 25); commons closed at 7-9 P (list 10). Our own observations,
+# recorded as the bot plays, are added to these.
+SEEN_FLOORS = {"abuela:uncommon": [0.92, 0.96, 0.96, 0.84, 0.96], "abuela:common": [0.7, 0.8, 0.9]}
+
+
+def expected_floor(mem: dict, dealer: str, rarity: str, list_price: float) -> float:
+    ratios = SEEN_FLOORS.get(f"{dealer}:{rarity}", []) + mem.get("floor_ratios", {}).get(f"{dealer}:{rarity}", [])
+    if not ratios:
+        return 0.0
+    ratios = sorted(ratios)
+    return ratios[len(ratios) // 2] * list_price  # the median
+
+
+def learn_floor(mem: dict, st: dict, price: float, catalog_cards: dict):
+    ref = (st["topic"].get("buy") or {}).get("card")
+    if not ref or ref not in catalog_cards:
+        return
+    rarity = catalog_cards[ref]["rarity"]
+    list_price = {"common": 10, "uncommon": 25}.get(rarity)
+    if list_price:
+        bucket = mem.setdefault("floor_ratios", {}).setdefault(f"{st['dealer']}:{rarity}", [])
+        bucket.append(round(price / list_price, 3))
+        del bucket[:-30]
 
 
 class Strategy:
@@ -152,6 +178,10 @@ class Strategy:
                 floor = mem.get("floors", {}).get(f"{dealer}:{ref}")
                 if floor is not None and floor > limit:
                     continue  # we already saw this dealer's last word on this card: out of our reach
+                # Every thread has its own secret floor, so judge by what this dealer's floors for the
+                # rarity usually are (deal prices and final offers seen, ours and the team's).
+                if expected_floor(mem, dealer, c["rarity"], list_price) > limit:
+                    continue
                 if limit >= 1 and limit <= cash and (best is None or gain > best[0]):
                     best = (gain, ref, limit)
         if best and best[0] > 0:
@@ -160,7 +190,7 @@ class Strategy:
         # A pack, at most PACKS_PER_HOUR an hour.
         packs = [m for m in menu.get("sells", []) if m.get("pack")]
         recent_packs = [d for d in recent if d.get("goal") == "buy" and d.get("pack")]
-        if packs and len(recent_packs) < PACKS_PER_HOUR and cash > 60:
+        if packs and len(recent_packs) < param(ctx, "PACKS_PER_HOUR", PACKS_PER_HOUR) and cash > 60:
             pv = v.pack_value(packs[0]["pack"])
             options.append((pv - packs[0].get("list_price", 26) * param(ctx, "EXPECT", 0.95),
                             {"goal": "buy", "pack": True, "topic": {"buy": {"pack": packs[0]["pack"]}},
@@ -245,6 +275,7 @@ class Strategy:
         if st.get("final") and not acceptable:
             ref = (st["topic"].get("buy") or {}).get("card") or st.get("item")
             ctx.memory.setdefault("floors", {})[f"{st['dealer']}:{ref}"] = theirs_p
+            learn_floor(ctx.memory, st, theirs_p, ctx.values.cards)
             ctx.journal.decide(self.name, "walk away", thread=tid, theirs=theirs_p, limit=limit,
                                remembered_floor=theirs_p)
             if not ctx.dry_run:
@@ -309,6 +340,8 @@ class Strategy:
             capture = (first - price) / first if first else 0
         else:
             capture = (price - first) / first if first else 0
+        if st["goal"] == "buy":
+            learn_floor(ctx.memory, st, price, ctx.values.cards)
         deal = {"at": time.time(), "thread": tid, "dealer": st["dealer"], "goal": st["goal"], "item": st["item"],
                 "pack": st.get("pack", False), "first": first, "price": price, "capture_vs_open": round(capture, 3)}
         ctx.memory["deals"].append(deal)
