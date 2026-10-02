@@ -41,7 +41,7 @@ MAX_ASK_FRACTION = 1.5     # never ask more than 1.5x book (nobody buys it and i
 # --- buying / swapping -------------------------------------------------------
 BUY_MIN_GAIN = 3           # P of private value, at least
 BUY_MIN_MARGIN = 0.25      # gain >= 25 % of what we give up (cash + fee + cards)
-CASH_RESERVE = 120         # never let a trade take our cash below this
+CASH_RESERVE = 10          # never let a trade take the bot's wallet below this
 MAX_SPEND_SHARE = 0.5      # one trade spends at most this share of the cash above the reserve
 MAX_VENUE_BOARDS = 3       # boards read per tick
 VENUES_REFRESH = 20        # ticks between /api/venues reads
@@ -77,7 +77,7 @@ class Strategy:
             mem.setdefault(k, d)
         self.me_id = ctx.me.get("id")
         self.tick_no = ctx.budget.tick or ctx.clock.get("tick") or 0
-        self.cash = ctx.me.get("cash", 0)
+        self.cash = ctx.cash  # the bot's own budget, never the team's money
         self.held_ids = {a["id"] for a in ctx.me.get("assets", [])}
 
         team_offers = [o for o in ctx.b.my_offers().get("offers", []) if o.get("maker") == self.me_id]
@@ -122,6 +122,8 @@ class Strategy:
                      "gave": [l["ref"]], "got_cash": l["price"], "gain": round(l["price"] - l["loss"], 2),
                      "status": "done"}
             mem["trades"].append(trade)
+            if ctx.wallet:
+                ctx.wallet.record("earn", l["price"], why=f"sold {l['ref']} on {l.get('venue')}", ids_out=[l["asset"]])
             ctx.journal.decide(self.name, "sold", **trade)
 
         counts = {}
@@ -137,6 +139,12 @@ class Strategy:
                 del mem["pending"][oid]
                 trade = {**p["trade"], "status": "done", "settled_tick": self.tick_no}
                 mem["trades"].append(trade)
+                if ctx.wallet:
+                    t = p["trade"]
+                    net = (t.get("paid", 0) or 0) + (t.get("fee", 0) or 0) - (t.get("got_cash", 0) or 0)
+                    ctx.wallet.record("spend" if net >= 0 else "earn", abs(net), why=f"market trade {t.get('offer')}",
+                                      ids_in=got_ids, ids_out=p.get("out_ids", []),
+                                      claim=None if got_ids else ((p.get("in_refs") or [None])[0]))
                 ctx.journal.decide(self.name, "trade settled", **trade)
             elif self.tick_no - p["tick"] > PENDING_TIMEOUT:
                 del mem["pending"][oid]
@@ -341,6 +349,10 @@ class Strategy:
                 loss = copies[0]["your_value"] if copies[0].get("your_value") is not None else v.spare_value(ref)
                 out.append({**copies[0], "loss": float(loss), "first": True})
         busy = self.team_listed_assets | self.out_reserved | set(ctx.shared.get("reserved", []))
+        mine = [{**a, "loss": float(v.spare_value(a["ref"])), "first": v.count(a["ref"]) == 1}
+                for a in ctx.me.get("assets", []) if a.get("kind") == "card" and ctx.mine(a["id"])]
+        seen = {a["id"] for a in out}
+        out = [a for a in out if ctx.mine(a["id"])] + [a for a in mine if a["id"] not in seen]
         return [a for a in out if a["id"] not in busy and a.get("kind") == "card"]
 
     def market_ask(self, boards: dict, ref: str) -> int | None:

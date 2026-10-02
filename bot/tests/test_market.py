@@ -97,7 +97,8 @@ class MarketTest(unittest.TestCase):
 
     def test_cash_reserve(self):
         b = FakeB([offer(1, [card(500, "LAV-04")], want_cash=10)])
-        ctx = make_ctx(b, [card(1, "LAV-01")], cash=125)
+        from bot.strategies.market import CASH_RESERVE
+        ctx = make_ctx(b, [card(1, "LAV-01")], cash=CASH_RESERVE + 5)  # 10 + fee would break the reserve
         ctx.memory["exact"] = {"LAV-04": {"count": 0, "value": 16.0}}
         Strategy().tick(ctx)
         self.assertEqual(self.accepts(b), [])

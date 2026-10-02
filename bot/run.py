@@ -18,7 +18,8 @@ import time
 import traceback
 
 from .control import Control
-from .core import DATA, REAL_GATEWAY, STOP_FILE, BazaarError, Ctx, Journal, TickBudget, Values, gateway_url, load_env, make_client
+from .core import (DATA, REAL_GATEWAY, STOP_FILE, BazaarError, Ctx, Journal, TickBudget, Values, Wallet, gateway_url,
+                   load_env, make_client)
 
 DEFAULT_STRATEGIES = ["duels", "dealer", "market"]  # priority order: duels decay fastest
 MEMORY = DATA / "memory.json"
@@ -89,7 +90,8 @@ def main():
             armed = args.live and op["armed"]  # live play needs --live AND the operator's arm switch
             ctx = Ctx(b=b, me=me, clock=clock, catalog=catalog, values=Values(me, catalog),
                       budget=TickBudget(clock), journal=journal, dry_run=not armed, env=env,
-                      control=control if armed else None)
+                      control=control if armed else None,
+                      wallet=Wallet(memory.setdefault("_wallet", {}), env, me))
             ctx.shared = memory.setdefault("_shared", {})
             for s in strategies:
                 ctx.memory = memory.setdefault(s.name, {})
@@ -107,7 +109,8 @@ def main():
             journal.flush(mode="running" if armed else "disarmed", live=args.live, armed=armed,
                           operator=op, real=real, tick=clock["tick"], cash=me.get("cash"),
                           level=me.get("level"), score=me.get("score"),
-                          suspicious=ctx.shared.get("suspicious", [])[-10:])
+                          suspicious=ctx.shared.get("suspicious", [])[-10:],
+                          wallet=ctx.wallet.view(me.get("cash", 0)))
             if args.once:
                 return
         except BazaarError as e:

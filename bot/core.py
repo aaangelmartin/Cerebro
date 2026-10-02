@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO / "sdk" / "bazaar-kit"))
 
 from bazaar_sdk import Bazaar, BazaarError  # noqa: E402
 
-__all__ = ["Bazaar", "BazaarError", "Ctx", "Journal", "TickBudget", "Values", "gateway_url", "load_env", "make_client", "REAL_GATEWAY"]
+__all__ = ["Bazaar", "BazaarError", "Ctx", "Journal", "Wallet", "TickBudget", "Values", "gateway_url", "load_env", "make_client", "REAL_GATEWAY"]
 
 
 def load_env() -> dict:
@@ -190,6 +190,61 @@ class Journal:
         tmp.replace(self.status_path)
 
 
+class Wallet:
+    """The bot's own share of the team account, so it runs in parallel with the humans.
+
+    The game has one account per team, so the bot cannot have money of its own; instead it gets a
+    budget (BOT_BUDGET primas) it never exceeds, and it may only sell cards it bought itself. Cards
+    and cash the team already had are never touched. State lives in memory["_wallet"]."""
+
+    def __init__(self, state: dict, env: dict, me: dict):
+        self.s = state
+        self.s.setdefault("budget", float(env.get("BOT_BUDGET") or 0))
+        if env.get("BOT_BUDGET") is not None:
+            self.s["budget"] = float(env["BOT_BUDGET"])
+        self.s.setdefault("spent", 0.0)
+        self.s.setdefault("earned", 0.0)
+        self.s.setdefault("owned", [])
+        self.s.setdefault("claims", [])  # refs bought from a dealer whose new asset id we have not seen yet
+        self.s.setdefault("ledger", [])
+        held = {a["id"]: a for a in me.get("assets", [])}
+        if "baseline" not in self.s:  # what the team owned when the bot first started: never the bot's
+            self.s["baseline"] = sorted(held)
+        base, owned = set(self.s["baseline"]), set(self.s["owned"])
+        for claim in list(self.s["claims"]):
+            new = [i for i, a in held.items() if a.get("ref") == claim and i not in base and i not in owned]
+            if new:
+                owned.add(new[0])
+                self.s["claims"].remove(claim)
+        self.s["owned"] = sorted(i for i in owned if i in held)
+
+    def cash(self, team_cash: float) -> float:
+        """What the bot may still spend: its budget plus what it earned, minus what it spent, never
+        more than the team actually has."""
+        return max(0.0, min(team_cash, self.s["budget"] - self.s["spent"] + self.s["earned"]))
+
+    def owned(self) -> set:
+        return set(self.s["owned"])
+
+    def record(self, kind: str, amount: float, *, why: str, ids_in=(), ids_out=(), claim: str | None = None):
+        if kind == "spend":
+            self.s["spent"] += amount
+        else:
+            self.s["earned"] += amount
+        owned = set(self.s["owned"]) | set(ids_in)
+        owned -= set(ids_out)
+        self.s["owned"] = sorted(owned)
+        if claim:
+            self.s["claims"].append(claim)
+        self.s["ledger"] = (self.s["ledger"] + [{"at": time.strftime("%H:%M:%S"), "kind": kind, "amount": amount,
+                                                  "why": why}])[-100:]
+
+    def view(self, team_cash: float) -> dict:
+        return {"budget": self.s["budget"], "spent": round(self.s["spent"], 2), "earned": round(self.s["earned"], 2),
+                "cash": round(self.cash(team_cash), 2), "owned": self.s["owned"], "claims": self.s["claims"],
+                "ledger": self.s["ledger"][-20:]}
+
+
 @dataclass
 class Ctx:
     """Everything a strategy sees in one tick."""
@@ -206,6 +261,16 @@ class Ctx:
     memory: dict = field(default_factory=dict)  # per-strategy state that survives ticks (and restarts)
     shared: dict = field(default_factory=dict)  # state shared by all strategies, e.g. "reserved" asset ids
     control: object = None  # bot.control.Control when the operator can review actions
+    wallet: Wallet = None  # the bot's own budget and cards
+
+    @property
+    def cash(self) -> float:
+        """Cash the bot may use (its wallet), not the team's."""
+        return self.wallet.cash(self.me.get("cash", 0)) if self.wallet else self.me.get("cash", 0)
+
+    def mine(self, asset_id) -> bool:
+        """May the bot sell this card? Only if it bought it."""
+        return self.wallet is None or asset_id in self.wallet.owned()
 
     def write(self, strategy: str, action: str, fn, *args, **kwargs):
         """Run a game action, or only log it in dry-run. Returns the API result (None in dry-run).

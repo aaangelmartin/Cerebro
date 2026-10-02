@@ -95,13 +95,16 @@ class Strategy:
             return None
         if mem.get("cooloff_until", 0) > time.time():
             return None
-        cash = ctx.me.get("cash", 0)
+        cash = ctx.cash  # the bot's own budget, never the team's money
         menu = self.menu(ctx, dealer)
 
         options = []
         # Sell our cheapest spare if the dealer buys that rarity.
         buys = {m.get("rarity") for m in menu.get("buys", [])}
-        for s in v.spares():
+        for s in v.spares() + [a for a in ctx.me.get("assets", []) if a.get("kind") == "card" and ctx.mine(a["id"])]:
+            if not ctx.mine(s["id"]):
+                continue  # the team's own cards are not the bot's to sell
+            s.setdefault("loss", v.spare_value(s["ref"]))
             if s.get("rarity") in buys and s["id"] not in mem.get("sold_ids", []) and s["id"] not in self.listed:
                 options.append((s.get("book", 10) - s["loss"], {"goal": "sell", "topic": {"sell": {"assets": [s["id"]]}},
                                                                 "item": s["ref"], "limit": max(1, round(s["loss"]) + 1)}))
@@ -175,6 +178,11 @@ class Strategy:
             price = offer["want"]["cash"] if buying else offer["give"]["cash"]
             st.setdefault("first", price)
             st["theirs"] = price
+            hist = st.setdefault("history", [])  # [[tick, ours, theirs]] for the dashboard's chart
+            row = [ctx.clock.get("tick"), st.get("ours"), price]
+            if not hist or hist[-1] != row:
+                hist.append(row)
+                del hist[:-60]
             st["final"] = bool(offer.get("final"))
         if "theirs" not in st:
             return  # the dealer has not named a price yet
@@ -269,14 +277,25 @@ class Strategy:
             ctx.memory.setdefault("sold_ids", []).extend(st["topic"]["sell"]["assets"])
         if st.get("pack"):
             ctx.memory["packs_to_open"] = ctx.memory.get("packs_to_open", 0) + 1
+        if ctx.wallet:
+            if st["goal"] == "buy":
+                ctx.wallet.record("spend", price, why=f"bought {st['item']} from {st['dealer']}",
+                                  claim=None if st.get("pack") else (st["topic"]["buy"].get("card") or None))
+            else:
+                ctx.wallet.record("earn", price, why=f"sold {st['item']} to {st['dealer']}",
+                                  ids_out=st["topic"]["sell"]["assets"])
         st["status"] = "deal"
         ctx.journal.decide(self.name, "deal", **deal)
 
     def open_packs(self, ctx: Ctx):
         """Open the packs the bot bought (teammates' packs are theirs to open)."""
         for a in ctx.me.get("assets", []):
-            if a.get("kind") == "pack" and ctx.memory.get("packs_to_open", 0) > 0:
+            if a.get("kind") == "pack" and ctx.memory.get("packs_to_open", 0) > 0 \
+                    and (ctx.wallet is None or a["id"] not in ctx.wallet.s.get("baseline", [])):
                 ctx.memory["packs_to_open"] -= 1
                 res = ctx.write(self.name, "open pack", ctx.b.open_pack, a["id"])
                 if res:
+                    if ctx.wallet:
+                        ctx.wallet.record("earn", 0, why="opened a pack", ids_in=[c["id"] for c in res.get("cards", [])],
+                                          ids_out=[a["id"]])
                     ctx.journal.decide(self.name, "pulled", cards=[c.get("ref") for c in res.get("cards", [])])
