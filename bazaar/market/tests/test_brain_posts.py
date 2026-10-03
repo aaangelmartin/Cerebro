@@ -268,6 +268,37 @@ class OrderedCardsTest(unittest.TestCase):
         self.assertIn("LAV-04", given([]))
         self.assertNotIn("LAV-04", given(["LAV-04"]))
 
+    def test_the_code_keeps_workshop_copies_and_page_goal_singles(self):
+        """Outbox requests code-f84c0c91 (a copy ordered crafted) and code-61fab14f (the single copy of a page
+        with a goal in force): the code posters list neither; the brain's own post of the single still goes out."""
+        from types import SimpleNamespace
+        me = {"id": "t10", "cash": 30, "affinity": {"LAV": 1.6, "SAL": 0.9}, "assets": [
+            {"id": 1, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 16},
+            {"id": 2, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 4},
+            {"id": 3, "kind": "card", "ref": "SAL-03", "rarity": "common", "set": "SAL", "your_value": 9}]}
+        sit = SimpleNamespace(tick=10, me=me, my_offers=[], threads=[], venues=[], feed_new=[], limits={}, books={})
+        ctx = SimpleNamespace(control={}, budget={}, cautious=False, llm_ok=False)
+
+        def given(crafts="auto", goals=None, posts=()):
+            with mock.patch.object(S, "dealer_orders", return_value=[]), \
+                    mock.patch.object(S, "post_offers", return_value=list(posts)), \
+                    mock.patch.object(S, "reserved_refs", return_value=set()), \
+                    mock.patch.object(S, "workshop_orders", return_value=crafts), \
+                    mock.patch.object(S, "goal_buys", return_value=goals or {}):
+                _, cands, state = domain()._prepare(sit, ctx)
+                acts = domain().fallback(sit, ctx)
+            code = {p.asset.get("id") for p in cands} | {s.asset.get("id") for s in state.get("_swaps") or []}
+            brain = {a["id"] if isinstance(a, dict) else a for x in acts if x.source == "council"
+                     for a in (x.params.get("give") or {}).get("assets") or []}
+            return code, brain
+
+        self.assertEqual(given()[0], {2, 3})                               # the spare and the low-affinity single
+        self.assertNotIn(2, given(crafts=[[2, 8, 9]])[0])                  # ordered crafted: not listed
+        self.assertNotIn(3, given(goals={"SAL-05": 8})[0])                 # Salamanca has a goal: the single stays
+        self.assertIn(2, given(goals={"SAL-05": 8})[0])                    # a real spare still sells
+        post = {"give": "SAL-03", "want_card": None, "want_cash": 12, "to": None, "venue": "rastro", "why": "t"}
+        self.assertIn(3, given(goals={"SAL-05": 8}, posts=[post])[1])      # the brain's own post is its call
+
 
 class BrainReservedSpareTest(unittest.TestCase):
     """The fallback does not relist a spare the brain's plan gives in a post (outbox request code-4136c8c6)."""
