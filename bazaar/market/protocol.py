@@ -25,11 +25,11 @@ PAGE_BONUS = 0.25                 # catalog values.page_bonus (share of the page
 CORE_SETS = ("LAV", "MAL", "RET")  # the pages we most want to complete (our highest affinities)
 BID_EXPIRES = 120                  # ticks
 SWAP_EXPIRES = 120
-MAX_OWN_BIDS = 6                   # open bids at once
+MAX_OWN_BIDS = 2                   # open bids at once (round-4 strategy: standing bids rarely fill and lock cash)
 MAX_OWN_SWAPS = 6                  # open swaps at once
 MAX_OWN_OPEN = 22                  # all our market offers at once (team cap 30: room for dealers)
 MAX_BID_P = 60                     # never commit more than this to one bid (council threshold)
-BID_COMMIT_MAX = 150               # cash committed to open bids at once
+BID_COMMIT_MAX = 40                # cash committed to open bids at once (round-4 strategy)
 BID_BOOK_MIN, BID_BOOK_DEFAULT, BID_BOOK_MAX = 0.3, 0.7, 1.0   # bid price as a share of book
 SWAP_BOOK_MIN = 0.8                # what we give must look fair to the taker: book >= 0.8 x book wanted
 PREFERRED_VENUES = ("v03",)        # t13's protocol venue (no per-card fee): tie-break only

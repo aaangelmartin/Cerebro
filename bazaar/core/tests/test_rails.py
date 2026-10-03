@@ -353,3 +353,23 @@ class PromisedCopies(unittest.TestCase):
         s.my_offers = [{"id": 70, "maker": "t10", "status": "open", "give": {"assets": [10]}, "want": {"cash": 30}}]
         a = Action("post_offer", {"venue": "rastro", "give": {"assets": [11]}, "want": {"cash": 30}}, "market")
         self.assertEqual(rails.rail_cards(a, s, ctx()).rail, "cards")
+
+
+# These tests check the logic with the original numbers; the live policy values (round-4 strategy) differ.
+_PINS = []
+
+
+def setUpModule():
+    from unittest import mock as _m
+    from bazaar import config as _c
+    from bazaar.market import protocol as _p
+    _PINS.extend([_m.patch.object(_c, "CASH_RESERVE", 40), _m.patch.object(_p, "BID_COMMIT_MAX", 150),
+                  _m.patch.object(_p, "MAX_OWN_BIDS", 6)])
+    for p in _PINS:
+        p.start()
+
+
+def tearDownModule():
+    for p in _PINS:
+        p.stop()
+    _PINS.clear()
