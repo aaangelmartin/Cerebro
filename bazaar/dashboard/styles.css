@@ -50,9 +50,9 @@ button, input, select { font: inherit; color: inherit; }
 .layout { position: fixed; inset: var(--topbar-h) 0 0 0; display: flex; }
 .sidenav { width: var(--nav-w); flex: none; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 12px 12px; border-right: 1px solid var(--line); background: var(--s1); overflow-y: auto; }
 .nav-list { display: flex; flex-direction: column; gap: 2px; }
-.nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; color: var(--ink-2); font-size: 13.5px; }
-.nav-item:hover { background: var(--s2); color: var(--ink); }
-.nav-item.active { background: var(--s3); color: var(--ink); }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 7px 9px; border: 1px solid transparent; color: var(--ink-2); font-size: 13.5px; }
+.nav-item:hover { background: var(--s2); border-color: var(--line-2); color: var(--ink); }
+.nav-item.active { background: var(--s3); border-color: var(--line-2); color: var(--ink); }
 .nav-badge { margin-left: auto; font-size: 10px; padding: 0 5px; background: var(--s3); color: var(--ink-2); border: 1px solid var(--line-2); }
 .status-box { border: 1px solid var(--line-2); background: var(--s1); margin-top: 16px; font-size: 12px; }
 .sb-sec { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
