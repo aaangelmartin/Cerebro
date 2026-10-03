@@ -80,9 +80,9 @@ def blocked_counterparty(a: Action, sit, blocked: set[str]) -> str | None:
         who = p.get("to")
     elif a.kind == "open_thread":
         who = p.get("with")
-    if not who and a.kind in ("accept_offer", "post_offer", "thread_message"):   # inside a thread: the other side
-        tid = str(p.get("thread") or (p.get("expect") or {}).get("thread") or "")
-        for t in (_get(sit, "threads") or []) if tid else []:
+    elif a.kind == "thread_message":
+        tid = str(p.get("thread"))
+        for t in _get(sit, "threads") or []:
             if str(_get(t, "id")) == tid:
                 who = _get(t, "with")
                 break

@@ -89,17 +89,6 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(self.lg.spend_last_hour(), 40)
         self.assertEqual(self.lg.deals_with("t3"), 1)
 
-    def test_accept_of_a_public_bid_made_by_a_blocked_team_is_vetoed(self):
-        # The order names only the offer: its maker is known on the re-read (RET-03 went to t06 this way).
-        bid = {k: v for k, v in OFFER.items() if k != "maker"}
-        gw = FakeGW({"/api/venues/rastro/offers": {"offers": [{**bid, "maker": "T06"}]}})
-        self.ctx.control["blocked_teams"] = ["t06"]
-        out = self.run_(Action("accept_offer", {"offer": 7, "expect": bid}, "market"), gw)
-        self.assertEqual((out.status, out.response["rail"]), ("vetoed", "blocked_team"))
-        self.assertFalse(any(c[0] == "POST" for c in gw.calls))
-        self.ctx.control["blocked_teams"] = []
-        self.assertEqual(self.run_(Action("accept_offer", {"offer": 7, "expect": bid}, "market"), gw).status, "sent")
-
     def test_accept_vetoed_when_offer_changed(self):
         changed = {**OFFER, "want": {"cash": 400}}
         gw = FakeGW({"/api/venues/rastro/offers": {"offers": [changed]}, "/api/me/offers": {"offers": []}})

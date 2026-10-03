@@ -55,8 +55,6 @@ limits, cash or strategy. Rules:
   offered something on their venue, ask them to post it on El Rastro addressed to Team 10.
 - If a card is `committed` it is tied to another offer right now: say so and give the price it would take.
 - If we hold nothing they want (or only cards we keep), decline politely in one line and point to our open offers.
-- `never_route_to` lists teams we do not deal with: never suggest that they buy, bid for or receive a card of
-  ours, and never offer to pass anything on to them.
 - One short message, English, friendly, no filler. Call team_reply once."""
 
 
@@ -283,9 +281,7 @@ class TeamTalk:
                  "sellable": {r: {"floor": c["floor"], "committed": bool(c.get("committed"))}
                               for r, c in cards.items() if c.get("floor")},
                  "not_held": [r for r, c in cards.items() if not c.get("held")],
-                 "our_open_offers_for_them": ours,
-                 "never_route_to": sorted({str(x).strip().lower() for x in
-                                           (_g(_g(ctx, "control") or {}, "blocked_teams") or []) if str(x).strip()})}
+                 "our_open_offers_for_them": ours}
         dl = getattr(ctx, "deadline", None)
         res = llm.ask(purpose="market", system=PROMPT, tools=[TOOL], tool_choice={"type": "auto"},
                       messages=[{"role": "user", "content": "THREAD (JSON):\n" + json.dumps(state, ensure_ascii=False)

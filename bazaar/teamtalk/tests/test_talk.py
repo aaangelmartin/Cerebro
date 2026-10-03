@@ -165,20 +165,6 @@ class TeamTalkTest(unittest.TestCase):
         self.assertEqual(acts[1].params["want"]["cash"], 105)
         self.assertEqual(acts[1].source, "opus")
 
-    def test_llm_is_told_the_teams_we_never_route_cards_to(self):
-        seen = {}
-
-        class LLM:
-            def ask(self, **kw):
-                seen.update(system=kw["system"], user=kw["messages"][0]["content"])
-                return SimpleNamespace(tool_calls=[{"name": "team_reply", "input": {
-                    "action": "offer", "ref": "SAL-10", "price": 120, "text": "120 P."}}])
-        tt = T.TeamTalk(live=self.live, llm=LLM())
-        tt.actions(sit(threads=[thread(msgs=[ASK])], assets=[SAL10]), SimpleNamespace(llm_ok=True, control={
-            "min_asks": {"SAL-10": 105}, "blocked_teams": ["T06"]}), values=FakeValues({797: 63.0}), check=lambda a: OK)
-        self.assertIn('"never_route_to": ["t06"]', seen["user"])
-        self.assertIn("never_route_to", seen["system"])
-
 
 if __name__ == "__main__":
     unittest.main()
