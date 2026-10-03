@@ -13,6 +13,7 @@ GET  /outbox?kind=code|promo|task&status=&since=   POST /outbox/<id> {"status", 
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
+GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
 POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets"}   header X-Dashboard: 1
@@ -300,6 +301,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._send(400, {"error": "bad_query", "message": "since must be a number"})
             return self._send(200, {"items": Outbox().list(q.get("kind") or None, q.get("status") or None, since)})
+        if path == "/values":                                    # what each card is worth to us (no game calls)
+            from .values import card_values
+            return self._send(200, card_values(self.record, self.live))
         if path == "/broker/sessions":
             return self._send(200, {"items": broker_sessions(self.live)})
         if path.startswith("/broker/session/"):

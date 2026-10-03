@@ -717,6 +717,20 @@ class Runner:
                     "duels": sit.duels, "threads": [{k: t.get(k) for k in ("id", "with", "status", "topic")}
                                                     for t in sit.threads],
                     "my_offers": len(sit.my_offers), "feed_new": len(sit.feed_new)})
+                exact: dict = {}                    # /api/me/value answers the domains hold, for the dashboard
+                for d in self.domains:
+                    for ref, ex in (getattr(d, "_exact", None) or {}).items():
+                        if isinstance(ex, dict) and ex.get("at", 0) >= (exact.get(ref) or {}).get("at", 0):
+                            exact[ref] = ex
+                if exact:
+                    try:                            # keep what earlier runs learned (a restart empties the caches)
+                        old = json.loads((self.live / "exact_values.json").read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        old = {}
+                    for ref, ex in (old or {}).items():
+                        if isinstance(ex, dict) and ex.get("at", 0) > (exact.get(ref) or {}).get("at", 0):
+                            exact[ref] = ex
+                    _write_json(self.live / "exact_values.json", exact)
         except OSError as e:
             self._err("status", e)
 
