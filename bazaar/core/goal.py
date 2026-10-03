@@ -135,12 +135,28 @@ def last_card_value(values, ref) -> float:
     return max(v, float(values.estimate_next(ref)) + page_bonus(values, values.set_of(ref)))
 
 
+def off_page(values, ref) -> bool:
+    """True for a released card outside its set's page: an epic nº 11 or a legendary nº 12."""
+    if values is None or not ref:
+        return False
+    try:
+        from bazaar.market.protocol import page_refs
+        c = values.cards.get(ref)
+        return bool(c) and not c.get("hidden") and ref not in page_refs(values, values.set_of(ref))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def team_only(values, control, ref) -> bool:
     """A common or uncommon that completes a page is bought from a TEAM: that trade scored +42.7 neg_points
     (RET-03 at 12 P, Saturday t1033), while the same card from a dealer scores nothing (MAL-09). The dealers'
-    code skips it and the market bids for it. An operator goal (control.goal_buys) lifts this: any seller."""
-    return (str(ref).upper() not in goal_buys(control) and completes_page(values, ref)
-            and str(values.rarity(ref)).lower() in TEAM_ONLY_RARITIES)
+    code skips it and the market bids for it. The same holds for a goal outside the page (an epic or a
+    legendary): MAL-11 from a team scored +39, and a dealer sells it only on the brain's own dealer order.
+    An operator goal (control.goal_buys) lifts this: any seller."""
+    if str(ref).upper() in goal_buys(control):
+        return False
+    return off_page(values, ref) or (completes_page(values, ref)
+                                     and str(values.rarity(ref)).lower() in TEAM_ONLY_RARITIES)
 
 
 def strategy_goals(values=None) -> dict[str, int]:
@@ -166,7 +182,8 @@ def goal_sets(control, values=None) -> set[str]:
     """Sets with a goal card in force (automatic, the strategist's or the operator's): a page we are building, so
     the market's code posters keep the single copy of each of its cards."""
     goals = {**auto_goals(values), **strategy_goals(values), **goal_buys(control)}
-    return {str(r).upper()[:3] for r, p in goals.items() if p > 0 and not avoided(r, control)}
+    return {str(r).upper()[:3] for r, p in goals.items()
+            if p > 0 and not avoided(r, control) and not off_page(values, r)}   # an epic goal builds no page
 
 
 def pending(sit, control, values=None, team: bool = False) -> dict[str, int]:

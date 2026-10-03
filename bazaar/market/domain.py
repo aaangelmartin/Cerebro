@@ -896,7 +896,8 @@ class MarketDomain:
         bid_room = max(0, min(MAX_OWN_BIDS - kinds.count("bid"), room_total))
         bids = proto.bid_candidates(values, counts, venues, cash_room, wanted, bid_room) if bid_room else []
         bids = [b for b in bids if b.max_price <= per_deal]
-        from bazaar.core.goal import last_card_value as _last_value, pending as _goal_pending, team_only as _team_only
+        from bazaar.core.goal import (last_card_value as _last_value, off_page as _off_page,
+                                      pending as _goal_pending, team_only as _team_only)
         goal = _goal_pending(sit, control, values, team=True)  # cash is saved for these: bid only on them
         if self._funding:                           # raising cash for a bargain: no cash parked in bids either
             bids = []
@@ -906,8 +907,11 @@ class MarketDomain:
             # ...except the common/uncommon that completes a page: only a TEAM sale of it scores, so we bid for it
             team_goal = {r for r in goal if _team_only(values, control, r)}
             for r in sorted(team_goal - wanted)[:bid_room] if not (self._funding or cautious) else []:
-                price = min(int(goal[r]), int(values.book(r) * LAST_CARD_BID_BOOK), proto.MAX_BID_P, per_deal,
-                            int(avail - committed))
+                if _off_page(values, r):            # an epic or a legendary: the goal price itself, below value
+                    price = min(int(goal[r]), int(_last_value(values, r)) - 1, per_deal, int(avail - committed))
+                else:
+                    price = min(int(goal[r]), int(values.book(r) * LAST_CARD_BID_BOOK), proto.MAX_BID_P, per_deal,
+                                int(avail - committed))
                 if price >= 1:
                     v = _last_value(values, r)
                     bids.append(BidCand(id=f"g{len(bids) + 1}", ref=r, value=round(v, 1), min_price=1,

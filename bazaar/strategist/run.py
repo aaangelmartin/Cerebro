@@ -643,9 +643,23 @@ class Strategist:
                                          "dealer sale scores nothing")
                 except Exception:  # noqa: BLE001
                     pass
+            off = []                                # epics/legendaries we lack: goals too, bought from a TEAM
+            for c in st.get("cards") or []:
+                if c.get("page", True) or c.get("hidden") or c["id"] in held:
+                    continue
+                try:
+                    v = round(values.next_copy(c["id"]), 1) if values is not None else None
+                except Exception:  # noqa: BLE001
+                    v = None
+                off.append({"ref": c["id"], "rarity": c.get("rarity"), "value_to_us": v, "minted": c.get("minted"),
+                            "print_run": c.get("print_run"),
+                            "buy_from": "a TEAM (up to value - 50 scores the full +50): as a goal_buys entry the "
+                                        "code bids for it on El Rastro at your goal price and renews the bid when "
+                                        "it expires; a dealer only on your own dealer_orders (scores 0 neg_points)"})
             sets[st["id"]] = {"affinity": (me.get("affinity") or {}).get(st["id"]),
                               "page_held": len(page) - len(missing), "page_size": len(page),
-                              "missing": sorted(missing, key=lambda m: -(m["value_to_us"] or 0))[:10]}
+                              "missing": sorted(missing, key=lambda m: -(m["value_to_us"] or 0))[:10],
+                              "off_page": off}
         # the spare listed is a copy the rails let go: never one in control.protected (by ref or by asset id)
         from bazaar.core.spares import free_copies, protected_set
         prot = protected_set(_read(self.live / "control.json", {}) or {})

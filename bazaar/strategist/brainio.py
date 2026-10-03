@@ -440,6 +440,8 @@ def validate(plan: dict, pic: dict) -> list[str]:
     missing_value = {m["ref"]: m.get("value_with_page_bonus") or m.get("value_to_us")
                      for s in sets.values() for m in s.get("missing") or []}
     page_refs = set(missing_value)
+    # an epic or a legendary we lack (outside the page) may be a goal too, below its value to us
+    off_value = {m["ref"]: m.get("value_to_us") for s in sets.values() for m in s.get("off_page") or []}
     avoid = set(plan.get("avoid_buy_sets") or []) | set((pic.get("control") or {}).get("avoid_buy_sets") or [])
     held_refs = set(pic.get("held_refs") or [])
     for ref, p in (plan.get("goal_buys") or {}).items():
@@ -449,9 +451,9 @@ def validate(plan: dict, pic: dict) -> list[str]:
             errors.append(f"goal {ref} is in a set we avoid buying ({sorted(avoid)})")
         if ref in held_refs:
             errors.append(f"goal {ref}: we already hold it")
-        elif ref not in page_refs:
-            errors.append(f"goal {ref} is not a missing page card")
-        v = missing_value.get(ref)
+        elif ref not in page_refs and ref not in off_value:
+            errors.append(f"goal {ref} is not a missing page card nor an epic/legendary we lack")
+        v = missing_value.get(ref, off_value.get(ref))
         if v is not None and p >= v:
             errors.append(f"goal {ref} at {p} P is not below its value to us ({v})")
     cash = (pic.get("us") or {}).get("cash")
@@ -544,7 +546,7 @@ def hourly_review(live: Path, scoreboard_now: dict, now: float | None = None, wi
 def repair(plan: dict, pic: dict, errors: list[str]) -> dict:
     """Drop the parts of a plan that still fail the sanity check (after one re-ask), keep the rest."""
     out = dict(plan)
-    bad_goals = {e.split()[1] for e in errors if e.startswith("goal ")}
+    bad_goals = {e.split()[1].rstrip(":") for e in errors if e.startswith("goal ")}
     out["goal_buys"] = {r: p for r, p in (plan.get("goal_buys") or {}).items() if r not in bad_goals}
     bad_acc = {e.split()[1] for e in errors if e.startswith("accept_offers ")}
     out["accept_offers"] = [x for x in plan.get("accept_offers") or [] if str(x) not in bad_acc]
