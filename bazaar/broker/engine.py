@@ -25,6 +25,8 @@ from typing import Any
 
 # --------------------------------------------------------------------------- policy
 
+GONE_CODES = ("gone", "not_found", "notfound", "unknown", "closed", "taken", "no_offer", "expired", "missing")
+
 DEFAULT_POLICY: dict[str, Any] = {
     "session_ticks": 16,          # bench session length (schedule params.ticks)
     "max_bench_matches_per_tick": 10,
@@ -33,7 +35,10 @@ DEFAULT_POLICY: dict[str, Any] = {
     "cross_rule": "probe",        # quotes | limits | probe (learn it: try a few non-crossing pairs per session)
     "max_probes": 2,              # non-crossing tries per session while the rule is unknown
     "probe_after": 2,             # ticks into a session before the first probe (estimates need a few quotes)
-    "probe_refusals": 3,          # refused probes that settle the rule as "quotes"
+    "probe_refusals": 3,          # refused probes that settle the rule as "quotes" ...
+    "probe_refusal_runs": 2,      # ... and they must come from at least this many distinct sessions
+    "probes_when_quotes": 1,      # once settled as "quotes", keep this many probes per session (refusals are free)
+    "carry_max_weight": 24.0,     # cap on the pseudo-observations carried across sessions for the shading prior
     "profiles": {
         "normal": {
             "prior_shade": 0.15,      # initial quote distance from the limit, as a share of the limit
@@ -288,6 +293,12 @@ class BenchEngine:
         self.rule: str = self.policy.get("cross_rule", "quotes")      # quotes | limits | probe
         self.probes: dict[str, int] = {}                              # run -> probes sent
         self.probe_refusals = 0
+        self.refusal_runs: set[str] = set()                          # sessions in which a probe was refused
+        self.learn_rule = self.rule == "probe"                        # the rule is learned (not forced by policy)
+        self.carry: dict[str, dict[str, float]] = {}                  # profile -> {"sum", "n"}: shades of past sessions
+        self.learned_runs: set[str] = set()
+        self.shadow: dict[str, dict] = {}                             # run -> what the free stall would have done
+        self.our_pairs: dict[str, list[tuple[str, str, int]]] = {}    # run -> (sell key, buy key, quoted gap) we matched
         self.blocked: set[tuple[Any, Any]] = set()                    # refused non-crossing pairs
         self.penalty: dict[str, int] = {}                             # trader key -> refusals it took part in
 
@@ -324,7 +335,53 @@ class BenchEngine:
         for tr in self.traders.values():
             if tr.active and tr.key not in seen and tr.last_tick < tick:
                 tr.gone = True                          # vanished without a match: it left
+        self._shadow_stall(tick)
         self.last_tick = tick
+
+    def _shadow_stall(self, tick: int) -> None:
+        """Replay this tick's book through the free stall. Traders we matched are no longer in our book, so the
+        shadow keeps them at their last quote (the stall would still have had them); traders that left are dropped."""
+        runs: dict[str, tuple[list[Trader], list[Trader]]] = {}
+        for t in self.traders.values():
+            sh = self.shadow.setdefault(t.run, {"pairs": [], "used": set()})
+            if t.key in sh["used"] or t.gone:
+                continue
+            if not (t.last_tick == tick or (t.matched and t.last_tick < tick)):
+                continue
+            if t.last_tick < tick and t.deadline is not None and t.deadline <= tick:
+                continue                                # it would have expired from the stall's book too
+            asks, bids = runs.setdefault(t.run, ([], []))
+            (asks if t.side == "sell" else bids).append(t)
+        for run, (asks, bids) in runs.items():
+            sh = self.shadow[run]
+            for s, b in zip(sorted(asks, key=lambda t: t.quote), sorted(bids, key=lambda t: -t.quote)):
+                if b.quote < s.quote:
+                    break
+                sh["used"].update((s.key, b.key))
+                sh["pairs"].append((s.key, b.key, b.quote - s.quote))
+
+    def stall_efficiency(self, run: str) -> float | None:
+        """Best estimate of what the free stall would have scored on this run, on the same estimated limits as
+        efficiency_estimate (so the two compare like with like)."""
+        best = self._best_gain(run)
+        sh = self.shadow.get(run)
+        if best is None or sh is None:
+            return None
+        return min(1.0, self._pairs_gain(sh["pairs"]) / best)
+
+    def our_efficiency(self, run: str) -> float | None:
+        """Our realised share on the CURRENT estimates, scored exactly like stall_efficiency."""
+        best = self._best_gain(run)
+        if best is None:
+            return None
+        return min(1.0, self._pairs_gain(self.our_pairs.get(run, [])) / best)
+
+    def _pairs_gain(self, pairs: list) -> float:
+        gain = 0.0
+        for sk, bk, quoted in pairs:
+            s, b = self.traders.get(sk), self.traders.get(bk)
+            gain += max(float(quoted), (b.est - s.est) if (s and b) else 0.0)
+        return gain
 
     def _by_offer(self, offer_id: Any) -> Trader | None:
         for tr in self.traders.values():
@@ -333,23 +390,26 @@ class BenchEngine:
         return None
 
     def note_matched(self, sell: Any, buy: Any, est_surplus: float = 0.0, kind: str = "cross") -> None:
-        for oid in (sell, buy):
-            tr = self._by_offer(oid)
+        trs = [self._by_offer(sell), self._by_offer(buy)]
+        for tr in trs:
             if tr is not None:
                 tr.matched = True
         run = run_of(sell)
+        if all(trs):
+            self.our_pairs.setdefault(run, []).append((trs[0].key, trs[1].key, max(0, trs[1].quote - trs[0].quote)))
         self.realised_est[run] = self.realised_est.get(run, 0.0) + est_surplus
-        if kind in ("limit", "probe") and self.rule == "probe":
+        if kind in ("limit", "probe") and (self.rule == "probe" or (self.learn_rule and self.rule == "quotes")):
             self.rule = "limits"                       # a non-crossing pair went through: limits rule
 
     def note_refused(self, m: "Match", code: str = "") -> None:
         """A planned match was refused. Gone offers are dropped; a refused non-crossing pair is blocked, both
         traders' limit estimates are pulled toward their quotes, and enough probe refusals settle the rule."""
-        gone = any(w in (code or "") for w in ("gone", "not_found", "closed", "taken", "no_offer", "unknown_offer"))
+        c = (code or "").lower()
+        gone = any(w in c for w in GONE_CODES)
         if gone:
             for oid in (m.sell, m.buy):
                 tr = self._by_offer(oid)
-                if tr is not None and tr.active and code:
+                if tr is not None and tr.active:
                     tr.gone = True
             return
         if m.kind in ("limit", "probe"):
@@ -360,30 +420,82 @@ class BenchEngine:
                     self.penalty[tr.key] = self.penalty.get(tr.key, 0) + 1
             if m.kind == "probe":
                 self.probe_refusals += 1
-                if self.probe_refusals >= int(self.policy.get("probe_refusals", 3)) and self.rule == "probe":
-                    self.rule = "quotes"
+                self.refusal_runs.add(m.run or run_of(m.sell))
+                if self.rule == "probe" and self.probe_refusals >= int(self.policy.get("probe_refusals", 3)) \
+                        and len(self.refusal_runs) >= int(self.policy.get("probe_refusal_runs", 2)):
+                    self.rule = "quotes"               # one odd session (bad estimates) cannot settle it alone
+
+    def probe_budget(self) -> int:
+        if self.rule == "probe":
+            return int(self.policy.get("max_probes", 2))
+        if self.rule == "quotes" and self.learn_rule:
+            return int(self.policy.get("probes_when_quotes", 1))
+        return 0
 
     # ---- estimation
-    def profile_for(self, run: str) -> dict:
+    def profile_name(self, run: str) -> str:
         name = self.forced_profile or self.run_profile.get(run)
         if name is None:
             n = sum(1 for t in self.traders.values() if t.run == run)
             name = "hard" if n >= int(self.policy.get("hard_traders", 12)) else "normal"
-        return self.policy["profiles"].get(name) or self.policy["profiles"]["normal"]
+        return name if name in self.policy["profiles"] else "normal"
 
-    def estimates(self, run: str) -> dict[str, float]:
+    def profile_for(self, run: str) -> dict:
+        return self.policy["profiles"][self.profile_name(run)]
+
+    def session_shades(self, run: str) -> list[float]:
+        """Realised quote shading of the traders of this run whose limit we pinned down."""
         prof = self.profile_for(run)
-        trs = [t for t in self.traders.values() if t.run == run]
-        shades = []                                     # learn the shading prior from traders we have pinned down
-        for t in trs:
-            if len(t.quotes) >= 3:
+        out = []
+        for t in self.traders.values():
+            if t.run == run and len(t.quotes) >= 3:
                 est, st = estimate_limit(t.side, t.prices(), prof["prior_shade"], prof)
                 if st in ("geo", "stopped"):
                     s = realised_shade(t.side, t.prices(), est)
                     if s is not None and 0 <= s < prof["max_shade"]:
-                        shades.append(s)
+                        out.append(s)
+        return out
+
+    def learn_session(self, run: str) -> dict | None:
+        """Carry this run's shading into the prior of the next sessions (once per run). Returns the new carry."""
+        if run in self.learned_runs:
+            return None
+        self.learned_runs.add(run)
+        shades = self.session_shades(run)
+        if not shades:
+            return None
+        c = self.carry.setdefault(self.profile_name(run), {"sum": 0.0, "n": 0.0})
+        c["sum"] += sum(shades)
+        c["n"] += len(shades)
+        cap = float(self.policy.get("carry_max_weight", 24.0))
+        if c["n"] > cap:                                # old sessions fade: keep the mean, cap the weight
+            c["sum"], c["n"] = c["sum"] * cap / c["n"], cap
+        return dict(c)
+
+    def export_state(self) -> dict:
+        return {"carry": self.carry, "rule": self.rule, "probe_refusals": self.probe_refusals,
+                "refusal_runs": sorted(self.refusal_runs)[-20:]}
+
+    def load_state(self, d: dict | None) -> None:
+        d = d or {}
+        for name, c in (d.get("carry") or {}).items():
+            try:
+                self.carry[str(name)] = {"sum": float(c["sum"]), "n": float(c["n"])}
+            except (KeyError, TypeError, ValueError):
+                continue
+        if self.learn_rule and d.get("rule") in ("probe", "quotes", "limits"):
+            self.rule = d["rule"]
+            self.probe_refusals = int(d.get("probe_refusals") or 0)
+            self.refusal_runs = set(map(str, d.get("refusal_runs") or []))
+
+    def estimates(self, run: str) -> dict[str, float]:
+        prof = self.profile_for(run)
+        trs = [t for t in self.traders.values() if t.run == run]
+        shades = self.session_shades(run)               # learn the shading prior from traders we have pinned down
         w = prof["prior_weight"]
-        prior = (prof["prior_shade"] * w + sum(shades)) / (w + len(shades))
+        c = self.carry.get(self.profile_name(run)) if run not in self.learned_runs else None
+        cs, cn = (c["sum"], c["n"]) if c else (0.0, 0.0)   # ... and from past sessions
+        prior = (prof["prior_shade"] * w + cs + sum(shades)) / (w + cn + len(shades))
         out = {}
         for t in trs:
             t.est, t.status = estimate_limit(t.side, t.prices(), prior, prof)
@@ -439,7 +551,7 @@ class BenchEngine:
         endgame = tick >= end - prof["endgame_ticks"] + 1
         h = self.hazard(run)
         base_risk = 1 - (1 - h) ** prof["wait_ticks"]
-        probing = self.rule == "probe" and self.probes.get(run, 0) < int(self.policy.get("max_probes", 2)) \
+        probing = self.probes.get(run, 0) < self.probe_budget() \
             and tick - self.run_start.get(run, tick) >= int(self.policy.get("probe_after", 2))
         loose = self.rule == "limits"
 
@@ -524,7 +636,7 @@ class BenchEngine:
         return int(min(hi, max(lo, p)))
 
     # ---- reporting
-    def efficiency_estimate(self, run: str) -> float | None:
+    def _best_gain(self, run: str) -> float | None:
         trs = [t for t in self.traders.values() if t.run == run]
         if not trs:
             return None
@@ -532,7 +644,11 @@ class BenchEngine:
         v = sorted((t.est for t in trs if t.side == "buy"), reverse=True)
         c = sorted(t.est for t in trs if t.side == "sell")
         best = sum(max(0.0, a - b) for a, b in zip(v, c))
-        return None if best <= 0 else min(1.0, self.realised_est.get(run, 0.0) / best)
+        return best if best > 0 else None
+
+    def efficiency_estimate(self, run: str) -> float | None:
+        best = self._best_gain(run)
+        return None if best is None else min(1.0, self.realised_est.get(run, 0.0) / best)
 
     def snapshot(self, run: str | None = None) -> list[dict]:
         return [{"key": t.key, "run": t.run, "side": t.side, "quote": t.quote, "est": round(t.est, 1),
@@ -544,7 +660,8 @@ class BenchEngine:
         dead = {r for r, e in self.run_end.items() if e < tick - 2}
         self.traders = {k: t for k, t in self.traders.items() if t.run not in dead}
         for r in dead:
-            for d in (self.run_start, self.run_end, self.run_profile, self.probes, self.realised_est):
+            for d in (self.run_start, self.run_end, self.run_profile, self.probes, self.realised_est, self.shadow,
+                      self.our_pairs):
                 d.pop(r, None)
 
 
@@ -578,12 +695,20 @@ def _asset_ref(a: Any) -> tuple[Any, str | None]:
     return a, None
 
 
-def public_plan(book: dict, limit: int = 10) -> list[Match]:
+def public_plan(book: dict, limit: int = 10, tick: int | None = None) -> list[Match]:
     """Card by card: each single-card ask against the highest bid that wants that card (any copy via want.types, or
     that exact asset via want.assets), from another maker, covering ask + fee. Price at the midpoint, lowered until the
-    buyer can also pay our fee. Asks are taken cheapest first; a bid is used once."""
+    buyer can also pay our fee. Asks are taken cheapest first; a bid is used once. Offers that expire at or before
+    `tick` (default book["tick"]) are skipped: the server would refuse them."""
     fee_bps, fee_card = int(book.get("fee_bps") or 0), int(book.get("fee_per_card") or 0)
-    offers = [o for o in (book.get("offers") or []) if o.get("status", "open") == "open"]
+    if tick is None and isinstance(book.get("tick"), int):
+        tick = book["tick"]
+
+    def alive(o: dict) -> bool:
+        exp = o.get("expires_tick")
+        return not (isinstance(tick, int) and isinstance(exp, int) and exp <= tick)
+
+    offers = [o for o in (book.get("offers") or []) if o.get("status", "open") == "open" and alive(o)]
     bids = []
     for o in offers:
         g, w = o.get("give") or {}, o.get("want") or {}

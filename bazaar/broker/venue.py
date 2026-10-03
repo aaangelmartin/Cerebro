@@ -112,12 +112,51 @@ def our_venue(me: dict) -> str | None:
     return None
 
 
+def _vid(v: Any) -> str | None:
+    if isinstance(v, dict):
+        x = v.get("venue") or v.get("id")
+        return str(x) if x else None
+    return str(v) if v else None
+
+
+def _venue_list(venues: Any) -> list[dict]:
+    """/api/venues may come as a list or as {"venues": [...]}."""
+    if isinstance(venues, dict):
+        venues = venues.get("venues")
+    return [v for v in (venues or []) if isinstance(v, dict)]
+
+
+def starter_ids(venues: Any) -> set[str]:
+    """Ids of the free starter stalls and house venues (never our own board venue)."""
+    return {vid for v in _venue_list(venues) if (v.get("starter") or v.get("house")) and (vid := _vid(v))}
+
+
+def own_venue_id(me: dict, venues: Any = None) -> str | None:
+    """Our OWN venue id, or None. From hour 3.0 every team without a venue gets a free starter stall and /api/me may
+    report its id; that stall is not ours to broker and must not stop us opening the board venue. A venue counts as
+    ours when it is the one saved in broker.json, or when it is neither a starter nor a house venue."""
+    me = me or {}
+    vid = our_venue(me)
+    if not vid:
+        return None
+    stored = load().get("venue")
+    if stored and vid == str(stored):
+        return vid
+    raw = me.get("venue")
+    if isinstance(raw, dict) and (raw.get("starter") or raw.get("house")):
+        return None
+    if vid in starter_ids(venues):
+        return None
+    return vid
+
+
 def should_open(sit: Any, reserve: int | None = None) -> bool:
     """True when it is time to open: hour >= 4.05, doors open, level >= 2, no venue yet, and cash for bond + fee +
-    reserve. `sit` is a core.state.Situation (or anything with t_hours, doors, paused, me)."""
+    reserve. `sit` is a core.state.Situation (or anything with t_hours, doors, paused, me, optionally venues).
+    A starter stall reported in /api/me.venue does not count as a venue of ours."""
     reserve = config.CASH_RESERVE if reserve is None else reserve
     me = getattr(sit, "me", None) or {}
-    if our_venue(me) or (load().get("venue") and load_key()):
+    if own_venue_id(me, getattr(sit, "venues", None)) or (load().get("venue") and load_key()):
         return False
     if (getattr(sit, "t_hours", 0) or 0) < OPEN_AT_HOURS or getattr(sit, "paused", False):
         return False
@@ -141,7 +180,11 @@ def open_venue(gw, name: str = VENUE_NAME, description: str = VENUE_DESCRIPTION)
     """Open our board venue unless we already have one. Idempotent. Returns a redacted summary:
     {"venue": id, "reused": bool, "has_key": bool}. Raises gateway.GameError on refusal (it costs nothing)."""
     me = gw.get("/api/me")
-    vid = our_venue(me)
+    try:
+        venues = gw.get("/api/venues")
+    except Exception:  # noqa: BLE001 - without the list a reported id still counts unless flagged as a starter
+        venues = None
+    vid = own_venue_id(me, venues)
     if vid:
         stored = load()
         if not load_key() and me.get("broker_key"):
@@ -152,7 +195,7 @@ def open_venue(gw, name: str = VENUE_NAME, description: str = VENUE_DESCRIPTION)
                                    "rules": {"mechanism": "board"}, "description": description})
     rec = save_from_response(resp)
     if not rec.get("venue"):
-        rec["venue"] = our_venue(gw.get("/api/me"))
+        rec["venue"] = own_venue_id(gw.get("/api/me"), venues)
         if rec["venue"]:
             d = load()
             d["venue"] = rec["venue"]

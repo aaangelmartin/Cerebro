@@ -11,7 +11,9 @@ Safety net: any exception in the engine, or mode "stall" in data/live/broker_con
 by quotes exactly as the free auto stall does, so we never score below half the bench points.
 Writes are blocked when bazaar/STOP exists, when data/live/control.json says armed: false, when
 broker_control.json says enabled: false / mode "off", and always unless BAZAAR_ALLOW_REAL=1 (live mode).
-After each session it reads /api/me score.bench_efficiency and the public bench.finished events and logs them.
+After each session it reads /api/me score.bench_efficiency and the public bench.* events and logs them, carries the
+learned quote-shading prior into the next sessions (state file), and compares itself with the free stall: below it in
+`stall_switch_sessions` sessions in a row, it switches broker_control.json to mode "stall" and posts a notice.
 """
 from __future__ import annotations
 
@@ -31,6 +33,12 @@ from .engine import BenchEngine, Match, load_policy, public_plan, run_of, stall_
 STOP_CODES = {"wait_for_tick", "rate_limited", "too_many_matches", "match_limit", "limit_reached", "bad_broker_key", "bad_key",
               "auto_venue", "not_board"}
 GONE_HINTS = ("gone", "not_found", "closed", "taken", "unknown")
+KEY_CODES = {"bad_broker_key", "bad_key", "unauthorized", "forbidden", "invalid_key"}
+HEARTBEAT_EVERY = 5.0          # seconds: heartbeat on every poll at most this often, even when the tick does not move
+END_AFTER_ABSENT = 2           # ticks a run must be missing from the book before its session is closed
+STALL_SWITCH_SESSIONS = 2      # sessions in a row below the stall before switching to mode "stall"
+STALL_MARGIN = 0.005           # server numbers are exact
+REPLAY_MARGIN = 0.02           # the replay compares estimates: demand a clearer gap
 
 
 # --------------------------------------------------------------------------- clients
@@ -38,8 +46,18 @@ GONE_HINTS = ("gone", "not_found", "closed", "taken", "unknown")
 class LiveClient:
     """The broker side of the gateway. The key stays in memory and in broker.json, never in logs."""
 
-    def __init__(self, gw: Gateway, key: str | None):
-        self.gw, self._key = gw, key
+    def __init__(self, gw: Gateway, key: str | None, reload: bool = True):
+        self.gw, self._key, self.reload = gw, key, reload
+
+    def reload_key(self) -> bool:
+        """Re-read the stored broker key (the venue may be reopened or rotated). True when it changed."""
+        if not self.reload:
+            return False
+        key = venue.load_key()
+        if key and key != self._key:
+            self._key = key
+            return True
+        return False
 
     @property
     def has_key(self) -> bool:
@@ -98,7 +116,8 @@ def live_writes_allowed() -> tuple[bool, str]:
 class BrokerLoop:
     def __init__(self, client, out_dir: Path, policy: dict | None = None,
                  writes_allowed: Callable[[], tuple[bool, str]] = lambda: (True, ""),
-                 control_file: Path | None = None, status_file: Path | None = None, day: str | None = None):
+                 control_file: Path | None = None, status_file: Path | None = None, day: str | None = None,
+                 state_file: Path | None = None, notices_file: Path | None = None):
         self.client = client
         self.out = out_dir
         self.out.mkdir(parents=True, exist_ok=True)
@@ -121,11 +140,39 @@ class BrokerLoop:
         self.hard_hours: list[float] = []
         self.schedule_tick: int | None = None
         self.t_hours: float = 0.0
+        self.absent: dict[str, int] = {}                # run -> consecutive ticks missing from the book
+        self.hb_at = 0.0
+        self.auto_mode: str | None = None               # "stall" after an automatic switch when there is no control file
+        self.state_file = state_file or (self.out.parent / "broker_state.json")
+        self.notices_file = notices_file or (self.out.parent / "notices.jsonl")
+        self.watch: dict = {"below": 0, "history": [], "switched": None}
+        self._load_state()
 
     # ---- helpers
     def control(self) -> dict:
         d = _read_json(self.control_file) if self.control_file else {}
-        return {"enabled": d.get("enabled", True), "mode": d.get("mode", "smart")}
+        mode = d.get("mode", "smart")
+        if self.auto_mode and mode == "smart" and not self.control_file:
+            mode = self.auto_mode
+        return {"enabled": d.get("enabled", True), "mode": mode}
+
+    # ---- state carried across sessions and restarts
+    def _load_state(self) -> None:
+        d = _read_json(self.state_file)
+        self.engine.load_state(d.get("engine"))
+        w = d.get("watch")
+        if isinstance(w, dict):
+            self.watch.update({k: w[k] for k in ("below", "history", "switched") if k in w})
+
+    def _save_state(self) -> None:
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"updated": time.time(), "engine": self.engine.export_state(),
+                                       "watch": self.watch}, default=str))
+            tmp.replace(self.state_file)
+        except OSError as e:
+            self._err(self.last_tick, "state", e)
 
     def _err(self, tick: int | None, where: str, e: Any) -> None:
         self.errors.append({"t": round(time.time(), 1), "tick": tick, "where": where, "error": str(e)[:300]})
@@ -172,6 +219,8 @@ class BrokerLoop:
         tick = clock.get("tick")
         self.t_hours = float(clock.get("t_hours") or 0.0)
         if not isinstance(tick, int) or tick == self.last_tick:
+            if time.time() - self.hb_at >= HEARTBEAT_EVERY:   # slow ticks: stay alive for the supervisor
+                self.heartbeat(self.last_tick)
             return
         self.last_tick = tick
         self._refresh_schedule(tick)
@@ -191,6 +240,8 @@ class BrokerLoop:
         meta = book.get("bench")
         if isinstance(meta, dict) and meta.get("run") and isinstance(meta.get("ends_tick"), int):
             ends[str(meta["run"])] = meta["ends_tick"]
+        for run in runs:
+            self.absent.pop(run, None)
         for run in runs - self.active_runs:            # a session starts
             hard = any(abs(self.t_hours - h) < 0.25 for h in self.hard_hours)
             if hard:
@@ -199,12 +250,26 @@ class BrokerLoop:
                                "est_surplus": 0.0, "profile": "hard" if hard else "auto"}
             self._append(self.session_name(run), {"type": "start", "tick": tick, "t_hours": self.t_hours,
                                                   "profile": self.stats[run]["profile"], "policy": self.policy})
-        for run in self.active_runs - runs:            # a session ended: read our score in two ticks
+        still = set()
+        for run in self.active_runs - runs:            # missing: ended, or a blip in the book?
+            self.absent[run] = self.absent.get(run, 0) + 1
+            if self.absent[run] < END_AFTER_ABSENT:
+                still.add(run)
+                continue
+            self.absent.pop(run, None)                 # a session ended: read our score in two ticks
             self.pending_results[run] = tick + 2
+            stall_eff = self.engine.stall_efficiency(run)
+            if run in self.stats:
+                self.stats[run]["stall_efficiency"] = stall_eff
+                self.stats[run]["our_replay_efficiency"] = self.engine.our_efficiency(run)
             self._append(self.session_name(run), {"type": "end", "tick": tick,
                                                   "est_efficiency": self.engine.efficiency_estimate(run),
+                                                  "stall_efficiency": stall_eff,
                                                   "stats": self.stats.get(run), "traders": self.engine.snapshot(run)})
-        self.active_runs = runs
+            carry = self.engine.learn_session(run)
+            if carry is not None:
+                self._save_state()
+        self.active_runs = runs | still
 
         plan: list[Match] = []
         mode = ctl["mode"]
@@ -238,7 +303,7 @@ class BrokerLoop:
                 "traders": self.engine.snapshot(run), "rule": self.engine.rule})
 
         if book.get("offers"):
-            pplan = public_plan(book, int(self.policy.get("max_public_matches_per_tick", 10)))
+            pplan = public_plan(book, int(self.policy.get("max_public_matches_per_tick", 10)), tick)
             if pplan:
                 presults = self._send(tick, pplan, send, bench=False)
                 self._append(f"public-{self.day}", {"type": "tick", "tick": tick, "t": round(time.time(), 2),
@@ -278,6 +343,9 @@ class BrokerLoop:
                         st["refused"] += 1
                         st["probes"] += m.kind == "probe"
                 out.append(rec)
+                if e.code in KEY_CODES and hasattr(self.client, "reload_key"):
+                    if self.client.reload_key():
+                        self._err(tick, "match", f"{e.code}: broker key reloaded")
                 if e.code in STOP_CODES:
                     self._err(tick, "match", f"{e.code}: stopping this tick")
                     break
@@ -309,14 +377,71 @@ class BrokerLoop:
             self._err(tick, "feed", e)
         for run in due:
             self.pending_results.pop(run, None)
+            est = self.engine.efficiency_estimate(run)
+            ours_cmp = (self.stats.get(run) or {}).get("our_replay_efficiency")
+            if ours_cmp is None:
+                ours_cmp = self.engine.our_efficiency(run)
+            stall_est = (self.stats.get(run) or {}).get("stall_efficiency")
+            if stall_est is None:
+                stall_est = self.engine.stall_efficiency(run)
             rec = {"type": "result", "tick": tick, "run": run, "session": self.session_name(run), "score": res,
-                   "est_efficiency": self.engine.efficiency_estimate(run), "stats": self.stats.get(run),
+                   "est_efficiency": est, "stall_efficiency": stall_est, "stats": self.stats.get(run),
                    "bench_events": others[-40:]}
+            rec["vs_stall"] = self._compare_with_stall(run, res.get("bench_efficiency"), ours_cmp, stall_est, others)
             self._append(self.session_name(run), rec)
             self._append("results", rec)
             self.last_result = rec
 
+    def _compare_with_stall(self, run: str, ours_server: Any, ours_est: float | None, stall_est: float | None,
+                            events: list[dict]) -> dict:
+        """Are we below the free stall this session? Like with like: the server's efficiency against a stall
+        efficiency published in the bench.* events when there is one, else our estimate against the stall replayed on
+        our own recorded book. Below in STALL_SWITCH_SESSIONS sessions in a row -> mode "stall" + a notice."""
+        stall_srv = stall_from_events(events, run)
+        if isinstance(ours_server, (int, float)) and stall_srv is not None:
+            ours, stall, basis = float(ours_server), stall_srv, "server"
+        elif ours_est is not None and stall_est is not None:
+            ours, stall, basis = ours_est, stall_est, "replay"
+        else:
+            return {"basis": None}
+        below = ours < stall - (STALL_MARGIN if basis == "server" else REPLAY_MARGIN)
+        self.watch["below"] = self.watch.get("below", 0) + 1 if below else 0
+        self.watch["history"] = (list(self.watch.get("history") or []) + [
+            {"run": run, "ours": round(ours, 4), "stall": round(stall, 4), "basis": basis, "below": below}])[-10:]
+        out = {"basis": basis, "ours": ours, "stall": stall, "below": below, "below_in_a_row": self.watch["below"]}
+        if self.watch["below"] >= STALL_SWITCH_SESSIONS and self.control()["mode"] == "smart":
+            out["switched"] = self._switch_to_stall(ours, stall, basis)
+        self._save_state()
+        return out
+
+    def _switch_to_stall(self, ours: float, stall: float, basis: str) -> bool:
+        n = self.watch["below"]
+        if self.control_file:
+            d = _read_json(self.control_file)
+            d.update(mode="stall", auto=True, reason=f"below the stall {n} sessions in a row", switched_at=time.time())
+            try:
+                tmp = self.control_file.with_suffix(".tmp")
+                tmp.write_text(json.dumps(d))
+                tmp.replace(self.control_file)
+            except OSError as e:
+                self._err(self.last_tick, "control", e)
+                return False
+        else:
+            self.auto_mode = "stall"
+        self.watch["switched"] = time.time()
+        self.watch["below"] = 0
+        try:
+            from ..lab.store import write_notice
+            write_notice("broker", f"Broker: por debajo de la tienda gratis {n} sesiones seguidas "
+                         f"({ours:.1%} frente a {stall:.1%}, base {basis}). Paso a modo «stall» (cruzar por "
+                         f"cotizaciones). Para volver: mode «smart» en broker_control.json.",
+                         path=self.notices_file, mode="stall", ours=round(ours, 4), stall=round(stall, 4), basis=basis)
+        except Exception as e:  # noqa: BLE001
+            self._err(self.last_tick, "notice", e)
+        return True
+
     def heartbeat(self, tick: int | None) -> None:
+        self.hb_at = time.time()
         run = sorted(self.active_runs)[-1] if self.active_runs else None
         st = {
             "updated": time.time(), "tick": tick, "t_hours": self.t_hours,
@@ -324,15 +449,57 @@ class BrokerLoop:
             "mode": self.control()["mode"], "writes": self.writes_allowed()[0], "rule": self.engine.rule,
             "has_key": getattr(self.client, "has_key", True),
             "efficiency_estimate": self.engine.efficiency_estimate(run) if run else None,
+            "stall_efficiency": (self.engine.stall_efficiency(run) if run else
+                                 (self.last_result or {}).get("stall_efficiency")),
+            "vs_stall": {"below_in_a_row": self.watch.get("below", 0), "switched": self.watch.get("switched"),
+                         "history": (self.watch.get("history") or [])[-3:]},
+            "prior_carry": self.engine.carry,
             "session_stats": self.stats.get(run) if run else None,
             "matches_total": self.matches_total, "public_matches_total": self.public_total,
-            "last_result": ({k: self.last_result.get(k) for k in ("session", "score", "est_efficiency")}
+            "last_result": ({k: self.last_result.get(k) for k in ("session", "score", "est_efficiency",
+                                                                  "stall_efficiency", "vs_stall")}
                             if self.last_result else None),
             "errors": self.errors[-10:],
         }
         tmp = self.status_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(st, default=str))
         tmp.replace(self.status_file)
+
+
+def _num(x: Any) -> float | None:
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return None
+    x = float(x)
+    return x / 100 if 1 < x <= 100 else x          # a percentage
+
+
+def stall_from_events(events: list[dict], run: str | None = None) -> float | None:
+    """The free stall's efficiency for a session, if the public bench.* events publish it: an explicit
+    stall/baseline field, or the mean efficiency of the starter (auto) venues in a per-venue list."""
+    vals: list[float] = []
+    for ev in events or []:
+        if not str(ev.get("type", "")).startswith("bench."):
+            continue
+        evrun = ev.get("run") or (ev.get("data") or {}).get("run")
+        if run and evrun and str(evrun) != str(run):
+            continue
+        body = {**(ev.get("data") or {}), **ev} if isinstance(ev.get("data"), dict) else ev
+        for k in ("stall_efficiency", "stall", "baseline_efficiency", "baseline", "auto_efficiency"):
+            v = body.get(k)
+            v = _num(v.get("efficiency") if isinstance(v, dict) else v)
+            if v is not None:
+                vals.append(v)
+                break
+        else:
+            rows = body.get("venues") or body.get("results") or []
+            if isinstance(rows, dict):
+                rows = [{"venue": k, **(r if isinstance(r, dict) else {"efficiency": r})} for k, r in rows.items()]
+            st = [_num(r.get("efficiency")) for r in rows if isinstance(r, dict)
+                  and (r.get("starter") or (r.get("rules") or {}).get("mechanism") == "auto" or r.get("mechanism") == "auto")]
+            st = [v for v in st if v is not None]
+            if st:
+                vals.append(sum(st) / len(st))
+    return vals[-1] if vals else None
 
 
 # --------------------------------------------------------------------------- entry points
@@ -344,6 +511,9 @@ def run_sim(hard: bool = False, sessions: int = 3, seed: int = 0, cross_rule: st
     out_dir = out_dir or (config.LAB / "broker" / "sim_run" / "bench")
     if out_dir.exists():                             # each sim run starts clean
         for f in out_dir.glob("*.jsonl"):
+            f.unlink()
+    for f in (out_dir.parent / "broker_state.json",):
+        if f.exists():
             f.unlink()
     client = SimClient(seed=seed, hard=hard, sessions=sessions)
     for _, s in client.sessions:
@@ -382,20 +552,23 @@ def main(argv: list[str] | None = None) -> None:
     gw = Gateway(url=a.url or config.GATEWAY_URL, token=a.token or config.GATEWAY_TOKEN,
                  real=True if against_sim else config.ALLOW_REAL)
     key = a.key or venue.load_key()
-    client = LiveClient(gw, key)
+    client = LiveClient(gw, key, reload=not a.key)
     out = (config.LAB / "broker" / "fake_run" / "bench") if against_sim else (config.LIVE / "bench")
     writes = (lambda: (True, "")) if against_sim else live_writes_allowed
     loop = BrokerLoop(client, out, load_policy(), writes_allowed=writes,
                       control_file=config.LIVE / "broker_control.json",
-                      status_file=out.parent / "broker_status.json")
+                      status_file=out.parent / "broker_status.json",
+                      state_file=(out.parent / "broker_state.json") if against_sim else (config.LAB / "broker" / "state.json"),
+                      notices_file=(out.parent / "notices.jsonl") if against_sim else (config.LAB / "notices.jsonl"))
     print(f"broker: {'fake bazaar' if against_sim else 'live'} | key {'present' if key else 'MISSING'} | "
           f"writes {'on' if writes()[0] else 'off (' + writes()[1] + ')'} | out {out}", flush=True)
     while True:
-        if not client.has_key:
-            key = venue.load_key()                    # the venue may open while we run
-            if key:
-                client._key = key
-                print("broker: key found, matching on", flush=True)
+        had = client.has_key
+        try:
+            if client.reload_key():                   # the venue may open (or be reopened) while we run
+                print("broker: key " + ("changed" if had else "found, matching on"), flush=True)
+        except Exception as e:  # noqa: BLE001
+            loop._err(loop.last_tick, "key", e)
         started = time.time()
         try:
             if client.has_key:
