@@ -183,6 +183,29 @@ def bot_control(path_qs, body=None):
         return 502, json.dumps({"error": "bot_offline", "message": str(e.reason)}).encode()
 
 
+# The new bot's supervisor dashboard and API (bazaar/api/server.py), served under /v2/ for logged-in users.
+V2_URL = ENV.get("BAZAAR_API_URL", "http://127.0.0.1:8791").rstrip("/")
+V2_PREFIX = "/v2"
+
+
+def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=False):
+    """Forwards /v2/<rest> to the bazaar API; returns (status, content type, body)."""
+    rest = path_qs[len(V2_PREFIX):] or "/"
+    headers = {"Accept": accept or "*/*"}
+    if dashboard_header:
+        headers["X-Dashboard"] = "1"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(V2_URL + rest, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.headers.get("Content-Type", "application/json"), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", "application/json"), e.read()
+    except urllib.error.URLError as e:
+        return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(e.reason)}).encode()
+
+
 def log_action(client, method, path, body, status, resp):
     with ACTIONS_LOG.open("a") as f:
         f.write(json.dumps({
@@ -346,6 +369,8 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
+        if path == V2_PREFIX or path.startswith(V2_PREFIX + "/"):
+            return self.v2(client, "GET")
         if path == "/bot/status":
             return self.send_file(BOT_DATA / "status.json", "application/json")
         if path.startswith(BOT_CONTROL_PREFIXES):
@@ -404,6 +429,8 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None:
             return self.deny()
+        if path.startswith(V2_PREFIX + "/"):
+            return self.v2(client, method)
         if path.startswith(BOT_CONTROL_PREFIXES):
             return self.bot_write(client, path)
         if READ_ONLY:
@@ -438,6 +465,40 @@ class Handler(SimpleHTTPRequestHandler):
         status, resp = bot_control(self.path, body)
         log_action(client, "POST", path, body, status, resp)
         self.send_json(status, resp)
+
+    def v2(self, client, method):
+        """The new dashboard: browsers with the dashboard login only, never bot tokens."""
+        path = self.path.split("?")[0]
+        if client != "dashboard":
+            return self.send_error(403)
+        if path == V2_PREFIX:  # relative URLs in the page need the trailing slash
+            self.send_response(301)
+            self.send_header("Location", V2_PREFIX + "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if method == "GET":
+            status, ctype, body = v2_proxy(self.path, accept=self.headers.get("Accept"))
+            return self.send_raw(status, ctype, body)
+        if method not in ("POST", "DELETE") or self.headers.get("X-Dashboard") != "1":
+            return self.send_error(403)
+        if READ_ONLY:
+            return self.send_json(403, b'{"error":"read_only","message":"this dev server never writes"}')
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY:
+            return self.send_error(413)
+        body = self.rfile.read(length) if length else (b"{}" if method == "POST" else None)
+        status, ctype, resp = v2_proxy(self.path, method, body, dashboard_header=True)
+        log_action(client, method, path, body, status, resp)
+        self.send_raw(status, ctype, resp)
+
+    def send_raw(self, status, content_type, body):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def broker_header(self):
         key = self.headers.get("X-Broker-Key")

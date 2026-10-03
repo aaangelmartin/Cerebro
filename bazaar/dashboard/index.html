@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bazaar · Supervisor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Bazaar · Team 10</h1>
+    <span id="state-pill" class="pill pill--muted"><span class="dot"></span><span id="state-text">Cargando…</span></span>
+  </div>
+  <dl class="clock" id="clock">
+    <div><dt>Tick</dt><dd id="c-tick">—</dd></div>
+    <div><dt>Siguiente</dt><dd id="c-next">—</dd></div>
+    <div><dt>Puertas</dt><dd id="c-doors">—</dd></div>
+    <div><dt>Próximo evento</dt><dd id="c-event">—</dd></div>
+  </dl>
+  <div class="actions">
+    <button id="btn-arm" class="btn" type="button" disabled>…</button>
+    <button id="btn-stop" class="btn btn--danger" type="button" disabled>■ STOP</button>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<section id="confirm" class="confirm" hidden aria-live="assertive">
+  <div class="confirm__text">
+    <strong id="confirm-title"></strong>
+    <p id="confirm-body"></p>
+  </div>
+  <div class="confirm__buttons">
+    <button id="confirm-yes" class="btn btn--danger" type="button">Sí</button>
+    <button id="confirm-no" class="btn" type="button">Cancelar</button>
+  </div>
+</section>
+
+<main class="body">
+  <section class="kpis" aria-label="Indicadores">
+    <article class="kpi"><h3>Puntuación de hoy</h3><p class="kpi__value" id="k-score">—</p><p class="kpi__sub" id="k-score-sub">&nbsp;</p></article>
+    <article class="kpi"><h3>Negociación · mercado</h3><p class="kpi__value" id="k-neg">—</p><p class="kpi__sub" id="k-neg-sub">&nbsp;</p></article>
+    <article class="kpi"><h3>Caja</h3><p class="kpi__value" id="k-cash">—</p><p class="kpi__sub" id="k-cash-sub">&nbsp;</p></article>
+    <article class="kpi"><h3>Gasto de API hoy</h3><p class="kpi__value" id="k-spend">—</p><p class="kpi__sub" id="k-spend-sub">&nbsp;</p><div class="bar"><div class="bar__fill" id="k-spend-bar"></div></div></article>
+    <article class="kpi"><h3>Market Test</h3><p class="kpi__value" id="k-mt">—</p><p class="kpi__sub" id="k-mt-sub">&nbsp;</p></article>
+  </section>
+
+  <div class="main">
+    <section class="panel panel--activity" aria-labelledby="h-activity">
+      <header class="panel__head">
+        <h2 id="h-activity">Qué está haciendo el bot</h2>
+        <div class="legend"><span class="chip chip--ai">Opus</span><span class="chip chip--warn">Consejo</span><span class="chip chip--muted">Reserva</span><span class="chip chip--muted">Código</span></div>
+      </header>
+      <ol id="activity" class="activity"><li class="empty">Cargando…</li></ol>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="h-duels">
+        <h2 id="h-duels">Duelos en vivo</h2>
+        <ul id="duels" class="lines"><li class="empty">Cargando…</li></ul>
+      </section>
+      <section class="panel" aria-labelledby="h-alerts">
+        <h2 id="h-alerts">Alertas</h2>
+        <ul id="alerts" class="lines"><li class="empty">Cargando…</li></ul>
+      </section>
+      <section class="panel" aria-labelledby="h-lab">
+        <h2 id="h-lab">Laboratorio</h2>
+        <div id="lab-bar" class="stack"></div>
+        <ul id="lab" class="lines"><li class="empty">Cargando…</li></ul>
+      </section>
+      <section class="panel" aria-labelledby="h-proc">
+        <h2 id="h-proc">Procesos</h2>
+        <ul id="procs" class="lines"><li class="empty">Cargando…</li></ul>
+      </section>
+    </aside>
+  </div>
+  <footer class="foot" id="foot">&nbsp;</footer>
+</main>
+<script src="static/app.js"></script>
+</body>
+</html>

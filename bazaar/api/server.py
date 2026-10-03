@@ -2,10 +2,14 @@
 
     python -m bazaar.api.server            # [--port 8791] [--live data/live]
 
+GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
+GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 POST /control          {"armed", "mode", "caps", "protected", "paused_domains"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
+POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
+Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
 
 It only reads files under data/live (and data/lab); the bot reads control.json every tick.
 """
@@ -25,6 +29,10 @@ from .. import config
 JOURNALS = {"decisions", "outcomes", "council", "events", "novelty", "attribution", "leaderboard", "llm"}
 MODES = {"auto", "observe", "manual"}
 LESSON_STATUSES = {"proposed", "shadow", "canary", "active", "retired"}
+DASHBOARD_DIR = config.ROOT / "dashboard"
+STATIC_RX = re.compile(r"/static/([\w-]+\.(js|css|svg|png|ico))")
+STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8", "svg": "image/svg+xml",
+                "png": "image/png", "ico": "image/x-icon", "html": "text/html; charset=utf-8"}
 CORS_RX = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 _control_lock = threading.Lock()
 
@@ -98,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "bazaar-api/1"
     live: Path = config.LIVE
     lab: Path = config.LAB
+    stop_file: Path = config.STOP_FILE
+    dashboard: Path = DASHBOARD_DIR
 
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -108,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         if CORS_RX.match(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Dashboard")
 
     def _send(self, code: int, obj):
@@ -121,6 +131,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path: Path, ctype: str):
+        try:
+            body = path.read_bytes()
+        except OSError:
+            return self._send(404, {"error": "not_found", "message": path.name})
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    @staticmethod
+    def _route(raw: str) -> str:
+        path = urlparse(raw).path
+        if path == "/api" or path.startswith("/api/"):
+            path = path[4:]
+        return path.rstrip("/") or "/"
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
@@ -131,7 +160,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[-1] for k, v in parse_qs(u.query).items()}
-        path = u.path.rstrip("/") or "/"
+        path = self._route(self.path)
+        if path in ("/", "/index.html") and ("text/html" in (self.headers.get("Accept") or "")
+                                             or path == "/index.html"):
+            return self._send_file(self.dashboard / "index.html", STATIC_TYPES["html"])
+        m = STATIC_RX.fullmatch(path)
+        if m:
+            return self._send_file(self.dashboard / m.group(1), STATIC_TYPES[m.group(2)])
         try:
             since = int(q["since"]) if q.get("since") not in (None, "") else None
             limit = max(1, min(2000, int(q.get("limit") or 200)))
@@ -148,10 +183,10 @@ class Handler(BaseHTTPRequestHandler):
             st = _read_json(live / "status.json", {}) or {}
             age = time.time() - float(st.get("updated") or 0) if st else None
             return self._send(200, {"ok": True, "time": time.time(), "bot_status_age_s": age,
-                                    "stop_file": config.STOP_FILE.exists()})
+                                    "stop_file": self.stop_file.exists()})
         if path == "/status":
             st = _read_json(live / "status.json", {}) or {}
-            return self._send(200, {**st, "stop_file": config.STOP_FILE.exists(),
+            return self._send(200, {**st, "stop_file": self.stop_file.exists(),
                                     "age_s": time.time() - float(st.get("updated") or 0) if st else None})
         if path == "/control":
             from ..run import DEFAULT_CONTROL, load_control
@@ -172,6 +207,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {**(st.get("spend") or {}), "note": f"from status.json ({type(e).__name__})"})
         if path == "/lessons":
             return self._send(200, self._lessons())
+        if path == "/overview":
+            from . import overview
+            return self._send(200, overview.build(live, self.lab, self.stop_file, since))
         name = path.lstrip("/")
         if name in JOURNALS:
             return self._send(200, {"items": _tail(live / f"{name}.jsonl", since, limit)})
@@ -188,6 +226,38 @@ class Handler(BaseHTTPRequestHandler):
         notices = _tail(self.lab / "notices.jsonl", None, 50)
         return {"lessons": lessons, "notices": notices}
 
+    # --- STOP file ---
+    def do_DELETE(self):
+        if self.headers.get("X-Dashboard") != "1":
+            return self._send(403, {"error": "forbidden", "message": "writes need the X-Dashboard: 1 header"})
+        if self._route(self.path) != "/stop":
+            return self._send(404, {"error": "not_found", "message": self.path})
+        try:
+            self.stop_file.unlink(missing_ok=True)
+        except OSError as e:
+            return self._send(500, {"error": "server_error", "message": str(e)[:200]})
+        self._log_stop(False)
+        return self._send(200, {"stop_file": False, "armed": False,
+                                "note": "STOP removed; the bot stays disarmed until someone arms it"})
+
+    def _stop(self, body: dict):
+        """Create bazaar/STOP and disarm: no write leaves the bot until both are undone."""
+        self.stop_file.write_text(f"stopped by {str(body.get('by') or 'dashboard')[:40]} at {time.ctime()}\n")
+        control = None
+        try:
+            control = apply_control(self.live, {"armed": False})
+        except Exception as e:  # noqa: BLE001 - the file alone already stops every write
+            control = {"error": str(e)[:200]}
+        self._log_stop(True)
+        return self._send(200, {"stop_file": True, "armed": False, "control": control})
+
+    def _log_stop(self, on: bool):
+        try:
+            from ..core.ledger import Ledger
+            Ledger(self.live).append("control", {"change": {"stop_file": on}, "by": "dashboard"})
+        except Exception:  # noqa: BLE001
+            pass
+
     # --- POST ---
     def do_POST(self):
         if self.headers.get("X-Dashboard") != "1":
@@ -201,8 +271,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self._send(400, {"error": "bad_json"})
-        path = urlparse(self.path).path.rstrip("/")
+        path = self._route(self.path)
         try:
+            if path == "/stop":
+                return self._stop(body)
             if path == "/control":
                 return self._send(200, apply_control(self.live, body))
             m = re.fullmatch(r"/lessons/([A-Za-z0-9_.:\-]+)", path)
@@ -226,8 +298,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(port: int = config.API_PORT, live: Path | None = None, lab: Path | None = None,
-                host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    handler = type("BoundHandler", (Handler,), {"live": Path(live or config.LIVE), "lab": Path(lab or config.LAB)})
+                host: str = "127.0.0.1", stop_file: Path | None = None) -> ThreadingHTTPServer:
+    handler = type("BoundHandler", (Handler,), {"live": Path(live or config.LIVE), "lab": Path(lab or config.LAB),
+                                                "stop_file": Path(stop_file or config.STOP_FILE)})
     srv = ThreadingHTTPServer((host, port), handler)
     srv.daemon_threads = True
     return srv
