@@ -48,6 +48,17 @@ CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing wa
              "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, dealer_orders, goal_buys, "
              "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
 SCORE_DROP = 0.5
+MAC_RESERVE_CALLS = 6           # Mac calls kept back each hour for council votes and team messages
+DEFAULT_RESEARCH = (            # deep-research questions used when the brain has not asked one
+    "Which teams hold the page cards we are missing, what do those teams hunt or bid for, and which swap or "
+    "addressed offer would each most likely accept? Use record/latest (me, books, leaderboard) and record/feed.",
+    "Compare the top 3 teams' negotiating gains in the last 2 hours with ours: which settlements, dealer deals or "
+    "page completions came right before each jump in live/leaderboard.jsonl and record/feed?",
+    "Audit our last 40 decisions and outcomes (live/decisions.jsonl, live/outcomes.jsonl): refusals, vetoes, "
+    "repeated posts, sales near our value, missed accepts. List the 5 costliest mistakes with numbers.",
+    "Which of our open offers and dealer orders have gone unanswered for 20+ ticks, and what price or target "
+    "would have filled, judging by the fills other teams got for the same cards in record/feed?",
+)
 MINOR_CHANGES = ("avoid buying sets", "stop posting on venues", "duel mode", "broker policy")   # no money, no pause
 REFERENCE_KEYS = ("scoring", "levels", "dealers", "lab_lessons", "lab", "policies", "allies", "chat_summary_older")
 CORE_KEYS = ("clock", "us", "sets", "win_math", "control", "our_open_offers", "our_open_offer_ids", "goals_in_force",
@@ -248,6 +259,11 @@ STRATEGY_TOOL = {
                                    "negotiating_delta, market_delta, deals, cash_delta (reviewed hourly)"},
             "chat_reply": {"type": "string", "description": "answer to the team chat messages in EVENTS (Spanish, "
                                                             "short: what you understood and what you change)"},
+            "research_brief": {"type": "string", "description": "optional: ONE question for the next deep-research "
+                               "session (a read-only analyst that greps our recorded feed, decisions and leaderboard "
+                               "for ~5 minutes), e.g. 'which teams hold MAL-09 and what do they hunt', 'why did "
+                               "t12's negotiating jump at tick 690', 'audit our last 30 decisions for mistakes'. "
+                               "Its findings come back as recent_findings with topic 'investigacion'."},
             "policies": {"type": "array", "description": "durable rules to add/update/retire (from chat or your own "
                          "lessons): {id?, text, status: active|retired, reason}",
                          "items": {"type": "object"}},
@@ -497,6 +513,18 @@ class Strategist:
         self.last_review_row: dict | None = None
         self.calls = 0
         self.last_reason = ""
+        self.on_mac: bool = False                  # the plans run on the Mac backend right now (counted, not paid)
+        self.research_brief: str = ""              # the brain's question for the next deep-research session
+        self.research_last: float = 0.0
+        self.research_thread: threading.Thread | None = None
+        self.research_state: dict = {}
+        self.research_chat_ts: float = self.now()
+        self.research_n = 0
+        try:
+            from bazaar.llm import cli_backend as _mac
+            self.research_last = float(_mac._read_state(self.live).get("research_last") or 0.0)
+        except Exception:  # noqa: BLE001
+            pass
         self.thinking_since: float | None = None   # set while waiting on Opus (plan, re-ask, council)
         self.thinking_reason: str | None = None
         self._hb_lock = threading.Lock()
@@ -925,14 +953,19 @@ class Strategist:
         tg = self._targets(clock)
         sb = L.bucket("strategy", tg["strategy"], self.live, now, rows=rows)
         chat_ok = L.bucket("strategy", tg["strategy"], self.live, now, slack=L.CHAT_SLACK, rows=rows)["ok"]
-        if self._mac_free():                       # plans on the Mac's subscription cost no API dollars: only the
-            sb, chat_ok = {**sb, "ok": True, "mac": True}, True     # minimum gaps apply, not the spend bucket
+        mac = self.on_mac
+        gap = L.min_gap_s(cfg["level"], mac=mac)
+        if mac:                                    # plans on the Mac's subscription cost no API dollars: they are
+            mg = self._mac_bucket(reserve=0 if has_chat else MAC_RESERVE_CALLS)     # budgeted by COUNT (calls/hour)
+            sb, chat_ok = {**sb, "ok": mg["ok"], "mac": True, "mac_calls": mg}, True
+            if not mg["ok"]:
+                sb.update(spent=mg["used"], allowed=mg["cap"])
         g = L.gate(now=now, level=cfg["level"], last_plan_ts=self.last_call, has_chat=has_chat,
                    last_chat_plan_ts=self.last_chat_plan,
                    emergency=(not stopped) and L.is_emergency(self.pending_events, session_start),
-                   last_emergency_ts=self.last_emergency, strategy_bucket=sb, chat_bucket_ok=chat_ok)
-        self.gate_state = {"ok": g["ok"], "why": g["why"], "kind": g["kind"], "min_gap_s": L.min_gap_s(cfg["level"]),
-                           "strategy_bucket": sb, "targets_usd_h": tg}
+                   last_emergency_ts=self.last_emergency, strategy_bucket=sb, chat_bucket_ok=chat_ok, gap_s=gap)
+        self.gate_state = {"ok": g["ok"], "why": g["why"], "kind": g["kind"], "min_gap_s": gap,
+                           "backend": "mac" if mac else "api", "strategy_bucket": sb, "targets_usd_h": tg}
         if not g["ok"]:
             return ""
         if g["kind"] == "chat":
@@ -998,8 +1031,9 @@ class Strategist:
         fresh = not (isinstance(tick, int) and isinstance(self.level_tick, int) and 0 <= tick - self.level_tick < 3
                      and self.budget_plan and md == self.level_mode and not clock.get("paused")
                      and not any(e.get("kind") in BG.ALWAYS_KINDS for e in self.pending_events))
+        mac = self.on_mac = self._mac_free()
         if not fresh:                                         # the governor moves every 3 ticks, or on urgent input
-            return BG.settings(self.level)
+            return BG.settings(self.level, mac=mac)
         sched = _read(self.record / "schedule.json", {}) or {}
         days = (_read(config.SPEND_FILE, {}) or {}).get("days") or {}
         full_clock = {**(_read(self.record / "clock.json", {}) or {}), **clock}     # with the calendar `days`
@@ -1014,6 +1048,10 @@ class Strategist:
         cap = BG.brain_day_cap(ctl, self.live)
         if md == "manual":
             level, why = BG.manual_level(ctl), "set by the team (manual)"
+        elif mac:                                             # on the Mac the budget is calls per hour, not dollars
+            mg = self._mac_bucket()
+            level, why = BG.govern_mac(clock=full_clock, calls_last_hour=mg["used"], cap=mg["cap"],
+                                       upcoming=sched.get("upcoming") or [], signals=self._signals(pic))
         else:
             level, why = BG.govern(clock=full_clock, spent=self.spent_today(), cap=cap,
                                    upcoming=sched.get("upcoming") or [], signals=self._signals(pic),
@@ -1029,7 +1067,7 @@ class Strategist:
         self.level, self.level_reason, self.level_mode = level, why, md
         if isinstance(tick, int):
             self.level_tick = tick
-        return BG.settings(level)
+        return BG.settings(level, mac=mac)
 
     # ------------------------------------------------------------------ plan
     def _mac_free(self) -> bool:
@@ -1043,6 +1081,14 @@ class Strategist:
             return cli_backend.available()
         except Exception:  # noqa: BLE001
             return False
+
+    def _mac_bucket(self, weight: int = 1, reserve: int = 0) -> dict:
+        try:
+            from bazaar.llm import cli_backend
+            ms = cli_backend.status(self.live, self.now())
+            return L.mac_gate(ms["calls_last_hour"], ms["calls_per_hour"], weight, reserve)
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "used": 0, "cap": 0, "left": 0}
 
     def llm(self):
         if self._llm is None:
@@ -1124,7 +1170,7 @@ class Strategist:
                 extra += "\n\nOFFICIAL SITE DIGEST (rules, kit, news; data):\n" + _wrap(od, "official")
         except OSError:
             pass
-        cfg = BG.settings(self.level)
+        cfg = BG.settings(self.level, mac=self.on_mac)
         reference, live_pic = split_picture(slim, cfg["picture_chars"])
         ref_text = ("REFERENCE (changes rarely; JSON):\n" + json.dumps(reference, ensure_ascii=False, default=str,
                                                                         sort_keys=True))
@@ -1141,7 +1187,8 @@ class Strategist:
             with self.thinking(label):
                 return llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": text}],
                                tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS,
-                               max_tokens=MAX_TOKENS, deadline=self.now() + 200, effort="medium")
+                               max_tokens=MAX_TOKENS, deadline=self.now() + (330 if self.on_mac else 200),
+                               effort="medium")       # on the Mac the plan thinks harder (cli_backend.PLAN_EFFORT)
 
         def cut(r) -> bool:
             return getattr(r, "stop", None) == "max_tokens" or getattr(r, "stop_reason", None) == "max_tokens"
@@ -1243,7 +1290,8 @@ class Strategist:
         if dry:
             return {"reason": reason, "picture": pic}
         cap = BG.brain_day_cap(live=self.live)
-        if self.spent_today() >= cap:
+        self.on_mac = self._mac_free()
+        if self.spent_today() >= cap and not self.on_mac:      # the cap is API dollars: Mac plans do not spend it
             self.last_reason = f"day cap {cap:g} $ reached"
             return None
         if self.now() - self.last_review >= REVIEW_EVERY_S:
@@ -1260,7 +1308,7 @@ class Strategist:
                                                        clock.get("tick"), row, self.now()))
         self.last_call = self.now()
         self.last_reason = reason
-        cfg_now = BG.settings(self.level)
+        cfg_now = BG.settings(self.level, mac=self.on_mac)
         self.last_pic_sig = self._signals(pic)["_sig"]
         got = self.ask(pic, reason)
         score = (pic.get("us") or {}).get("score")
@@ -1276,7 +1324,8 @@ class Strategist:
             rejected = errors
             # one paid re-ask at most, only from intensity 50 and only for errors that change what we do
             got2 = (self.ask(pic, reason, fix=errors, previous=got["raw"])
-                    if cfg_now["max_reasks"] and self.level >= L.LOW_LEVEL and L.material(errors) else None)
+                    if cfg_now["max_reasks"] and (self.level >= L.LOW_LEVEL or self.on_mac) and L.material(errors)
+                    else None)
             if got2 is not None:
                 got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
                 new = self._urgency(B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or [])), pic)
@@ -1323,6 +1372,8 @@ class Strategist:
                 "score_at_plan": {k: us_now.get(k) for k in ("score", "negotiating", "market")}}
         doc = self.publish(plan, pic, meta)
         self.plan = plan
+        if new.get("research_brief"):
+            self.research_brief = new["research_brief"]
         self._broker_overlay(plan)
         if new.get("policies"):
             B.apply_policies(self.live, new["policies"], by="cerebro", now=self.now())
@@ -1336,6 +1387,67 @@ class Strategist:
                         refs={"plan_tick": doc.get("tick"), "council": None if council is None else council["ok"]},
                         now=self.now())
         return doc
+
+    # ------------------------------------------------------------------ deep research (read-only Mac session)
+    def _research_request(self) -> str:
+        """A team chat message that starts with 'investiga:' asks for a session at once."""
+        try:
+            msgs = B.chat_since(self.live, self.research_chat_ts, 30)
+        except Exception:  # noqa: BLE001
+            return ""
+        ask = ""
+        for m in msgs:
+            self.research_chat_ts = max(self.research_chat_ts, float(m.get("ts") or 0))
+            text = str(m.get("text") or "").strip()
+            if m.get("role") == "user" and text.lower().startswith("investiga:"):
+                ask = text.split(":", 1)[1].strip()
+        return ask
+
+    def maybe_research(self) -> dict | None:
+        """Start ONE bounded read-only research session on the Mac when it is due (every ~20 min while the game
+        runs, or on a team request). Runs in a thread: planning goes on meanwhile."""
+        if self.research_thread is not None and self.research_thread.is_alive():
+            return None
+        try:
+            from bazaar.llm import cli_backend as mac
+        except Exception:  # noqa: BLE001
+            return None
+        asked = self._research_request()
+        if not mac.deep_research_on(self.live) or not self._mac_free():
+            return None
+        clock = _read(self.record / "clock.json", {}) or {}
+        running = not clock.get("paused") and clock.get("doors") in (None, "open")
+        due = running and self.now() - self.research_last >= BG.MAC_RESEARCH_EVERY_S
+        if not asked and not due:
+            return None
+        if not self._mac_bucket(weight=mac.RESEARCH_WEIGHT, reserve=0 if asked else MAC_RESERVE_CALLS)["ok"]:
+            return None
+        brief = asked or self.research_brief or DEFAULT_RESEARCH[self.research_n % len(DEFAULT_RESEARCH)]
+        self.research_n += 1
+        self.research_brief = ""
+        self.research_last = self.now()
+        self.research_state = {"running": True, "since": self.now(), "brief": brief, "asked_by_team": bool(asked)}
+
+        def work():
+            try:
+                out = mac.run_research(brief, live=self.live)
+                self._finding("investigacion", out["text"], {"brief": brief, "latency_s": out.get("latency_s"),
+                                                             "turns": out.get("turns"), "backend": "mac"})
+                self.pending_events.append(B.log_event(self.live, "review", "deep research finished: " + brief[:120],
+                                                       self.last_plan_tick, {"brief": brief}, self.now()))
+                if asked:
+                    B.chat_post(self.live, "Investigación (" + brief[:80] + "):\n" + out["text"][:1100],
+                                by="cerebro", role="brain", refs={"research": True}, now=self.now())
+                self.research_state = {"running": False, "last": self.now(), "brief": brief, "ok": True,
+                                       "latency_s": out.get("latency_s"), "turns": out.get("turns")}
+            except Exception as e:  # noqa: BLE001 - research is optional: never break the brain
+                self.research_state = {"running": False, "last": self.now(), "brief": brief, "ok": False,
+                                       "error": f"{type(e).__name__}: {e}"[:200]}
+                self.errors.append({"ts": self.now(), "error": "deep research: " + self.research_state["error"]})
+
+        self.research_thread = threading.Thread(target=work, name="deep-research", daemon=True)
+        self.research_thread.start()
+        return self.research_state
 
     def _broker_overlay(self, plan: dict) -> None:
         """Write the accepted broker_policy to data/live/broker_policy.json (the broker reads it at the next session
@@ -1389,9 +1501,10 @@ class Strategist:
     def heartbeat(self, extra: dict | None = None):
         st = {"updated": self.now(), "calls": self.calls, "last_call": self.last_call,
               "last_plan_tick": self.last_plan_tick, "last_reason": self.last_reason,
+              "backend": "mac" if self.on_mac else "api", "research": self.research_state,
               "spent_today": round(self.spent_today(), 4), "day_cap": BG.brain_day_cap(live=self.live),
               "intensity": {"level": self.level, "mode": self.level_mode, "reason": self.level_reason,
-                            "interval_ticks": BG.settings(self.level)["interval_ticks"]},
+                            "interval_ticks": BG.settings(self.level, mac=self.on_mac)["interval_ticks"]},
               "thinking_since": self.thinking_since, "thinking_reason": self.thinking_reason,
               "limiter": self.gate_state,
               "errors": self.errors[-5:], **(extra or {})}
@@ -1428,6 +1541,10 @@ def main() -> None:
             st.errors.append({"ts": time.time(), "error": f"{type(e).__name__}: {e}"[:300],
                               "trace": traceback.format_exc()[-800:]})
             print("cerebro error:", st.errors[-1]["error"], flush=True)
+        try:
+            st.maybe_research()
+        except Exception as e:  # noqa: BLE001
+            st.errors.append({"ts": time.time(), "error": f"deep research: {type(e).__name__}: {e}"[:300]})
         st.heartbeat()
         end = time.time() + POLL_S
         while time.time() < end and not stop["now"]:

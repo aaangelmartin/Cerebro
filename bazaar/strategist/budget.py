@@ -193,9 +193,24 @@ def manual_level(ctl: dict | None = None, live: Path | None = None) -> int:
         return DEFAULT_LEVEL
 
 
-def settings(level: float) -> dict:
-    """What a level means. Every field moves one way only as the level rises."""
+MAC_LEVEL_DEFAULT = 70           # the Mac backend healthy: plan every ~3-4 ticks, counted in calls not dollars
+MAC_PLAN_CALLS = 1               # a plan is one CLI call...
+MAC_VOTE_CALLS = 3               # ...and a council vote up to three (independent voters)
+MAC_RESEARCH_EVERY_S = 1200.0    # one read-only deep-research session about every 20 minutes
+
+
+def settings(level: float, mac: bool = False) -> dict:
+    """What a level means. Every field moves one way only as the level rises. `mac`: the plan runs on the Mac's
+    subscription (no API dollars), so the picture is fuller, re-asks are allowed and the gap is shorter."""
     level = int(_clamp(round(float(level)), 0, 100))
+    if mac:
+        base = settings(level)
+        from bazaar.strategist import limiter as _lim
+        return {**base, "backend": "mac",
+                "interval_ticks": max(3, min(base["interval_ticks"], int(round(_lerp(((0, 20), (40, 10), (70, 4), (100, 3)), level))))),
+                "min_gap_s": int(_lim.min_gap_s(level, mac=True)),
+                "picture_chars": int(round(_lerp(((0, 20000), (50, 40000), (100, 60000)), level))),
+                "max_reasks": 1, "council_minor": level >= 40}
     kinds = list(ALWAYS_KINDS)
     if level >= 35:
         kinds += MID_KINDS
@@ -335,6 +350,55 @@ def govern(*, clock: dict, spent: float, cap: float, upcoming: list[dict] | None
     return int(_clamp(level, 5, 100)), "; ".join(why)
 
 
+def govern_mac(*, clock: dict, calls_last_hour: int, cap: int, upcoming: list[dict] | None = None,
+               signals: dict | None = None) -> tuple[int, str]:
+    """(level, reason) in auto mode while the brain's plans run on the Mac: the budget is CALLS per hour, not
+    dollars. Level 70 by default; higher around sessions, bargains and team messages; lower as the hourly cap
+    of Mac calls fills up (the subscription's own limits are shared with the humans' session)."""
+    sig = signals or {}
+    if clock.get("paused"):
+        return 0, "game paused"
+    if clock.get("doors") not in (None, "open"):
+        return 0, "doors closed"
+    used = float(calls_last_hour) / max(1.0, float(cap))
+    level, why = MAC_LEVEL_DEFAULT, [f"Mac backend: {int(calls_last_hour)}/{int(cap)} calls this hour"]
+    t = clock.get("t_hours")
+    soon = [u.get("action") for u in upcoming or []
+            if isinstance(u.get("at_hours"), (int, float)) and isinstance(t, (int, float))
+            and 0 <= u["at_hours"] - t <= 0.25 and u.get("action") in ("bench", "duels", "persona_opens", "persona_patch", "round")]
+    if sig.get("bargain"):
+        level = 95; why.append("bargain open")
+    elif sig.get("duels_live") or sig.get("bench_live"):
+        level = 85; why.append("session live")
+    elif soon:
+        level = 85; why.append(f"{soon[0]} within 15 min")
+    elif sig.get("chat") or sig.get("rank_drop") or sig.get("behind_pace"):
+        level = 80; why.append("team message" if sig.get("chat") else "behind the pace")
+    if sig.get("unchanged") or sig.get("no_feasible_action"):
+        level -= 20; why.append("nothing changed since the last plan" if sig.get("unchanged") else "no feasible action")
+    if used >= 0.9:
+        level = min(level, 40); why.append("hourly cap of Mac calls almost used")
+    elif used >= 0.7:
+        level = min(level, 55); why.append("hourly cap of Mac calls filling up")
+    return int(_clamp(level, 5, 100)), "; ".join(why)
+
+
+def mac_usage(live: Path | None = None, now: float | None = None) -> dict:
+    """The Mac backend's side of the budget, for GET /brain/budget and GET /spend."""
+    try:
+        from bazaar.llm import cli_backend as mac
+        ms = mac.status(live, now)
+    except Exception:  # noqa: BLE001
+        return {}
+    return {"brain_backend": ms["mode"], "mac_backend_state": ms["state"], "mac_calls_last_hour": ms["calls_last_hour"],
+            "mac_calls_per_hour": ms["calls_per_hour"], "mac_calls_today": ms.get("calls_today", 0),
+            "mac_saved_usd_estimate": ms.get("cli_cost_reported_total", 0.0),
+            "mac_backoff_until": ms.get("backoff_until"), "mac_backoff_why": ms.get("backoff_why"),
+            "mac_last_error": ms.get("last_error"), "mac_last_latency_s": ms.get("last_latency_s"),
+            "mac_max_concurrent": ms.get("max_concurrent"), "brain_deep_research": ms.get("deep_research"),
+            "mac_research_sessions": ms.get("research_sessions", 0), "mac_research_last": ms.get("research_last")}
+
+
 def log_change(live: Path | None, level: int, reason: str, mode_: str, now: float | None = None) -> None:
     p = Path(live or config.LIVE) / LOG
     try:
@@ -396,17 +460,24 @@ def report(live: Path | None = None, clock: dict | None = None, spend: dict | No
     real = _lim.trailing(live, now)                       # what we really spent in the last 30 minutes, per hour
     day_spent = float(spend.get("usd") or 0.0)
     by_key = spend.get("by_key") or {}
+    mu = mac_usage(live, now)
+    on_mac = mu.get("mac_backend_state") == "ok"
+    if on_mac:
+        per_h = 0.0                                    # plans on the Mac's subscription cost no API dollars
+    gap = _lim.min_gap_s(level, mac=on_mac)
     return {"mode": md, "level": level, "reason": st.get("reason"), "changed": st.get("changed"),
-            "settings": settings(level), "usd_per_hour_now": real["brain"], "usd_per_hour_all_now": real["all"],
+            **mu, "brain_api_usd_today": round(spent, 2), "brain_on_mac": on_mac,
+            "mac_calls_per_hour_at_level": round(3600.0 / max(1.0, gap) * 1.6, 1) if on_mac else 0.0,
+            "settings": settings(level, mac=on_mac), "usd_per_hour_now": real["brain"], "usd_per_hour_all_now": real["all"],
             "usd_per_hour_brain_now": real["brain"],
             "usd_per_hour_council_now": real["council"], "usd_per_hour_by_purpose": real["by_purpose"],
-            "usd_per_hour_level": per_h, "min_gap_s": _lim.min_gap_s(level),
+            "usd_per_hour_level": per_h, "min_gap_s": gap,
             "limiter": (_read_json(live / "strategist_status.json") or {}).get("limiter"),
             "projected_day_by_close": round(day_spent + real["all"] * hl, 2), "table": table(tick_s, m),
             "measured": m, "spent_today": round(spent, 2), "cap_today": cap,
             "cap_limits": {"brain_max": BRAIN_CAP_MAX, "day_max": config.DAY_CAP_MAX_USD},
             "day_total_spent": round(day_spent, 2), "day_cap": config.day_cap_usd(),
-            "hours_left": round(hl, 2), "projected_spend_by_close": round(min(cap, spent + per_h * hl), 2),
+            "hours_left": round(hl, 2), "projected_spend_by_close": round(min(cap, spent + (real["brain"] if on_mac else per_h) * hl), 2),
             "keys_headroom": {k: round(max(0.0, config.KEY_CAP_USD - float(v.get("usd_total") or 0.0)), 2)
                               for k, v in by_key.items() if not v.get("dead")},
             "keys_spent": {k: round(float(v.get("usd_total") or 0.0), 2) for k, v in by_key.items()},

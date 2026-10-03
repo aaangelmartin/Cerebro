@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "brain_backend", "mac_calls_per_hour"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -375,7 +375,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/spend":
             try:
                 from ..llm import client
-                return self._send(200, client.spend_today())
+                sp = dict(client.spend_today())
+                try:                               # API dollars and Mac (subscription) usage, kept apart
+                    from ..strategist import budget as _bg
+                    sp["mac"] = _bg.mac_usage(live)
+                    sp["brain_api_usd_today"] = round(float((sp.get("by_purpose") or {}).get("strategy") or 0.0), 2)
+                except Exception:  # noqa: BLE001
+                    pass
+                return self._send(200, sp)
             except Exception as e:  # noqa: BLE001
                 st = _read_json(live / "status.json", {}) or {}
                 return self._send(200, {**(st.get("spend") or {}), "note": f"from status.json ({type(e).__name__})"})

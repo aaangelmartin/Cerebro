@@ -32,6 +32,7 @@ LOW_LEVEL = 50
 MIN_STRATEGY_USD_H = 1.0            # floors so a tiny remainder never freezes the brain or the council entirely
 MIN_COUNCIL_USD_H = 0.6
 _GAP = ((0, 600), (20, 420), (40, 240), (50, 180), (70, 120), (100, 90))
+_GAP_MAC = ((0, 600), (40, 240), (60, 150), (70, 100), (100, 90))     # plans on the Mac are counted, not paid
 MATERIAL = ("goal ", "accept_offers", "cancel_offers", "post_offers", "reserve ", "promo_draft", "whatsapp_reply",
             "no priorities", "dealer_orders", "workshop")
 MONEY_WORDS = ("goal ", "cash policy", "budgets", "pause ", "accept offers")
@@ -45,9 +46,17 @@ def _lerp(points, x: float) -> float:
     return points[-1][1]
 
 
-def min_gap_s(level: float) -> float:
-    """Seconds that must pass between two brain plans at this intensity (level 40 -> 240 s)."""
-    return round(_lerp(_GAP, level))
+def min_gap_s(level: float, mac: bool = False) -> float:
+    """Seconds that must pass between two brain plans at this intensity (level 40 -> 240 s; on the Mac
+    backend level 70 -> 100 s, a little more than the ~70 s a plan takes)."""
+    return round(_lerp(_GAP_MAC if mac else _GAP, level))
+
+
+def mac_gate(calls_last_hour: int, cap: int, weight: int = 1, reserve: int = 0) -> dict:
+    """The count-based bucket of the Mac backend: {ok, used, cap, left}. `reserve` calls are kept back (for the
+    council votes and a team message) when a scheduled plan asks."""
+    left = int(cap) - int(calls_last_hour)
+    return {"ok": left - int(reserve) >= int(weight), "used": int(calls_last_hour), "cap": int(cap), "left": max(0, left)}
 
 
 # ----------------------------------------------------------------------------- real spend from llm.jsonl
@@ -138,10 +147,11 @@ def is_emergency(events: list[dict], session_start: bool = False) -> bool:
 
 def gate(*, now: float, level: float, last_plan_ts: float, has_chat: bool, last_chat_plan_ts: float = 0.0,
          emergency: bool = False, last_emergency_ts: float = 0.0, strategy_bucket: dict | None = None,
-         chat_bucket_ok: bool = True) -> dict:
-    """May the brain plan now? {ok, why, kind}: kind is "chat", "emergency" or "slot"."""
+         chat_bucket_ok: bool = True, gap_s: float | None = None) -> dict:
+    """May the brain plan now? {ok, why, kind}: kind is "chat", "emergency" or "slot". `gap_s` overrides the
+    level's minimum gap (the Mac backend uses its own, shorter table)."""
     since = now - float(last_plan_ts or 0.0)
-    gap = min_gap_s(level)
+    gap = min_gap_s(level) if gap_s is None else float(gap_s)
     b = strategy_bucket or {"ok": True}
     if has_chat:
         if now - float(last_chat_plan_ts or 0.0) < CHAT_COALESCE_S or since < 10.0:

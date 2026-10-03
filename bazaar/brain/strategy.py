@@ -153,6 +153,7 @@ def sanitize(raw: Any) -> dict:
                                                           "deals", "cash_delta"))
                                if v is not None} if isinstance(raw.get("expected_next_hour"), dict) else {},
         "chat_reply": _clean(raw.get("chat_reply"), 1200),
+        "research_brief": _clean(raw.get("research_brief"), 600),
         "chat_summary": _clean(raw.get("chat_summary"), 1500),
         "policies": [{k: _clean(p.get(k), 400) for k in ("id", "text", "status", "reason")}
                      for p in (raw.get("policies") or [])[:6] if isinstance(p, dict)]
@@ -595,13 +596,49 @@ STRATEGY_COUNCIL_NOTE = (
 MAC_COUNCIL_TOOL_NAME = "council_votes"
 
 
+MAC_COUNCIL_ROOM = 12            # Mac calls that must be left this hour for three independent votes
+
+
+def _mac_council_three(council, brief: str, cli_backend) -> list[dict] | None:
+    """Three INDEPENDENT votes on the Mac: one CLI call per voter, at most two at a time (the backend's slots).
+    None when fewer than two voters answered."""
+    def one(role):
+        res = cli_backend.ask_cli(council.ROLES[role] + STRATEGY_COUNCIL_NOTE + council.COMMON,
+                                  [{"role": "user", "content": brief}], council.VOTE_TOOL, purpose="council",
+                                  effort="low", wait_s=120.0, timeout=90.0)
+        v = council.parse_vote(res)
+        if v is not None:
+            v.update(role=role, model=res.model)
+        return v
+
+    out = []
+    with cf.ThreadPoolExecutor(max_workers=2) as pool:
+        futs = {pool.submit(one, r): r for r in COUNCIL_ROLES}
+        done, _ = cf.wait(futs, timeout=240)
+        for f in done:
+            try:
+                v = f.result()
+            except Exception:  # noqa: BLE001
+                continue
+            if v is not None:
+                out.append(v)
+    return out if len(out) >= 2 else None
+
+
 def _mac_council(council, brief: str, llm) -> list[dict] | None:
-    """The three council votes in ONE call to the Mac backend (it runs one call at a time and is capped per
-    hour, so three parallel votes would not fit). None = not on the Mac: ask the API, one call per voter."""
+    """The council votes on the Mac backend: three independent calls while the hourly cap has room
+    (MAC_COUNCIL_ROOM calls left), otherwise the three votes in ONE call. None = not on the Mac: ask the API,
+    one call per voter."""
     try:
         from ..llm import cli_backend, client as real
         if llm is not real or cli_backend.mode() == "api" or not cli_backend.available():
             return None
+        if cli_backend.headroom() >= MAC_COUNCIL_ROOM:
+            three = _mac_council_three(council, brief, cli_backend)
+            if three is not None:
+                return three
+            if not cli_backend.available():
+                return None
         vote_schema = dict(council.VOTE_TOOL["input_schema"])
         props = {"role": {"type": "string", "enum": list(COUNCIL_ROLES)}, **vote_schema.get("properties", {})}
         tool = {"name": MAC_COUNCIL_TOOL_NAME, "input_schema": {

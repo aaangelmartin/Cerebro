@@ -141,14 +141,15 @@ class AskCliTest(Base):
         self.assertEqual(e.exception.kind, "cap")
         self.assertFalse(M.available(self.live))
 
-    def test_only_one_call_at_a_time(self):
-        lock = M._acquire(self.live, 0)
+    def test_at_most_two_calls_at_a_time(self):
+        locks = [M._acquire(self.live, 0) for _ in range(M.MAX_CONCURRENT)]
         try:
             with self.assertRaises(M.CLIError) as e:
                 self.ask(self.runner(Proc(ok_doc())))
             self.assertEqual(e.exception.kind, "busy")
         finally:
-            lock.close()
+            for lock in locks:
+                lock.close()
         self.ask(self.runner(Proc(ok_doc())))
 
 
@@ -199,7 +200,8 @@ class RouteTest(Base):
 
 
 class BrainCouncilOnTheMacTest(Base):
-    """The brain's three council votes go to the Mac in ONE call; a fake llm (tests, eval) never does."""
+    """Near the hourly cap the brain's three council votes go to the Mac in ONE call (with room they are three
+    independent calls: brain/tests/test_mac_council.py); a fake llm (tests, eval) never uses the Mac."""
 
     def votes(self, *verdicts):
         from bazaar.brain import strategy as S
@@ -211,6 +213,7 @@ class BrainCouncilOnTheMacTest(Base):
                                      "input": self.votes("approve", "approve", "reject")}],
                                "claude-cli", "MAC", {}, 0.0, 1.0)
         with mock.patch.object(M, "mode", return_value="auto"), mock.patch.object(M, "available", return_value=True), \
+                mock.patch.object(M, "headroom", return_value=3), \
                 mock.patch.object(M, "ask_cli", return_value=res) as cli, \
                 mock.patch.object(client, "ask", side_effect=AssertionError("the API must not be asked")):
             out = S.council_vote({}, {"goal_buys": {"MAL-09": 88}}, {"clock": {"tick": 1}}, ["goal MAL-09 88"],
