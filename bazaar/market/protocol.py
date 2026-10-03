@@ -14,8 +14,11 @@ Everything here is pure code over our private values (`dealers.values.Values`):
 """
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+
+from .. import config
 
 from ..dealers.values import Values
 
@@ -33,10 +36,10 @@ BID_COMMIT_MAX = 40                # cash committed to open bids at once (round-
 BID_BOOK_MIN, BID_BOOK_DEFAULT, BID_BOOK_MAX = 0.3, 0.7, 1.0   # bid price as a share of book
 SWAP_BOOK_MIN = 0.8                # what we give must look fair to the taker: book >= 0.8 x book wanted
 PREFERRED_VENUES = ("v03",)        # t13's protocol venue (no per-card fee): tie-break only
-# Alliance 2026-10-03: Team 5 lists on our v07 (its trades there score market-making for us) and we list on its
-# v10. Allied venues are trusted at their posted fee (no worst-case fee rise) and get our asks from ALLIED_MIN_ASK up:
-# the taker saves El Rastro's 5 % + 1 P there, so the same ask fills more easily and we keep the full price.
-ALLIED_VENUES = {"v10": "t05"}     # venue -> owner team
+# No allied venues by default: the Team 5 / v10 alliance ended on 2026-10-03, so every maker offer goes to El Rastro.
+# The team (or the brain) can name one later in control.json `allied_venues` {venue: owner team}. An allied venue is
+# trusted at its posted fee (no worst-case fee rise) and gets our asks from ALLIED_MIN_ASK up when the taker pays
+# less there than on El Rastro.
 ALLIED_MIN_ASK = 12                # cheaper asks stay on El Rastro, where the traffic is
 FAIR_MAX_PER_HOUR = 4
 
@@ -54,13 +57,39 @@ def venue_id(v: dict | None) -> str | None:
 MAX_FEE_BPS, MAX_FEE_PER_CARD = 1000.0, 5.0     # RULES: fees are capped at 10 % and 5 P per card
 
 
+_ALLIES: dict = {"sig": False, "val": {}}        # control.json signature -> parsed `allied_venues`
+
+
+def allied_venues() -> dict[str, str]:
+    """{venue: owner team} from control.json `allied_venues`; {} when the team has no allies (the default).
+    Re-read only when the file changes."""
+    path = config.LIVE / "control.json"
+    try:
+        st = path.stat()
+        sig = (st.st_mtime, st.st_size)
+    except OSError:
+        sig = None
+    if sig != _ALLIES["sig"]:
+        val = {}
+        if sig is not None:
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8")).get("allied_venues") or {}
+                if isinstance(raw, dict):
+                    val = {str(k): str(v) for k, v in raw.items() if k and v}
+            except (OSError, ValueError, AttributeError):
+                val = {}
+        _ALLIES["sig"], _ALLIES["val"] = sig, val
+    return dict(_ALLIES["val"])
+
+
 def is_allied(v: dict | None) -> bool:
     """An allied team's venue (by id, and by owner when the venue says who owns it)."""
+    allies = allied_venues()
     vid = venue_id(v)
-    if vid not in ALLIED_VENUES:
+    if vid not in allies:
         return False
     owner = (v or {}).get("owner") if isinstance(v, dict) else None
-    return owner in (None, ALLIED_VENUES[vid])
+    return owner in (None, allies[vid])
 
 
 def venue_for(venue: str | None, to: str | None, venues: list[dict] | None = None) -> str:
@@ -69,7 +98,7 @@ def venue_for(venue: str | None, to: str | None, venues: list[dict] | None = Non
     vid = str(venue or "rastro")
     if not to or vid == "rastro":
         return vid
-    owner = ALLIED_VENUES.get(vid)
+    owner = allied_venues().get(vid)
     for v in venues or []:
         if venue_id(v) == vid and isinstance(v, dict) and v.get("owner"):
             owner = v.get("owner")
@@ -115,8 +144,8 @@ def tradable_venues(venues: list[dict], my_id: str | None, my_venue: str | None)
 
 def choose_venue(venues: list[dict], cash: int, cards: int) -> str:
     """Where to post a maker offer: lowest fee for the taker on a board (or house) venue."""
-    # Team decision 2026-10-03: post only on El Rastro (a trade on a rival's venue scores for its owner), except our
-    # allies' venues: asks from ALLIED_MIN_ASK go there when the taker pays less than on El Rastro.
+    # Team decision 2026-10-03: post only on El Rastro (a trade on a rival's venue scores for its owner). If control
+    # names an allied venue, asks from ALLIED_MIN_ASK go there when the taker pays less than on El Rastro.
     allied = [v for v in venues if is_allied(v) and v.get("status", "open") in ("open", "active")]
     if allied and cash >= ALLIED_MIN_ASK:
         rastro = next((v for v in venues if venue_id(v) == "rastro"), {"venue": "rastro", "fee_bps": 500,

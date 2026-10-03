@@ -255,8 +255,8 @@ def message_policy(plan: dict, held: set[str] | None = None, allies: set[str] | 
     or something an offer cannot say). Courtesy replies lose their text. What was dropped is in `messages_dropped`."""
     if allies is None:
         try:
-            from bazaar.market.protocol import ALLIED_VENUES
-            allies = set(ALLIED_VENUES.values())
+            from bazaar.market.protocol import allied_venues
+            allies = set(allied_venues().values())
         except Exception:  # noqa: BLE001
             allies = set()
     held = set(held or [])

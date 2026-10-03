@@ -307,11 +307,43 @@ def tearDownModule():
     _PINS.clear()
 
 
+class NoAlliesByDefaultTest(unittest.TestCase):
+    """The team has no allies unless control.json names one: every maker offer goes to El Rastro."""
+    RASTRO = {"venue": "rastro", "fee_bps": 500, "fee_per_card": 1, "house": True}
+    V10 = {"venue": "v10", "owner": "t05", "fee_bps": 0, "fee_per_card": 0, "status": "open"}
+
+    def test_default_is_no_allied_venue(self):
+        self.assertEqual(proto.allied_venues(), {})
+        self.assertFalse(proto.is_allied(self.V10))
+        self.assertEqual(proto.choose_venue([self.RASTRO, self.V10], 20, 1), "rastro")
+        self.assertEqual(proto.taker_fee(self.V10, 30, 1), 8)          # priced like any team venue: 10 % + 5 P
+
+    def test_control_json_names_an_ally(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "control.json").write_text(json.dumps({"allied_venues": {"v10": "t05"}}))
+            with mock.patch.object(proto.config, "LIVE", Path(d)):
+                self.assertEqual(proto.allied_venues(), {"v10": "t05"})
+                self.assertEqual(proto.choose_venue([self.RASTRO, self.V10], 20, 1), "v10")
+                (Path(d) / "control.json").write_text(json.dumps({"allied_venues": {}, "note": "alliance ended"}))
+                self.assertEqual(proto.allied_venues(), {})
+        self.assertEqual(proto.allied_venues(), {})
+
+
 class AlliedVenueTest(unittest.TestCase):
-    """Alliance with Team 5: our asks from ALLIED_MIN_ASK go to its v10 when the taker pays less there."""
+    """With an ally named in control (here Team 5's v10): asks from ALLIED_MIN_ASK go there when the taker pays less."""
     RASTRO = {"venue": "rastro", "fee_bps": 500, "fee_per_card": 1, "house": True}
     V10 = {"venue": "v10", "owner": "t05", "fee_bps": 0, "fee_per_card": 0, "status": "open"}
     RIVAL = {"venue": "v02", "owner": "t12", "fee_bps": 0, "fee_per_card": 0, "status": "open"}
+
+    def setUp(self):
+        from unittest import mock
+        p = mock.patch.object(proto, "allied_venues", return_value={"v10": "t05"})
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_ask_goes_to_ally_when_cheaper_for_taker(self):
         self.assertEqual(proto.choose_venue([self.RASTRO, self.V10, self.RIVAL], 20, 1), "v10")
@@ -338,6 +370,13 @@ class AlliedVenueTest(unittest.TestCase):
 
 class VenueForAddresseeTest(unittest.TestCase):
     """A team cannot trade on its own venue: an offer addressed to the venue's owner goes to El Rastro."""
+
+    def setUp(self):
+        from unittest import mock
+        from bazaar.market import protocol as proto
+        p = mock.patch.object(proto, "allied_venues", return_value={"v10": "t05"})
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_offer_to_the_owner_of_the_allied_venue_goes_to_rastro(self):
         from bazaar.market import protocol as proto

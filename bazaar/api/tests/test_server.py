@@ -69,6 +69,15 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((saved["armed"], saved["protected"], saved["mode"]), (True, [12], "auto"))
         self.assertEqual(self.req("/control")[1]["paused_domains"], ["market"])
 
+    def test_control_allied_venues(self):
+        h = {"X-Dashboard": "1", "Content-Type": "application/json"}
+        self.assertEqual(self.req("/control", {"allied_venues": ["v10"]}, h)[0], 400)
+        self.assertEqual(self.req("/control", {"allied_venues": {"rastro": "t05"}}, h)[0], 400)
+        self.assertEqual(self.req("/control", {"allied_venues": {"v10": "t05"}}, h)[0], 200)
+        self.assertEqual(json.loads((self.live / "control.json").read_text())["allied_venues"], {"v10": "t05"})
+        self.assertEqual(self.req("/control", {"allied_venues": {}}, h)[0], 200)      # no allies again
+        self.assertEqual(json.loads((self.live / "control.json").read_text())["allied_venues"], {})
+
     def test_lessons_get_and_set(self):
         self.assertEqual(self.req("/lessons")[1]["lessons"][0]["id"], "L1")
         h = {"X-Dashboard": "1"}

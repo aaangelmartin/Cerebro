@@ -325,7 +325,7 @@ class MarketDomain:
             avoid_venues = {str(v) for v in control.get("avoid_post_venues") or []}
             note = ""
             if venue == self._my_venue(me):          # the game refuses offers on our own venue (self_venue)
-                ally = next((v for v in sorted(proto.ALLIED_VENUES) if v not in avoid_venues), None)
+                ally = next((v for v in sorted(proto.allied_venues()) if v not in avoid_venues), None)
                 note = f"{venue} is our own venue (we cannot trade there): rerouted to {ally or 'rastro'}"
                 venue = ally or "rastro"
             if venue in avoid_venues:

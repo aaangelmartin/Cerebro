@@ -772,8 +772,8 @@ def venue_growth(record: Path, feed: list[dict], venue_list: list[dict], me: dic
 
 def _allies() -> dict:
     try:
-        from bazaar.market.protocol import ALLIED_VENUES
-        return dict(ALLIED_VENUES)
+        from bazaar.market.protocol import allied_venues
+        return allied_venues()
     except Exception:  # noqa: BLE001
         return {}
 

@@ -56,12 +56,18 @@ class BrainPostsTest(unittest.TestCase):
         me = {**ME, "venue": "v07"}
         with mock.patch.object(S, "post_offers", return_value=[{**POST, "venue": "v07"}]):
             acts = d._brain_posts(me, [], lambda a, c: True, {"SAL-07": 1}, {}, 100)
-        self.assertEqual(acts[0].params["venue"], "v10")                      # the ally, never v07
+        self.assertEqual(acts[0].params["venue"], "rastro")                   # no allies: El Rastro, never v07
         d.observe(Outcome(acts[0].id, 100, "sent", {"id": 5}))
         self.assertIn("our own venue", S.post_history()[-1]["detail"])
-        with mock.patch.object(S, "post_offers", return_value=[{**POST, "venue": "v07", "want_cash": 25}]):
-            acts = domain()._brain_posts(me, [], lambda a, c: True, {"SAL-07": 1}, {"avoid_post_venues": ["v10"]}, 100)
-        self.assertEqual(acts[0].params["venue"], "rastro")                   # ally avoided: El Rastro
+        from bazaar.market import protocol as proto
+        with mock.patch.object(proto, "allied_venues", return_value={"v10": "t05"}):
+            with mock.patch.object(S, "post_offers", return_value=[{**POST, "venue": "v07", "want_cash": 25}]):
+                acts = domain()._brain_posts(me, [], lambda a, c: True, {"SAL-07": 1}, {}, 100)
+            self.assertEqual(acts[0].params["venue"], "v10")                  # an ally named in control: there
+            with mock.patch.object(S, "post_offers", return_value=[{**POST, "venue": "v07", "want_cash": 26}]):
+                acts = domain()._brain_posts(me, [], lambda a, c: True, {"SAL-07": 1},
+                                             {"avoid_post_venues": ["v10"]}, 100)
+            self.assertEqual(acts[0].params["venue"], "rastro")               # ally avoided: El Rastro
 
     def test_plan_accept_outcomes_reach_the_brain(self):
         d = domain()

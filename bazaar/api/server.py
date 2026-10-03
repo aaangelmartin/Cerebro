@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -190,6 +190,12 @@ def apply_control(live: Path, body: dict) -> dict:
         if not isinstance(a, list) or not all(isinstance(x, str) and len(x.strip()) == 3 for x in a):
             raise ValueError("avoid_buy_sets must be a list of set ids like \"RET\"")
         change["avoid_buy_sets"] = sorted({x.strip().upper() for x in a})
+    if "allied_venues" in body:                        # {venue: owner team}; {} = no allies (the default)
+        av = body["allied_venues"]
+        if not isinstance(av, dict) or not all(isinstance(k, str) and re.fullmatch(r"v\d{1,3}", k) and isinstance(v, str)
+                                               and re.fullmatch(r"t\d{1,3}", v) for k, v in av.items()):
+            raise ValueError('allied_venues must be an object like {"v10": "t05"}')
+        change["allied_venues"] = dict(av)
     if "goal_buys" in body:
         g = body["goal_buys"]
         if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
