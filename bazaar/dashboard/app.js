@@ -227,6 +227,7 @@
     if (st.stop_file) return ["APAGADO", "bad", "STOP activo"];
     if (!st.armed) return ["APAGADO", "bad", "listo para encender"];
     if (d.clock && d.clock.doors !== "open") return ["ENCENDIDO", "ok", "esperando a que abran"];
+    if (d.clock && d.clock.paused) return ["ENCENDIDO", "ok", "juego en pausa: espera al primer tick"];
     if (degraded(d)) return ["ENCENDIDO", "ok", "sin Opus: decide el código"];
     return ["ENCENDIDO", "ok", "jugando"];
   }
@@ -260,7 +261,9 @@
     const [bText, bTone, bSub] = botState(d);
     const open = d.clock && d.clock.doors === "open" && !d.clock.paused;
     const ca = closesAt(d), oa = opensAt();
+    const paused = d.clock && d.clock.doors === "open" && d.clock.paused;
     const marketSub = open ? "abiertas · cierra " + (ca ? fmtTime(ca, false) : "—")
+      : paused ? "puertas abiertas · reloj parado por la organización · cierra " + (ca ? fmtTime(ca, false) : "—")
       : "abre " + (oa ? fmtTime(oa, false) + " · en " + fmtDur(oa - Date.now() / 1000) : (d.clock && d.clock.opens_at) || "—");
     // This tick
     const limits = (S.rec.clock && S.rec.clock.limits) || {};
@@ -293,7 +296,7 @@
       el("div", { class: "sb-sec" },
         el("div", { class: "sb-line" }, el("span", null, "Bot"), pill(bText, bTone)),
         el("div", { class: "sb-sub" }, bSub + " · " + okN + "/" + procs.length + " procesos"),
-        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : "CERRADO", open ? "ok" : "bad")),
+        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : paused ? "EN PAUSA" : "CERRADO", open ? "ok" : paused ? "warn" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
       recorderBlock(d.recorder || {}),
       el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),
@@ -327,13 +330,23 @@
     }
     host.replaceChildren(...items);
     // Doors closed: dim the screen with a centred card (can be dismissed to keep working).
-    const closed = d && d.clock && (d.clock.doors === "closed" || d.clock.paused);
+    const pausedOnly = d && d.clock && d.clock.doors === "open" && d.clock.paused;
+    const closed = d && d.clock && (d.clock.doors === "closed" || pausedOnly);
     if (!closed) S.closedDismissed = false;
     const ov = $("closed-overlay");
     if (closed && !S.closedDismissed && S.route !== "bot" && S.route !== "supervision") {
       const oa = opensAt();
       const lbMe = myTeam() || {};
       ov.hidden = false;
+      if (pausedOnly) {
+        ov.replaceChildren(el("div", { class: "closed-card is-paused" },
+          el("h2", null, icon("lock", 18), "Juego en pausa"),
+          el("div", { class: "closed-sub num" }, "puertas abiertas · la organización ha parado el reloj (tick " + (d.clock.tick ?? "—") + ")"),
+          el("p", null, "No hay cuenta atrás: se reanuda cuando lo decidan los organizadores. El bot arranca solo en el primer tick si está encendido."),
+          el("div", { class: "closed-foot num" }, "Hoy: " + fmtNum(d.team && d.team.score, 1) + " pts" + (d.team && d.team.rank ? " · " + d.team.rank + ".º de " + d.team.teams : "")),
+          el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, "Ver el dashboard igualmente")));
+        return;
+      }
       ov.replaceChildren(el("div", { class: "closed-card" },
         el("h2", null, icon("lock", 18), "Mercado cerrado"),
         el("div", { class: "closed-sub num" }, oa ? "abre el " + new Date(oa * 1000).toLocaleDateString("es-ES", { weekday: "long" }) + " a las " + fmtTime(oa, false) : "abre " + ((d.clock && d.clock.opens_at) || "—")),
@@ -426,7 +439,7 @@
     route();
     tick();
     setInterval(tick, 3000);
-    setInterval(() => { renderClock(); if (S.data) { const ov = $("closed-overlay"); const c = ov.querySelector(".closed-count"); const oa = opensAt(); if (c && oa) c.textContent = fmtDur(oa - Date.now() / 1000); } }, 1000);
+    setInterval(() => { renderClock(); if (S.data) { const ov = $("closed-overlay"); const c = ov.querySelector(".closed-card:not(.is-paused) .closed-count"); const oa = opensAt(); if (c && oa) c.textContent = fmtDur(oa - Date.now() / 1000); } }, 1000);
   }
   window.app = { state: S, refresh: tick, route, groupOf, reloadRec: () => loadRec(true) };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
