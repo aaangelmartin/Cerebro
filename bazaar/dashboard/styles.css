@@ -261,3 +261,4 @@ select {
 .tb-wall .num { font-size: 15px; font-weight: 600; color: var(--ink); }
 .topbar .tb-stats { flex: 0 1 auto; }
 .topbar .tb-clock { margin-left: 0; }
+.refresh.ok-flash { border-color: var(--ok); color: var(--ok); transition: border-color .2s, color .2s; }

@@ -310,13 +310,13 @@
       root.replaceChildren(el("div", { class: "scr-cerebro" },
         el("div", { class: "cb-top" }, U().loading()), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })));
     },
-    async refresh(root, data) {
+    async refresh(root, data, params, opts) {
       S.root = root;
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
       // avoid rebuilding when nothing changed (keeps scroll and open history item)
       const sig = JSON.stringify([d.cur && d.cur.updated, d.status && d.status.updated, d.history.length, d.findings.length, d.err && d.err.status, S.topic, S.histSel]);
-      if (sig === S.sig && S.data) return;
+      if (sig === S.sig && S.data && !(opts && opts.force)) return;
       S.sig = sig; S.data = d;
       render();
     },

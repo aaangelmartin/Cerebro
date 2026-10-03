@@ -151,7 +151,7 @@
     const id = head.duel ?? head.id;
     const count = head.message_count ?? (head.messages || []).length;
     const c = S.transcripts[id];
-    if (c && c.count === count && (c.data.status !== "live" || count === c.count) && c.fresh > Date.now() - 2500) return c.data;
+    if (c && c.count === count && (c.data.status !== "live" || count === c.count) && c.fresh > Date.now() - 2500 && c.fresh > (window.__dashForceAt || 0)) return c.data;
     if (c && c.data.status && c.data.status !== "live" && c.count === count) return c.data;
     const r = await safe(() => A().recDuel(id), null);
     const data = val(r) || head;

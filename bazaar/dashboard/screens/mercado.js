@@ -457,7 +457,7 @@
   const TH_STATUS = { deal: "acuerdo", closed: "cerrada", open: "abierta", expired: "caducada" };
   async function pullConversations() {
     const api = window.api, C = S.conv;
-    if (Date.now() - C.at < 4000 && C.list.length) return;
+    if (Date.now() - C.at < 4000 && C.list.length && C.at > (window.__dashForceAt || 0)) return;
     C.at = Date.now();
     const r = await safe(() => api.recThreads());
     if (!r.ok) { C.err = r.err; return; }

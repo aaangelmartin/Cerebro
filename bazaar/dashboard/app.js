@@ -97,32 +97,41 @@
     try { S.screen.mount(root, params); } catch (e) { console.error(e); root.appendChild(window.ui.error(e)); }
     if (S.data) refreshScreen();
   }
-  async function refreshScreen() {
+  async function refreshScreen(force) {
     const sc = S.screen;
     if (!sc || !sc.refresh || !S.data) return;
     const route = S.route;
-    try { await sc.refresh($("screen"), S.data, S.params); }
-    catch (e) { if (route === S.route) console.error("refresh " + route, e); }
+    try { await sc.refresh($("screen"), S.data, S.params, { force: !!force }); }
+    catch (e) { if (route === S.route) console.error("refresh " + route, e); if (force) throw e; }
   }
 
   // ------------------------------------------------------------------ loop
-  async function tick() {
-    if (S.inflight) return;
+  // Each tick carries a generation: a forced refresh starts a new one, so a slower tick that was already
+  // in flight can never overwrite the fresh data when its responses arrive later.
+  S.gen = 0;
+  async function tick(force) {
+    if (S.inflight && !force) return;
+    const gen = force ? ++S.gen : S.gen;
     S.inflight = true;
     try {
       const data = await api.overview();
+      if (gen !== S.gen) return;
       S.data = data; S.lastOk = Date.now(); S.apiDown = false;
       window.ui.setClock(data.clock, data.now);
-      await loadRec(false);
+      await loadRec(!!force);
+      if (gen !== S.gen) return;
+      if (force) tickMapAt = 0;
       loadTickMap();
       renderTop(data);
       renderStatus(data);
       renderBanners(data);
-      await refreshScreen();
+      await refreshScreen(force);
     } catch (e) {
+      if (gen !== S.gen) return;
+      if (force) throw e;
       S.apiDown = true;
       renderBanners(S.data);
-    } finally { S.inflight = false; }
+    } finally { if (gen === S.gen) S.inflight = false; }
     pollNotifications();
   }
   let tickMapAt = 0;
@@ -438,12 +447,20 @@
     $("refresh").addEventListener("click", async () => {
       // Refresh every panel right now, without reloading the page (keeps filters, scroll and drawers).
       const btn = $("refresh");
+      if (btn.classList.contains("spin")) return;
       btn.classList.add("spin");
+      const t0 = Date.now();
       try {
         if (window.api && window.api.clearCache) window.api.clearCache();
-        S.inflight = false;
-        await tick();
-      } finally { setTimeout(() => btn.classList.remove("spin"), 400); }
+        window.__dashForceAt = Date.now();          // screens' own caches and stream throttles skip their wait once
+        await tick(true);
+        btn.classList.add("ok-flash");
+        setTimeout(() => btn.classList.remove("ok-flash"), 900);
+      } catch (e) {
+        S.apiDown = true;
+        renderBanners(S.data);
+        window.ui.toast({ type: "error", title: "No se pudo actualizar", text: (e && e.message) || "La API no responde.", ttl: 5000 });
+      } finally { setTimeout(() => btn.classList.remove("spin"), Math.max(0, 400 - (Date.now() - t0))); }
     });
     $("bell").addEventListener("click", (e) => {
       e.stopPropagation();

@@ -50,7 +50,7 @@
   const cache = {};
   async function cached(key, ttlMs, fn) {
     const c = cache[key];
-    if (c && Date.now() - c.at < ttlMs) return c.val;
+    if (c && Date.now() - c.at < ttlMs && c.at > (window.__dashForceAt || 0)) return c.val;
     if (c && c.busy) return c.busy;
     const slot = cache[key] = c || {};
     slot.busy = (async () => {
@@ -67,7 +67,7 @@
     const s = { rows: [], last: null, at: 0, busy: null, err: null, loaded: false, maxSeq: -1 };
     s.pull = function () {
       if (s.busy) return s.busy;
-      if (s.loaded && Date.now() - s.at < 2500) return Promise.resolve();
+      if (s.loaded && Date.now() - s.at < 2500 && s.at > (window.__dashForceAt || 0)) return Promise.resolve();
       s.busy = (async () => {
         try {
           const r = s.last == null ? await api.recStream(name, { tail }) : await api.recStream(name, { since_seq: s.last, limit: 2000 });
