@@ -382,8 +382,12 @@
     const list = el("div", { class: "cb-chat-list" });
     const input = el("textarea", { class: "cb-chat-in", rows: 2, placeholder: "Pregunta o pide algo al cerebro…" });
     const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar");
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } });
-    send.addEventListener("click", chatSend);
+    // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition never sends
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault(); e.stopPropagation(); chatSend();
+    });
+    send.addEventListener("click", (e) => { e.preventDefault(); chatSend(); });
     const nameBox = el("div", { class: "cb-chat-name" });
     const host = el("aside", { class: "cb-chat" },
       el("header", { class: "cb-chat-h" }, U().icon("cerebro", 15), el("b", {}, "Habla con el cerebro"), el("span", { class: "cb-chat-st" })),
@@ -412,7 +416,12 @@
     else if (C.state === "error") kids.push(U().error(C.err));
     else if (!C.msgs.length && C.state === "idle") kids.push(U().loading());
     else if (!C.msgs.length) kids.push(U().empty("Aún no hay mensajes. Pregúntale qué está pensando o por qué tomó una decisión."));
+    const shown = [];
     for (const m of C.msgs) {
+      // the same role + author + text within 15 s is one message (a double send or a local copy plus the server copy)
+      const dup = shown.find((p) => p.role === m.role && (p.by || "") === (m.by || "") && p.text === m.text && Math.abs((+p.ts || 0) - (+m.ts || 0)) <= 15);
+      if (dup) { if (dup.pending && !m.pending) dup.pending = false; continue; }
+      shown.push(m);
       const me = m.role !== "brain";
       kids.push(el("div", { class: "cb-msg " + (me ? "is-user" : "is-brain") + (m.pending ? " is-pending" : "") },
         el("div", { class: "cb-msg-h" }, el("b", {}, me ? (m.by || "equipo") : "Cerebro"), el("span", { class: "num" }, m.ts ? when(m.ts) : "")),
@@ -438,7 +447,7 @@
           if (seen.has(k)) continue;
           seen.add(k); added = true;
           // the server copy of our own message replaces the local pending one
-          if (m.role !== "brain") { const i = C.msgs.findIndex((x) => x.pending && x.text === m.text); if (i >= 0) C.msgs.splice(i, 1); }
+          if (m.role !== "brain") { const i = C.msgs.findIndex((x) => x.local && x.text === m.text); if (i >= 0) C.msgs.splice(i, 1); }
           C.msgs.push(m);
           if (m.role === "brain") C.waiting = false;
         }
@@ -451,20 +460,32 @@
       renderChat();
     } finally { C.lastState = C.state; C.busy = false; }
   }
+  // One POST per message: in-flight guard, inputs disabled while sending, the same text is not sent twice within
+  // 3 s, the box is cleared only after the server accepted it, and a failed POST is never retried by itself.
   async function chatSend() {
     const text = (C.input.value || "").trim();
     if (!text || C.sending) return;
     if (C.state === "off") { renderChat(); return; }
+    const now = Date.now();
+    if (C.lastSent && C.lastSent.text === text && now - C.lastSent.at < 3000) return;
     const by = getName() || "equipo";
-    C.sending = true; C.send.disabled = true;
-    const mine = { ts: Date.now() / 1000, role: "user", by, text, pending: true };
-    C.msgs.push(mine); C.waiting = true; C.forceEnd = true; C.input.value = "";
+    C.sending = true; C.lastSent = { text, at: now };
+    C.send.disabled = true; C.input.disabled = true;
+    const mine = { ts: now / 1000, role: "user", by, text, pending: true, local: true };
+    C.msgs.push(mine); C.waiting = true; C.forceEnd = true;
     renderChat();
-    try { await A().brainSay(text, by); mine.pending = false; }
-    catch (e) {
-      C.waiting = false; C.msgs.splice(C.msgs.indexOf(mine), 1); C.input.value = text;
+    try {
+      await A().brainSay(text, by);
+      mine.pending = false;
+      if ((C.input.value || "").trim() === text) C.input.value = "";
+    } catch (e) {
+      C.waiting = false; C.lastSent = null;
+      const i = C.msgs.indexOf(mine); if (i >= 0) C.msgs.splice(i, 1);
       U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "El chat del cerebro aún no está activo." : (e && e.message) || "Error" });
-    } finally { C.sending = false; C.send.disabled = false; renderChat(); chatPull(); }
+    } finally {
+      C.sending = false; C.send.disabled = false; C.input.disabled = false; C.input.focus();
+      renderChat(); chatPull();
+    }
   }
   // poll faster than the 2 s screen refresh while waiting for a reply
   setInterval(() => { if (C.list && C.list.isConnected && C.waiting) chatPull(); }, 1500);
