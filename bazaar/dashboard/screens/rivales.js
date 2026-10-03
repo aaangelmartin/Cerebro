@@ -288,6 +288,16 @@
   const { el, fmt, fmtP, num, hhmm, hhmmss, TYPES, TYPE_LABEL, TYPE_COLOR, US } = D;
   const SET_COLORS = ["var(--t-dealer,#2bb3a3)", "#e0457b", "var(--t-venta,#e5534b)", "var(--t-puja,#e8a33d)", "#7b83eb", "#9acd32", "#c77dff"];
   let S = null;
+  const NEG_C = "var(--t-dealer,#2bb3a3)", MKT_C = "var(--t-cambio,#4c8dff)";
+  // points split per team over time (negotiation vs market-making), from the leaderboard stream
+  const split = D.stream("leaderboard", 400, 3000, (row) => {
+    const d = row.data || row; let teams = d.teams || [];
+    if (!Array.isArray(teams)) teams = Object.values(teams);
+    const neg = {}, mkt = {};
+    for (const t of teams) { if (!t || !t.team) continue; neg[t.team] = num(t.negotiating); mkt[t.team] = num(t.market); }
+    return { ts: num(row.ts) || 0, neg, mkt };
+  });
+  let W = { negotiating: 30, market: 30 };
 
   function mount(root) {
     S = { sel: null, types: new Set(), lastKey: null };
@@ -345,12 +355,48 @@
     if (!teams.length) { const e = D.recErr("leaderboard"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : "Sin clasificación todavía.")); }
     D.replace(box, teams.map((t) => {
       const p = profs[t.team]; const tg = t.team === US ? ["tú"] : tags(t, p, avg).slice(0, 2);
+      const stats = [t.deals != null ? t.deals + " tratos" : null, t.album_filled != null ? "álbum " + t.album_filled + "/" + t.album_slots : null,
+        t.pages_complete != null ? t.pages_complete + " pág." : null, num(t.luck) != null ? "suerte " + (t.luck > 0 ? "+" : "") + fmt(t.luck, 1) : null,
+        t.venue ? "tienda " + t.venue : null].filter(Boolean).join(" · ");
       return el("a", { class: "r-item" + (t.team === S.sel ? " on" : "") + (t.team === US ? " t10-usrow" : ""), href: "#rivales/" + t.team },
         el("span", { class: "num t10-muted" }, (t.rank || "") + ".º"),
-        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)), el("span", { class: "t10-small t10-muted" }, tg.join(" · "))),
-        el("span", { class: "r-item-acts t10-small t10-muted num", title: "eventos hoy" }, p.total ? String(p.total) : ""),
-        el("span", { class: "num" }, fmt(t.score, 1)));
+        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)),
+          el("span", { class: "t10-small t10-muted" }, tg.join(" · ")), el("span", { class: "t10-small t10-muted r-item-stats" }, stats)),
+        el("span", { class: "r-split" }, splitBar("Neg.", t.negotiating, W.negotiating, NEG_C), splitBar("Merc.", t.market, W.market, MKT_C)),
+        el("span", { class: "num r-item-total" }, fmt(t.score, 1)));
     }));
+  }
+
+  function splitBar(label, v, max, col) {
+    v = num(v); const pct = v == null ? 0 : Math.max(0, Math.min(100, (v / (max || 30)) * 100));
+    return el("span", { class: "r-sb", title: label + " " + (v == null ? "—" : fmt(v, 2)) + " / " + (max || 30) },
+      el("span", { class: "r-sb-l t10-muted" }, label),
+      el("span", { class: "r-sb-t" }, el("span", { style: `width:${pct}%;background:${col}` })),
+      el("span", { class: "num r-sb-v" }, v == null ? "—" : fmt(v, 1)));
+  }
+  // two lines over time: negotiation and market points of one team
+  function splitChart(tid) {
+    const rows = split.rows.filter((r) => r.neg[tid] != null || r.mkt[tid] != null);
+    const w = 520, h = 120, L = 26, B = 14;
+    if (rows.length < 2) return D.state("empty", "Aún no hay historia suficiente.");
+    const t0 = rows[0].ts, t1 = rows[rows.length - 1].ts || t0 + 1;
+    const hi = Math.max(5, ...rows.map((r) => Math.max(r.neg[tid] || 0, r.mkt[tid] || 0)));
+    const x = (ts) => L + ((ts - t0) / Math.max(1, t1 - t0)) * (w - L - 4), y = (v) => h - B - (v / hi) * (h - B - 6);
+    const line = (k, col) => `<polyline fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke" points="${rows.filter((r) => r[k][tid] != null).map((r) => x(r.ts).toFixed(1) + "," + y(r[k][tid]).toFixed(1)).join(" ")}"/>`;
+    let g = "";
+    for (const v of [0, hi / 2, hi]) g += `<line x1="${L}" x2="${w - 4}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line,#262626)"/><text x="0" y="${y(v) + 3}" class="t10-svgtxt">${fmt(v, 0)}</text>`;
+    g += `<text x="${L}" y="${h - 2}" class="t10-svgtxt">${hhmm(t0)}</text><text x="${w - 4}" y="${h - 2}" class="t10-svgtxt" text-anchor="end">${hhmm(t1)}</text>`;
+    return D.svg(w, h, g + line("neg", NEG_C) + line("mkt", MKT_C), "r-split-chart", true);
+  }
+  function compRow(label, col, v, max, lead, leadName, us, isUs) {
+    v = num(v); lead = num(lead); us = num(us);
+    const gap = (a, b) => (a == null || b == null ? "—" : (a - b > 0 ? "+" : "") + fmt(a - b, 1));
+    return el("div", { class: "r-comp" },
+      el("span", { class: "r-comp-l" }, el("i", { class: "r-sq", style: "background:" + col }), label),
+      el("span", { class: "num r-comp-v" }, v == null ? "—" : fmt(v, 1), el("small", { class: "t10-muted" }, " / " + max)),
+      el("span", { class: "r-sb-t r-comp-t" }, el("span", { style: `width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${col}` })),
+      el("span", { class: "num t10-small", title: "frente al líder en este apartado (" + leadName + ")" }, "vs líder " + gap(v, lead)),
+      isUs ? el("span", {}) : el("span", { class: "num t10-small " + (v != null && us != null && v > us ? "t10-down" : "t10-up"), title: "frente a Team 10" }, "vs nos. " + gap(v, us)));
   }
 
   function renderProfile(root, t, teams, p, profs, avg, booksAll) {
@@ -367,7 +413,20 @@
         kpi("Tratos", t.deals != null ? String(t.deals) : "—"), kpi("Nivel", t.level != null ? String(t.level) : "—"),
         kpi("Álbum", t.album_filled != null ? t.album_filled + "/" + t.album_slots : "—"),
         kpi("Tienda", t.venue || "—"), vsUs ? kpi("Duelos con nos.", String(vsUs)) : null),
-      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, "Puntos en el tiempo"), D.spark(D.series(t.team), { w: 300, h: 34 })));
+      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, "Puntos en el tiempo"), D.spark(D.series(t.team), { w: 300, h: 34 })),
+      (() => {
+        const best = (k) => teams.reduce((b, x) => (num(x[k]) != null && (b == null || num(x[k]) > num(b[k])) ? x : b), null) || {};
+        const bn = best("negotiating"), bm = best("market");
+        const nm = (x) => (x.team === US ? "Team 10" : D.teamName(x.team) || "—");
+        return el("div", { class: "r-splitbox" },
+          el("div", { class: "r-split-h" }, el("span", { class: "t10-cap" }, "De dónde salen los puntos"),
+            el("span", { class: "t10-small t10-muted" }, "líder negociación: " + nm(bn) + " " + fmt(bn.negotiating, 1) + " · líder mercado: " + nm(bm) + " " + fmt(bm.market, 1))),
+          compRow("Negociación", NEG_C, t.negotiating, W.negotiating, bn.negotiating, nm(bn), me.negotiating, t.team === US),
+          compRow("Mercado", MKT_C, t.market, W.market, bm.market, nm(bm), me.market, t.team === US),
+          el("div", { class: "r-split-legend t10-small t10-muted" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + NEG_C }), "negociación"),
+            el("span", {}, el("i", { class: "r-sq", style: "background:" + MKT_C }), "mercado"), el("span", {}, "puntos en el tiempo")),
+          splitChart(t.team));
+      })());
     // affinities with our marker
     const ours = profs[US] ? Object.fromEntries(profs[US].aff.map((a) => [a.set, a.v])) : {};
     root.querySelector(".r-aff-sub").textContent = "de sus pujas y compras · " + p.signals + " señales";
@@ -420,13 +479,15 @@
     if (!S) mount(root);
     S.data = data; S.params = params;
     await D.prime();
-    await Promise.all([D.feed.pull(), D.board.pull()]);
+    await Promise.all([D.feed.pull(), D.board.pull(), split.pull()]);
     const teams = await D.leaderboard();
+    const lbw = await D.rec("leaderboard", 5000);
+    if (lbw && lbw.weights) W = { negotiating: num(lbw.weights.negotiating) || 30, market: num(lbw.weights.market) || 30 };
     const ven = await D.rec("venues", 8000);
     const booksAll = (await D.rec("books", 8000)) || {};
     const want = params ? String(params).split("/")[0] : null;
     const sel = (want && teams.find((t) => t.team === want)) ? want : (teams.find((t) => t.team !== US) || {}).team;
-    const key = [D.feed.maxSeq, D.board.maxSeq, sel, teams.length, Object.values(booksAll).map((b) => b && b.tick).join(",")].join("|");
+    const key = [D.feed.maxSeq, D.board.maxSeq, split.maxSeq, sel, teams.length, Object.values(booksAll).map((b) => b && b.tick).join(",")].join("|");
     if (key === S.lastKey) return;
     S.lastKey = key; S.sel = sel;
     const day = D.dayEvents();
