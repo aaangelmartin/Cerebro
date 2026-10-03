@@ -68,6 +68,74 @@ def score_points(record: Path, now: float | None = None) -> list[dict]:
     return out
 
 
+RESET_MIN_RAW = 3.0             # a round restart: the raw components had at least this much...
+RESET_SHARE = 0.25              # ...and fell to this share of it or less between two snapshots
+GAME_HOUR_TICKS = 120           # one game hour, at any tick length
+
+
+def _raw_total(p: dict) -> float:
+    return sum(float(p.get(r) or 0.0) for rs in RAW.values() for r in rs)
+
+
+def round_points(points: list[dict]) -> tuple[list[dict], dict | None]:
+    """The snapshots of the round in play, and where it started.
+
+    Each round scores on its own: the raw components (neg_points, duel_points, ...) go back to 0 when a round
+    starts (Saturday's opening took neg_points from 68.7 to 0). Snapshots from before the last such fall belong to
+    an earlier round and must not feed the conversions or the menu."""
+    start = None
+    cut = 0
+    for i in range(1, len(points)):
+        a, b = _raw_total(points[i - 1]), _raw_total(points[i])
+        if a >= RESET_MIN_RAW and b <= a * RESET_SHARE:
+            cut = i
+            start = {"tick": points[i].get("tick"), "ts": points[i].get("ts"), "raw_before": round(a, 2),
+                     "raw_after": round(b, 2)}
+    return points[cut:], start
+
+
+def round_info(clock: dict, schedule: dict, leaderboard: dict, reset: dict | None = None,
+               now: float | None = None) -> dict:
+    """The round in play: its number, name and weight, the rounds already closed, when the next one starts (game
+    hours) and how long this one still runs. Rounds are averaged by weight, so each scores from zero."""
+    t = _f((clock or {}).get("t_hours"))
+    rounds = [r for r in (leaderboard or {}).get("rounds") or [] if isinstance(r, dict)]
+    no = (clock or {}).get("round") or (leaderboard or {}).get("round")
+    cur = next((r for r in rounds if r.get("round") == no), {})
+    out: dict[str, Any] = {
+        "round": no, "name": (clock or {}).get("round_name") or cur.get("name"), "weight": cur.get("weight"),
+        "closed_rounds": [{"round": r.get("round"), "name": r.get("name"), "weight": r.get("weight")}
+                          for r in rounds if r.get("status") == "closed"],
+    }
+    ends = []
+    for u in (schedule or {}).get("upcoming") or []:
+        if not isinstance(u, dict) or u.get("action") not in ("round", "end_round"):
+            continue
+        at = _f(u.get("at_hours"))
+        if at is not None and (t is None or at >= t):
+            ends.append((at, u))
+    if ends:
+        at, u = min(ends, key=lambda x: x[0])
+        out["ends_at_hours"] = round(at, 3)
+        if t is not None:
+            out["hours_left_in_round"] = round(max(0.0, at - t), 2)
+        if u.get("action") == "round":
+            par = u.get("params") or {}
+            out["next_round"] = {"at_hours": round(at, 3), "name": par.get("name"), "weight": par.get("weight")}
+    ts = _f((clock or {}).get("tick_seconds"))
+    if ts:
+        out["tick_seconds"] = ts
+        out["game_hour_real_minutes"] = round(GAME_HOUR_TICKS * ts / 60.0, 1)
+    if reset:
+        out["started"] = reset
+        if now is not None and reset.get("ts"):
+            out["started_minutes_ago"] = round(max(0.0, now - float(reset["ts"])) / 60.0, 1)
+    out["note"] = ("The final score averages the rounds by weight: every round starts from zero and counts on its "
+                   "own. Raw components and the conversions below are this round's only; points, ladder slots and "
+                   "deals from an earlier round do not carry over.")
+    return out
+
+
 def conversions(points: list[dict]) -> dict[str, dict]:
     """Leaderboard points per raw unit, from the recorded day.
 
@@ -306,9 +374,12 @@ def build(*, record: Path, me: dict, leaderboard: dict, clock: dict, schedule: d
           venue_growth: dict | None = None, avoid: set[str] | None = None, now: float | None = None) -> dict[str, Any]:
     now = now or time.time()
     left, tomorrow = _hours(clock or {}, schedule or {}, now)
-    pts = score_points(record, now)
+    pts, reset = round_points(score_points(record, now))
+    rnd = round_info(clock or {}, schedule or {}, leaderboard or {}, reset, now)
+    # the pace is to the end of the ROUND when the schedule shows one (it may end before or after today's close)
+    pace_hours = rnd.get("hours_left_in_round") if rnd.get("hours_left_in_round") else left
     conv = conversions(pts)
-    comps = components(leaderboard or {}, scoreboard or {}, left)
+    comps = components(leaderboard or {}, scoreboard or {}, pace_hours)
     our_venue = (me.get("venue") or {}).get("venue") if isinstance(me.get("venue"), dict) else me.get("venue")
     menu = action_menu(cash=_f(me.get("cash")) or 0.0, conv=conv, needs=needs, goals=goals, sets=sets, ladder=ladder,
                        schedule=schedule, clock=clock, points=pts, duel_sessions=_duel_sessions(Path(record).parent),
@@ -318,8 +389,9 @@ def build(*, record: Path, me: dict, leaderboard: dict, clock: dict, schedule: d
         feas = [a for a in menu.get(comp) or [] if a.get("feasible") and a.get("next_hour")]
         comps.setdefault(comp, {})["menu_points_available_next_hour"] = round(sum(a["expected_points"] for a in feas), 2)
     return {
-        "mission": "pass the leader in total score by today's close",
-        "hours_left_today": left, "hours_tomorrow": tomorrow,
+        "mission": "pass the leader in total score by today's close" if not rnd.get("hours_left_in_round")
+                   else "lead this round when it ends (rounds are averaged by weight; each starts from zero)",
+        "hours_left_today": left, "hours_tomorrow": tomorrow, "round": rnd,
         "components": comps,
         "raw_components_now": {r: score.get(r) for rs in RAW.values() for r in rs},
         "leaderboard_points_per_raw_unit": conv,

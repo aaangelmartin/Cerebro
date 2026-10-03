@@ -326,6 +326,20 @@ def win_text(win: dict | None) -> str:
         return ""
     lines = [f"\n\nWIN MATH (computed by code; mission: {win.get('mission')}; hours left today "
              f"{win.get('hours_left_today')}, tomorrow {win.get('hours_tomorrow')}):"]
+    rnd = win.get("round") if isinstance(win.get("round"), dict) else {}
+    if rnd.get("round") is not None:
+        nxt = rnd.get("next_round") or {}
+        line = (f"- round {rnd.get('round')} ({rnd.get('name')}, weight {rnd.get('weight')}): "
+                f"{rnd.get('hours_left_in_round')} game hours left in it")
+        if nxt:
+            line += f"; round '{nxt.get('name')}' starts at h{nxt.get('at_hours')} FROM ZERO (weight {nxt.get('weight')})"
+        if rnd.get("game_hour_real_minutes"):
+            line += f"; one game hour is {rnd.get('game_hour_real_minutes')} real minutes at {rnd.get('tick_seconds'):g} s ticks"
+        if rnd.get("started"):
+            line += (f"; this round started at tick {rnd['started'].get('tick')} (raw components fell from "
+                     f"{rnd['started'].get('raw_before')} to {rnd['started'].get('raw_after')}): everything below "
+                     f"counts this round only")
+        lines.append(line + ". Rounds are averaged by weight.")
     for comp in ("score", "negotiating", "market"):
         c = (win.get("components") or {}).get(comp) or {}
         if not c:
@@ -496,6 +510,14 @@ def hourly_review(live: Path, scoreboard_now: dict, now: float | None = None, wi
     p = old[-1]
     exp = ((p.get("plan") or {}).get("expected_next_hour")) or {}
     base = p.get("score_at_plan") or {}
+    started = (((win or {}).get("round") or {}).get("started") or {}).get("ts")
+    if isinstance(started, (int, float)) and started > float(p.get("updated") or p.get("ts") or 0):
+        # a new round started since that plan: its scores restart from zero, so the two are not comparable
+        row = {"ts": now, "tick": (scoreboard_now or {}).get("tick"), "plan_tick": p.get("tick"),
+               "plan_ts": p.get("updated"), "expected": exp, "realised": {}, "pace": {}, "round_restarted": True,
+               "verdict": "a new round started since that plan: scores restarted from zero, no comparison"}
+        _append(Path(live) / "strategist_reviews.jsonl", row)
+        return row
     us_now = (scoreboard_now or {}).get("us_now") or {}
     realised = {k: round(float(us_now.get(k) or 0) - float(base.get(k) or 0), 2)
                 for k in ("score", "negotiating", "market") if base.get(k) is not None}

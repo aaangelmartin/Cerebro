@@ -41,7 +41,9 @@ MIN_GAP_S = float(config.ENV.get("BAZAAR_STRATEGY_MIN_GAP_S", "150"))     # at m
 TRIGGER_GAP_S = 45.0                                                      # ...or this often on a big change
 POLL_S = 5.0
 CHAT_GAP_S = 10.0               # a team chat message gets a plan this soon
-REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once an hour
+REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once a game hour (an hour at 30 s ticks)
+REVIEW_MIN_S = 1500.0           # ...never more often than this (Sunday's 15 s ticks: a game hour is 30 minutes)
+GAME_HOUR_TICKS = 120
 MAX_TOKENS = 24000              # medium effort thinks before the tool call: 3000, then 12000, cut the plan
 COMPACT_RULE = ("\n\nKEEP THE PLAN COMPACT so it is never cut: urgent actions first (accept_offers, cancel_offers, "
                 "post_offers, dealer_orders, goal_buys, cash_policy, chat_reply), at most 6 priorities, 4 findings, 1 promo_draft, "
@@ -69,6 +71,18 @@ REFERENCE_KEYS = ("scoring", "levels", "dealers", "lab_lessons", "lab", "policie
 CORE_KEYS = ("clock", "us", "sets", "win_math", "control", "our_open_offers", "our_open_offer_ids", "goals_in_force",
              "automatic_goals", "spares", "held_refs", "schedule_next", "leaderboard", "our_level", "bot")
 TAIL_KEYS = ("chat_recent", "recent_decisions", "plan_history", "recent_findings", "recent_refusals")   # keep the newest
+
+
+def review_every_s(clock: dict | None) -> float:
+    """Real seconds in one game hour at the tick length the clock reports: `expected_next_hour` is a game hour,
+    so the review that checks it follows the clock (3600 s at 30 s ticks, 1800 s at 15 s)."""
+    try:
+        ts = float((clock or {}).get("tick_seconds") or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    if ts <= 0:
+        return REVIEW_EVERY_S
+    return max(REVIEW_MIN_S, min(REVIEW_EVERY_S, GAME_HOUR_TICKS * ts))
 
 
 def _size(x) -> int:
@@ -1367,11 +1381,12 @@ class Strategist:
         if self.spent_today() >= cap and not self.on_mac:      # the cap is API dollars: Mac plans do not spend it
             self.last_reason = f"day cap {cap:g} $ reached"
             return None
-        if self.now() - self.last_review >= REVIEW_EVERY_S:
+        review_s = review_every_s(clock)
+        if self.now() - self.last_review >= review_s:
             self.last_review = self.now()
             try:
                 row = B.hourly_review(self.live, (pic.get("research") or {}).get("scoreboard") or {}, self.now(),
-                                      win=pic.get("win_math"))
+                                      window_s=review_s, win=pic.get("win_math"))
             except Exception as e:  # noqa: BLE001
                 row = {"error": f"{type(e).__name__}: {e}"[:200]}
             if row:
