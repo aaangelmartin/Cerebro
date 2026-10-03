@@ -399,6 +399,74 @@ class RestartWaitTest(unittest.TestCase):
         ok, _, _ = self.run_restart([(0, [111])])
         self.assertFalse(ok)
 
+    def run_watch(self, timeline, log=""):
+        """`_watch` on one service, with a fake clock: timeline is [(seconds, pids)] as in run_restart."""
+        now = [0.0]
+
+        def pids(_service):
+            cur = []
+            for at, ps in timeline:
+                if now[0] >= at:
+                    cur = ps
+            return list(cur)
+
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "l"
+            live.mkdir()
+            (live / "bot.out").write_text("")
+
+            def sleep(s):
+                now[0] += s
+                if log and now[0] >= T.WATCH_S:
+                    (live / "bot.out").write_text(log)
+
+            t = T.Taller(outbox=Outbox(Path(d) / "o.jsonl"), repo=Path(d), work=Path(d) / "w", live=live,
+                         clock=lambda: now[0], sleep=sleep, pids=pids)
+            return t._watch(["bot"], 0.0), now[0]
+
+    def test_another_deploy_restarting_the_service_during_the_watch_is_not_a_failure(self):
+        # our restart gave pid 222; a second deploy kills it at 90 s and the supervisor starts 333 at 102 s:
+        # the check at 95 s lands inside that restart and must wait for the new process, not revert
+        errors, at = self.run_watch([(0, [222]), (90, []), (102, [333])])
+        self.assertEqual(errors, [])
+        self.assertLess(at, T.WATCH_S + T.RESTART_WAIT_S)
+
+    def test_a_service_that_stays_down_after_the_watch_is_a_failure(self):
+        errors, at = self.run_watch([(0, [222]), (90, [])])
+        self.assertEqual(errors, ["bot: not running after the restart"])
+        self.assertGreaterEqual(at, T.WATCH_S + T.RESTART_WAIT_S - T.RESTART_POLL_S)
+
+    def test_log_errors_during_the_watch_still_count(self):
+        errors, _ = self.run_watch([(0, [222])], log="tick 5 ok\nTraceback (most recent call last):\n")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Traceback", errors[0])
+
+    def test_a_second_finish_waits_for_the_lock_instead_of_overlapping(self):
+        now = [0.0]
+        with tempfile.TemporaryDirectory() as d:
+            mk = lambda sleep: T.Taller(outbox=Outbox(Path(d) / "o.jsonl"), repo=Path(d), work=Path(d) / "w",  # noqa: E731
+                                        live=Path(d) / "l", clock=lambda: now[0], sleep=sleep)
+            first = mk(lambda s: None)
+            self.assertTrue(first.acquire("--finish a"))
+
+            def sleep(s):                                   # the first deploy ends 12 s into the wait
+                now[0] += s
+                if now[0] >= 12:
+                    first.release()
+
+            second = mk(sleep)
+            self.assertFalse(second.acquire("--finish b"))  # no wait: busy
+            self.assertTrue(second.acquire_wait("--finish b"))
+            self.assertGreaterEqual(now[0], 12)
+            self.assertIn("--finish b", second.busy())
+            second.release()
+            # a holder that never lets go: give up after the timeout, without taking the lock
+            self.assertTrue(first.acquire("--finish a"))
+            now[0] = 0.0
+            third = mk(lambda s: now.__setitem__(0, now[0] + s))
+            self.assertFalse(third.acquire_wait("--finish c", timeout=30))
+            self.assertIn("--finish a", third.busy())
+
 
 if __name__ == "__main__":
     unittest.main()

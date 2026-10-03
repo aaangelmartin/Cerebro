@@ -52,6 +52,8 @@ WATCH_S = 95                     # ~3 ticks of 30 s
 OLD_EXIT_WAIT_S = 150            # a killed service may finish its current work first (an Opus call takes up to 150 s)
 RESTART_WAIT_S = 45              # after the old process is gone: bazaar.supervise starts a new one after ~10 s
 RESTART_POLL_S = 3
+FINISH_LOCK_WAIT_S = 20 * 60     # a second --finish waits for the first one's tests, deploy and watch
+FINISH_LOCK_POLL_S = 5
 CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 TEST_CMD = [PY, "-m", "unittest", "discover", "-s", "bazaar", "-t", "."]
 
@@ -326,7 +328,7 @@ class Taller:
         for s in services:
             p = self.live / f"{s}.out"
             offsets[s] = p.stat().st_size if p.exists() else 0
-        time.sleep(WATCH_S)
+        self.sleep(WATCH_S)
         errors = []
         for s in services:
             p = self.live / f"{s}.out"
@@ -337,9 +339,21 @@ class Taller:
                 for line in f.read().splitlines():
                     if "Traceback" in line or re.search(r"\b(ERROR|CRITICAL)\b", line):
                         errors.append(f"{s}: {line.strip()[:200]}")
-            if not self._pids(s):
+            if not self._back(s):
                 errors.append(f"{s}: not running after the restart")
         return errors[:10]
+
+    def _back(self, service: str) -> bool:
+        """Is the service running at the end of the watch? Another deploy (or a person) may be restarting it
+        right now: its old process is gone and the supervisor starts the new one ~10 s later. So an empty
+        process list is re-checked for up to RESTART_WAIT_S before it counts as down (a sound commit was
+        reverted once because the check landed inside someone else's restart)."""
+        end = self.clock() + RESTART_WAIT_S
+        while not self.pids(service):
+            if self.clock() >= end:
+                return False
+            self.sleep(RESTART_POLL_S)
+        return True
 
     # ---- state + log
     def load_state(self) -> dict:
@@ -390,6 +404,16 @@ class Taller:
                 return self.acquire(what)
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps({"pid": os.getpid(), "at": self.clock(), "what": what}))
+        return True
+
+    def acquire_wait(self, what: str = "", timeout: float = FINISH_LOCK_WAIT_S) -> bool:
+        """Take the lock, waiting for the job that holds it: two deploys never overlap, the second one
+        starts when the first has finished its restart and watch."""
+        end = self.clock() + timeout
+        while not self.acquire(what):
+            if self.clock() >= end:
+                return False
+            self.sleep(FINISH_LOCK_POLL_S)
         return True
 
     def busy(self) -> str:
@@ -833,7 +857,7 @@ def main(argv: list[str] | None = None) -> None:
     if a.finish:
         if not a.commit:
             sys.exit("--finish needs --commit <hash>")
-        if not t.acquire(f"--finish {a.finish}"):
+        if not t.acquire_wait(f"--finish {a.finish}"):       # deploys are serialised: wait for the other one
             sys.exit(t.busy())
         try:
             out = t.finish_job(a.finish, a.commit)

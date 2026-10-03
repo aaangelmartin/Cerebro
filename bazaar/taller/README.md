@@ -24,7 +24,7 @@ Turns el cerebro's code requests (outbox items of kind `code`) into tested, push
 - `handled at HH:MM (failed|rejected|needs_accept…): Aceptar to run it again`.
 - `possible duplicate: done in <commit> at HH:MM and filed again`.
 
-"another taller job is running: --finish <id> since HH:MM:SS (pid N)" (exit code 1) means another `--next` or `--finish` holds the lock right now; a `--finish` takes a few minutes (tests, push, restart, watch). Try again on the next loop.
+"another taller job is running: --finish <id> since HH:MM:SS (pid N)" (exit code 1) means another `--next` or `--finish` holds the lock right now; a `--finish` takes a few minutes (tests, push, restart, watch). A `--next` should try again on the next loop; a `--finish` waits for the lock by itself (up to 20 minutes), so two deploys never overlap.
 
 ## Claims, parallel work and duplicates
 
@@ -48,6 +48,7 @@ Turns el cerebro's code requests (outbox items of kind `code`) into tested, push
    - runs the full suite on a clean checkout of that commit (red → reverted locally, item back to `open`);
    - pushes `feat/bazaar-v2` (never force, never `main`; if origin moved it answers `push_failed`: `git pull --rebase origin feat/bazaar-v2` and `--finish` again with the new hash);
    - restarts only the affected processes (bazaar.supervise starts them again) and watches their logs for about three ticks;
+     a process that is missing at the end of the watch is re-checked for up to 45 s before it counts as down, so somebody else restarting it at that moment does not revert a sound commit;
    - errors → `git revert`, push, restart, item `rejected` with the errors; clean → item `done` with the commit.
 5. **If the request is wrong or impossible:**
    ```bash
