@@ -63,6 +63,19 @@ def is_allied(v: dict | None) -> bool:
     return owner in (None, ALLIED_VENUES[vid])
 
 
+def venue_for(venue: str | None, to: str | None, venues: list[dict] | None = None) -> str:
+    """The venue an offer addressed to `to` can really go on. A team cannot trade on its own venue, so an offer
+    addressed to a venue's owner is refused there (self_venue): it goes to El Rastro instead."""
+    vid = str(venue or "rastro")
+    if not to or vid == "rastro":
+        return vid
+    owner = ALLIED_VENUES.get(vid)
+    for v in venues or []:
+        if venue_id(v) == vid and isinstance(v, dict) and v.get("owner"):
+            owner = v.get("owner")
+    return "rastro" if owner == to else vid
+
+
 def _fee_parts(v: dict | None) -> tuple[float, float]:
     """(bps, per card) a taker pays: the worse of the fee in force and any announced change."""
     v = v or {}

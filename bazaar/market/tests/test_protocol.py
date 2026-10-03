@@ -334,3 +334,23 @@ class AlliedVenueTest(unittest.TestCase):
     def test_ally_fee_taken_as_posted(self):
         self.assertEqual(proto.taker_fee(self.V10, 30, 1), 0)
         self.assertEqual(proto.taker_fee(self.RIVAL, 30, 1), 8)       # rival venues: worst case 10 % + 5 P
+
+
+class VenueForAddresseeTest(unittest.TestCase):
+    """A team cannot trade on its own venue: an offer addressed to the venue's owner goes to El Rastro."""
+
+    def test_offer_to_the_owner_of_the_allied_venue_goes_to_rastro(self):
+        from bazaar.market import protocol as proto
+        self.assertEqual(proto.venue_for("v10", "t05"), "rastro")
+
+    def test_offer_to_another_team_stays_on_the_allied_venue(self):
+        from bazaar.market import protocol as proto
+        self.assertEqual(proto.venue_for("v10", "t17"), "v10")
+        self.assertEqual(proto.venue_for("v10", None), "v10")
+        self.assertEqual(proto.venue_for("rastro", "t05"), "rastro")
+
+    def test_owner_from_the_venue_list_wins(self):
+        from bazaar.market import protocol as proto
+        venues = [{"venue": "v21", "owner": "t09"}]
+        self.assertEqual(proto.venue_for("v21", "t09", venues), "rastro")
+        self.assertEqual(proto.venue_for("v21", "t04", venues), "v21")

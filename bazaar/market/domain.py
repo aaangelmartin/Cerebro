@@ -281,6 +281,12 @@ class MarketDomain:
                 venue = ally or "rastro"
             if venue in avoid_venues:
                 venue = "rastro"
+            if proto.venue_for(venue, p.get("to")) != venue:
+                note = (f"{venue} belongs to {p.get('to')}, who cannot trade on its own venue: "
+                        "rerouted to rastro")
+                log.info("market: brain post %s to %s rerouted from %s to rastro (addressee owns the venue)",
+                         p.get("give"), p.get("to"), venue)
+                venue = "rastro"
             params = {"venue": venue, "give": {"assets": [a["id"]]},
                       "want": {"cards": [p["want_card"]]} if p.get("want_card") else {"cash": int(p["want_cash"])},
                       "expires_in_ticks": SWAP_EXPIRES if p.get("want_card") else LIST_EXPIRES}
@@ -1072,7 +1078,8 @@ class MarketDomain:
                 pool.append((a, float(values.asset_value(a["id"])), float(values.book(ref))))
             give = bargain.counter_give(fast_cap, best.cash_out, best.value_in, pool)
             if give is not None:
-                vid = choose_venue(venues, int(give["cash"]), len(give["assets"]) + len(best.in_refs))
+                vid = proto.venue_for(choose_venue(venues, int(give["cash"]),
+                                                   len(give["assets"]) + len(best.in_refs)), seller, venues)
                 params = {"venue": vid, "give": {"assets": [a["id"] for a in give["assets"]]},
                           "want": {"cards": list(best.in_refs)}, "to": seller,
                           "expires_in_ticks": bargain.COUNTER_EXPIRES}
@@ -1099,8 +1106,8 @@ class MarketDomain:
         bargain.set_funding(self._funding)
 
     def _act_post(self, p: PostCand, price: int, to: str | None, source: str, reason: str) -> Action:
-        params = {"venue": p.venue, "give": {"assets": [p.asset["id"]]}, "want": {"cash": int(price)},
-                  "expires_in_ticks": LIST_EXPIRES}
+        params = {"venue": proto.venue_for(p.venue, to), "give": {"assets": [p.asset["id"]]},
+                  "want": {"cash": int(price)}, "expires_in_ticks": LIST_EXPIRES}
         if to:
             params["to"] = to
         a = Action(kind="post_offer", params=params, domain=self.name, source=source,
@@ -1120,8 +1127,8 @@ class MarketDomain:
         return a
 
     def _act_swap(self, s: SwapCand, to: str | None, source: str, reason: str) -> Action:
-        params = {"venue": s.venue, "give": {"assets": [s.asset["id"]]}, "want": {"cards": [s.want]},
-                  "expires_in_ticks": SWAP_EXPIRES}
+        params = {"venue": proto.venue_for(s.venue, to), "give": {"assets": [s.asset["id"]]},
+                  "want": {"cards": [s.want]}, "expires_in_ticks": SWAP_EXPIRES}
         if to:
             params["to"] = to
         a = Action(kind="post_offer", params=params, domain=self.name, source=source,
