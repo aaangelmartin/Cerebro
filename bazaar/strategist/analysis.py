@@ -6,6 +6,7 @@
     venues(venues, our_id)                        -> traffic and fees per venue, ours compared
     offer_outliers(my_offers, me, record)         -> our open offers far above value/market, or outbid
     offers_to_us(my_offers, me, allies)           -> offers addressed to us, values, last copies, page completion
+    dealer_offers_to_us(my_offers, me, catalog)   -> open offers dealers made to us (threads), terms at our values
     unknown_offers(my_offers, live)               -> our open offers no process of ours posted
     gap(leaderboard)                              -> our negotiating/market split against the leaders
 
@@ -376,6 +377,67 @@ def offers_to_us(my_offers: list[dict], me: dict, allies: dict) -> list[dict]:
                     "last_copy": any(x.get("copies_held", 0) <= 1 for x in we_give),
                     "page_completion": {st: f"{(pages.get(st) or {}).get('have')}/{(pages.get(st) or {}).get('of')}"
                                         for st in sets}})
+    return out
+
+
+def dealer_offers_to_us(my_offers: list[dict], me: dict, catalog: dict | None = None) -> list[dict]:
+    """Open offers a DEALER made to us (inside a thread or standalone), with their terms at our values.
+    They are not accept_offers material: the dealers domain accepts inside the thread (use dealer_orders)."""
+    import re
+    held = {a.get("id"): a for a in me.get("assets") or []}
+    try:
+        from bazaar.dealers.values import Values
+        values = Values(me, catalog or {})
+    except Exception:  # noqa: BLE001 - the picture must never fail on a value lookup
+        values = None
+
+    def next_value(ref):
+        try:
+            return round(float(values.next_copy(ref)), 1) if values is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def refs(side):
+        return [a.get("ref") for a in side.get("assets") or [] if a.get("ref")] + \
+               [t.split(":", 1)[1] for t in side.get("types") or [] if ":" in str(t)]
+
+    out = []
+    for o in my_offers:
+        maker = str(o.get("maker") or "")
+        if not maker or re.fullmatch(r"t\d+", maker) or o.get("to") != US or o.get("status", "open") != "open":
+            continue
+        g, w = o.get("give") or {}, o.get("want") or {}
+        they_give, we_give = refs(g), refs(w)
+        get_value = int(g.get("cash") or 0)
+        give_value = int(w.get("cash") or 0)
+        known = True
+        gets = []
+        for ref in they_give:
+            v = None if str(ref).startswith(("sobre", "pack")) else next_value(ref)
+            known = known and v is not None
+            get_value += v or 0
+            gets.append({"ref": ref, "value_to_us": v})
+        gives = []
+        for a in w.get("assets") or []:
+            v = (held.get(a.get("id")) or {}).get("your_value")
+            known = known and v is not None
+            give_value += v or 0
+            gives.append({"ref": a.get("ref"), "value_to_us": v})
+        for t in w.get("types") or []:
+            if str(t).startswith("card:"):
+                ref = str(t)[5:]
+                vals = sorted((x.get("your_value") or 0) for x in held.values() if x.get("ref") == ref)
+                v = vals[0] if vals else None
+                known = known and v is not None
+                give_value += v or 0
+                gives.append({"ref": ref, "value_to_us": v})
+        out.append({"offer": o.get("id"), "dealer": maker, "thread": o.get("thread"),
+                    "kind": "dealer_offer", "final": bool(o.get("final")), "expires_tick": o.get("expires_tick"),
+                    "they_give": {"cash": g.get("cash") or 0, "cards": gets},
+                    "we_give": {"cash": w.get("cash") or 0, "cards": gives},
+                    "value_gain": round(get_value - give_value, 1) if known else None,
+                    "how_to_take": "not accept_offers: use a dealer_order for this dealer and card so the dealers "
+                                   "domain accepts inside the thread, inside your bound"})
     return out
 
 
@@ -837,6 +899,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venues", lambda: venues(venue_list, our_venue)),
                      ("our_offer_outliers", lambda: offer_outliers(my_offers, me, record)),
                      ("offers_to_us", lambda: offers_to_us(my_offers, me, _allies())),
+                     ("dealer_offers_to_us", lambda: dealer_offers_to_us(my_offers, me, catalog)),
                      ("our_stale_offers", lambda: stale_offers(my_offers, feed)),
                      ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live)),
                      ("scoreboard", lambda: scoreboard(record, now)),
