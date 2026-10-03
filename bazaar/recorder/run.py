@@ -34,7 +34,7 @@ def build(url: str | None = None, token: str | None = None, public_url: str | No
     keyed_url = (url or config.GATEWAY_URL).rstrip("/")
     tok = config.GATEWAY_TOKEN if token is None else token
     # Live: public reads go straight to the public API (keyless, its own budget); against a local sim, to the sim.
-    pub = public_url or (keyed_url if url else config.PUBLIC_URL)
+    pub = public_url or config.ENV.get("BAZAAR_PUBLIC_URL") or (keyed_url if url else config.PUBLIC_URL)
     public = Lane("public", pub, PUBLIC_RPS, burst=2.0)
     keyed = Lane("keyed", keyed_url, KEYED_RPS, headers={"X-Team-Key": tok}, burst=1.0) if tok else None
     store = Store(root or (config.DATA / "record"))

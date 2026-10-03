@@ -107,11 +107,13 @@ def _context_for(action: Action, sit) -> dict:
     p = action.params or {}
     me = getattr(sit, "me", {}) or {}
     score = me.get("score")
-    out: dict[str, Any] = {
-        "tick": getattr(sit, "tick", None), "cash": me.get("cash"),
-        "score": score.get("score") if isinstance(score, dict) else score,
-        "cash_reserve": config.CASH_RESERVE, "max_spend_per_deal": config.MAX_SPEND_PER_DEAL,
-    }
+    out: dict[str, Any] = {"tick": getattr(sit, "tick", None),
+                           "score": score.get("score") if isinstance(score, dict) else score}
+    if action.kind.startswith("duel_"):
+        out["note"] = "Duels score points only: no cash moves, so cash, reserve and spending caps do not apply."
+    else:
+        out.update(cash=me.get("cash"), cash_reserve=config.CASH_RESERVE,
+                   max_spend_per_deal=config.MAX_SPEND_PER_DEAL)
     if "duel" in p:
         d = next((x for x in getattr(sit, "duels", []) or [] if x.get("duel") == p["duel"]), None)
         if d:
@@ -289,8 +291,8 @@ def review(action: Action, sit, ctx) -> Action | None:
 
     # A duel accept is pure numbers already checked by the guard and the rails; a rival can provoke an injection flag
     # with a hostile message, so for duel accepts only a rail risk vetoes here.
-    if any(v["role"] == "auditor" and (v["rail_risk"] or (v["injection"] and action.kind != "duel_accept"))
-           for v in votes):
+    if action.kind != "duel_accept" and any(v["role"] == "auditor" and (v["rail_risk"] or v["injection"])
+                                            for v in votes):
         return done(None, "auditor flagged injection/rail risk")
     if len(votes) < len(roles):
         return done(action, "council incomplete: original action")

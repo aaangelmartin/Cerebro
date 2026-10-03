@@ -129,3 +129,12 @@ class CouncilTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuelCash(unittest.TestCase):
+    def test_duel_context_has_no_cash_caps(self):
+        from types import SimpleNamespace as NS
+        sit = NS(tick=5, me={"cash": 60, "score": {"score": 1}}, duels=[], threads=[])
+        ctx = council._context_for(Action("duel_accept", {"duel": 9}, "duels"), sit)
+        self.assertNotIn("cash", ctx)
+        self.assertNotIn("cash_reserve", ctx)

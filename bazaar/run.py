@@ -400,6 +400,14 @@ class Runner:
                 self._ledger("decision", a, Verdict(False, "council", "vetoed by the council"),
                              tick=sit.tick, dry_run=False)
                 self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"by": "council"}))
+                alt = None
+                if self.arbiter is not None and hasattr(self.arbiter, "alternative"):
+                    try:
+                        alt = self.arbiter.alternative(a)       # a vetoed duel accept still answers the rival
+                    except Exception:  # noqa: BLE001
+                        alt = None
+                if alt is not None:
+                    out.append(alt)
             else:
                 out.append(r)
         return out
@@ -590,9 +598,11 @@ class Runner:
             tid = t.get("id") or t.get("thread")
             if (tid is not None and _is_team(t.get("with")) and (t.get("status") or "open") == "open"
                     and tid not in self.closed_team_threads):
-                self.closed_team_threads.add(tid)
+                if self.can_write(ctx.control if ctx is not None else self.control()):
+                    self.closed_team_threads.add(tid)
+                who = t.get("team") if t.get("team") not in (None, (sit.me or {}).get("id")) else t.get("with")
                 out.append(Action(kind="close_thread", params={"thread": tid}, domain="market", source="code",
-                                  reason=f"Close the thread {t.get('with')} opened with us: it holds one of our 6 "
+                                  reason=f"Close the thread {who} opened with us: it holds one of our 6 "
                                          "thread slots and the bot trades with teams through offers."))
         vid = _own_venue(sit)
         if vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H:

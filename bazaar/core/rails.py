@@ -365,8 +365,16 @@ def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
     reserve = _cap(ctx, "cash_reserve", config.CASH_RESERVE)
     if action.kind != "venue_open" and _venue_pending(sit, ctx):
         reserve += _venue_reserve(sit)                         # keep the bond for our venue until it is open
-    if cash - spend < reserve:
-        return Verdict(False, "cash", f"cash {cash:.0f} - {spend} < reserve {reserve}")
+    committed = 0
+    if action.kind != "venue_open":
+        try:
+            from .context import committed_cash
+            committed = committed_cash(sit) - (spend if action.kind in ("thread_message", "post_offer") else 0)
+            committed = max(0, committed)
+        except Exception:  # noqa: BLE001
+            committed = 0
+    if cash - spend - committed < reserve:
+        return Verdict(False, "cash", f"cash {cash:.0f} - {spend} - promised {committed} < reserve {reserve}")
     if action.kind == "venue_open":
         return OK                                              # a refundable bond, not a purchase
     per_deal = _cap(ctx, "max_spend_per_deal", config.MAX_SPEND_PER_DEAL)
