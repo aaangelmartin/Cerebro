@@ -12,7 +12,7 @@
 .scr-rivales .t10-down { color: var(--bad, #e5534b); }
 .scr-rivales .t10-warn { color: var(--warn, #e8a33d); }
 .scr-rivales .t10-accent { color: var(--t-duelo, #9b7bff); }
-.scr-rivales .t10-usrow { background: var(--s2, #1b1b1b); box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-rivales .t10-usrow { background: var(--s2, #1b1b1b); box-shadow: inset 3px 0 0 var(--ink, #eee); }
 .scr-rivales .t10-us { color: var(--ink, #eee); font-weight: 600; }
 .scr-rivales .t10-who { font-size: 12px; color: var(--ink-2, #bbb); padding: 2px 6px; background: var(--s2, #1b1b1b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
 .scr-rivales .t10-kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line, #262626); font-size: 12px; }
@@ -32,8 +32,10 @@ div.scr-rivales { display: grid; grid-template-columns: 280px minmax(0, 1fr); ga
 .scr-rivales .r-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .scr-rivales .r-mid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .scr-rivales .r-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px 40px; gap: 8px; align-items: center; padding: 8px 6px; border-bottom: 1px solid var(--line, #262626); font-size: 13px; }
-.scr-rivales .r-item:hover, .scr-rivales .r-item.on { background: var(--s2, #1b1b1b); }
-.scr-rivales .r-item.on { box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-rivales .r-item:hover { background: var(--s2, #1b1b1b); }
+.scr-rivales .r-item.on { background: color-mix(in srgb, var(--ink-3, #777) 16%, transparent); }
+.scr-rivales .r-item.on { box-shadow: inset 3px 0 0 var(--ink-3, #777); outline: 1px solid var(--line-2, #333); outline-offset: -1px; }
+.scr-rivales .r-item.on.t10-usrow { box-shadow: inset 3px 0 0 var(--ink, #eee); }
 .scr-rivales .r-item-name { display: flex; flex-direction: column; min-width: 0; }
 .scr-rivales .r-item-name b { font-weight: 500; }
 .scr-rivales .r-item-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
