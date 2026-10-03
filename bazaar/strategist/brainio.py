@@ -422,7 +422,9 @@ def validate(plan: dict, pic: dict) -> list[str]:
     """Code-side checks of a sanitised plan against the picture. Returns errors (empty = valid)."""
     errors = []
     sets = pic.get("sets") or {}
-    missing_value = {m["ref"]: m.get("value_to_us") for s in sets.values() for m in s.get("missing") or []}
+    # the card that completes a page is worth its page bonus too (sets[..].missing[..].value_with_page_bonus)
+    missing_value = {m["ref"]: m.get("value_with_page_bonus") or m.get("value_to_us")
+                     for s in sets.values() for m in s.get("missing") or []}
     page_refs = set(missing_value)
     avoid = set(plan.get("avoid_buy_sets") or []) | set((pic.get("control") or {}).get("avoid_buy_sets") or [])
     held_refs = set(pic.get("held_refs") or [])

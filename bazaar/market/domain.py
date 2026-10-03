@@ -47,6 +47,7 @@ SCARCE_SETS = {"LAV", "MAL", "RET"}
 MAX_OWN_LISTINGS = 8            # our sell listings at once (team cap 30; leave room)
 BRAIN_POST_PRIORITY = 50.0     # the brain's posts (and the cancels that free their card) outrank fallback posts
 POSTS_PER_TICK = 3              # new sells + bids + swaps per tick (team cap 12, shared)
+LAST_CARD_BID_BOOK = 3.0        # bid for the last page card (team sellers only): up to 3x book (30 P a common)
 CANCELS_PER_TICK = 2
 LIST_EXPIRES = 60               # ticks
 BRAIN_REPOST_TICKS = 120        # an identical successful brain post is not repeated within this many ticks
@@ -895,12 +896,23 @@ class MarketDomain:
         bid_room = max(0, min(MAX_OWN_BIDS - kinds.count("bid"), room_total))
         bids = proto.bid_candidates(values, counts, venues, cash_room, wanted, bid_room) if bid_room else []
         bids = [b for b in bids if b.max_price <= per_deal]
-        from bazaar.core.goal import pending as _goal_pending
-        goal = _goal_pending(sit, control, values)  # cash is saved for these: bid only on them
+        from bazaar.core.goal import last_card_value as _last_value, pending as _goal_pending, team_only as _team_only
+        goal = _goal_pending(sit, control, values, team=True)  # cash is saved for these: bid only on them
         if self._funding:                           # raising cash for a bargain: no cash parked in bids either
             bids = []
+        team_goal: set[str] = set()
         if goal:                                    # goal cards come from the dealers: no cash parked in bids
             bids = []
+            # ...except the common/uncommon that completes a page: only a TEAM sale of it scores, so we bid for it
+            team_goal = {r for r in goal if _team_only(values, control, r)}
+            for r in sorted(team_goal - wanted)[:bid_room] if not (self._funding or cautious) else []:
+                price = min(int(goal[r]), int(values.book(r) * LAST_CARD_BID_BOOK), proto.MAX_BID_P, per_deal,
+                            int(avail - committed))
+                if price >= 1:
+                    v = _last_value(values, r)
+                    bids.append(BidCand(id=f"g{len(bids) + 1}", ref=r, value=round(v, 1), min_price=1,
+                                        max_price=price, price=price, venue=proto.choose_venue(venues, price, 1),
+                                        score=round(v - price, 2)))
 
         # swaps: our duplicates / low-affinity cards for cards we lack, aimed at teams that value what we give
         swap_room = max(0, min(MAX_OWN_SWAPS - kinds.count("swap"), room_total))
@@ -940,7 +952,7 @@ class MarketDomain:
         if goal:                                    # free the cash locked in bids for other cards
             seen = {o.get("id") for o, _ in stale}
             for o in own_market:
-                if offer_kind(o) == "bid" and o.get("id") not in seen:
+                if offer_kind(o) == "bid" and o.get("id") not in seen and not (set(want_cards(o)) & team_goal):
                     stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
         # hands off protected offers; a hand-posted one goes only when the brain's plan names its id
