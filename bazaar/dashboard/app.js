@@ -233,6 +233,22 @@
     if (/abuela/i.test(n)) return "Abuela";
     return words[words.length > 1 && p.id && words.some((w) => w.toLowerCase() === p.id) ? words.findIndex((w) => w.toLowerCase() === p.id) : 0] || n;
   }
+  function recorderBlock(r) {
+    // Is everything that happens (ours and rivals') being recorded right now?
+    const stale = r.age_s == null || r.age_s > 120;
+    const down = (r.down || []).length > 0;
+    let text = "GRABANDO", tone = "ok";
+    if (stale || r.state == null) { text = "SIN LATIDO"; tone = "bad"; }
+    else if (down || /down/.test(String(r.state))) { text = "CORTE"; tone = "bad"; }
+    else if (r.state === "closed") { text = "EN ESPERA"; tone = "ok"; }
+    const gaps = Number(r.feed_gaps || 0);
+    const sub = (stale ? "latido —" : "latido " + Math.round(r.age_s) + " s") + " · " +
+      (gaps ? gaps + " huecos en el feed" : "feed sin huecos") + (down ? " · sin red: " + r.down.join(", ") : "");
+    return el("div", { class: "sb-sec" },
+      el("div", { class: "sb-line" }, el("span", null, "Grabación"), pill(text, tone)),
+      el("div", { class: "sb-sub" }, sub));
+  }
+
   function renderStatus(d) {
     const box = $("status-box");
     const procs = d.processes || [];
@@ -275,6 +291,7 @@
         el("div", { class: "sb-sub" }, (bSub || "encendido") + (bTone === "ok" || !bSub ? " · " + okN + "/" + procs.length + " procesos" : "")),
         el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : "CERRADO", open ? "ok" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
+      recorderBlock(d.recorder || {}),
       el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),
         window.ui.meter({ label: "Aceptar", value: accepted, max: limits.accepts_per_team_per_tick }),
         window.ui.meter({ label: "Conversac.", value: threads, max: limits.max_open_threads_per_team }),

@@ -236,6 +236,16 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
     return out
 
 
+def recorder_view(live: Path, now: float) -> dict:
+    """Is everything being recorded? Heartbeat, lane outages, feed gaps (for the sidebar)."""
+    st = _read_json(live / "recorder_status.json", {}) or {}
+    lanes = st.get("lanes") or {}
+    down = [k for k, v in lanes.items() if (v or {}).get("down_since")]
+    return {"state": st.get("state"), "age_s": _age(st.get("updated"), now), "feed_gaps": st.get("feed_gaps", 0),
+            "last_event_id": st.get("last_event_id"), "down": down,
+            "rps": {k: (v or {}).get("rps_60s") for k, v in lanes.items()}}
+
+
 # --------------------------------------------------------------------------- alerts
 def alerts(live: Path, status: dict, broker: dict, lab_v: dict) -> list[dict]:
     out = []
@@ -292,6 +302,7 @@ def build(live: Path, lab: Path, stop_file: Path, since: int | None = None, now:
         "lab": lab_v,
         "alerts": alerts(live, status, broker, lab_v),
         "processes": processes(live, lab, status, broker, now, gw),
+        "recorder": recorder_view(live, now),
         "threads": threads,
         "activity": rows,
         "last_id": last_id,
