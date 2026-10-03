@@ -88,13 +88,14 @@ class GateTest(unittest.TestCase):
                               "item": "LAV-06", "rarity": "uncommon", "dealer_prices": [[i * 20, 13, False], [i * 20 + 1, 15, True]],
                               "team_prices": [[i * 20, 30], [i * 20 + 1, 20]], "final": True, "status": "deal",
                               "deal_price": 15, "first_tick": i * 20, "last_tick": i * 20 + 1}
+            c.threads[key]["lc"] = 100.0 + i                  # all seen after the lesson was created (holdout)
             c.evidence[f"thr:live:{i}"] = {"src": team, "tick": i * 20, "w": f"live:{i * 20 // 30}", "origin": "live"}
         for i in range(20):
             key = f"live:thr:our{i}"
             c.threads[key] = {"key": key, "id": f"our{i}", "origin": "live", "dealer": "chato", "team": "t10",
                               "side": "buy", "item": "LAV-06", "rarity": "uncommon", "dealer_prices": [[1, 13, False]],
                               "team_prices": [], "final": False, "status": "closed", "deal_price": None}
-        self.add(status="shadow")
+        self.add(status="shadow", backtest={"created_lc": 50.0})
         moves = gate.step(self.store, c, run_sim=True)
         self.assertEqual(self.store.get("T1").status, "canary", moves)
         self.assertEqual(self.store.get("T1").weight, 0.3)
@@ -124,11 +125,15 @@ class GateTest(unittest.TestCase):
         gate.step(self.store, self.corpus, run_sim=False)
         self.assertEqual(self.store.get("T1").status, "retired")
 
-    def test_ttl(self):
+    def test_ttl_runs_on_the_live_clock(self):
         l = self.add(params={"prediction": {"kind": "duel_fast", "max_rounds": 99}})  # lift <= 0
-        bt = {"status_since": time.time() - 7 * 3600}
+        bt = {"status_since": time.time() - 7 * 3600, "status_since_lc": 0.0}
         self.store.upsert(Lesson(**{**l.__dict__, "backtest": bt}), bump=False)
-        gate.step(self.store, Corpus(), run_sim=False)
+        gate.step(self.store, Corpus(), run_sim=False)          # 7 h of wall clock, no live play yet
+        self.assertEqual(self.store.get("T1").status, "proposed")
+        c = Corpus()
+        c.live_clock = 7 * 3600.0
+        gate.step(self.store, c, run_sim=False)
         self.assertEqual(self.store.get("T1").status, "retired")
 
 
@@ -151,8 +156,10 @@ class SeedTest(unittest.TestCase):
             self.assertFalse(gate.touches_rails(l.rule, l.params), l.id)
             if l.status == "active":
                 self.assertTrue(0.6 <= l.weight <= 0.8)
-        self.assertGreater(by.get("active", 0), 5)
-        self.assertGreater(by.get("canary", 0), 0)
+            if l.status == "active":
+                self.assertGreaterEqual(l.n, 5, l.id)              # thin seeds are canary at most
+        self.assertGreaterEqual(by.get("active", 0), 3)
+        self.assertGreater(by.get("canary", 0), 5)
 
 
 class HypothesizeTest(unittest.TestCase):

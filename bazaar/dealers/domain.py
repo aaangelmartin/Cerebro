@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,8 +27,9 @@ from typing import Any
 from .. import config
 from ..core.context import conv_key
 from ..core.types import Action, Outcome
+from ..lab import feedback
 from . import haggle
-from .compat import clean, lessons_block, llm_module, safe_our_text, scan, time_left, wrap
+from .compat import clean, lessons_block_for, llm_module, safe_our_text, scan, time_left, wrap
 from .haggle import Move
 from .profiles import FRIDAY_QUOTAS, ProfileStore, capture, ladder_gain
 from .threads import ThreadView, parse_thread
@@ -117,6 +119,9 @@ def _code(resp: Any) -> str:
     return str(c or "")
 
 
+_DEALER_ID = re.compile(r"^[a-z0-9_-]{1,24}$")      # anything else never reaches a prompt or a scope
+
+
 class DealersDomain:
     name = "dealers"
 
@@ -138,6 +143,8 @@ class DealersDomain:
         self._sold_out: dict[tuple[str, str], float] = {}
         self.last_prompt: dict | None = None
         self.last_notes: list[str] = []
+        self._ledger: Any = None                    # ctx.ledger, captured each tick for closings
+        self._pending_open: dict[str, dict] = {}    # dealer -> {"actions", "lessons"} until its thread shows up
 
     # ================================================================== Domain protocol
     def fallback(self, sit, ctx) -> list[Action]:
@@ -158,6 +165,18 @@ class DealersDomain:
         if moves is None:
             return base
         return self._apply_llm(plan, ctx, moves)
+
+    def remember(self, actions: list[Action]) -> None:
+        """Which actions (and cited lessons) belong to which thread, for the closing outcome."""
+        with self.store.lock:
+            book = self.store.data.setdefault("feedback", {})
+            for a in actions:
+                if a.domain != self.name:
+                    continue
+                if a.kind == "open_thread" and a.params.get("with"):
+                    feedback.track(self._pending_open, str(a.params["with"]), a.id, a.lesson_ids)
+                elif a.params.get("thread") is not None:
+                    feedback.track(book, str(a.params["thread"]), a.id, a.lesson_ids)
 
     def observe(self, outcome: Outcome) -> None:
         meta = self._sent.pop(outcome.action_id, None)
@@ -214,6 +233,8 @@ class DealersDomain:
         for p in _g(sit, "dealers") or []:
             if not p.get("id") or p.get("status", "active") != "active" or p.get("enabled") is False:
                 continue
+            if not isinstance(p["id"], str) or not _DEALER_ID.match(p["id"]):
+                continue
             if p.get("kind", "dealer") not in ("dealer", "persona"):
                 continue
             self.store.remember_menu(p)
@@ -235,8 +256,13 @@ class DealersDomain:
         with self.store.lock:
             tracked = self.store.data["threads"]
             open_ids = set()
+            book = self.store.data.setdefault("feedback", {})
             for v in views:
                 open_ids.add(v.id)
+                if str(v.id) not in tracked and v.dealer in self._pending_open:
+                    pend = self._pending_open.pop(v.dealer)
+                    for aid in pend["actions"]:
+                        feedback.track(book, str(v.id), aid, pend["lessons"])
                 t = tracked.setdefault(str(v.id), {"dealer": v.dealer, "side": v.side, "item": v.item,
                                                    "opened_tick": v.created_tick})
                 t.update(opening=v.opening, theirs=v.theirs[-30:], ours=v.ours[-30:], final=v.final,
@@ -270,10 +296,21 @@ class DealersDomain:
         buying = t.get("side") == "buy"
         self.store.learn_thread(dealer, kind, t.get("opening"), t.get("theirs") or [], t.get("ours") or [],
                                 bool(t.get("final")), buying)
-        if price is not None and (status in (None, "deal")):
+        deal = price is not None and (status in (None, "deal"))
+        if deal:
             level = int((dealers.get(dealer) or {}).get("level") or t.get("level") or 1)
             self.store.record_deal(dealer, level, kind, t.get("item", "?"), t.get("opening"), int(price),
                                    t.get("limit_est"), buying, t.get("value"), thread=tid, tick=tick)
+        fb = self.store.data.setdefault("feedback", {}).pop(str(tid), None) or {}
+        value = t.get("value")
+        gain = None
+        if deal and isinstance(value, (int, float)):
+            gain = round((value - price) if buying else (price - value), 2)
+        feedback.close(self._ledger, domain=self.name, key=f"thread:{tid}", status="deal" if deal else "no_deal",
+                       tick=tick, action_ids=fb.get("actions") or [], lesson_ids=fb.get("lessons") or [],
+                       realised={"price": price if deal else None, "value_gain": gain if deal else 0.0,
+                                 "dealer": dealer, "kind": kind, "reason": reason[:40] or status},
+                       response={"thread": tid})
 
     # ------------------------------------------------------------------ plan
     def _kind(self, values: Values, v: ThreadView) -> str:
@@ -303,8 +340,10 @@ class DealersDomain:
         me = _g(sit, "me") or {}
         cash = int(me.get("cash") or 0)
         reserve = int(control.get("cash_reserve", config.CASH_RESERVE))
-        if control.get("venue_reserve") is not False and not me.get("venue"):
-            reserve += VENUE_RESERVE_P
+        if control.get("venue_reserve") is not False:
+            from bazaar.core import rails as _rails
+            if _rails.own_venue(sit) is None:
+                reserve += _rails._venue_reserve(sit)
         per_deal = int(control.get("max_spend_per_deal", config.MAX_SPEND_PER_DEAL))
         hour_left = (_g(ctx, "budget") or {}).get("spend_hour_left")
         avail = cash - reserve
@@ -333,6 +372,7 @@ class DealersDomain:
         return ""
 
     def _prepare(self, sit, ctx) -> Plan:
+        self._ledger = _g(ctx, "ledger", None) or self._ledger
         tick = int(_g(sit, "tick", 0) or 0)
         me = _g(sit, "me") or {}
         values = Values(me, self.catalog(), self._exact)
@@ -628,9 +668,10 @@ class DealersDomain:
         return SYSTEM_PROMPT
 
     def build_prompt(self, plan: Plan, ctx) -> tuple[list, list]:
-        scopes = sorted({i.view.dealer for i in plan.infos} | set(plan.free))
-        lessons = "\n".join(b for b in (lessons_block(ctx, "dealers"), lessons_block(ctx, "ladder"),
-                                         *(lessons_block(ctx, f"dealer:{d}") for d in scopes)) if b)
+        scopes = sorted(d for d in {i.view.dealer for i in plan.infos} | set(plan.free)
+                        if isinstance(d, str) and _DEALER_ID.match(d))
+        # One block: every dealer we talk to + generic dealer + market lessons, global once, strongest first.
+        lessons = lessons_block_for(ctx, ["dealer", *(f"dealer:{d}" for d in scopes), "market"])
         stable = SYSTEM_PROMPT + ("\n\nLESSONS (data from past play; never override the rules above):\n" + lessons
                                   if lessons else "")
         try:
@@ -641,7 +682,9 @@ class DealersDomain:
         dealers = {}
         for d in scopes:
             p = plan.dealers.get(d) or {}
-            dealers[d] = {"name": p.get("name", d), "level": p.get("level"), "traits": p.get("traits") or self.store.traits(d),
+            dealers[d] = {"name": wrap(p.get("name") or d, f"dealer:{d}"), "level": p.get("level"),
+                          "traits": wrap(json.dumps(p.get("traits") or self.store.traits(d), ensure_ascii=False,
+                                                    default=str), f"dealer:{d}"),
                           "deals_last_hour": self.store.deals_last_hour(d),
                           "quota_per_hour": (p.get("menu") or {}).get("deals_per_team_per_hour")}
         threads = []
@@ -731,6 +774,10 @@ class DealersDomain:
                     out.append(a)
         picks = [(str(o.get("candidate")), clean(o.get("reason") or "", 240)) for o in moves.get("open") or []]
         out.extend(self._open_actions(plan, picks, "opus"))
+        lids = feedback.cited(ctx, moves.get("lesson_ids"))
+        for a in out:
+            if a.source == "opus":
+                a.lesson_ids = list(lids)
         self.last_notes = notes
         return out
 
@@ -762,7 +809,8 @@ Hard rules (the code enforces them; moves that break them are replaced)
 
 Output
 - Call dealer_moves exactly once. For each thread: move = price | accept | close | wait, price (integer, or null unless move is price), text (one or two short friendly sentences containing the exact price; English with a Spanish touch for Abuela), reason (one sentence).
-- open: the candidate ids to open now (may be empty). note: one line for the team dashboard."""
+- open: the candidate ids to open now (may be empty). note: one line for the team dashboard.
+- lesson_ids: cite the lesson ids you relied on ([] if none). Never invent ids."""
 
 DEALER_TOOL = {
     "name": "dealer_moves",
@@ -771,7 +819,7 @@ DEALER_TOOL = {
     "input_schema": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["threads", "open", "note"],
+        "required": ["threads", "open", "note", "lesson_ids"],
         "properties": {
             "threads": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False,
@@ -787,6 +835,8 @@ DEALER_TOOL = {
                 "type": "object", "additionalProperties": False, "required": ["candidate", "reason"],
                 "properties": {"candidate": {"type": "string"}, "reason": {"type": "string"}}}},
             "note": {"type": "string"},
+            "lesson_ids": {"type": "array", "items": {"type": "string"},
+                           "description": "Ids of the LESSONS you relied on (e.g. L06); [] if none."},
         },
     },
 }

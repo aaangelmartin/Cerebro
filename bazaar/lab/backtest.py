@@ -4,9 +4,15 @@ A prediction is a small dict with a ``kind`` from ``KINDS`` (the hypothesis prom
 list). Every kind turns the corpus into cases, says per case whether the prediction hit, and
 compares with a naive baseline, so ``lift = hit - baseline_hit`` (absolute) except where noted.
 
-Evidence diversity (anti-poisoning) is computed here from the cases' sources and time windows:
-evidence from a single team counts half, and so does any source that supplies more than a third of
-the cases. The gate needs ``n_eff >= 8`` from ``>= 3`` sources across ``>= 2`` windows.
+Evidence diversity (anti-poisoning) is computed here from the cases' sources and time windows: each
+source counts for at most 2 effective cases (a settlement's source is the pair of parties), and the
+lift is recomputed with the top source removed (``lift_wo_top``). The gate needs ``n_eff >= 8`` from
+``>= 3`` sources across ``>= 2`` windows, and lift >= 0.05 both with and without the top source.
+
+Holdout: ``backtest_lesson`` also evaluates only live cases first seen after the lesson was created
+(``holdout_n``, ``holdout_lift``), measured on the corpus' live clock (``lc``, seconds of live play,
+robust to tick renumbering); promotion to canary needs that, so no lesson is judged on the data it was
+fitted to.
 """
 from __future__ import annotations
 
@@ -28,6 +34,26 @@ KINDS: dict[str, str] = {
     "score_delta": '{"kind":"score_delta","class_prefix":"dealer_buy:pack:sobre_plata","sign":-1}  (leaderboard jump after one public deal of that class; classes look like dealer_buy|dealer_sell|team_buy|team_sell:<rarity>:over_book|under_book)',
 }
 MIN_CASES = 3
+SOURCE_CAP = 2.0          # effective cases one source can contribute
+
+
+class Filter:
+    """Which cases count: all, one origin ('friday' | 'live'), or live cases seen after a live-clock mark."""
+
+    def __init__(self, origin: str | None = None, after_lc: float | None = None):
+        self.origin, self.after_lc = origin, after_lc
+
+    def ok(self, rec: dict) -> bool:
+        if self.origin is not None and rec.get("origin") != self.origin:
+            return False
+        if self.after_lc is not None:
+            lc = rec.get("lc")
+            return isinstance(lc, (int, float)) and lc > self.after_lc
+        return True
+
+
+def _flt(origin) -> Filter:
+    return origin if isinstance(origin, Filter) else Filter(origin)
 
 
 def _stage_value(t: dict, stage: str) -> float | None:
@@ -57,23 +83,48 @@ def diversity(case_eids: list[str], corpus: Corpus) -> dict[str, Any]:
         wins.add(e.get("w") or window_of(e.get("tick"), e.get("origin", "live")))
     n = len(case_eids)
     count = Counter(srcs)
-    single = len(count) == 1
-    n_eff = 0.0
-    for s in srcs:
-        heavy = single or (n >= 3 and count[s] > n / 3)
-        n_eff += 0.5 if heavy else 1.0
+    n_eff = sum(min(SOURCE_CAP, k) for k in count.values())
     return {"n": n, "sources": len(count), "windows": len(wins), "n_eff": round(n_eff, 2),
             "top_source_share": round(max(count.values()) / n, 3) if n else 0.0}
 
 
+def _default_lift(hits: list[bool], base: list[bool]) -> Callable[[list[int]], float | None]:
+    aligned = len(base) == len(hits)
+
+    def f(idx: list[int]) -> float | None:
+        if not idx:
+            return None
+        h = sum(hits[i] for i in idx) / len(idx)
+        if aligned:
+            b = sum(base[i] for i in idx) / len(idx)
+        elif base:
+            b = sum(base) / len(base)
+        else:
+            return None
+        return round(h - b, 3)
+    return f
+
+
+def _without_top(eids: list[str], corpus: Corpus, lift_fn: Callable[[list[int]], float | None]) -> float | None:
+    """The lift recomputed without the cases of the source that supplied most of them."""
+    srcs = [(corpus.evidence.get(e) or {}).get("src") or "?" for e in eids]
+    if len(set(srcs)) < 2:
+        return None
+    top = Counter(srcs).most_common(1)[0][0]
+    return lift_fn([i for i, s in enumerate(srcs) if s != top])
+
+
 def _result(kind: str, hits: list[bool], base: list[bool], eids: list[str], corpus: Corpus,
-            lift: float | None = None, extra: dict | None = None) -> dict[str, Any]:
+            lift: float | None = None, extra: dict | None = None,
+            lift_fn: Callable[[list[int]], float | None] | None = None) -> dict[str, Any]:
     n = len(hits)
     hit = round(sum(hits) / n, 3) if n else None
     bh = round(sum(base) / len(base), 3) if base else None
     if lift is None and hit is not None and bh is not None:
         lift = round(hit - bh, 3)
+    fn = lift_fn or _default_lift(hits, base)
     out = {"kind": kind, "hit": hit, "baseline_hit": bh, "lift": lift, "cases": eids[:40],
+           "lift_wo_top": _without_top(eids, corpus, fn) if n else None,
            **diversity(eids, corpus), **(extra or {})}
     out["ok"] = n >= MIN_CASES
     if not out["ok"]:
@@ -81,18 +132,22 @@ def _result(kind: str, hits: list[bool], base: list[bool], eids: list[str], corp
     return out
 
 
-def _origin_ok(origin: str | None, o: str) -> bool:
-    return origin is None or origin == o
+def _origin_ok(origin, rec: dict) -> bool:
+    return _flt(origin).ok(rec)
 
 
-def evaluate(pred: dict | None, corpus: Corpus, origin: str | None = None) -> dict[str, Any]:
-    """Evaluate one prediction. ``origin`` restricts to 'friday' or 'live' cases."""
+def evaluate(pred: dict | None, corpus: Corpus, origin: str | Filter | None = None,
+             after_lc: float | None = None) -> dict[str, Any]:
+    """Evaluate one prediction. ``origin`` restricts to 'friday' or 'live' cases; ``after_lc`` to live cases
+    first seen after that live-clock mark (the holdout)."""
+    if after_lc is not None:
+        origin = Filter("live", float(after_lc))
     if not isinstance(pred, dict) or pred.get("kind") not in KINDS:
         return {"kind": (pred or {}).get("kind") if isinstance(pred, dict) else None, "ok": False, "n": 0,
                 "hit": None, "lift": None, "note": "no falsifiable prediction"}
     fn: Callable = _EVAL[pred["kind"]]
     try:
-        return fn(pred, corpus, origin)
+        return fn(pred, corpus, _flt(origin))
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
         return {"kind": pred["kind"], "ok": False, "n": 0, "hit": None, "lift": None, "note": f"bad prediction: {e!r}"}
 
@@ -106,7 +161,8 @@ def _dealer_price(p, c, origin):
     width = max(1.0, hi - lo)
     hits, base, eids = [], [], []
     for t in c.threads.values():
-        if not _origin_ok(origin, t["origin"]) or t.get("dealer") != p.get("dealer") or t.get("side") != p.get("side"):
+        if not _origin_ok(origin, t) or t.get("dealer") != p.get("dealer") \
+                or t.get("side") != p.get("side"):
             continue
         if not _item_ok(p.get("item", "*"), t.get("rarity"), t.get("item")):
             continue
@@ -125,7 +181,7 @@ def _mirror(p, c, origin):
     width = max(0.05, hi - lo)
     hits, base, eids = [], [], []
     for t in c.threads.values():
-        if not _origin_ok(origin, t["origin"]) or t.get("dealer") != p.get("dealer"):
+        if not _origin_ok(origin, t) or t.get("dealer") != p.get("dealer"):
             continue
         if p.get("side") and t.get("side") != p.get("side"):
             continue
@@ -144,7 +200,7 @@ def _settlement(p, c, origin):
     where = p.get("where", "any")
     hits, base, eids = [], [], []
     for s in c.settlements:
-        if not _origin_ok(origin, s["origin"]) or s.get("price") is None or len(s["refs"]) != 1:
+        if not _origin_ok(origin, s) or s.get("price") is None or len(s["refs"]) != 1:
             continue
         if where == "rastro" and s.get("venue") != "rastro":
             continue
@@ -167,7 +223,7 @@ def _listing(p, c, origin):
     side = p.get("side", "ask")
     hits, base, eids = [], [], []
     for l in c.listings:
-        if not _origin_ok(origin, l["origin"]):
+        if not _origin_ok(origin, l):
             continue
         refs, price = (l["ask_refs"], l["ask"]) if side == "ask" else (l["bid_refs"], l["bid"])
         if not refs or not price:
@@ -185,7 +241,7 @@ def _listing(p, c, origin):
 
 
 def _duels(c, origin):
-    return [d for d in c.duels.values() if _origin_ok(origin, d["origin"])]
+    return [d for d in c.duels.values() if _origin_ok(origin, d)]
 
 
 def _duel_fast(p, c, origin):
@@ -203,7 +259,8 @@ def _duel_fast(p, c, origin):
     rel = round((sum(fast) / len(fast) - sum(allp) / len(allp)) / max(1.0, sum(allp) / len(allp)), 3) if fast else None
     hit = sum(hits) / len(hits)
     return _result("duel_fast", hits, [], eids, c, lift=round(hit - 0.5, 3),
-                   extra={"baseline_hit": 0.5, "rel_gain": rel, "median_points": med})
+                   extra={"baseline_hit": 0.5, "rel_gain": rel, "median_points": med},
+                   lift_fn=lambda idx: round(sum(hits[i] for i in idx) / len(idx) - 0.5, 3) if idx else None)
 
 
 def _margin(d: dict, price: float) -> float:
@@ -226,7 +283,13 @@ def _duel_accept_first(p, c, origin):
         real.append(realised)
         eids.append(f"duel:{d['origin']}:{d['id']}")
     lift = round((sum(af) - sum(real)) / max(1.0, sum(real)), 3) if real else None
-    return _result("duel_accept_first", hits, [], eids, c, lift=lift,
+
+    def lf(idx):
+        if not idx:
+            return None
+        a, r = sum(af[i] for i in idx), sum(real[i] for i in idx)
+        return round((a - r) / max(1.0, r), 3)
+    return _result("duel_accept_first", hits, [], eids, c, lift=lift, lift_fn=lf,
                    extra={"mean_accept_first": round(sum(af) / len(af), 2) if af else None,
                           "mean_realised": round(sum(real) / len(real), 2) if real else None})
 
@@ -242,8 +305,17 @@ def _rival_rate(p, c, origin):
     rate_all = sum(1 for d in ds if d["status"] == outc) / len(ds)
     inside = lo <= rate <= hi
     hits = [inside] * len(sel)
-    lift = round(abs(rate - rate_all), 3) if inside and not (lo <= rate_all <= hi) else (0.0 if inside else -0.1)
-    return _result("rival_rate", hits, [], [f"duel:{d['origin']}:{d['id']}" for d in sel], c, lift=lift,
+
+    def lift_of(r: float) -> float:
+        ins = lo <= r <= hi
+        return round(abs(r - rate_all), 3) if ins and not (lo <= rate_all <= hi) else (0.0 if ins else -0.1)
+    lift = lift_of(rate)
+
+    def lf(idx):
+        if not idx:
+            return None
+        return lift_of(sum(1 for i in idx if sel[i]["status"] == outc) / len(idx))
+    return _result("rival_rate", hits, [], [f"duel:{d['origin']}:{d['id']}" for d in sel], c, lift=lift, lift_fn=lf,
                    extra={"rate": round(rate, 3), "rate_all": round(rate_all, 3)})
 
 
@@ -263,7 +335,8 @@ def _score_delta(p, c, origin):
 
 
 def _attribution_cases(c: Corpus, origin):
-    snaps = [s for s in c.leaderboard if origin is None or s["origin"] == origin]
+    flt = _flt(origin)
+    snaps = [s for s in c.leaderboard if flt.ok(s)]
     out = []
     for a, b in zip(snaps, snaps[1:]):
         if a["origin"] != b["origin"] or b["tick"] <= a["tick"]:
@@ -303,8 +376,23 @@ def backtest_lesson(lesson, corpus: Corpus) -> dict[str, Any]:
     live = evaluate(pred, corpus, origin="live") if allr.get("ok") else {"n": 0}
     rec = {k: allr.get(k) for k in ("kind", "hit", "baseline_hit", "lift", "n", "n_eff", "sources", "windows",
                                      "top_source_share", "ok", "note")}
+    rec["lift_wo_top"] = allr.get("lift_wo_top")
     rec["live_n"] = live.get("n", 0)
     rec["live_hit"] = live.get("hit")
     rec["live_lift"] = live.get("lift")
+    created = created_lc(lesson)
+    hold = evaluate(pred, corpus, after_lc=created) if allr.get("ok") and created is not None else {"n": 0}
+    rec["holdout_after_lc"] = created
+    rec["holdout_n"] = hold.get("n", 0)
+    rec["holdout_lift"] = hold.get("lift")
     rec["cases"] = allr.get("cases", [])[:20]
     return rec
+
+
+def created_lc(lesson) -> float | None:
+    """The corpus live clock when the lesson was created (its holdout starts after it); None when unknown."""
+    v = (lesson.backtest or {}).get("created_lc")
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None

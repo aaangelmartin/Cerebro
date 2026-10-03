@@ -32,6 +32,7 @@ class Move:
     expected_points: float = 0.0
     source: str = "fallback"
     econ: dict = field(default_factory=dict)
+    lesson_ids: list = field(default_factory=list)     # lessons Claude cited (validated in the domain)
 
 
 TEMPLATES = [

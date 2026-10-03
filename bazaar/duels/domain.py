@@ -4,7 +4,9 @@ decide()   one Claude call per live duel (threads), each with the structured sta
            the economics table, the lessons and the rival's words wrapped as untrusted. Whatever comes
            back goes through policy.guard (limit, days, no repeats, exact price in the text).
 fallback() the pure-code concession schedule (policy.plan), instant.
-observe()  outcomes of our own actions; observe_closed() takes finished duels (/api/duels?done=true).
+observe()  outcomes of our own actions; observe_closed() takes finished duels (/api/duels?done=true) and
+           logs one closing outcome per duel to the ledger (deal|no_deal, points, the actions and the
+           lesson ids Claude cited) for the Lab's feedback loop.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from typing import Any
 
 from ..core.context import conv_key
 from ..core.types import Action, Outcome
+from ..lab import feedback
 from .model import DuelView, parse_duel, points
 from .opponent import OpponentMemory
 from .policy import Move, economics, guard, plan
@@ -67,6 +70,7 @@ class DuelsDomain:
         self._pool = cf.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="duel")
         self._last_ask: dict[int, tuple] = {}      # duel -> (tick, rival offer count, rival offer key)
         self._sent: dict[str, tuple[int, str, Any]] = {}    # action id -> (duel, kind, price)
+        self._ledger: Any = None                            # ctx.ledger, captured each tick for closings
         self.last_notes: dict[int, list[str]] = {}
 
     # --- helpers -------------------------------------------------------------------------------------
@@ -94,6 +98,7 @@ class DuelsDomain:
             pts = points(margin, v.decay, v.rounds)
             return Action(kind="duel_accept", params={"duel": v.id, "expect": self._expect(v)}, domain=self.name,
                           reason=mv.reason, big=True, priority=accept_priority(pts, v.ticks_left), source=mv.source,
+                          lesson_ids=list(mv.lesson_ids),
                           expected={"points": round(pts, 2), "margin": round(margin, 1), "rounds": v.rounds,
                                     "price": r.price, "days": r.days, "rival_type": opp.get("type"),
                                     "pie_est": opp.get("pie_estimate")})
@@ -102,7 +107,7 @@ class DuelsDomain:
             params["days"] = int(mv.days if mv.days is not None else 0)
         margin = v.utility(mv.price, mv.days)
         return Action(kind="duel_message", params=params, domain=self.name, reason=mv.reason, big=False,
-                      priority=round(mv.expected_points, 2), source=mv.source,
+                      priority=round(mv.expected_points, 2), source=mv.source, lesson_ids=list(mv.lesson_ids),
                       expected={"points": mv.expected_points, "points_if_accepted": mv.expected_points,
                                 "margin": round(margin, 1), "rounds_if_accepted": v.rounds_if_we_send(),
                                 "rival_type": opp.get("type"), "pie_est": opp.get("pie_estimate")})
@@ -127,6 +132,7 @@ class DuelsDomain:
 
     # --- Domain protocol -----------------------------------------------------------------------------
     def fallback(self, sit, ctx) -> list[Action]:
+        self._ledger = getattr(ctx, "ledger", None) or self._ledger
         actions = []
         for v in self._views(sit, ctx):
             opp, mv = self._base(v)
@@ -158,6 +164,7 @@ class DuelsDomain:
         return mv
 
     def decide(self, sit, ctx) -> list[Action]:
+        self._ledger = getattr(ctx, "ledger", None) or self._ledger
         views = self._views(sit, ctx)
         bases = {v.id: self._base(v) for v in views}
         llm = self._llm or (getattr(ctx, "llm", None) if ctx is not None else None) or _lazy_llm()
@@ -194,7 +201,10 @@ class DuelsDomain:
             opp, base = bases[v.id]
             mv = claude.get(v.id)
             if mv is not None:
+                mv.lesson_ids = feedback.cited(ctx, mv.lesson_ids)
                 safe, notes = guard(v, mv, fallback=base)
+                if safe is not base and safe.source == mv.source and not safe.lesson_ids:
+                    safe.lesson_ids = list(mv.lesson_ids)
                 if notes:
                     self.last_notes[v.id] = notes
                     log.info("duel %s: guard %s", v.id, notes)
@@ -217,10 +227,13 @@ class DuelsDomain:
 
     def remember(self, actions: list[Action]) -> None:
         """Optional: let observe() map action ids back to duels (run.py may call it after arbitration)."""
+        book = self.memory.data.setdefault("feedback", {})
         for a in actions:
             if a.domain == self.name:
                 self._sent[a.id] = (a.params.get("duel"), a.kind,
                                     a.params.get("price", (a.params.get("expect") or {}).get("price")))
+                if a.params.get("duel") is not None:
+                    feedback.track(book, str(a.params["duel"]), a.id, a.lesson_ids)
 
     def observe_closed(self, duels: list[dict]) -> None:
         """Finished duels from GET /api/duels?done=true: results feed the opponent model."""
@@ -228,9 +241,31 @@ class DuelsDomain:
             if not isinstance(d, dict) or d.get("status") == "live":
                 continue
             did = d.get("duel", d.get("id"))
+            known = self.memory.data["duels"].get(str(did))
+            seen_live = bool(known) and (known.get("status") == "live"     # this bot saw it while it ran
+                                         or str(did) in (self.memory.data.get("feedback") or {}))
             if str(did) not in self.memory.data["duels"]:
                 v = parse_duel({**d, "status": "live", "result": None}, int(d.get("deadline_tick") or 0))
                 if v is not None:
                     self.memory.observe_duel(v)
             self.memory.record_result(did, str(d.get("status")), price=d.get("price"),
                                       rounds=d.get("rounds"), days=d.get("days"))
+            if seen_live:
+                self._log_closing(did, d)
+
+    def _log_closing(self, did, d: dict) -> None:
+        """One closing outcome per finished duel (idempotent across calls and restarts)."""
+        reported = self.memory.data.setdefault("closings_logged", {})
+        if str(did) in reported or self._ledger is None:
+            return
+        fb = (self.memory.data.get("feedback") or {}).get(str(did)) or {}
+        status = "deal" if d.get("status") == "deal" else "no_deal"
+        rec = feedback.close(self._ledger, domain=self.name, key=f"duel:{did}", status=status,
+                             tick=d.get("deadline_tick") or d.get("tick") or 0,
+                             action_ids=fb.get("actions") or [], lesson_ids=fb.get("lessons") or [],
+                             realised={"points": d.get("result") if status == "deal" else 0.0,
+                                       "price": d.get("price"), "rounds": d.get("rounds")},
+                             response={**d, "duel": did})
+        if rec is not None:
+            reported[str(did)] = rec.get("id", True)
+            self.memory.save()

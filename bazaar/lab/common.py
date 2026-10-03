@@ -15,6 +15,9 @@ RARITY_BOOK = {"common": 10, "uncommon": 25, "rare": 70, "epic": 180, "legendary
 PACK_LIST = {"sobre_barrio": 26, "sobre_plata": 150}
 WINDOW_TICKS = 30            # a "time window" for evidence diversity (30 min on Friday's 60 s ticks)
 REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
+ID_RE = re.compile(r"^[a-z0-9_-]{1,24}$")          # dealer / team / venue ids that may reach a prompt
+TEAM_RE = re.compile(r"^t\d{1,3}$")
+RARITIES = set(RARITY_BOOK)
 
 
 @lru_cache(maxsize=1)
@@ -39,14 +42,23 @@ def rarity_of(item: str) -> str:
     if not item:
         return "unknown"
     item = item.split(":", 1)[1] if item.startswith(("card:", "pack:")) else item
-    if item.startswith("sobre_"):
+    if item.startswith("sobre_") and ID_RE.match(item):
         return f"pack:{item}"
     c = card_index().get(item)
     if c:
         return c["rarity"]
-    if REF_RE.match(item):
-        return "unknown"
-    return item
+    if item in RARITIES:
+        return item
+    return "unknown"          # never pass a foreign name through: it could reach a prompt
+
+
+def safe_id(x, default: str | None = None) -> str | None:
+    """x when it looks like a game id (^[a-z0-9_-]{1,24}$), else default."""
+    return x if isinstance(x, str) and ID_RE.match(x) else default
+
+
+def safe_team(x) -> str | None:
+    return x if isinstance(x, str) and TEAM_RE.match(x) else None
 
 
 def book_of(item: str) -> float | None:

@@ -4,10 +4,14 @@
     python -m bazaar.lab.run --once       # one full cycle including one Opus hypothesis round, then exit
     python -m bazaar.lab.run --once --no-llm
 
-Every cycle (about one tick): read the new ledger lines, handle novelty (a new dealer gets an
+Every cycle (about one tick): read the new ledger lines, feed every new closed negotiation (with the
+lesson ids the operator cited) to ``LessonStore.record_use``, handle novelty (a new dealer gets an
 Opus-drafted playbook lesson, 'proposed'; new limits, tick speed, duel decay or error codes update
 rules.json and leave a dashboard notice), run the gate. Every 30 minutes, or on novelty, one
-hypothesis round. Heartbeat in config.LAB/lab_status.json.
+hypothesis round, skipped while the corpus has not changed. Heartbeat in config.LAB/lab_status.json.
+
+At startup: an old-schema corpus is rebuilt (Friday + the whole live ledger), limits are seeded from
+data/live/known.json, and pending state migrations (``lab.migrate``) run once.
 """
 from __future__ import annotations
 
@@ -21,10 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from bazaar import config
-from bazaar.lab import gate, seed
-from bazaar.lab.common import read_json, write_json
+from bazaar.lab import gate, migrate, seed
+from bazaar.lab.common import read_json, safe_id, write_json
 from bazaar.lab.hypothesize import hypothesize
-from bazaar.lab.ingest import Ingestor, build_features, load_or_build
+from bazaar.lab.ingest import SCHEMA, Ingestor, build_features, load_or_build, seed_known
 from bazaar.lab.store import LessonStore, write_notice
 
 HYPOTHESIS_EVERY_S = 30 * 60
@@ -53,11 +57,25 @@ class Lab:
         if not (self.lab / "lessons.jsonl").exists():
             seed.seed(lab=self.lab)
         self.store = LessonStore(self.lab / "lessons.jsonl")
+        old = read_json(self.lab / "corpus.json") or {}
+        rebuilt = bool(old) and int(old.get("schema", 1)) < SCHEMA
         self.corpus = load_or_build(self.lab / "corpus.json")
-        self.ing = Ingestor(self.corpus, live=live, state_path=self.lab / "ingest_state.json")
+        self.live = Path(live or config.LIVE)
+        seed_known(self.corpus, self.live)
+        self.ing = Ingestor(self.corpus, live=self.live, state_path=self.lab / "ingest_state.json")
         self.ask, self.use_llm, self.run_sim = ask, use_llm, run_sim
+        self.migration = None
+        if rebuilt:
+            self.ing.poll()                       # re-read the whole live ledger into the new-schema corpus
+            self.apply_closings()
+            self.ing.save(self.lab / "corpus.json")
+        try:
+            self.migration = migrate.run(self.store, self.corpus, self.lab)
+        except Exception as e:  # noqa: BLE001 - a failed migration must not stop the Lab
+            self.migration = {"error": f"{type(e).__name__}: {e}"[:300]}
         st = read_json(self.lab / "lab_status.json", {}) or {}
         self.last_hyp = float(st.get("last_hypothesis_ts") or 0)
+        self.last_hyp_version = st.get("last_hypothesis_version")
         self.last_novel_hyp = 0.0
         self.last_gate = 0.0
         self.day = time.strftime("%Y-%m-%d")
@@ -97,7 +115,7 @@ class Lab:
                          path=self.lab / "notices.jsonl", novelty=n["kind"], key=n["key"], tick=n.get("tick"))
             if n["kind"] in RULE_NOVELTY:
                 self._rules_change(n)
-            if n["kind"] == "dealer":
+            if n["kind"] == "dealer" and safe_id(n.get("key")):          # only game-like ids reach Opus
                 new_dealers.append(n)
             handled.append(n)
         if new_dealers and self._can_spend() and time.time() - self.last_novel_hyp > NOVELTY_MIN_GAP_S:
@@ -117,11 +135,24 @@ class Lab:
             self.day, self.spent_today = time.strftime("%Y-%m-%d"), 0.0
         return self.use_llm and self.spent_today < LAB_DAY_CAP_USD
 
+    def apply_closings(self) -> int:
+        """record_use for every closed negotiation not applied yet (the Lab, not the trading loop, moves weights)."""
+        n = 0
+        for c in self.corpus.closings.values():
+            if c.get("applied"):
+                continue
+            if c.get("lesson_ids"):
+                self.store.record_use(list(c["lesson_ids"]), c)
+                n += 1
+            c["applied"] = True
+        return n
+
     def _hypothesize(self, focus: dict | None = None) -> dict:
         rep = hypothesize(self.corpus, self.store, focus=focus, ask=self.ask,
                           log_path=self.lab / "hypotheses.jsonl")
         self.spent_today += float(rep.get("cost_usd") or 0.0)
         self.last_hyp = time.time()
+        self.last_hyp_version = self.corpus.version
         self.last_report = {k: rep.get(k) for k in ("ts", "model", "cost_usd", "error", "focus")} | {
             "accepted": [a["id"] for a in rep.get("accepted", [])], "rejected": len(rep.get("rejected", []))}
         if rep.get("accepted"):
@@ -136,6 +167,9 @@ class Lab:
         st = {"updated": time.time(), "pid": os.getpid(), "cycles": self.cycles, "max_tick": self.corpus.max_tick,
               "lessons": gate.summary(self.store), "corpus": feats_counts, "offsets": self.ing.offsets,
               "last_hypothesis_ts": self.last_hyp, "last_hypothesis": self.last_report, "day": self.day,
+              "last_hypothesis_version": self.last_hyp_version, "corpus_version": self.corpus.version,
+              "live_clock_s": round(self.corpus.live_clock, 1), "closings": len(self.corpus.closings),
+              "migration": self.migration, "ingest_errors": self.ing.errors[-5:],
               "spent_today": round(self.spent_today, 4), "day_cap": LAB_DAY_CAP_USD,
               "pending_novelty": sum(1 for n in self.corpus.novelty if not n.get("handled")),
               "last_moves": self.last_moves[-10:], "errors": self.errors[-5:], **(extra or {})}
@@ -148,8 +182,9 @@ class Lab:
         out: dict[str, Any] = {}
         try:
             out["ingested"] = self.ing.poll()
+            out["record_use"] = self.apply_closings()
             out["novelty"] = [n["key"] for n in self.handle_novelty()]
-            due = time.time() - self.last_hyp >= HYPOTHESIS_EVERY_S
+            due = time.time() - self.last_hyp >= HYPOTHESIS_EVERY_S and self.corpus.version != self.last_hyp_version
             if (force_hypothesis or due) and self._can_spend():
                 out["hypothesis"] = self._hypothesize()
             if force_hypothesis or time.time() - self.last_gate >= GATE_EVERY_S:

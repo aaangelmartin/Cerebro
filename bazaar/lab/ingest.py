@@ -18,8 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from bazaar import config
-from bazaar.lab.common import (WINDOW_TICKS, book_of, iter_jsonl, rarity_of, read_json, read_jsonl,
-                               window_of, write_json)
+import re
+
+from bazaar.lab.common import (WINDOW_TICKS, book_of, iter_jsonl, rarity_of, read_json, read_jsonl, safe_id,
+                               safe_team, window_of, write_json)
 
 KNOWN_EVENT_TYPES = {
     "thread.message", "duel.closed", "offer.listed", "offer.cancelled", "thread.opened", "settlement",
@@ -33,6 +35,14 @@ KNOWN_DEALERS = {"abuela", "chato"}
 MAX_TEAM_EVENTS = 400
 MAX_LISTINGS = 3000
 MAX_NOVELTY = 300
+MAX_CLOSINGS = 5000
+SCHEMA = 2                 # 2: (id, tick, type) dedupe, settlement source = team pair, closings, offsets inside
+_KEY_RE = re.compile(r"^[a-z0-9_.:-]{1,40}$")
+
+
+def _safe_key(x: Any) -> str:
+    """Event types / error codes come from outside: keep them only when they look like identifiers."""
+    return x if isinstance(x, str) and _KEY_RE.match(x) else "unknown"
 
 
 def _q(xs: list[float], q: float) -> float | None:
@@ -93,8 +103,16 @@ class Corpus:
             "tick_seconds": seen.get("tick_seconds"),
         }
         self.version = d.get("version", 0)
-        # Public feed ids are global: the live recorder may replay events already loaded (e.g. Friday's tail).
-        self.event_ids: set[int] = set(d.get("event_ids", []))
+        self.schema = d.get("schema", 1 if d else SCHEMA)
+        # The live recorder may replay events already loaded (e.g. Friday's tail). A replay repeats id, tick
+        # AND type; a new game may reuse an id with another tick/type, which must not be dropped.
+        self.event_keys: set[str] = set(d.get("event_keys", []))
+        # Closed negotiations (duel / dealer thread / market offer) with their lesson ids: the feedback loop.
+        self.closings: dict[str, dict] = d.get("closings", {})
+        self.offsets: dict[str, int] = dict(d.get("ingest_offsets", {}))
+        # Seconds of LIVE play seen (from tick advances in the live feed): the clock of the lesson TTLs.
+        self.live_clock: float = float(d.get("live_clock", 0.0))
+        self.last_live_tick: int | None = d.get("last_live_tick")
 
     def to_dict(self) -> dict:
         return {
@@ -104,7 +122,9 @@ class Corpus:
             "decisions": self.decisions, "novelty": self.novelty[-MAX_NOVELTY:], "evidence": self.evidence,
             "llm_cost": self.llm_cost, "council_votes": self.council_votes, "max_tick": self.max_tick,
             "seen": {k: (sorted(v) if isinstance(v, set) else v) for k, v in self.seen.items()},
-            "version": self.version, "event_ids": sorted(self.event_ids),
+            "version": self.version, "schema": SCHEMA, "event_keys": sorted(self.event_keys),
+            "closings": dict(list(self.closings.items())[-MAX_CLOSINGS:]), "ingest_offsets": self.offsets,
+            "live_clock": round(self.live_clock, 1), "last_live_tick": self.last_live_tick,
         }
 
     # --- helpers -------------------------------------------------------------
@@ -113,7 +133,7 @@ class Corpus:
         return eid
 
     def _team_event(self, team: str, tick: int, origin: str, kind: str, detail: Any) -> None:
-        if not team or not team.startswith("t"):
+        if not safe_team(team):
             return
         lst = self.team_events.setdefault(team, [])
         lst.append([tick, origin, kind, detail])
@@ -133,6 +153,8 @@ class Corpus:
             t = {"key": key, "id": tid, "origin": origin, "dealer": None, "team": None, "side": None,
                  "item": None, "rarity": None, "dealer_prices": [], "team_prices": [], "final": False,
                  "status": "open", "deal_price": None, "first_tick": None, "last_tick": None}
+            if origin == "live":
+                t["lc"] = self.live_clock
             self.threads[key] = t
         for k, v in init.items():
             if v is not None and t.get(k) in (None, [], False):
@@ -145,14 +167,17 @@ class Corpus:
             data = e["data"]
             e = data if "payload" in data else {"id": e.get("seq"), "type": e.get("type"),
                                                  "tick": data.get("tick"), "payload": data}
-        typ, p = e.get("type") or "", e.get("payload") or {}
+        typ, p = _safe_key(e.get("type") or ""), e.get("payload") or {}
         eid = e.get("id")
-        if isinstance(eid, int) and e.get("scope", "public") == "public":
-            if eid in self.event_ids:
-                return                      # already seen (replayed feed)
-            self.event_ids.add(eid)
         tick = int(e.get("tick") or p.get("tick") or 0)
+        if isinstance(eid, int) and e.get("scope", "public") == "public":
+            key = f"{eid}|{tick}|{typ}"
+            if key in self.event_keys:
+                return                      # already seen (replayed feed)
+            self.event_keys.add(key)
         self.max_tick[origin] = max(self.max_tick.get(origin, 0), tick)
+        if origin == "live" and tick:
+            self._advance_live_clock(tick)
         self.version += 1
         if typ not in self.seen["event_types"]:
             self.seen["event_types"].add(typ)
@@ -163,8 +188,8 @@ class Corpus:
             side = "sell" if "buy" in topic else "buy" if "sell" in topic else None
             buy = topic.get("buy") or {}
             item = buy.get("card") or buy.get("pack") or buy.get("rarity")
-            t = self._thread(origin, p.get("thread"), dealer=p.get("with"), team=p.get("team"), side=side,
-                             item=item, first_tick=tick)
+            t = self._thread(origin, p.get("thread"), dealer=safe_id(p.get("with"), "unknown"),
+                             team=safe_team(p.get("team")), side=side, item=item, first_tick=tick)
             t["rarity"] = t["rarity"] or (rarity_of(item) if item else None)
             self._new_dealer(p.get("with"), tick, origin)
             self._team_event(p.get("team", ""), tick, origin, "thread.opened", p.get("with"))
@@ -194,9 +219,9 @@ class Corpus:
         elif typ == "announcement":
             text = str(p.get("text", ""))
             if any(w in text.lower() for w in ("limit", "rule", "per tick", "quota", "new dealer", "now ")):
-                self.novel("announcement", f"ann@{tick}:{text[:40]}", tick, {"text": text}, origin)
+                self.novel("announcement", f"ann@{tick}", tick, {"text": text[:300]}, origin)
         elif typ.startswith("venue."):
-            v = p.get("venue")
+            v = safe_id(p.get("venue"))
             if v and v not in self.seen["venues"]:
                 self.seen["venues"].add(v)
                 if origin == "live":
@@ -204,15 +229,23 @@ class Corpus:
         if actor.startswith("t") and typ not in ("thread.message", "settlement", "offer.listed"):
             self._team_event(actor, tick, origin, typ, None)
 
+    def _advance_live_clock(self, tick: int) -> None:
+        last = self.last_live_tick
+        if last is None or tick < last - 30:          # first live event, or the game renumbered its ticks
+            self.last_live_tick = tick
+        elif tick > last:
+            self.live_clock += min(tick - last, 5) * float(self.seen.get("tick_seconds") or 60.0)
+            self.last_live_tick = tick
+
     def _new_dealer(self, dealer: str | None, tick: int, origin: str, detail: Any = None) -> None:
-        if not dealer or dealer.startswith("t") and dealer[1:].isdigit():
+        if not safe_id(dealer) or safe_team(dealer) or dealer == "unknown":
             return
         if dealer not in self.seen["dealers"]:
             self.seen["dealers"].add(dealer)
             self.novel("dealer", dealer, tick, detail or {"first_seen": tick}, origin)
 
     def _thread_message(self, p: dict, tick: int, origin: str) -> None:
-        dealer, team, sender = p.get("with"), p.get("team"), p.get("sender")
+        dealer, team, sender = safe_id(p.get("with"), "unknown"), safe_team(p.get("team")), p.get("sender")
         offer = p.get("offer") or {}
         give, want = offer.get("give") or {}, offer.get("want") or {}
         t = self._thread(origin, p.get("thread"), dealer=dealer, team=team, first_tick=tick)
@@ -230,10 +263,10 @@ class Corpus:
             t["item"] = item
         if item and (not t["rarity"] or t["rarity"] in ("unknown", "common", "uncommon", "rare")):
             t["rarity"] = rarity_of(item)
-        if sender == dealer and not offer:
+        if sender == p.get("with") and not offer:
             if p.get("text"):
                 t["last_text"] = str(p["text"])[:300]
-        elif sender == dealer:
+        elif sender == p.get("with"):
             if give.get("types") or give.get("assets"):
                 t["side"], price = "sell", want.get("cash")
             else:
@@ -256,11 +289,14 @@ class Corpus:
         row = {"id": p.get("settlement"), "tick": tick, "origin": origin, "venue": p.get("venue"),
                "persona": persona, "refs": refs, "price": p.get("price"), "fee": p.get("fee", 0),
                "parties": parties, "kind": p.get("kind")}
+        if origin == "live":
+            row["lc"] = self.live_clock
         if items:
             row["seller"] = items[0].get("frm")
             row["buyer"] = items[0].get("to")
         self.settlements.append(row)
-        src = next((x for x in parties if x and x.startswith("t")), persona or "?")
+        # The source of a settlement is the PAIR of parties: two colluding teams count as one source.
+        src = "|".join(sorted({str(x) for x in parties if x})) or persona or "?"
         row["eid"] = self._ev(f"set:{origin}:{row['id']}", src, tick, origin)
         if persona:
             team = next((x for x in parties if x != persona), None)
@@ -284,9 +320,12 @@ class Corpus:
         give, want = o.get("give") or {}, o.get("want") or {}
         g_refs = [a.get("ref") for a in give.get("assets") or []]
         w_refs = [x.split(":", 1)[1] for x in want.get("types") or [] if ":" in x] + list(want.get("cards") or [])
-        row = {"tick": tick, "origin": origin, "maker": o.get("maker"), "venue": p.get("venue") or o.get("venue"),
+        row = {"tick": tick, "origin": origin, "maker": safe_team(o.get("maker")) or "?",
+               "venue": safe_id(p.get("venue") or o.get("venue"), "venue"),
                "ask_refs": g_refs, "ask": want.get("cash") if g_refs else None,
                "bid_refs": w_refs, "bid": give.get("cash") if w_refs else None}
+        if origin == "live":
+            row["lc"] = self.live_clock
         self.listings.append(row)
         if len(self.listings) > MAX_LISTINGS:
             del self.listings[: len(self.listings) - MAX_LISTINGS]
@@ -307,6 +346,8 @@ class Corpus:
                "our_first": our_prices[0] if our_prices else None, "issues": raw.get("issues") or ["price"],
                "decay": raw.get("decay_per_round", 0.06), "session": raw.get("session"),
                "tick": raw.get("deadline_tick"), "kind": classify_rival(rival_prices, raw.get("role", ""))}
+        if origin == "live":
+            rec["lc"] = (self.duels.get(key) or {}).get("lc", self.live_clock)
         dec = rec["decay"]
         if dec is not None and dec not in self.seen["decays"]:
             self.seen["decays"].add(dec)
@@ -343,7 +384,10 @@ class Corpus:
             return
         slim = {tid: {k: v.get(k) for k in ("score", "negotiating", "market", "deals", "level", "venue",
                                             "album_filled", "luck")} for tid, v in teams.items() if tid}
-        self.leaderboard.append({"tick": int(tick), "origin": origin, "teams": slim})
+        snap = {"tick": int(tick), "origin": origin, "teams": slim}
+        if origin == "live":
+            snap["lc"] = self.live_clock
+        self.leaderboard.append(snap)
         self.leaderboard.sort(key=lambda s: (s["origin"] != "friday", s["tick"]))
         self.version += 1
 
@@ -361,16 +405,39 @@ class Corpus:
                   "rail": v.get("rail") if isinstance(v, dict) else None})
         self.version += 1
 
+    def add_closing(self, row: dict) -> dict | None:
+        """A closed negotiation (status deal|no_deal) written by a domain; idempotent by its key."""
+        key = str(row.get("closing") or "")
+        if not key or key in self.closings:
+            return None
+        aids = [str(a) for a in (row.get("action_ids") or []) if a]
+        lids = [str(x) for x in (row.get("lesson_ids") or [])]
+        for a in aids:
+            lids += [str(x) for x in (self.decisions.get(a) or {}).get("lesson_ids") or []]
+            if a in self.decisions:
+                self.decisions[a]["closing"] = key
+        c = {"key": key, "domain": row.get("domain"), "status": row.get("status"), "tick": row.get("tick"),
+             "realised": row.get("realised") or {}, "action_ids": aids,
+             "lesson_ids": list(dict.fromkeys(lids))[:16], "applied": False, "ts": row.get("ts")}
+        self.closings[key] = c
+        self.version += 1
+        return c
+
     def add_outcome(self, row: dict) -> None:
         aid = row.get("action_id")
+        resp = row.get("response") or {}
+        if row.get("closing"):
+            self.add_closing(row)
+            if isinstance(resp, dict) and resp.get("duel") is not None and row.get("status") in ("deal", "no_deal"):
+                self.add_duel({**resp, "status": resp.get("status") or row.get("status")}, "live")
+            return
         if not aid:
             return
         d = self.decisions.setdefault(aid, {"id": aid})
         d["outcome"] = {"status": row.get("status"), "tick": row.get("tick"),
                         "realised": row.get("realised") or {}}
         self._ev(f"dec:{aid}", "t10", row.get("tick"), "live")
-        resp = row.get("response") or {}
-        err = resp.get("error") if isinstance(resp, dict) else None
+        err = _safe_key(resp.get("error")) if isinstance(resp, dict) and resp.get("error") else None
         if err and err not in self.seen["errors"]:
             self.seen["errors"].add(err)
             self.novel("error_code", err, row.get("tick"), {"message": str(resp.get("message", ""))[:200]})
@@ -412,13 +479,40 @@ LIVE_FILES = ("events.jsonl", "decisions.jsonl", "outcomes.jsonl", "leaderboard.
 
 
 class Ingestor:
-    """Reads the live ledger incrementally (byte offsets) into a Corpus."""
+    """Reads the live ledger incrementally (byte offsets) into a Corpus.
+
+    The offsets live inside the corpus (``corpus.offsets``) and both are saved together in one atomic
+    write-then-rename, so a crash can never leave offsets ahead of (or behind) the corpus. An offset
+    only moves after its rows were processed.
+    """
 
     def __init__(self, corpus: Corpus, live: Path | None = None, state_path: Path | None = None):
         self.corpus = corpus
         self.live = Path(live or config.LIVE)
         self.state_path = Path(state_path or config.LAB / "ingest_state.json")
-        self.offsets: dict[str, int] = (read_json(self.state_path, {}) or {}).get("offsets", {})
+        if not corpus.offsets and corpus.schema < SCHEMA:          # legacy corpus: offsets were separate
+            corpus.offsets.update((read_json(self.state_path, {}) or {}).get("offsets", {}))
+        self.errors: list[str] = []
+
+    @property
+    def offsets(self) -> dict[str, int]:
+        return self.corpus.offsets
+
+    def _one(self, name: str, r: dict) -> None:
+        c = self.corpus
+        if name == "events.jsonl":
+            c.add_event(r, "live")
+        elif name == "decisions.jsonl":
+            c.add_decision(r)
+        elif name == "outcomes.jsonl":
+            c.add_outcome(r)
+        elif name == "leaderboard.jsonl":
+            c.add_leaderboard(r, "live")
+        elif name == "council.jsonl":
+            c.council_votes += 1
+        elif name == "llm.jsonl":
+            purpose = r.get("purpose", "?")
+            c.llm_cost[purpose] = round(c.llm_cost.get(purpose, 0.0) + float(r.get("cost_usd") or 0), 4)
 
     def poll(self) -> dict[str, int]:
         c, counts = self.corpus, {}
@@ -431,38 +525,52 @@ class Ingestor:
             except FileNotFoundError:
                 continue
             rows, new = read_jsonl(path, off)
-            self.offsets[name] = new
-            counts[name] = len(rows)
             for r in rows:
-                if name == "events.jsonl":
-                    c.add_event(r, "live")
-                elif name == "decisions.jsonl":
-                    c.add_decision(r)
-                elif name == "outcomes.jsonl":
-                    c.add_outcome(r)
-                elif name == "leaderboard.jsonl":
-                    c.add_leaderboard(r, "live")
-                elif name == "council.jsonl":
-                    c.council_votes += 1
-                elif name == "llm.jsonl":
-                    purpose = r.get("purpose", "?")
-                    c.llm_cost[purpose] = round(c.llm_cost.get(purpose, 0.0) + float(r.get("cost_usd") or 0), 4)
+                try:
+                    self._one(name, r)
+                except Exception as e:  # noqa: BLE001 - one bad row never blocks the file
+                    self.errors.append(f"{name}: {type(e).__name__}: {e}"[:200])
+                    del self.errors[:-20]
+            self.offsets[name] = new              # only after the rows are in the corpus
+            counts[name] = len(rows)
         for t in c.threads.values():
             if t["origin"] == "live":
                 c._ev(f"thr:live:{t['id']}", t.get("team") or "?", t.get("first_tick"), "live")
         return counts
 
     def save(self, corpus_path: Path | None = None) -> None:
+        """Corpus and offsets in ONE file, written atomically; ingest_state.json is only informational."""
         write_json(Path(corpus_path or config.LAB / "corpus.json"), self.corpus.to_dict())
-        write_json(self.state_path, {"offsets": self.offsets})
+        try:
+            write_json(self.state_path, {"offsets": dict(self.offsets), "note": "informational; the corpus holds them"})
+        except OSError:
+            pass
+
+
+def seed_known(corpus: Corpus, live: Path | None = None) -> bool:
+    """Seed seen limits / tick speed from the operator's known.json, so the first live change is news."""
+    known = read_json(Path(live or config.LIVE) / "known.json", {}) or {}
+    changed = False
+    if not corpus.seen.get("limits") and isinstance(known.get("limits"), dict) and known["limits"]:
+        corpus.seen["limits"] = dict(known["limits"])
+        changed = True
+    if not corpus.seen.get("tick_seconds") and known.get("tick_seconds"):
+        corpus.seen["tick_seconds"] = known["tick_seconds"]
+        changed = True
+    return changed
 
 
 def load_or_build(corpus_path: Path | None = None, friday_root: Path | None = None) -> Corpus:
+    """The saved corpus, or a fresh one from Friday when absent or of an older schema (the live files are
+    then re-read from offset 0 by the Ingestor, which recovers live events an older dedupe dropped)."""
     path = Path(corpus_path or config.LAB / "corpus.json")
     data = read_json(path)
-    if data:
+    if data and int(data.get("schema", 1)) >= SCHEMA:
         return Corpus(data)
-    return load_friday(Corpus(), friday_root)
+    c = load_friday(Corpus(), friday_root)
+    if data:
+        c.novelty = [n for n in data.get("novelty", []) if n.get("origin") == "live"] + c.novelty
+    return c
 
 
 # --- features --------------------------------------------------------------------------------

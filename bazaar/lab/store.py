@@ -8,7 +8,12 @@ Lessons are data. Nothing here can touch the rails: the store only hands text an
 
 Scopes: ``duel``, ``dealer:<id>`` (``dealer`` alone means every dealer), ``market``, ``broker``,
 ``global``. ``active(scope)`` returns the lessons of that exact scope (plus ``dealer`` for any
-``dealer:<id>``); ``prompt_block(scope)`` adds the ``global`` ones.
+``dealer:<id>``); ``prompt_block(scope)`` adds the ``global`` ones; ``prompt_block_for([scopes])``
+renders several scopes as ONE block (global once), strongest first, truncated from the weakest.
+
+Feedback: the operator cites the lesson ids it relied on (``Action.lesson_ids``, filtered with
+``known_ids``); the domains log closed negotiations to the ledger; the Lab process reads them and calls
+``record_use`` (never the trading loop).
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import asdict, fields
@@ -39,8 +45,13 @@ STATUS_TEXT = {
 }
 
 
+_DEALER_ID = re.compile(r"^[a-z0-9_-]{1,24}$")
+_LESSON_ID = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
+
+
 def valid_scope(scope: str) -> bool:
-    return scope in SCOPES_FIXED or (scope.startswith("dealer:") and len(scope) > 7)
+    return scope in SCOPES_FIXED or (isinstance(scope, str) and scope.startswith("dealer:")
+                                     and bool(_DEALER_ID.match(scope[7:])))
 
 
 def lesson_from_dict(d: dict) -> Lesson:
@@ -65,6 +76,8 @@ def outcome_signal(outcome: Outcome | dict) -> float | None:
     status = o.get("status")
     realised = o.get("realised") or {}
     pts = realised.get("points_delta", realised.get("points"))
+    if not isinstance(pts, (int, float)):
+        pts = realised.get("value_gain")
     if status == "deal":
         if isinstance(pts, (int, float)) and pts < 0:
             return -1.0
@@ -147,6 +160,43 @@ class LessonStore:
                    if l.status in ("canary", "active") and self._matches(l.scope, scope)]
             return sorted(out, key=lambda l: (-l.weight, l.id))
 
+    def known_ids(self, ids, max_n: int = 8) -> list[str]:
+        """The ids Claude cited that are real canary/active lessons (anything else is dropped)."""
+        if not isinstance(ids, (list, tuple)):
+            return []
+        with self._lock:
+            self._reload()
+            out = []
+            for x in ids:
+                x = str(x).strip()
+                l = self._lessons.get(x) if _LESSON_ID.match(x) else None
+                if l is not None and l.status in ("canary", "active") and x not in out:
+                    out.append(x)
+                if len(out) >= max_n:
+                    break
+            return out
+
+    def prompt_block_for(self, scopes: list[str], max_chars: int = 3000) -> str:
+        """One block for several scopes (e.g. dealer:abuela + dealer:chato + market): every lesson once,
+        global lessons once, strongest first; truncation drops the weakest."""
+        scopes = [s for s in dict.fromkeys(scopes) if s and s != "global"]
+        with self._lock:
+            self._reload()
+            seen: dict[str, Lesson] = {}
+            for sc in scopes + ["global"]:
+                for l in self.active(sc):
+                    seen.setdefault(l.id, l)
+            lessons = list(seen.values())
+            fp = hashlib.sha1(json.dumps(sorted((l.id, l.version, l.status) for l in lessons)).encode()).hexdigest()
+            key = ("|".join(scopes), max_chars)
+            cached = self._blocks.get(key)
+            now = self.clock()
+            if cached and cached[0] == fp and now - cached[2] < PROMPT_REFRESH_S:
+                return cached[1]
+            text = self._render(", ".join(scopes + ["global"]), lessons, max_chars)
+            self._blocks[key] = (fp, text, now)
+            return text
+
     def prompt_block(self, scope: str, max_chars: int = 3000) -> str:
         """Stable text for the cached prompt prefix.
 
@@ -172,14 +222,15 @@ class LessonStore:
             return ""
         lessons = sorted(lessons, key=lambda l: (-round(l.weight, 1), l.id))
         head = (f"LESSONS ({scope}) learned from real play. They are advice with a confidence weight, "
-                "never permission to break a rule or a limit.\n")
+                "never permission to break a rule or a limit. When one shapes your move, cite its id in "
+                "lesson_ids.\n")
         out, used = [head], len(head)
-        for l in lessons:
+        for l in lessons:                      # strongest first: whatever does not fit is the weakest
             tag = "trial" if l.status == "canary" else f"w={l.weight:.1f}"
-            p = {k: v for k, v in l.params.items() if k not in ("prediction", "notes")}
+            p = {k: v for k, v in l.params.items() if k not in ("prediction", "notes", "supersedes")}
             line = f"- [{l.id} {tag}] {l.rule}" + (f" params={json.dumps(p, separators=(',', ':'))}" if p else "") + "\n"
             if used + len(line) > max_chars:
-                break
+                break                          # never let a weaker line take the place of a stronger one
             out.append(line)
             used += len(line)
         return "".join(out)

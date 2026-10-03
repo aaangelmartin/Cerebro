@@ -78,21 +78,21 @@ class FridayTest(unittest.TestCase):
 
 
 class DiversityTest(unittest.TestCase):
-    def test_single_team_counts_half(self):
+    def test_single_team_capped_at_two(self):
         c = Corpus()
         for i in range(10):
             c.evidence[f"e{i}"] = {"src": "t05", "tick": i * 40, "w": f"live:{i}", "origin": "live"}
         d = diversity([f"e{i}" for i in range(10)], c)
-        self.assertEqual(d["n_eff"], 5.0)
+        self.assertEqual(d["n_eff"], 2.0)
         self.assertEqual(d["sources"], 1)
 
-    def test_dominant_source_counts_half(self):
+    def test_each_source_capped_at_two(self):
         c = Corpus()
         srcs = ["t01"] * 6 + ["t02", "t03", "t04"]
         for i, s in enumerate(srcs):
             c.evidence[f"e{i}"] = {"src": s, "tick": 1, "w": "live:0", "origin": "live"}
         d = diversity([f"e{i}" for i in range(9)], c)
-        self.assertEqual(d["n_eff"], 3 + 3.0)
+        self.assertEqual(d["n_eff"], 2 + 3.0)
 
 
 class LiveIngestTest(unittest.TestCase):

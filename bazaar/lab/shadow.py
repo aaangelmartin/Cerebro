@@ -3,8 +3,11 @@
 Cases are our duels (Friday + live), our dealer threads (Friday memory + live feed) and the live ledger
 decisions in the lesson's scope. For each case the lesson's prediction kind gives a counterfactual
 delta (points for duels, primas for dealers; conservative: only half of a price improvement is
-credited, since the dealer might not have gone there). Kinds without a counterfactual count as 0, so
-"shadow net >= 0" then means "never seen to hurt".
+credited, since the dealer might not have gone there).
+
+Only APPLICABLE cases count: a case where the lesson would not have changed or judged anything
+(another dealer, another rival type, a kind with no counterfactual) returns None and is left out of
+``n``, so "shadow >= 20 cases" means twenty cases the lesson really speaks to.
 """
 from __future__ import annotations
 
@@ -45,7 +48,8 @@ def _margin(d: dict, price: float) -> float:
     return (d["limit"] - price) if d["role"] == "buyer" else (price - d["limit"])
 
 
-def would_have(lesson: Lesson, case: dict) -> float:
+def would_have(lesson: Lesson, case: dict) -> float | None:
+    """Counterfactual delta of following the lesson in this case; None when the lesson does not apply."""
     pred = (lesson.params or {}).get("prediction") or {}
     kind, rec = pred.get("kind"), case["rec"]
     if case["type"] == "duel" and rec.get("limit") is not None:
@@ -56,19 +60,24 @@ def would_have(lesson: Lesson, case: dict) -> float:
             m1 = _margin(rec, rp[0])
             if m1 >= float(pred.get("min_margin_frac", 0.15)) * rec["limit"]:
                 return round(m1 * (1 - decay) - realised, 2)
+            return None
         if kind == "duel_fast" and rp:
             k = int(pred.get("max_rounds", 3))
             if rec["status"] != "deal" or rec["rounds"] > k:
                 best = max((_margin(rec, p) for p in rp[:max(1, k)]), default=0.0)
                 if best > 0:
                     return round(best * (1 - decay) ** k - realised, 2)
+            return 0.0                                   # applies: we already closed fast (or could not)
         if kind == "rival_rate" and pred.get("rival_kind") == "fixed" and rec.get("kind") == "fixed" and rp:
             m = _margin(rec, rp[0])
             if m > 0 and rec["rounds"] > 2:
                 return round(m * (1 - decay) ** 2 - realised, 2)
-        return 0.0
-    if case["type"] == "thread" and kind == "dealer_price" and pred.get("dealer") == rec.get("dealer") \
-            and pred.get("side") == rec.get("side"):
+            return 0.0
+        return None
+    if case["type"] == "thread" and kind in ("dealer_price", "mirror_ratio") \
+            and pred.get("dealer") == rec.get("dealer") and pred.get("side") in (None, rec.get("side")):
+        if kind == "mirror_ratio":
+            return 0.0                                   # applies, but has no price counterfactual
         lo, hi = float(pred["lo"]), float(pred["hi"])
         deal = rec.get("deal_price")
         if deal is not None:
@@ -77,7 +86,7 @@ def would_have(lesson: Lesson, case: dict) -> float:
             if rec["side"] == "buy" and deal < lo:
                 return round((lo - deal) * 0.5, 2)
         return 0.0
-    return 0.0
+    return None
 
 
 def evaluate(lesson: Lesson, corpus: Corpus, all_cases: list[dict] | None = None) -> dict[str, Any]:
@@ -85,7 +94,9 @@ def evaluate(lesson: Lesson, corpus: Corpus, all_cases: list[dict] | None = None
     for c in all_cases if all_cases is not None else cases(corpus):
         if not _scope_ok(lesson.scope, c["scope"]):
             continue
-        rows.append((c["key"], would_have(lesson, c)))
+        d = would_have(lesson, c)
+        if d is not None:
+            rows.append((c["key"], d))
     deltas = [d for _, d in rows]
     return {"n": len(rows), "net": round(sum(deltas), 2), "pos": sum(1 for d in deltas if d > 0),
             "neg": sum(1 for d in deltas if d < 0),

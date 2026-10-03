@@ -5,7 +5,7 @@
 
 Status policy: confidence >= 0.8 and a backtest that does not contradict it -> active, weight
 0.6..0.8 by confidence; 0.7..0.8 -> canary (0.3); weaker -> proposed. A backtest with enough cases
-and negative lift demotes one step.
+and negative lift demotes one step. A seed with fewer than 5 cases is never active (canary at most).
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from bazaar.lab.common import read_json, write_json
 from bazaar.lab.ingest import Corpus, build_features, load_friday
 from bazaar.lab.store import LessonStore, write_notice
 
+MIN_SEED_N_ACTIVE = 5
 SEED_PATH = config.FRIDAY / "analysis" / "seed_lessons.json"
 SIM_DATA = config.ROOT / "sim" / "data"
 
@@ -136,8 +137,10 @@ def build_seed_lessons(corpus: Corpus) -> list[Lesson]:
         else:
             l.n = len(l.evidence)
             l.sources = 0
+        if l.status == "active" and l.n < MIN_SEED_N_ACTIVE:
+            l.status, l.weight = "canary", 0.3
         l.backtest = {**bt, "confidence": r["conf"], "seeded": time.time(),
-                      "live": {"prior": l.weight, "s": 0, "f": 0}}
+                      "created_lc": corpus.live_clock, "live": {"prior": l.weight, "s": 0, "f": 0}}
         lessons.append(l)
     return lessons
 

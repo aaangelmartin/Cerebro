@@ -74,6 +74,20 @@ def lessons_block(ctx: Any, scope: str, max_chars: int = 1500) -> str:
         return ""
 
 
+def lessons_block_for(ctx: Any, scopes: list[str], max_chars: int = 3000) -> str:
+    """ONE lesson block for several scopes (global once, strongest first); older stores: per scope."""
+    store = getattr(ctx, "lessons", None)
+    if store is None:
+        return ""
+    try:
+        if hasattr(store, "prompt_block_for"):
+            return store.prompt_block_for(list(scopes), max_chars=max_chars) or ""
+        return "\n".join(b for b in (store.prompt_block(s, max_chars=max_chars // max(1, len(scopes)))
+                                     for s in scopes) if b)
+    except Exception:
+        return ""
+
+
 def time_left(ctx: Any) -> float:
     dl = getattr(ctx, "deadline", None)
     return float("inf") if not dl else dl - time.time()
