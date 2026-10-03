@@ -215,6 +215,45 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
     return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(reason)}).encode()
 
 
+# The public market board (bazaar/plaza/server.py, its own process): the ONLY routes served without the dashboard
+# login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
+PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
+PLAZA_RX = re.compile(r"/plaza(?:/(?:agents\.md|cards\.json|static/plaza\.(?:css|js)"
+                      r"|api/(?:health|teams|matches|wall|claim|team/t\d{2}))?)?")
+PLAZA_QUERY = re.compile(r"(?:team=t\d{2})?")
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/claim"), "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+PLAZA_MAX_BODY = 16 * 1024
+PLAZA_PASS = ("Content-Type", "Cache-Control", "Location", "Access-Control-Allow-Origin", "X-Content-Type-Options",
+              "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy")
+
+
+def is_plaza(path, method="GET"):
+    """True for a public plaza route with that method."""
+    if method in ("GET", "HEAD"):
+        return bool(PLAZA_RX.fullmatch(path))
+    rx = PLAZA_WRITES.get(method)
+    return bool(rx and rx.fullmatch(path))
+
+
+def plaza_proxy(path, query, method="GET", body=None, headers=None):
+    """Forwards one whitelisted plaza request; returns (status, headers, body)."""
+    url = PLAZA_URL + path + ("?" + query if query and PLAZA_QUERY.fullmatch(query) else "")
+    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(req, timeout=10) as r:
+            return r.status, {k: r.headers[k] for k in PLAZA_PASS if r.headers.get(k)}, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, {k: e.headers[k] for k in PLAZA_PASS if e.headers.get(k)}, e.read()
+    except (urllib.error.URLError, ConnectionError, TimeoutError):
+        return 502, {"Content-Type": "application/json"}, b'{"error":"plaza_offline","message":"the plaza is starting"}'
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
 SECRET_FIELDS = {"broker_key", "key", "x-broker-key"}
 _SECRET_RE = re.compile(r'("(?:broker_key|key|X-Broker-Key)"\s*:\s*)"[^"]*"', re.IGNORECASE)
 
@@ -397,6 +436,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if is_plaza(path):                                # the public market board: no login, whitelisted routes
+            return self.plaza("GET")
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
@@ -464,6 +505,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def write(self, method):
         path = self.path.split("?")[0]
+        if is_plaza(path, method):                        # a team's agent declaring its sheet behind its PIN
+            return self.plaza(method)
         client = self.client()
         if client is None:
             return self.deny()
@@ -489,6 +532,32 @@ class Handler(SimpleHTTPRequestHandler):
         _cache.clear()
         log_action(client, method, path, body, status, resp)
         self.send_json(status, resp)
+
+    def plaza(self, method):
+        """The public board: forwards the request with the caller's address so the plaza can budget per client."""
+        parts = self.path.split("?", 1)
+        body = None
+        if method in ("POST", "PUT"):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self.send_error(400)
+            if length > PLAZA_MAX_BODY:
+                return self.send_error(413)
+            body = self.rfile.read(length) if length else b"{}"
+        fwd = (self.headers.get("CF-Connecting-IP") or self.client_address[0] or "")[:45]
+        headers = {"X-Plaza-Client": fwd if re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd) else "0.0.0.0"}
+        for name in ("Content-Type", "X-Plaza-Pin"):
+            if self.headers.get(name):
+                headers[name] = self.headers[name][:120]
+        status, out, payload = plaza_proxy(parts[0], parts[1] if len(parts) > 1 else "", method, body, headers)
+        self.send_response(status)
+        for k, v in out.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
 
     def bot_write(self, client, path):
         """Arming, mode and approvals for the bot: dashboard users only, never bot tokens."""
