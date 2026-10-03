@@ -53,6 +53,27 @@ class AnalysisTest(unittest.TestCase):
         self.assertIn("90%", text)
 
 
+class ReserveFromCapsTest(unittest.TestCase):
+    def _idle(self, control):
+        live = Path(tempfile.mkdtemp())
+        if control is not None:
+            (live / "control.json").write_text(json.dumps(control))
+        return A.idle(live, {"cash": 50}, [], {}, [], [], {"tick": 10})
+
+    def test_nested_caps_reserve_is_the_one_the_brain_sees(self):
+        d = self._idle({"caps": {"cash_reserve": 5}})          # how the dashboard stores it
+        self.assertEqual((d["cash_reserve"], d["cash_available"]), (5, 45))
+
+    def test_caps_win_over_a_stale_flat_key_like_in_the_bot(self):
+        d = self._idle({"cash_reserve": 15, "caps": {"cash_reserve": 5}})
+        self.assertEqual(d["cash_reserve"], 5)
+
+    def test_flat_key_and_default_still_work(self):
+        self.assertEqual(self._idle({"cash_reserve": 8})["cash_reserve"], 8)
+        from bazaar import config
+        self.assertEqual(self._idle(None)["cash_reserve"], config.CASH_RESERVE)
+
+
 class OffersTest(unittest.TestCase):
     me = {"assets": [{"id": 1, "ref": "RET-01", "your_value": 11.0}, {"id": 2, "ref": "MAL-01", "your_value": 13.0}],
           "album": {"pages": [{"set": "RET", "have": 2, "of": 10}, {"set": "MAL", "have": 8, "of": 10}]}}

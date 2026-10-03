@@ -142,8 +142,9 @@ def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: li
     cash = int(me.get("cash") or 0)
     control = {}
     try:
-        control = json.loads((Path(live) / "control.json").read_text())
-    except (OSError, ValueError):
+        from bazaar.run import load_control           # the bot's own reader: the dashboard's nested caps apply flat
+        control = load_control(Path(live), {})
+    except Exception:  # noqa: BLE001
         pass
     try:
         from bazaar import config as _cfg
