@@ -1,5 +1,5 @@
 /* Bot: salud (procesos, pasarela, latencia, gasto, errores) y TODOS los controles.
-   Contrato: bazaar/dashboard/CONTRACT.md. Palabras: Encender/Apagar, LIVE/PARADO. */
+   Contrato: bazaar/dashboard/CONTRACT.md. Palabras: Encender/Apagar, ENCENDIDO/APAGADO. */
 (function () {
   "use strict";
   const U = () => window.ui || {};
@@ -364,7 +364,7 @@
     const stateBox = el("div", { class: "bot-live " + (stop ? "is-stop" : on ? "is-live" : "is-off") },
       el("span", { class: "bot-dot" }),
       el("div", {},
-        el("div", { class: "bot-live-t" }, stop ? "PARADO · STOP activo" : on ? `LIVE · encendido · modo ${mode.label}` : `PARADO · apagado · modo ${mode.label}`),
+        el("div", { class: "bot-live-t" }, stop ? "APAGADO · STOP activo" : on ? `ENCENDIDO · modo ${mode.label}` : `APAGADO · modo ${mode.label}`),
         el("div", { class: "bot-mono bot-muted bot-small" }, [
           st.tick != null ? `tick ${st.tick}` : null, st.state || null, st.doors ? `puertas ${st.doors === "open" ? "abiertas" : "cerradas"}` : null,
           num(st.age_s) != null ? `latido ${fmtAge(st.age_s)}` : null, st.write === false && on ? "sin escritura" : null,
@@ -378,12 +378,12 @@
           : act({ title: "¿Pausar todos los dominios?", text: `El bot deja de actuar en ${ids.map((d) => (DOMAINS[d] || {}).label || d).join(", ")}. Sigue encendido y leyendo el juego.`, confirmLabel: "Sí, pausar", done: "Dominios en pausa" }, () => setControl({ paused_domains: ids })),
       }, ic(allPaused ? "play" : "pause"), allPaused ? "Reanudar" : "Pausar"),
       on || (armed() && stop)
-        ? el("button", { type: "button", class: "bot-b", disabled: S.busy, onclick: () => act({ title: "¿Apagar el bot?", text: "El bot queda PARADO: deja de enviar órdenes. Sigue leyendo el juego. Para volver, pulsa Encender.", confirmLabel: "Sí, apagar", danger: true, done: "Bot apagado (PARADO)" }, () => setControl({ armed: false })) }, ic("power"), "Apagar")
+        ? el("button", { type: "button", class: "bot-b", disabled: S.busy, onclick: () => act({ title: "¿Apagar el bot?", text: "El bot queda APAGADO: deja de enviar órdenes. Sigue leyendo el juego. Para volver, pulsa Encender.", confirmLabel: "Sí, apagar", danger: true, done: "Bot apagado" }, () => setControl({ armed: false })) }, ic("power"), "Apagar")
         : el("button", { type: "button", class: "bot-b bot-b-go", disabled: S.busy || stop, title: stop ? "Quita el STOP antes de encender" : "",
           onclick: () => act({ title: "¿Encender el bot?", text: `El bot pasa a LIVE en modo ${mode.label}: ${mode.text || ""}. Enviará órdenes reales al juego.`, confirmLabel: "Sí, encender", done: "Bot encendido (LIVE)" }, () => setControl({ armed: true })) }, ic("power"), "Encender"),
       stop
-        ? el("button", { type: "button", class: "bot-b bot-b-unstop", disabled: S.busy, onclick: () => act({ title: "¿Quitar el STOP?", text: "Se borra el fichero STOP. El bot sigue PARADO hasta que alguien pulse Encender.", confirmLabel: "Sí, quitar STOP", done: "STOP quitado · el bot sigue PARADO" }, () => (A().unstop ? A().unstop() : req("DELETE", "stop"))) }, ic("stop"), "Quitar STOP")
-        : el("button", { type: "button", class: "bot-b bot-b-stop", disabled: S.busy, onclick: () => act({ title: "¿Parar el bot ahora?", text: "Crea el fichero STOP y apaga el bot (PARADO): no sale ninguna orden más, ni de duelos, dealers, mercado ni broker. Para volver, quita el STOP y pulsa Encender.", confirmLabel: "Sí, parar todo", danger: true, done: "STOP activo · bot PARADO" }, () => (A().stop ? A().stop() : req("POST", "stop", { by: "dashboard" }))) }, ic("stop"), "STOP"));
+        ? el("button", { type: "button", class: "bot-b bot-b-unstop", disabled: S.busy, onclick: () => act({ title: "¿Quitar el STOP?", text: "Se borra el fichero STOP. El bot sigue apagado hasta que alguien pulse Encender.", confirmLabel: "Sí, quitar STOP", done: "STOP quitado · el bot sigue apagado" }, () => (A().unstop ? A().unstop() : req("DELETE", "stop"))) }, ic("stop"), "Quitar STOP")
+        : el("button", { type: "button", class: "bot-b bot-b-stop", disabled: S.busy, onclick: () => act({ title: "¿Parar el bot ahora?", text: "Crea el fichero STOP y apaga el bot: no sale ninguna orden más, ni de duelos, dealers, mercado ni broker. Para volver, quita el STOP y pulsa Encender.", confirmLabel: "Sí, parar todo", danger: true, done: "STOP activo · bot apagado" }, () => (A().stop ? A().stop() : req("POST", "stop", { by: "dashboard" }))) }, ic("stop"), "STOP"));
 
     const last = S.last ? el("div", { class: "bot-last " + (S.last.ok ? "bot-ok" : "bot-bad") }, `${S.last.ok ? "✓" : "✕"} ${S.last.text} · ${fmtTime(S.last.ts)}`) : null;
 

@@ -219,13 +219,16 @@
       /529|overload|anthropic|rate.?limit/i.test(String(a.text || "") + " " + String(a.where || "")));
   }
   function botState(d) {
+    // Real state: ENCENDIDO only when switched on, no STOP, and the bot process is alive (fresh heartbeat).
     const st = d.status || {};
-    if (!st.present) return ["PARADO", "bad", "sin latido del bot"];
-    if (st.stop_file) return ["PARADO", "bad", "STOP activo"];
-    if (!st.armed) return ["PARADO", "bad", "apagado"];
-    if (d.clock && d.clock.doors !== "open") return ["ESPERA", "warn", "encendido · arranca al abrir"];
-    if (degraded(d)) return ["DEGRADADO", "warn", "modo Código · sin Opus"];
-    return ["LIVE", "ok", null];
+    const age = st.age_s;
+    const alive = st.present && age != null && age <= 120;
+    if (!alive) return ["APAGADO", "bad", st.present ? "sin latido hace " + Math.round(age || 0) + " s" : "proceso caído"];
+    if (st.stop_file) return ["APAGADO", "bad", "STOP activo"];
+    if (!st.armed) return ["APAGADO", "bad", "listo para encender"];
+    if (d.clock && d.clock.doors !== "open") return ["ENCENDIDO", "ok", "esperando a que abran"];
+    if (degraded(d)) return ["ENCENDIDO", "ok", "sin Opus: decide el código"];
+    return ["ENCENDIDO", "ok", "jugando"];
   }
   function dealerShort(p) {
     const n = String(p.name || p.id || "");
@@ -237,13 +240,14 @@
     // Is everything that happens (ours and rivals') being recorded right now?
     const stale = r.age_s == null || r.age_s > 120;
     const down = (r.down || []).length > 0;
-    let text = "GRABANDO", tone = "ok";
-    if (stale || r.state == null) { text = "SIN LATIDO"; tone = "bad"; }
-    else if (down || /down/.test(String(r.state))) { text = "CORTE"; tone = "bad"; }
-    else if (r.state === "closed") { text = "EN ESPERA"; tone = "ok"; }
+    // Real state: ENCENDIDA when the recorder process is alive and reaching the game; APAGADA otherwise.
+    let text = "ENCENDIDA", tone = "ok";
+    if (stale || r.state == null) { text = "APAGADA"; tone = "bad"; }
+    else if (down || /down/.test(String(r.state))) { text = "APAGADA"; tone = "bad"; }
     const gaps = Number(r.feed_gaps || 0);
-    const sub = (stale ? "latido —" : "latido " + Math.round(r.age_s) + " s") + " · " +
-      (gaps ? gaps + " huecos en el feed" : "feed sin huecos") + (down ? " · sin red: " + r.down.join(", ") : "");
+    const what = text === "APAGADA" ? (down ? "sin red con el juego" : "proceso sin latido")
+      : r.state === "closed" ? "puertas cerradas: vigila cada 30 s" : "grabando todo lo que pasa";
+    const sub = what + " · " + (gaps ? gaps + " huecos en el feed" : "feed sin huecos");
     return el("div", { class: "sb-sec" },
       el("div", { class: "sb-line" }, el("span", null, "Grabación"), pill(text, tone)),
       el("div", { class: "sb-sub" }, sub));
@@ -288,7 +292,7 @@
     box.replaceChildren(
       el("div", { class: "sb-sec" },
         el("div", { class: "sb-line" }, el("span", null, "Bot"), pill(bText, bTone)),
-        el("div", { class: "sb-sub" }, (bSub || "encendido") + (bTone === "ok" || !bSub ? " · " + okN + "/" + procs.length + " procesos" : "")),
+        el("div", { class: "sb-sub" }, bSub + " · " + okN + "/" + procs.length + " procesos"),
         el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : "CERRADO", open ? "ok" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
       recorderBlock(d.recorder || {}),

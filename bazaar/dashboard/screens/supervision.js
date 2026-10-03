@@ -148,13 +148,13 @@
   // ---------- pieces ----------
   function strip(st) {
     const ctl = st.control || {};
-    const live = !!(st.armed && st.write && !st.stop_file);
+    const live = !!(st.armed && !st.stop_file && st.age_s != null && st.age_s <= 120);
     const doms = Object.keys(st.domains || {});
     const paused = new Set(ctl.paused_domains || []);
     const active = doms.filter((d) => !paused.has(d)).length;
     const mode = { auto: "Auto", observe: "Observar", manual: "Manual", review: "Revisión" }[ctl.mode] || ctl.mode || "—";
     return h("div", { class: "sv-strip" },
-      h("span", { class: "sv-dot " + (live ? "on" : "off") }), h("b", { class: "sv-state " + (live ? "on" : "off") }, live ? "LIVE" : "PARADO"),
+      h("span", { class: "sv-dot " + (live ? "on" : "off") }), h("b", { class: "sv-state " + (live ? "on" : "off") }, live ? "ENCENDIDO" : "APAGADO"),
       h("span", { class: "sv-mono" }, `Modo ${mode} · ${active}/${doms.length || 0} dominios activos · gestionado por el bot`),
       st.stop_file ? h("span", { class: "sv-bad" }, "· STOP activo") : null,
       st.doors ? h("span", { class: "sv-muted sv-mono" }, `· mercado ${st.doors === "open" ? "abierto" : "cerrado"}`) : null,
