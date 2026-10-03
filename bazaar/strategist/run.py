@@ -152,7 +152,9 @@ STRATEGY_TOOL = {
             "promo_drafts": {"type": "array", "description": "proactive messages for humans to send (WhatsApp group or "
                              "in-game), ALWAYS in English (the group is in English), short and concrete: asking an ally to "
                              "post publicly on v07, proposing a swap to a team that wants our spare, promoting our "
-                             "venue: {text, why, channel: whatsapp|in_game}",
+                             "venue: {text, why, channel: whatsapp|in_game, audience: team|person|group, to_team: 't05' when "
+                             "it is for one team, to_person: name when it is for one person}; audience group only for "
+                             "messages to everyone",
                              "items": {"type": "object"}},
             "whatsapp_replies": {"type": "array", "description": "for EVERY new WhatsApp intake record (EVENTS kind "
                                  "external, ids in brackets): {reply_to: the record id EXACTLY as shown inside the "
@@ -586,8 +588,12 @@ class Strategist:
                    "plan_tick": doc.get("tick")}
             if r.get("text") and box is not None:
                 try:
-                    it = box.draft_promo(r["text"], r.get("why") or r.get("conclusion") or "", channel="whatsapp")
                     rec = next((x for x in records if str(x.get("id")) == rid), {})
+                    who = rec.get("author") or rec.get("by")
+                    who = who if who and who != "equipo" else None   # "equipo" = whoever pasted it, not the sender
+                    it = box.draft_promo(r["text"], r.get("why") or r.get("conclusion") or "", channel="whatsapp",
+                                         to_team=rec.get("team"), to_person=who,
+                                         audience="person" if who else "team" if rec.get("team") else None)
                     box.update(it["id"], reply_to={"record": rid, "author": rec.get("author") or rec.get("by"),
                                                    "team": rec.get("team")})
                     row["reply_outbox_id"] = it["id"]
@@ -881,7 +887,8 @@ class Strategist:
                               severity=c.get("severity") or "medium", impact=c.get("impact") or "",
                               patch_sketch=c.get("patch_sketch") or "")
             for p in plan.get("promo_drafts") or []:
-                box.draft_promo(p["text"], p.get("why") or "", channel=p.get("channel") or "whatsapp")
+                box.draft_promo(p["text"], p.get("why") or "", channel=p.get("channel") or "whatsapp",
+                                to_team=p.get("to_team"), to_person=p.get("to_person"), audience=p.get("audience"))
             for t in plan.get("human_tasks") or []:
                 box.file_task(t["task"], t.get("why") or "", evidence=[f"plan tick {doc.get('tick')}"])
         except Exception as e:  # noqa: BLE001

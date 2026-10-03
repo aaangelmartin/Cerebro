@@ -58,6 +58,38 @@ def similar(a: str, b: str) -> bool:
     return bool(a) and difflib.SequenceMatcher(None, a, b).ratio() >= SIMILAR
 
 
+
+_TEAM_MENTION = re.compile(r"\b(?:team|equipo)\s*0*(\d{1,2})\b", re.I)
+_PERSON_LEAD = re.compile(r"^\s*(?:hi|hey|hello|thanks)?[\s,!]*@([A-Za-zÀ-ÿ][\wÀ-ÿ .'-]{0,40}?)(?=[:,!\s]|$)")
+OUR_TEAM = "t10"
+AUDIENCES = ("team", "person", "group")
+
+
+def team_id(x) -> str | None:
+    """'t5', 'T05', 'Team 5', 5 -> 't05'."""
+    if x is None:
+        return None
+    m = re.search(r"(\d{1,2})", str(x))
+    return f"t{int(m.group(1)):02d}" if m else None
+
+
+def recipient(text: str, to_team=None, to_person=None, audience=None) -> dict:
+    """Who a message is for: explicit fields win; otherwise a leading 'Team N' / '@Name' in the text."""
+    team = team_id(to_team) if to_team else None
+    person = str(to_person).strip()[:80] if to_person else None
+    if not team and not person:
+        head = re.split(r"(?<=[.!?:])\s", str(text or ""), maxsplit=1)[0][:80]   # the greeting / first sentence
+        p = _PERSON_LEAD.match(head)
+        if p:
+            person = p.group(1).strip()
+        else:
+            for m in _TEAM_MENTION.finditer(head):
+                if team_id(m.group(1)) != OUR_TEAM:          # "Team 10 opened v07" is us talking, not a recipient
+                    team = team_id(m.group(1))
+                    break
+    aud = audience if audience in AUDIENCES else ("person" if person else "team" if team else "group")
+    return {"to_team": team, "to_person": person, "audience": aud}
+
 class Outbox:
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else DEFAULT_PATH
@@ -184,14 +216,19 @@ class Outbox:
         return self._put(item)
 
     def draft_promo(self, text: str, why: str = "", channel: str = "whatsapp", item_id: str | None = None,
-                    ts: float | None = None, status: str = "draft") -> dict:
-        """Draft a message; the same text twice is one draft."""
+                    ts: float | None = None, status: str = "draft", to_team: str | None = None,
+                    to_person: str | None = None, audience: str | None = None) -> dict:
+        """Draft a message; the same text twice is one draft. Recipient: to_team ("t05"), to_person, audience
+        (team | person | group); inferred from the text ("Team 5: …", "Hi Team 5", "@Name") when not given."""
         for it in self.list("promo"):
             if _norm(it.get("text")) == _norm(text):
+                if not it.get("audience"):                   # older drafts: fill in who it is for
+                    return self.update(it["id"], **recipient(text, to_team, to_person, audience))
                 return it
         item = {"kind": "promo", "channel": channel if channel in ("whatsapp", "in_game") else "whatsapp",
                 "text": str(text)[:4000], "why": str(why)[:1000],
-                "status": status if status in STATUSES["promo"] else "draft"}
+                "status": status if status in STATUSES["promo"] else "draft",
+                **recipient(text, to_team, to_person, audience)}
         if item_id:
             item["id"] = item_id
         if ts:

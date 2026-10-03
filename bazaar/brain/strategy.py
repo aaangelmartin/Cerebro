@@ -174,7 +174,9 @@ def sanitize(raw: Any) -> dict:
                           for x in (raw.get("code_requests") or [])[:4] if isinstance(x, dict) and x.get("title")]
         if isinstance(raw.get("code_requests"), list) else [],
         "promo_drafts": [{"text": _clean(x.get("text"), 2000), "why": _clean(x.get("why"), 400),
-                          "channel": x.get("channel") if x.get("channel") in ("whatsapp", "in_game") else "whatsapp"}
+                          "channel": x.get("channel") if x.get("channel") in ("whatsapp", "in_game") else "whatsapp",
+                          "to_team": _clean(x.get("to_team"), 12) or None, "to_person": _clean(x.get("to_person"), 80) or None,
+                          "audience": x.get("audience") if x.get("audience") in ("team", "person", "group") else None}
                          for x in (raw.get("promo_drafts") or [])[:2] if isinstance(x, dict) and x.get("text")]
         if isinstance(raw.get("promo_drafts"), list) else [],
         "human_tasks": [{"task": _clean(x.get("task"), 400), "why": _clean(x.get("why"), 600)}
