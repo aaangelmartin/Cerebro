@@ -48,7 +48,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------- layout + nav */
 .layout { position: fixed; inset: var(--topbar-h) 0 0 0; display: flex; }
-.sidenav { width: var(--nav-w); flex: none; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 12px 12px; border-right: 1px solid var(--line); background: var(--bg); overflow-y: auto; }
+.sidenav { width: var(--nav-w); flex: none; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 12px 12px; border-right: 1px solid var(--line); background: var(--s1); overflow-y: auto; }
 .nav-list { display: flex; flex-direction: column; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; color: var(--ink-2); font-size: 13.5px; }
 .nav-item:hover { background: var(--s2); color: var(--ink); }
