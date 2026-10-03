@@ -293,7 +293,12 @@
   function mount(root) {
     S = { mode: "rareza", drawerFor: null };
     root.innerHTML = "";
-    root.append(el("div", { class: "scr-competicion" },
+    let tab = "precios";
+    try { tab = localStorage.getItem("t10.comp.tab") || "precios"; } catch (e) { /* storage blocked */ }
+    root.append(el("div", { class: "scr-competicion c-tab-" + tab },
+      el("div", { class: "c-tabs" },
+        el("button", { class: "t10-seg" + (tab === "precios" ? " on" : ""), "data-tab": "precios" }, "Precios y sedes"),
+        el("button", { class: "t10-seg" + (tab === "mercados" ? " on" : ""), "data-tab": "mercados" }, "Todos los mercados")),
       el("div", { class: "c-top" },
         el("section", { class: "t10-panel c-chart" },
           el("div", { class: "t10-head" }, el("h2", {}, "Competición · precios y volumen"),
@@ -310,7 +315,18 @@
         el("section", { class: "t10-panel c-book c-book-b" }, D.state("loading")),
         el("section", { class: "t10-panel c-mt" },
           el("div", { class: "t10-head" }, el("h2", {}, "Market Test · nuestra sede"), el("span", { class: "t10-sub t10-right" }, "eficiencia vs puesto gratis")),
-          el("div", { class: "c-mt-body" }, D.state("loading"))))));
+          el("div", { class: "c-mt-body" }, D.state("loading")))),
+      el("section", { class: "t10-panel c-markets" },
+        el("div", { class: "t10-head" }, el("h2", {}, "Todos los mercados"), el("span", { class: "t10-sub t10-right" }, "libros, operaciones y conversaciones de cada tienda")),
+        el("div", { class: "c-markets-body" }))));
+    if (window.T10Markets) window.T10Markets.mount(root.querySelector(".c-markets-body"));
+    root.querySelectorAll(".c-tabs button").forEach((b) => b.addEventListener("click", () => {
+      const scr = root.querySelector(".scr-competicion"), t = b.dataset.tab;
+      scr.classList.toggle("c-tab-precios", t === "precios"); scr.classList.toggle("c-tab-mercados", t === "mercados");
+      root.querySelectorAll(".c-tabs button").forEach((x) => x.classList.toggle("on", x === b));
+      try { localStorage.setItem("t10.comp.tab", t); } catch (e) { /* storage blocked */ }
+      if (t === "mercados" && window.T10Markets) window.T10Markets.refresh();
+    }));
     root.querySelectorAll(".c-toggle button").forEach((b) => b.addEventListener("click", () => {
       S.mode = b.dataset.m; root.querySelectorAll(".c-toggle button").forEach((x) => x.classList.toggle("on", x === b)); S.lastSeq = null; refresh(root, S.data, S.params);
     }));
@@ -505,7 +521,321 @@
     title: "Competición",
     mount(root, params) { mount(root); S.params = params; },
     onParams(root, params) { if (S) S.params = params; },
-    async refresh(root, data, params) { return refresh(root, data, params); },
+    async refresh(root, data, params) { if (window.T10Markets) window.T10Markets.refresh(); return refresh(root, data, params); },
     unmount() { S = null; },
+  };
+})();
+/* ---- TODOS LOS MERCADOS (sección de Competición) ----
+   Todas las tiendas del juego (El Rastro, la nuestra y las de los demás equipos): qué hay en venta y qué se
+   busca, cambios, operaciones y anuncios de cada una, y las conversaciones públicas de todos los equipos con
+   los dealers. Se elige en la lista de la izquierda (sin tocar el hash, que es del cajón de sedes). */
+(function () {
+  "use strict";
+  const US = "t10", OUR_VENUE_FALLBACK = "v07";
+  const U = () => window.ui;
+  const el = (...a) => U().el(...a);
+  const num = (x) => (x === null || x === undefined || x === "" || isNaN(+x) ? null : +x);
+  const fmtP = (n) => (n == null ? "—" : U().fmtP(n));
+  const tclock = (tick) => U().tickClock(tick);
+  const wallOf = (row) => num(row.seen_at) || num(row.ts) || U().tickWall(row.tick);
+  const hhmmss = (ts) => (ts ? U().fmtTime(ts) : "—");
+  const isTeam = (id) => /^t\d+$/.test(String(id || ""));
+
+  const S = {
+    sel: null, q: "", side: "todo",
+    feed: [], lastSeq: null, feedErr: null,
+    venues: [], venuesErr: null, books: {}, dealers: {},
+    conv: { team: "", dealer: "", q: "", limit: 30 },
+  };
+
+  // ---------- data ----------
+  async function pullFeed() {
+    const api = window.api;
+    if (S.lastSeq == null) {
+      const r = await api.recStream("feed", { tail: 4000 });
+      S.feed = (r && r.rows) || [];
+      S.lastSeq = r && r.last_seq != null ? r.last_seq : (S.feed.length ? S.feed[S.feed.length - 1].seq : 0);
+    } else {
+      const r = await api.recStream("feed", { since_seq: S.lastSeq, limit: 2000 });
+      const rows = (r && r.rows) || [];
+      if (rows.length) { S.feed = S.feed.concat(rows).slice(-8000); S.lastSeq = rows[rows.length - 1].seq; }
+    }
+  }
+  async function load() {
+    const api = window.api;
+    const [v, d] = await Promise.allSettled([api.rec("venues"), Object.keys(S.dealers).length ? Promise.resolve(null) : api.rec("dealers")]);
+    if (v.status === "fulfilled") { S.venues = (v.value && v.value.venues) || []; S.venuesErr = null; } else S.venuesErr = v.reason;
+    if (d.status === "fulfilled" && d.value) for (const p of d.value.personas || []) if (p && p.id) S.dealers[p.id] = p.name;
+    try { await pullFeed(); S.feedErr = null; } catch (e) { S.feedErr = e; }
+    if (S.sel === "resumen") {
+      await Promise.all(S.venues.map(async (v) => { try { S.books[v.venue] = await api.rec("books/" + v.venue); } catch (e) { S.books[v.venue] = { err: e }; } }));
+    } else if (S.sel && S.sel !== "conversaciones") {
+      try { S.books[S.sel] = await api.rec("books/" + S.sel); } catch (e) { S.books[S.sel] = { err: e }; }
+    }
+  }
+  function ourVenue() {
+    const v = S.venues.find((x) => x.owner === US && x.status !== "closed");
+    return v ? v.venue : OUR_VENUE_FALLBACK;
+  }
+  // who made each offer (public books only show an anonymous maker; the feed says who listed it)
+  function makerIndex() {
+    const m = {};
+    for (const e of S.feed) if (e.type === "offer.listed" && e.payload && e.payload.offer) m[e.payload.offer.id] = e.actor || e.payload.offer.maker;
+    return m;
+  }
+
+  // ---------- helpers ----------
+  const refs = (side) => [
+    ...((side && side.assets) || []).map((a) => a.ref || (a.kind === "pack" ? "sobre" : "#" + a.id)),
+    ...((side && side.types) || []).map((t) => String(t).replace(/^card:/, "").replace(/^pack:/, "sobre ")),
+  ];
+  function offerKind(o) {
+    const gc = num(o.give && o.give.cash) || 0, wc = num(o.want && o.want.cash) || 0;
+    const gi = refs(o.give).length, wi = refs(o.want).length;
+    if (gi && wc && !wi) return "venta";      // they sell a card for cash
+    if (wi && gc && !gi) return "puja";       // they want a card and pay cash
+    if (gi && wi) return "cambio";
+    return gi ? "venta" : "puja";
+  }
+  function who(id) {
+    if (!id) return el("span", { class: "ms-muted" }, "anónimo");
+    if (isTeam(id)) return U().teamTag(id, { us: id === US });
+    if (S.dealers[id]) return el("span", { class: "ms-dealer" }, S.dealers[id]);
+    return el("span", { class: "ms-muted", title: "creador anónimo en el libro público" }, "anónimo");
+  }
+  const matchQ = (texts) => { const q = S.q.trim().toUpperCase(); return !q || texts.some((t) => String(t || "").toUpperCase().includes(q)); };
+
+  // ---------- render: venue list ----------
+  function venueList(root) {
+    const host = root.querySelector(".ms-list");
+    const ours = ourVenue();
+    const order = (v) => (v.venue === "rastro" ? 0 : v.venue === ours ? 1 : 2);
+    const vs = S.venues.slice().sort((a, b) => order(a) - order(b) || String(a.venue).localeCompare(String(b.venue)));
+    const nTh = new Set(S.feed.filter((e) => e.type === "thread.message").map((e) => e.payload && e.payload.thread)).size;
+    const item = (id, title, sub, extra, cls) => el("button", { type: "button", class: ["ms-item", S.sel === id ? "on" : "", cls || ""], onclick: () => { S.sel = id; S.q = ""; render(S.host); T10Markets.refresh(); } },
+      el("div", { class: "ms-item-h" }, title, el("span", { class: "ms-grow" }), extra || null), el("div", { class: "ms-item-s" }, sub));
+    const rows = vs.map((v) => {
+      const fee = v.venue === "rastro" ? "5 % + 1 P/carta" : feeText(v);
+      const tag = v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US });
+      return item(v.venue, el("span", {}, v.name || v.venue),
+        el("span", { class: "ms-mono" }, `${v.venue} · ${fee} · ${v.trades || 0} op. · ${fmtP(v.volume || 0)}` + (openOffers(v.venue) != null ? ` · ${openOffers(v.venue).length} ofertas` : "")),
+        el("div", { class: "ms-item-t" }, tag, v.status && v.status !== "open" ? el("span", { class: "ms-bad" }, v.status) : null),
+        v.venue === ours ? "is-us" : v.venue === "rastro" ? "is-rastro" : "");
+    });
+    host.replaceChildren(
+      el("div", { class: "ms-cap" }, "Vista general"),
+      item("resumen", el("span", {}, "Todos los mercados"), el("span", { class: "ms-mono" }, `${vs.length} tiendas · ${vs.reduce((a, v) => a + (num(v.trades) || 0), 0)} op. · ${fmtP(vs.reduce((a, v) => a + (num(v.volume) || 0), 0))}`), null, "is-sum"),
+      el("div", { class: "ms-cap" }, "Dealers"),
+      item("conversaciones", el("span", {}, U().icon("dealer", 13), " Conversaciones de todos"), el("span", { class: "ms-mono" }, `${nTh} hilos públicos en la grabación`), null, "is-conv"),
+      el("div", { class: "ms-cap" }, `Tiendas · ${vs.length}`),
+      ...(rows.length ? rows : [S.venuesErr ? U().error(S.venuesErr) : U().loading()]));
+  }
+  function feeText(v) {
+    const bps = num(v.fee_bps) || 0, per = num(v.fee_per_card) || 0;
+    if (!bps && !per) return "0 % comisión";
+    return `${(bps / 100).toLocaleString("es-ES")} %` + (per ? ` + ${per} P/carta` : "");
+  }
+
+  // ---------- render: one venue ----------
+  function venueView(root) {
+    const host = root.querySelector(".ms-detail");
+    const v = S.venues.find((x) => x.venue === S.sel);
+    if (!v) { host.replaceChildren(S.venues.length ? U().empty("Esa tienda no está en la lista.") : U().loading()); return; }
+    const book = S.books[S.sel];
+    const makers = makerIndex();
+    const offers = book && book.offers ? book.offers.filter((o) => !o.status || o.status === "open") : null;
+    const tick = S.feed.length ? S.feed[S.feed.length - 1].tick : null;
+    const ours = v.venue === ourVenue();
+
+    const kpi = (l, val, sub) => el("div", { class: "ms-kpi" }, el("span", { class: "ms-kpi-l" }, l), el("b", { class: "ms-mono" }, val), sub ? el("span", { class: "ms-kpi-s" }, sub) : null);
+    const head = el("div", { class: ["ms-head", ours ? "is-us" : ""] },
+      el("div", { class: "ms-title" }, el("h1", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, v.venue),
+        v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US })),
+      v.description ? el("div", { class: "ms-desc" }, v.description) : null,
+      el("div", { class: "ms-kpis" },
+        kpi("Comisión", v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
+        kpi("Ofertas abiertas", offers ? String(offers.length) : "—"),
+        kpi("Operaciones", String(v.trades || 0), fmtP(v.volume || 0)),
+        kpi("Equipos", String(v.traders || 0), (v.pairs || 0) + " parejas"),
+        kpi("Comisiones", fmtP(v.fees || 0)),
+        kpi("Abierta", v.opened_tick != null ? tclock(v.opened_tick) : "—", (v.rules && v.rules.mechanism) || "")));
+
+    const filt = el("div", { class: "ms-filters" },
+      el("input", { class: "ms-input", placeholder: "Carta o set (RET, MAL-04)…", value: S.q, oninput: (e) => { S.q = e.target.value; venueView(root); const i = root.querySelector(".ms-input"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } }),
+      el("div", { class: "ms-seg" }, [["todo", "Todo"], ["venta", "En venta"], ["puja", "Se busca"], ["cambio", "Cambios"]].map(([k, l]) =>
+        el("button", { type: "button", class: S.side === k ? "on" : "", onclick: () => { S.side = k; venueView(root); } }, l))));
+
+    let bookBox;
+    if (!book) bookBox = U().loading();
+    else if (book.err) bookBox = U().error(book.err);
+    else {
+      const rows = offers.map((o) => ({ o, kind: offerKind(o), give: refs(o.give), want: refs(o.want) }))
+        .filter((r) => (S.side === "todo" || r.kind === S.side) && matchQ([...r.give, ...r.want]))
+        .sort((a, b) => a.kind.localeCompare(b.kind) || String(a.give[0] || a.want[0]).localeCompare(String(b.give[0] || b.want[0])) || (offerPrice(a.o) - offerPrice(b.o)));
+      const counts = { venta: 0, puja: 0, cambio: 0 }; for (const o of offers) counts[offerKind(o)]++;
+      bookBox = el("div", { class: "ms-book" },
+        el("div", { class: "ms-sec" }, `Libro · ${counts.venta} en venta · ${counts.puja} se busca · ${counts.cambio} cambios`, book.tick != null ? el("span", { class: "ms-muted" }, " · leído " + tclock(book.tick)) : null),
+        rows.length ? el("table", { class: "ms-table" },
+          el("thead", {}, el("tr", {}, ["Tipo", "Da", "Pide", "Precio", "Quién", "Puesta", "Caduca"].map((x) => el("th", {}, x)))),
+          el("tbody", {}, rows.map(({ o, kind, give, want }) => {
+            const mk = makers[o.id] || o.maker;
+            return el("tr", { class: ["ms-t-" + kind, mk === US ? "is-us" : ""] },
+              el("td", {}, U().typeChip(kind)),
+              el("td", { class: "ms-mono" }, [num(o.give && o.give.cash) ? fmtP(o.give.cash) : null, ...give].filter(Boolean).join(" + ") || "—"),
+              el("td", { class: "ms-mono" }, [num(o.want && o.want.cash) ? fmtP(o.want.cash) : null, ...want].filter(Boolean).join(" + ") || "—"),
+              el("td", { class: "ms-mono ms-r" }, offerPrice(o) ? fmtP(offerPrice(o)) : "—"),
+              el("td", {}, who(mk)),
+              el("td", { class: "ms-mono ms-muted" }, o.created_tick != null ? tclock(o.created_tick) : "—"),
+              el("td", { class: "ms-mono ms-muted" }, o.expires_tick != null ? tclock(o.expires_tick) + (tick != null ? ` · ${Math.max(0, o.expires_tick - tick)} t` : "") : "—"));
+          }))) : U().empty(offers.length ? "Nada coincide con el filtro." : "Libro vacío: nadie tiene ofertas abiertas aquí."));
+    }
+
+    // activity on this venue from the feed: trades, listings, cancellations, announcements
+    const act = S.feed.filter((e) => e.payload && (e.payload.venue === v.venue || (e.type === "venue.announcement" && e.actor === v.venue)) &&
+      ["settlement", "offer.listed", "venue.announcement", "venue.opened", "venue.fee_changed", "venue.fee_announced"].includes(e.type))
+      .filter((e) => matchQ([JSON.stringify(e.payload)])).slice(-150).reverse();
+    const trades = act.filter((e) => e.type === "settlement");
+    const actBox = el("div", { class: "ms-act" },
+      el("div", { class: "ms-sec" }, `Actividad · ${trades.length} operaciones · ${act.length - trades.length} anuncios y ofertas`),
+      act.length ? act.map(activityRow) : U().empty("Sin actividad grabada en esta tienda."));
+    host.replaceChildren(head, filt, el("div", { class: "ms-cols" }, bookBox, actBox));
+  }
+  function openOffers(venue) {
+    const b = S.books[venue];
+    return b && b.offers ? b.offers.filter((o) => !o.status || o.status === "open") : null;
+  }
+  // ---------- render: every venue side by side ----------
+  function summaryView(root) {
+    const host = root.querySelector(".ms-detail");
+    const ours = ourVenue();
+    const since = Date.now() / 1000 - 3600;
+    const lastHour = {};
+    for (const e of S.feed) if (e.type === "settlement" && e.payload && (wallOf(e) || 0) >= since) {
+      const k = e.payload.venue || (e.payload.persona ? null : "rastro"); if (k) lastHour[k] = (lastHour[k] || 0) + 1;
+    }
+    const rows = S.venues.map((v) => {
+      const offs = openOffers(v.venue); const c = { venta: 0, puja: 0, cambio: 0 };
+      if (offs) for (const o of offs) c[offerKind(o)]++;
+      return { v, offs, c, h: lastHour[v.venue] || 0 };
+    }).sort((a, b) => (b.v.venue === ours) - (a.v.venue === ours) || (num(b.v.volume) || 0) - (num(a.v.volume) || 0) || (num(b.v.trades) || 0) - (num(a.v.trades) || 0));
+    const tot = rows.reduce((a, r) => ({ t: a.t + (num(r.v.trades) || 0), vol: a.vol + (num(r.v.volume) || 0), o: a.o + (r.offs ? r.offs.length : 0) }), { t: 0, vol: 0, o: 0 });
+    const kpi = (l, val) => el("div", { class: "ms-kpi" }, el("span", { class: "ms-kpi-l" }, l), el("b", { class: "ms-mono" }, val));
+    const head = el("div", { class: "ms-head" },
+      el("div", { class: "ms-title" }, el("h1", {}, "Todos los mercados"), el("span", { class: "ms-muted" }, "cada tienda del juego, la nuestra arriba")),
+      el("div", { class: "ms-kpis" }, kpi("Tiendas", String(rows.length)), kpi("Operaciones", String(tot.t)), kpi("Volumen", fmtP(tot.vol)), kpi("Ofertas abiertas", String(tot.o))));
+    const n = (x) => el("td", { class: "ms-mono ms-r" }, x);
+    const table = el("table", { class: "ms-table ms-sum" },
+      el("thead", {}, el("tr", {}, ["Tienda", "Dueño", "Comisión", "Estado", "Operaciones", "Última hora", "Volumen", "Equipos", "En venta", "Se busca", "Cambios"].map((x, i) => el("th", { class: i >= 4 ? "ms-r" : "" }, x)))),
+      el("tbody", {}, rows.map(({ v, offs, c, h }) => el("tr", { class: ["ms-click", v.venue === ours ? "is-us" : ""], onclick: () => { S.sel = v.venue; render(root); T10Markets.refresh(); } },
+        el("td", {}, el("b", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, " " + v.venue)),
+        el("td", {}, v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US })),
+        el("td", { class: "ms-mono" }, v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
+        el("td", { class: v.status === "open" ? "ms-muted" : "ms-bad" }, v.status === "open" ? "abierta" : v.status || "—"),
+        n(String(v.trades || 0)), n(h ? String(h) : "—"), n(fmtP(v.volume || 0)), n(String(v.traders || 0)),
+        n(offs ? String(c.venta) : "…"), n(offs ? String(c.puja) : "…"), n(offs ? String(c.cambio) : "…")))));
+    host.replaceChildren(head, rows.length ? table : (S.venuesErr ? U().error(S.venuesErr) : U().loading()));
+  }
+  function offerPrice(o) { return num(o.want && o.want.cash) || num(o.give && o.give.cash) || 0; }
+  function activityRow(e) {
+    const p = e.payload || {};
+    let type = "anuncio", text = "", price = null, team = e.actor;
+    if (e.type === "settlement") {
+      type = "compra"; price = num(p.price);
+      const items = (p.items || []).map((i) => `${i.ref || "#" + i.id} ${i.frm || "?"}→${i.to || "?"}`).join(", ");
+      text = `Operación: ${items}${p.fee ? ` · comisión ${fmtP(p.fee)}` : ""}`; team = (p.parties || []).find(isTeam) || e.actor;
+    } else if (e.type === "offer.listed") {
+      const o = p.offer || {}; type = offerKind(o); price = offerPrice(o);
+      text = `${type === "venta" ? "Vende" : type === "puja" ? "Busca" : "Cambia"} ${[...refs(o.give)].join(", ") || fmtP(o.give && o.give.cash)} por ${[...refs(o.want)].join(", ") || fmtP(o.want && o.want.cash)}`;
+    } else { text = p.text || p.name || e.type; team = null; }
+    return U().row({ type, cells: [
+      el("span", { class: "ms-mono ms-muted", title: "tick " + e.tick }, hhmmss(wallOf(e))),
+      team ? who(team) : el("span", {}, ""),
+      el("span", { class: "ms-txt" }, text),
+      el("span", { class: "ms-mono ms-r" }, price ? fmtP(price) : ""),
+    ], cols: "64px auto 1fr 64px" });
+  }
+
+  // ---------- render: every team's public dealer conversations ----------
+  function convView(root) {
+    const host = root.querySelector(".ms-detail");
+    const threads = new Map();
+    for (const e of S.feed) {
+      const p = e.payload || {};
+      if (e.type !== "thread.message" && e.type !== "thread.opened" && e.type !== "thread.closed") continue;
+      const id = p.thread; if (id == null) continue;
+      const t = threads.get(id) || { id, team: p.team, with: p.with, topic: null, msgs: [], last: 0, status: "abierta" };
+      if (p.team) t.team = p.team; if (p.with) t.with = p.with; if (p.topic) t.topic = p.topic;
+      if (e.type === "thread.message") t.msgs.push(e);
+      if (e.type === "thread.closed") t.status = p.status || "cerrada";
+      t.last = Math.max(t.last, wallOf(e) || 0);
+      threads.set(id, t);
+    }
+    const all = [...threads.values()];
+    const teams = [...new Set(all.map((t) => t.team).filter(Boolean))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    const dealers = [...new Set(all.map((t) => t.with).filter(Boolean))];
+    const f = S.conv;
+    const list = all.filter((t) => (!f.team || t.team === f.team) && (!f.dealer || t.with === f.dealer) &&
+      (!f.q || JSON.stringify([t.topic, t.msgs.map((m) => m.payload.text)]).toLowerCase().includes(f.q.toLowerCase())))
+      .sort((a, b) => b.last - a.last);
+    const rerender = () => convView(root);
+    const filters = el("div", { class: "ms-filters" },
+      el("select", { class: "ms-input", onchange: (e) => { f.team = e.target.value; rerender(); } }, el("option", { value: "" }, "Equipo: todos"),
+        teams.map((t) => el("option", { value: t, selected: f.team === t ? "selected" : null }, t === US ? "Nosotros (t10)" : U().teamName(t)))),
+      el("select", { class: "ms-input", onchange: (e) => { f.dealer = e.target.value; rerender(); } }, el("option", { value: "" }, "Dealer: todos"),
+        dealers.map((d) => el("option", { value: d, selected: f.dealer === d ? "selected" : null }, S.dealers[d] || d))),
+      el("input", { class: "ms-input", placeholder: "Buscar carta o texto…", value: f.q, onchange: (e) => { f.q = e.target.value; rerender(); } }));
+    const cards = list.slice(0, f.limit).map((t) => {
+      const msgs = t.msgs.slice().sort((a, b) => (a.payload.message || 0) - (b.payload.message || 0));
+      const topic = t.topic ? (t.topic.buy ? "Compra " + (t.topic.buy.card || t.topic.buy.pack || JSON.stringify(t.topic.buy)) : t.topic.sell ? "Vende" : "") : "";
+      return el("article", { class: ["ms-chat", t.team === US ? "is-us" : ""] },
+        el("header", { class: "ms-chat-h" }, U().typeChip("dealer", S.dealers[t.with] || t.with || "Dealer"), who(t.team),
+          el("span", { class: "ms-grow" }), el("span", { class: "ms-mono ms-muted" }, `#${t.id} · ${msgs.length} msj · ${hhmmss(t.last)}`)),
+        topic ? el("div", { class: "ms-chat-s ms-mono" }, topic) : null,
+        el("div", { class: "ms-msgs" }, msgs.map((m) => {
+          const p = m.payload, o = p.offer, fromTeam = isTeam(p.sender);
+          const price = o ? offerPrice(o) : null;
+          return el("div", { class: ["ms-msg", fromTeam ? "is-team" : "is-dealer", p.sender === US ? "is-us" : ""] },
+            el("div", { class: "ms-msg-h" }, el("span", {}, fromTeam ? U().teamName(p.sender) : S.dealers[p.sender] || p.sender),
+              price ? el("b", { class: "ms-mono" }, fmtP(price) + (o.final ? " · final" : "")) : null,
+              el("span", { class: "ms-mono ms-muted", title: "tick " + m.tick }, hhmmss(wallOf(m)))),
+            p.text ? el("div", { class: "ms-msg-t" }, p.text) : o ? el("div", { class: "ms-msg-t ms-muted" }, `oferta: da ${refs(o.give).join(", ") || fmtP(o.give && o.give.cash)} · pide ${refs(o.want).join(", ") || fmtP(o.want && o.want.cash)}`) : null);
+        })));
+    });
+    host.replaceChildren(
+      el("div", { class: "ms-head" }, el("div", { class: "ms-title" }, el("h1", {}, "Conversaciones con dealers"), el("span", { class: "ms-muted" }, "de todos los equipos · públicas en el feed")),
+        el("div", { class: "ms-desc" }, `${list.length} de ${all.length} hilos · ${S.feedErr ? "error leyendo el feed" : "se actualiza solo"}`)),
+      filters,
+      el("div", { class: "ms-chats" }, ...(cards.length ? cards : [S.feed.length ? U().empty("Ninguna conversación coincide.") : U().loading()])),
+      list.length > f.limit ? el("button", { type: "button", class: "ms-more", onclick: () => { f.limit += 30; rerender(); } }, `Mostrar más (${list.length - f.limit})`) : null);
+  }
+
+  function render(root) {
+    venueList(root);
+    if (S.sel === "conversaciones") convView(root); else if (S.sel === "resumen") summaryView(root); else venueView(root);
+  }
+
+  const T10Markets = window.T10Markets = {
+    mount(host) {
+      S.host = host;
+      host.replaceChildren(el("div", { class: "scr-mercados" },
+        el("aside", { class: "ms-list" }, U().loading()),
+        el("section", { class: "ms-detail" }, U().loading())));
+    },
+    async refresh() {
+      const root = S.host; if (!root || !root.isConnected || S.busy) return;
+      S.busy = true;
+      try {
+        if (!S.sel) S.sel = ourVenue();
+        await load();
+        const special = S.sel === "conversaciones" || S.sel === "resumen";
+        if (!S.sel || (!special && !S.venues.some((v) => v.venue === S.sel))) S.sel = ourVenue();
+        if (!special && !S.books[S.sel]) await load();
+        if (!root.isConnected) return;
+        // keep focus while typing in a filter box
+        const a = document.activeElement;
+        if (a && root.contains(a) && /INPUT|SELECT/.test(a.tagName)) { venueList(root); return; }
+        render(root);
+      } finally { S.busy = false; }
+    },
   };
 })();
