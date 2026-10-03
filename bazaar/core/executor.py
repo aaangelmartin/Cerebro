@@ -175,6 +175,11 @@ def _execute(action: Action, gw, sit, ctx, tick: int) -> Outcome:
             resp = gw.patch(path, body)
         else:
             resp = gw.post(path, body, broker_key=bk) if bk else gw.post(path, body)
+        if action.kind == "venue_open" and isinstance(resp, dict):
+            # The response carries the broker key: store it (0600) and never let it reach the ledger.
+            from bazaar.broker import venue as _venue
+            _venue.save_from_response(resp)
+            resp = _venue.redact(resp)
         return Outcome(action.id, tick, "sent", resp if isinstance(resp, dict) else {"items": resp}, _realised(action))
     except GameError as e:
         status = "error" if (e.code in SERVER_CODES or e.status >= 500) else "refused"
