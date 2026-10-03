@@ -114,12 +114,19 @@ def _accept_facts(action: Action, sit, control: dict) -> dict:
     offer = p.get("expect") or {}
     ask = ((offer.get("want") or {}).get("cash")) or 0
     pay = ((p.get("give") or {}).get("cash")) or 0
+    if not pay and action.domain == "dealers":                 # a dealer thread has no venue and no taker fee
+        pay = exp.get("spend") or 0
     out: dict[str, Any] = {"accept": {
         "maker_ask_cash": ask, "we_pay_all_in": pay, "taker_fee_included": max(0, pay - ask),
         "venue": offer.get("venue"),
         "note": "we_pay_all_in = maker_ask_cash + the venue's taker fee; the game charges the fee to the taker"}}
+    if offer:
+        # `expect` is written from the MAKER's side: accepting, we receive its give and hand over its want.
+        out["accept"].update(we_receive=offer.get("give"), we_hand_over=offer.get("want"),
+                             sides="params.expect is the maker's offer: expect.give comes to us, expect.want leaves us")
     refs = [a.get("ref") for a in ((p.get("want") or {}).get("assets") or []) if isinstance(a, dict)]
     refs += [t[5:] for t in ((p.get("want") or {}).get("types") or []) if str(t).startswith("card:")]
+    refs += _offer_cards(offer.get("give"))
     try:
         from ..core.goal import goal_buys as _manual
         goals = dict(_manual(control))
@@ -142,6 +149,53 @@ def _accept_facts(action: Action, sit, control: dict) -> dict:
     except Exception:  # noqa: BLE001 - context is a help, never a reason to fail a review
         pass
     return out
+
+
+def _offer_cards(side) -> list[str]:
+    side = side if isinstance(side, dict) else {}
+    refs = [str(a.get("ref")).upper() for a in side.get("assets") or [] if isinstance(a, dict) and a.get("ref")]
+    return refs + [str(t)[5:].upper() for t in side.get("types") or [] if str(t).startswith("card:")]
+
+
+def ordered_dealer_accept(action: Action, control: dict | None = None, live=None) -> str | None:
+    """Why this accept needs no new vote, or None. A dealer's offer lives about four ticks; when it is a buy
+    the plan in force already decided (a dealer_orders buy for that dealer and card, or a goal buy), the price
+    is inside that cap and the deal gains value, the vote was cast on the plan. The rails still check it."""
+    if action.kind != "accept_offer" or action.domain != "dealers":
+        return None
+    exp, offer = action.expected or {}, (action.params or {}).get("expect") or {}
+    cards = _offer_cards(offer.get("give"))
+    price, value, gain = exp.get("spend"), exp.get("value_get"), exp.get("value_gain")
+    nums = (price, value, gain)
+    if len(cards) != 1 or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in nums):
+        return None                                            # a sale, a lot, or numbers we cannot read: vote
+    if price != (offer.get("want") or {}).get("cash") or (offer.get("want") or {}).get("assets"):
+        return None                                            # the price we judged is not the offer's ask
+    if gain <= 0 or value < price:
+        return None
+    ref, dealer = cards[0], str(exp.get("dealer") or offer.get("maker") or "").lower()
+    caps: list[tuple[int, str]] = []
+    try:
+        from . import strategy as _st
+        caps += [(int(o["bound"]), "dealer order") for o in _st.dealer_orders(live)
+                 if o.get("action") == "buy" and o.get("ref") == ref and o.get("dealer") == dealer]
+        goals = _st.goal_buys(live)
+        if ref in goals:
+            caps.append((int(goals[ref]), "goal buy"))
+    except Exception:  # noqa: BLE001 - no plan to read: vote as usual
+        pass
+    try:
+        from ..core.goal import goal_buys as _manual
+        manual = dict(_manual(control or {}))
+        if ref in manual:
+            caps.append((int(manual[ref]), "goal buy (control)"))
+    except Exception:  # noqa: BLE001
+        pass
+    for cap, what in caps:
+        if 0 < price <= cap:
+            return ("%s for %s at %s: %d P is inside the cap of %d and gains %.1f P; the plan was already "
+                    "decided, no new vote" % (what, ref, dealer or "the dealer", price, cap, gain))
+    return None
 
 
 def _context_for(action: Action, sit, control: dict | None = None) -> dict:
@@ -334,6 +388,11 @@ def review(action: Action, sit, ctx) -> Action | None:
             _CACHE[key] = {"result": row["result"], "why": why, "tick": tick}
         _log(ctx, row)
         return result
+
+    ordered = ordered_dealer_accept(action, getattr(ctx, "control", None) or {}, getattr(ctx, "live", None))
+    if ordered:                             # before the cache: an earlier veto must not hold an ordered accept
+        row.update(votes=[], ordered=True)
+        return done(replace(action, source="council"), ordered)
 
     hit = _CACHE.get(key) if key is not None else None
     if hit and isinstance(tick, int) and tick - hit["tick"] <= CACHE_TICKS.get(hit["result"], 0):
