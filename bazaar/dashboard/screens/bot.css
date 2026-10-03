@@ -141,3 +141,25 @@
 .scr-bot .bot-keyalert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--bad); border-left-width: 3px;
   background: var(--bad-soft); font-size: 13px; line-height: 1.4; }
 .scr-bot .bot-keyalert.tone-warn { border-color: var(--warn); background: var(--warn-soft); }
+
+/* Cerebro · intensidad y presupuesto */
+.scr-bot .bot-brain-body.is-off { opacity: .45; pointer-events: none; }
+.scr-bot .bot-brain-top { display: grid; grid-template-columns: 170px minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+@media (max-width: 1100px) { .scr-bot .bot-brain-top { grid-template-columns: minmax(0, 1fr); } }
+.scr-bot .bot-brain-slide { display: flex; align-items: center; gap: 10px; }
+.scr-bot .bot-range { flex: 1; appearance: none; -webkit-appearance: none; height: 6px; background: var(--bx-line); border-radius: 0; outline: none; }
+.scr-bot .bot-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 20px; background: var(--bx-ink); border: 0; border-radius: 0; cursor: pointer; }
+.scr-bot .bot-range::-moz-range-thumb { width: 14px; height: 20px; background: var(--bx-ink); border: 0; border-radius: 0; cursor: pointer; }
+.scr-bot .bot-range:disabled::-webkit-slider-thumb { background: var(--bx-muted); }
+.scr-bot .bot-brain-level { font-size: 20px; min-width: 38px; text-align: right; }
+.scr-bot .bot-brain-est { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.scr-bot .bot-brain-rate { font-size: 20px; }
+.scr-bot .bot-brain-why { line-height: 1.4; }
+.scr-bot .bot-brain-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.scr-bot .bot-brain-bar .bot-brow-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.scr-bot .bot-bar-warn span { background: var(--warn); } .scr-bot .bot-bar-bad span { background: var(--bx-bad); }
+.scr-bot .bot-brain-kv { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12.5px; }
+.scr-bot .bot-bad { color: var(--bx-bad); }
+.scr-bot .bot-brain-caps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 24px; border-top: 1px solid var(--bx-line); padding-top: 10px; }
+.scr-bot .bot-brain-cap { width: 80px; }
+.scr-bot .bot-brain-bar { display: flex; flex-direction: column; min-width: 0; } .scr-bot .bot-brain-bar .bot-bar { display: block; width: 100%; }

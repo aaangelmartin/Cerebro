@@ -455,6 +455,118 @@
       panel("Dominios", "gestionado por el bot", doms),
       panel("Topes y límites", null, form));
   }
+  // ---------- Cerebro · intensidad y presupuesto ----------
+  // GET brain/budget -> {mode, level, usd_per_hour_now, table:[{level, interval_ticks, usd_per_hour}], spent_today, cap_today,
+  //   day_total_spent, day_cap, projected_spend_by_close, hours_left, keys_headroom, last_change:{ts, from, to, reason}}
+  // POST control {brain_intensity, brain_intensity_mode} / {brain_day_cap} / {day_cap}
+  const B = { host: null, data: null, state: "idle", err: null, dragging: false, busy: false, at: 0, n: {} };
+  // $/h and interval for any level, interpolated from the backend's table
+  function levelInfo(level) {
+    const t = ((B.data && B.data.table) || []).slice().sort((a, b) => a.level - b.level);
+    if (!t.length) return null;
+    if (level <= t[0].level) return t[0];
+    for (let i = 1; i < t.length; i++) if (level <= t[i].level) {
+      const a = t[i - 1], b = t[i], k = (level - a.level) / Math.max(1, b.level - a.level);
+      return { level, usd_per_hour: a.usd_per_hour + (b.usd_per_hour - a.usd_per_hour) * k,
+        interval_ticks: Math.max(1, Math.round(a.interval_ticks + (b.interval_ticks - a.interval_ticks) * k)) };
+    }
+    return t[t.length - 1];
+  }
+  function brainMount() {
+    const n = B.n = {};
+    n.auto = el("button", { type: "button", class: "bot-seg-b", onclick: () => setBrain({ brain_intensity_mode: "auto" }, "Cerebro en automático") }, "Auto");
+    n.manual = el("button", { type: "button", class: "bot-seg-b", onclick: () => setBrain({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Cerebro en manual · nivel " + n.slider.value) }, "Manual");
+    n.slider = el("input", { type: "range", min: "0", max: "100", step: "1", class: "bot-range", "aria-label": "Intensidad del cerebro" });
+    n.slider.addEventListener("input", () => { B.dragging = true; brainEstimate(+n.slider.value); });
+    n.slider.addEventListener("change", () => { B.dragging = false; setBrain({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Intensidad del cerebro: " + n.slider.value); });
+    n.level = el("b", { class: "bot-mono bot-brain-level" }, "—");
+    n.rate = el("b", { class: "bot-mono bot-brain-rate" }, "—");
+    n.every = el("span", { class: "bot-muted bot-small bot-mono" }, "");
+    n.why = el("div", { class: "bot-brain-why bot-small" });
+    n.proj = el("b", { class: "bot-mono" }, "—"); n.hours = el("b", { class: "bot-mono" }, "—"); n.head = el("b", { class: "bot-mono" }, "—");
+    n.barBrain = el("div", { class: "bot-brain-bar" }); n.barDay = el("div", { class: "bot-brain-bar" });
+    const capIn = (name, label) => {
+      const inp = el("input", { name, type: "number", min: "0", step: "1", inputmode: "numeric", class: "bot-brain-cap" });
+      const btn = el("button", { type: "button", class: "bot-b bot-b-sm", onclick: async () => {
+        const v = Number(inp.value);
+        if (!isFinite(v) || v < 0 || inp.value === "") { toast("error", "Número no válido", label); return; }
+        const ok = await confirmBox({ title: `¿Cambiar ${label.toLowerCase()} a ${fmt(v, 0)} $?`, text: "Es el máximo que puede gastar hoy en la API de Claude. Se aplica en la siguiente revisión.", confirmLabel: "Sí, cambiar" });
+        if (ok) setBrain({ [name]: v }, `${label}: ${fmt(v, 0)} $`);
+      } }, "Guardar");
+      n[name] = inp;
+      return el("label", { class: "bot-cap-row" }, el("span", {}, label), el("span", { class: "bot-cap-in" }, inp, el("span", { class: "bot-muted bot-small" }, "$"), btn));
+    };
+    n.body = el("div", { class: "bot-pb bot-brain-body" },
+      el("div", { class: "bot-brain-top" },
+        el("div", { class: "bot-seg bot-brain-mode" }, n.auto, n.manual),
+        el("div", { class: "bot-brain-slide" }, el("span", { class: "bot-muted bot-small" }, "0"), n.slider, el("span", { class: "bot-muted bot-small" }, "100"), n.level),
+        el("div", { class: "bot-brain-est" }, el("span", { class: "bot-muted bot-small" }, "≈"), n.rate, n.every)),
+      n.why,
+      el("div", { class: "bot-brain-grid" },
+        el("div", {}, el("div", { class: "bot-cap" }, "Cerebro hoy"), n.barBrain),
+        el("div", {}, el("div", { class: "bot-cap" }, "Todo el día (todas las llamadas)"), n.barDay)),
+      el("div", { class: "bot-brain-kv" },
+        el("span", {}, el("span", { class: "bot-muted" }, "Gasto previsto al cierre "), n.proj),
+        el("span", {}, el("span", { class: "bot-muted" }, "Quedan "), n.hours),
+        el("span", {}, el("span", { class: "bot-muted" }, "Margen de las claves "), n.head)),
+      el("div", { class: "bot-brain-caps" }, capIn("brain_day_cap", "Tope del cerebro hoy"), capIn("day_cap", "Tope de todo el día")));
+    n.off = el("div", { class: "bot-pb bot-muted", hidden: true }, "El presupuesto del cerebro aún no está activo.");
+    n.sub = el("span", { class: "bot-muted bot-mono bot-small" }, "");
+    B.host = el("section", { class: "bot-panel bot-brain" }, el("div", { class: "bot-ph" }, el("h2", {}, "Cerebro · intensidad y presupuesto"), n.sub), n.body, n.off);
+    brainPaint();
+    return B.host;
+  }
+  function brainEstimate(level) {
+    const n = B.n, li = levelInfo(level);
+    n.level.textContent = String(level);
+    n.rate.textContent = li ? fmt(li.usd_per_hour, 2) + " $/h" : "—";
+    n.every.textContent = li ? `planifica cada ${li.interval_ticks} tick${li.interval_ticks === 1 ? "" : "s"}` : "";
+  }
+  function bar(host, spent, cap) {
+    const pct = cap > 0 ? Math.min(100, (spent / cap) * 100) : 0;
+    const tone = cap > 0 && spent >= cap ? "bad" : pct >= 80 ? "warn" : "ok";
+    host.replaceChildren(el("div", { class: "bot-brow-h" }, el("span", { class: "bot-mono" }, usd(spent)), el("span", { class: "bot-muted bot-small bot-mono" }, cap ? `de ${fmt(cap, 0)} $ · ${Math.round(pct)} %` : "sin tope")),
+      el("div", { class: "bot-bar bot-bar-" + tone }, el("span", { style: `width:${Math.max(1, Math.round(pct))}%` })));
+  }
+  function brainPaint() {
+    const n = B.n, d = B.data; if (!B.host) return;
+    const off = B.state === "off" || (B.state !== "on" && !d);
+    n.off.hidden = !(B.state === "off" || B.state === "error");
+    n.off.textContent = B.state === "error" ? "No se pudo leer el presupuesto del cerebro: " + ((B.err && B.err.message) || "") : "El presupuesto del cerebro aún no está activo.";
+    n.body.classList.toggle("is-off", off);
+    for (const x of [n.slider, n.auto, n.manual, n.brain_day_cap, n.day_cap]) x.disabled = off || B.busy;
+    if (!d) { n.sub.textContent = B.state === "idle" ? "cargando…" : ""; return; }
+    const auto = d.mode !== "manual";
+    n.auto.classList.toggle("is-on", auto); n.manual.classList.toggle("is-on", !auto);
+    n.sub.textContent = (auto ? "automático" : "manual") + " · nivel " + d.level;
+    if (!B.dragging && document.activeElement !== n.slider) { n.slider.value = String(d.level ?? 0); brainEstimate(+n.slider.value); if (num(d.usd_per_hour_now) != null) n.rate.textContent = fmt(d.usd_per_hour_now, 2) + " $/h"; }
+    const lc = d.last_change;
+    n.why.replaceChildren(...(lc && lc.reason ? [el("span", { class: "bot-muted" }, auto ? "Último cambio automático: " : "Último cambio: "),
+      el("b", {}, (lc.to > lc.from ? "sube" : lc.to < lc.from ? "baja" : "se mantiene") + ": " + lc.reason), el("span", { class: "bot-muted bot-mono" }, ` · ${lc.from} → ${lc.to} · ${window.ui.fmtTime(lc.ts)}`)]
+      : [el("span", { class: "bot-muted" }, auto ? "En automático el cerebro sube cuando hay eventos (duelos, Market Test) y baja cuando el juego está parado." : "En manual el nivel se queda donde lo pongas.")]));
+    bar(n.barBrain, num(d.spent_today) || 0, num(d.cap_today) || 0);
+    bar(n.barDay, num(d.day_total_spent) || 0, num(d.day_cap) || 0);
+    n.proj.textContent = num(d.projected_spend_by_close) != null ? usd(d.projected_spend_by_close) : "—";
+    n.proj.className = "bot-mono" + (num(d.day_cap) && d.projected_spend_by_close > d.day_cap ? " bot-bad" : "");
+    n.hours.textContent = num(d.hours_left) != null ? fmt(d.hours_left, 1) + " h" : "—";
+    const kh = d.keys_headroom;
+    n.head.textContent = kh == null ? "—" : typeof kh === "number" ? usd(kh) : Object.entries(kh).map(([k, v]) => `${k} ${fmt(v, 0)} $`).join(" · ");
+    for (const k of ["brain_day_cap", "day_cap"]) if (document.activeElement !== n[k]) n[k].value = String((k === "brain_day_cap" ? d.cap_today : d.day_cap) ?? "");
+  }
+  async function brainPull(force) {
+    if (!B.host || B.busy || (!force && Date.now() - B.at < 4000)) return;
+    B.at = Date.now();
+    try { B.data = await A().brainBudget(); B.state = "on"; }
+    catch (e) { B.state = e && e.status === 404 ? "off" : "error"; B.err = e; if (e && e.status === 404) B.data = null; }
+    brainPaint();
+  }
+  async function setBrain(body, done) {
+    if (B.busy) return;
+    B.busy = true; brainPaint();
+    try { await req("POST", "control", body); toast("outcome", done, ""); }
+    catch (e) { toast("error", "No se pudo aplicar", e.message || String(e)); }
+    finally { B.busy = false; B.at = 0; await brainPull(true); }
+  }
   function panel(title, sub, ...kids) {
     return el("section", { class: "bot-panel" }, el("div", { class: "bot-ph" }, el("h2", {}, title), sub ? el("span", { class: "bot-muted bot-mono bot-small" }, sub) : null), el("div", { class: "bot-pb" }, ...kids));
   }
@@ -497,6 +609,7 @@
         el("div", { class: "bot-grid" },
           el("div", { class: "bot-main" },
             el("section", { class: "bot-panel" }, el("div", { class: "bot-ph" }, el("h2", {}, "Gasto de API"), el("span", { class: "bot-spend-sub bot-muted bot-mono bot-small" })), el("div", { class: "bot-spend bot-pb" }, loading())),
+            brainMount(),
             el("div", { class: "bot-row3" }, sec("Escalera de degradado", "bot-ladder"), sec("Latencia", "bot-lat"), sec("Procesos", "bot-procs")),
             sec("Disyuntores, errores y avisos", "bot-errs", "últimas 6 h")),
           el("div", { class: "bot-ctrl" }, loading())));
@@ -505,6 +618,7 @@
       S.root = root;
       await load(data);
       paintAll();
+      brainPull();
     },
     unmount(root) { S.root = null; root.classList.remove("scr-bot"); },
   };

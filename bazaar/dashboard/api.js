@@ -66,6 +66,7 @@
     novelty: (since, limit) => get("novelty", { since, limit }),
     spend: () => get("spend"),
     llmHealth: () => get("llm/health", {}, 5000),
+    brainBudget: () => get("brain/budget", {}, 0),
     strategy: (limit) => get("strategy", { limit }),
     brainChat: (since) => get("brain/chat", { since }, 0),
     brainSay: (text, by) => write("POST", "brain/chat", { text, by: by || "equipo" }),

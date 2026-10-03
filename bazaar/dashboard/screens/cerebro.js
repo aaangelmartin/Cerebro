@@ -60,13 +60,15 @@
     try { r = await A().strategy(200); } catch (e) { err = e; }
     let spend = null;
     try { spend = await A().spend(); } catch (e) { /* optional */ }
+    let budget = null;
+    try { budget = await A().brainBudget(); } catch (e) { /* optional: 404 until the backend serves it */ }
     let control = null;
     try { control = await A().getControl(); } catch (e) { /* optional */ }
     const sv = (ov && ov.strategy) || null;
     const cur = (r && r.current) || null;
     const history = ((r && r.history) || []).slice().sort((a, b) => (num(a.updated) || 0) - (num(b.updated) || 0));
     if (cur && !history.some((h) => h.updated === cur.updated)) history.push(cur);
-    return { cur, status: (r && r.status) || {}, history, findings: (r && r.findings) || [], sv, spend, control, err };
+    return { cur, status: (r && r.status) || {}, history, findings: (r && r.findings) || [], sv, spend, control, budget, err };
   }
 
   // ---------- pieces ----------
@@ -83,7 +85,11 @@
       U().kpi({ label: "Último plan", value: cur.updated ? when(cur.updated) : "—", sub: cur.tick != null ? "tick " + cur.tick + (cur.reason ? " · " + cur.reason : "") : "" }),
       U().kpi({ label: "Siguiente revisión", value: nextT ? "en " + nextT + " ticks" : "—", sub: "antes si pasa algo (evento)" }),
       U().kpi({ label: "Modelo", value: (cur.model || "claude-opus-5-5").replace("claude-", "").replace(/-/g, " "), sub: "esfuerzo medio" }),
-      U().kpi({ label: "Gasto hoy", value: spentStrategy != null ? U().fmtUsd(spentStrategy) : "—", sub: st.day_cap ? "tope " + U().fmtUsd(st.day_cap) : (st.calls != null ? st.calls + " llamadas" : "") }));
+      d.budget ? U().kpi({ label: "Intensidad", value: el("a", { href: "#bot", class: "cb-int" }, String(d.budget.level ?? "—"), el("span", { class: "cb-int-of" }, "/100")),
+        sub: (d.budget.mode === "manual" ? "manual" : "automático") + (num(d.budget.usd_per_hour_now) != null ? " · ≈ " + fmtNum(d.budget.usd_per_hour_now, 2) + " $/h" : "") }) : null,
+      U().kpi({ label: "Gasto hoy", value: (d.budget && num(d.budget.spent_today) != null) ? U().fmtUsd(d.budget.spent_today) : spentStrategy != null ? U().fmtUsd(spentStrategy) : "—",
+        sub: (d.budget && d.budget.cap_today) ? "tope " + U().fmtUsd(d.budget.cap_today) : st.day_cap ? "tope " + U().fmtUsd(st.day_cap) : (st.calls != null ? st.calls + " llamadas" : "") }));
+    if (d.budget) kpis.classList.add("has-6");
     const errs = (st.errors || []).slice(-3);
     const p = U().panel("Cerebro", { sub: "Opus piensa, investiga y decide; el consejo vota los cambios grandes", cls: "cb-status" });
     const sit = (cur.plan || {}).situation;
@@ -933,7 +939,7 @@
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
       // avoid rebuilding when nothing changed (keeps scroll and open history item)
-      const sig = JSON.stringify([d.cur && d.cur.updated, d.status && d.status.updated, d.history.length, d.findings.length, d.err && d.err.status, S.histSel]);
+      const sig = JSON.stringify([d.cur && d.cur.updated, d.status && d.status.updated, d.history.length, d.findings.length, d.err && d.err.status, S.histSel, d.budget && [d.budget.level, d.budget.mode, d.budget.usd_per_hour_now, d.budget.spent_today, d.budget.cap_today]]);
       if (sig === S.sig && S.data && !(opts && opts.force)) return;
       S.sig = sig; S.data = d;
       render();
