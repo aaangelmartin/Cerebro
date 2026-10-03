@@ -1,0 +1,65 @@
+/* shared look (same block in home/competicion/rivales css, scoped by prefix) */
+.scr-rivales .t10-panel { background: var(--s1, #111); border: 1px solid var(--line, #262626); padding: 14px 16px; min-width: 0; border-radius: 0; }
+.scr-rivales .t10-head { display: flex; align-items: baseline; gap: 12px; margin: -2px 0 10px; min-width: 0; }
+.scr-rivales .t10-head h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--ink, #eee); white-space: nowrap; }
+.scr-rivales .t10-sub { font-family: var(--font-num, monospace); font-size: 11px; color: var(--ink-3, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-rivales .t10-right { margin-left: auto; text-align: right; }
+.scr-rivales .t10-cap { font-family: var(--font-num, monospace); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3, #777); }
+.scr-rivales .t10-split { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr-rivales .t10-muted { color: var(--ink-3, #777); }
+.scr-rivales .t10-small { font-size: 11px; }
+.scr-rivales .t10-up { color: var(--ok, #3fbf7f); }
+.scr-rivales .t10-down { color: var(--bad, #e5534b); }
+.scr-rivales .t10-warn { color: var(--warn, #e8a33d); }
+.scr-rivales .t10-accent { color: var(--t-duelo, #9b7bff); }
+.scr-rivales .t10-usrow { background: var(--s2, #1b1b1b); box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-rivales .t10-us { color: var(--ink, #eee); font-weight: 600; }
+.scr-rivales .t10-who { font-size: 12px; color: var(--ink-2, #bbb); padding: 2px 6px; background: var(--s2, #1b1b1b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+.scr-rivales .t10-kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line, #262626); font-size: 12px; }
+.scr-rivales .t10-pre { font-family: var(--font-num, monospace); font-size: 11px; background: var(--bg, #0a0a0a); border: 1px solid var(--line, #262626); padding: 8px; overflow: auto; max-height: 360px; white-space: pre-wrap; word-break: break-all; color: var(--ink-2, #bbb); }
+.scr-rivales .t10-svgtxt { font-family: var(--font-num, monospace); font-size: 9px; fill: var(--ink-3, #777); }
+.scr-rivales .t10-now { fill: var(--bad, #e5534b); }
+.scr-rivales .t10-state { color: var(--ink-3, #777); font-size: 12px; padding: 12px 0; }
+.scr-rivales .t10-seg, .scr-rivales .t10-chipbtn { background: transparent; border: 1px solid var(--line, #262626); color: var(--ink-3, #777); font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer; border-radius: 0; }
+.scr-rivales .t10-seg.on { background: var(--s2, #1b1b1b); color: var(--ink, #eee); }
+.scr-rivales .t10-chipbtn { padding: 0; border: 0; opacity: .55; }
+.scr-rivales .t10-chipbtn.on { opacity: 1; outline: 1px solid var(--line-2, #444); }
+.scr-rivales svg { display: block; }
+.scr-rivales a { color: inherit; text-decoration: none; }
+
+/* RIVALES */
+div.scr-rivales { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.scr-rivales .r-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.scr-rivales .r-mid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.scr-rivales .r-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px 40px; gap: 8px; align-items: center; padding: 8px 6px; border-bottom: 1px solid var(--line, #262626); font-size: 13px; }
+.scr-rivales .r-item:hover, .scr-rivales .r-item.on { background: var(--s2, #1b1b1b); }
+.scr-rivales .r-item.on { box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-rivales .r-item-name { display: flex; flex-direction: column; min-width: 0; }
+.scr-rivales .r-item-name b { font-weight: 500; }
+.scr-rivales .r-item-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-rivales .r-item .num:last-child { text-align: right; }
+.scr-rivales .r-head { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+.scr-rivales .r-head h1 { font-size: 24px; margin: 0 0 8px; font-weight: 600; }
+.scr-rivales .r-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.scr-rivales .r-tag { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line-2, #444); color: var(--ink-2, #bbb); }
+.scr-rivales .r-kpis { display: flex; flex-wrap: wrap; gap: 20px; }
+.scr-rivales .r-kpi { display: flex; flex-direction: column; gap: 4px; }
+.scr-rivales .r-kpi-v { font-size: 20px; color: var(--ink, #eee); }
+.scr-rivales .r-kpi-v.t10-down { color: var(--bad, #e5534b); } .scr-rivales .r-kpi-v.t10-up { color: var(--ok, #3fbf7f); }
+.scr-rivales .r-series { min-width: 220px; flex: 1; }
+.scr-rivales .r-aff-row { display: grid; grid-template-columns: 50px minmax(0, 1fr) 44px 130px; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; }
+.scr-rivales .r-aff-set { border-left: 3px solid; padding-left: 6px; font-family: var(--font-num, monospace); }
+.scr-rivales .r-aff-track { position: relative; height: 6px; background: var(--s2, #1b1b1b); }
+.scr-rivales .r-aff-track span { position: absolute; left: 0; top: 0; bottom: 0; }
+.scr-rivales .r-aff-us { position: absolute; top: -4px; width: 2px; height: 14px; background: var(--ink, #eee); }
+.scr-rivales .r-stack { display: flex; height: 10px; margin-bottom: 10px; gap: 1px; }
+.scr-rivales .r-sq { display: inline-block; width: 8px; height: 8px; margin-right: 8px; }
+.scr-rivales .r-off { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 70px; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line, #262626); font-size: 12px; }
+.scr-rivales .r-offers-body, .scr-rivales .r-cards-body { max-height: 260px; overflow: auto; }
+.scr-rivales .r-acts-filter { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.scr-rivales .r-acts .t10-head { flex-wrap: wrap; }
+.scr-rivales .r-acts-body { max-height: 520px; overflow: auto; }
+.scr-rivales .r-list-body { max-height: calc(100vh - 160px); overflow: auto; }
+@media (max-width: 1000px) { .scr-rivales, .scr-rivales .r-mid { grid-template-columns: minmax(0, 1fr); } .scr-rivales .r-list-body { max-height: 320px; } }
+@media (max-width: 640px) { .scr-rivales .r-aff-row { grid-template-columns: 44px minmax(0, 1fr) 40px; } .scr-rivales .r-aff-row > :last-child { display: none; } }
+.scr-rivales .r-aff-track { display: block; }

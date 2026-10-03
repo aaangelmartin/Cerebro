@@ -1,0 +1,59 @@
+/* shared look (same block in home/competicion/rivales css, scoped by prefix) */
+.scr-competicion .t10-panel { background: var(--s1, #111); border: 1px solid var(--line, #262626); padding: 14px 16px; min-width: 0; border-radius: 0; }
+.scr-competicion .t10-head { display: flex; align-items: baseline; gap: 12px; margin: -2px 0 10px; min-width: 0; }
+.scr-competicion .t10-head h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--ink, #eee); white-space: nowrap; }
+.scr-competicion .t10-sub { font-family: var(--font-num, monospace); font-size: 11px; color: var(--ink-3, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-competicion .t10-right { margin-left: auto; text-align: right; }
+.scr-competicion .t10-cap { font-family: var(--font-num, monospace); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3, #777); }
+.scr-competicion .t10-split { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr-competicion .t10-muted { color: var(--ink-3, #777); }
+.scr-competicion .t10-small { font-size: 11px; }
+.scr-competicion .t10-up { color: var(--ok, #3fbf7f); }
+.scr-competicion .t10-down { color: var(--bad, #e5534b); }
+.scr-competicion .t10-warn { color: var(--warn, #e8a33d); }
+.scr-competicion .t10-accent { color: var(--t-duelo, #9b7bff); }
+.scr-competicion .t10-usrow { background: var(--s2, #1b1b1b); box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-competicion .t10-us { color: var(--ink, #eee); font-weight: 600; }
+.scr-competicion .t10-who { font-size: 12px; color: var(--ink-2, #bbb); padding: 2px 6px; background: var(--s2, #1b1b1b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+.scr-competicion .t10-kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line, #262626); font-size: 12px; }
+.scr-competicion .t10-pre { font-family: var(--font-num, monospace); font-size: 11px; background: var(--bg, #0a0a0a); border: 1px solid var(--line, #262626); padding: 8px; overflow: auto; max-height: 360px; white-space: pre-wrap; word-break: break-all; color: var(--ink-2, #bbb); }
+.scr-competicion .t10-svgtxt { font-family: var(--font-num, monospace); font-size: 9px; fill: var(--ink-3, #777); }
+.scr-competicion .t10-now { fill: var(--bad, #e5534b); }
+.scr-competicion .t10-state { color: var(--ink-3, #777); font-size: 12px; padding: 12px 0; }
+.scr-competicion .t10-seg, .scr-competicion .t10-chipbtn { background: transparent; border: 1px solid var(--line, #262626); color: var(--ink-3, #777); font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer; border-radius: 0; }
+.scr-competicion .t10-seg.on { background: var(--s2, #1b1b1b); color: var(--ink, #eee); }
+.scr-competicion .t10-chipbtn { padding: 0; border: 0; opacity: .55; }
+.scr-competicion .t10-chipbtn.on { opacity: 1; outline: 1px solid var(--line-2, #444); }
+.scr-competicion svg { display: block; }
+.scr-competicion a { color: inherit; text-decoration: none; }
+
+/* COMPETICIÓN */
+div.scr-competicion { display: flex; flex-direction: column; gap: 16px; }
+.scr-competicion .c-top { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.scr-competicion .c-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; align-items: start; }
+.scr-competicion .c-toggle { display: inline-flex; }
+.scr-competicion .c-legend, .scr-competicion .c-leg-row { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2, #bbb); margin-bottom: 8px; }
+.scr-competicion .c-leg { display: inline-flex; align-items: center; gap: 6px; }
+.scr-competicion .c-leg i { width: 12px; height: 2px; display: inline-block; }
+.scr-competicion .c-volcap { margin: 14px 0 6px; }
+.scr-competicion .c-vol-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.scr-competicion .c-venue { display: block; padding: 10px 6px; border-bottom: 1px solid var(--line, #262626); }
+.scr-competicion .c-venue:hover { background: var(--s2, #1b1b1b); }
+.scr-competicion .c-meter { display: grid; grid-template-columns: 120px 1fr 44px; gap: 8px; align-items: center; margin: 6px 0; }
+.scr-competicion .c-meter-track { height: 4px; background: var(--s2, #1b1b1b); position: relative; }
+.scr-competicion .c-meter-track span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ok, #3fbf7f); }
+.scr-competicion .c-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.scr-competicion .c-stats4 { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 6px; }
+.scr-competicion .c-stats > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.scr-competicion .c-bignum { font-size: 16px; color: var(--ink, #eee); }
+.scr-competicion .c-bk { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr); gap: 8px; padding: 4px 0; font-size: 12px; align-items: center; }
+.scr-competicion .c-bkh { border-bottom: 1px solid var(--line, #262626); }
+.scr-competicion .c-ref { font-family: var(--font-num, monospace); background: var(--s2, #1b1b1b); padding: 1px 6px; justify-self: start; }
+.scr-competicion .c-askp { color: var(--bad, #e5534b); }
+.scr-competicion .c-bidp { color: var(--warn, #e8a33d); }
+.scr-competicion .c-spread { padding: 6px 0; border-top: 1px solid var(--line, #262626); border-bottom: 1px solid var(--line, #262626); margin: 4px 0; }
+.scr-competicion .c-mt .t10-cap { margin-top: 12px; }
+@media (max-width: 1100px) { .scr-competicion .c-top, .scr-competicion .c-bottom { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .scr-competicion .c-stats4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .scr-competicion .c-meter { grid-template-columns: 1fr 44px; } .scr-competicion .c-meter .t10-cap { display: none; } }
+.scr-competicion .c-meter-track { display: block; }
+.scr-competicion .c-svg, .scr-competicion .c-mt-svg { width: 100%; height: auto; }
