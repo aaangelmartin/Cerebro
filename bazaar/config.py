@@ -63,15 +63,18 @@ PRICES = {OPUS: (4.0, 20.0), SONNET: (2.0, 10.0), HAIKU: (1.0, 5.0)}
 def anthropic_keys() -> list[tuple[str, str]]:
     """[(label, key)] for the router: ANTHROPIC_API_KEY_A/_B/_C, else ANTHROPIC_API_KEY."""
     keys = [(s, ENV[f"ANTHROPIC_API_KEY_{s}"]) for s in "ABC" if ENV.get(f"ANTHROPIC_API_KEY_{s}")]
-    if not keys and ENV.get("ANTHROPIC_API_KEY"):
-        keys = [("A", ENV["ANTHROPIC_API_KEY"])]
+    if ENV.get("ANTHROPIC_API_KEY") and ENV["ANTHROPIC_API_KEY"] not in {k for _, k in keys}:
+        if "A" not in {lbl for lbl, _ in keys}:
+            keys.insert(0, ("A", ENV["ANTHROPIC_API_KEY"]))   # the original key stays in the pool
+        else:
+            keys.append(("D", ENV["ANTHROPIC_API_KEY"]))
     return keys
 
 
 KEY_CAP_USD = float(ENV.get("BAZAAR_KEY_CAP_USD", "100"))     # hard cap per key, whole weekend
 DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "100"))     # all keys together, per Madrid day
-DEGRADE_AT = 0.8                                               # share of the day cap that steps Opus -> Sonnet
-DEGRADE_HAIKU_AT = 0.92                                        # share of the day cap that steps Sonnet -> Haiku
+DEGRADE_AT = 0.97                                              # share of the day cap that steps Opus -> Sonnet
+DEGRADE_HAIKU_AT = 0.99                                        # share of the day cap that steps Sonnet -> Haiku
 # Effective day cap = min(DAY_CAP_USD, budget left at the start of the day across live keys x share of the day).
 # Saturday may use 55 % of what is left, Sunday everything, Friday/other days 10 %. With one $100 key this keeps
 # about $45 for Sunday instead of letting Saturday burn it all. Past 100 % of the effective cap: code only.

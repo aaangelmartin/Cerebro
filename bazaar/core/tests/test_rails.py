@@ -299,11 +299,11 @@ class PackRail(unittest.TestCase):
 
 
 class VenueReserveEdges(unittest.TestCase):
-    def test_before_the_grant_only_the_uncovered_part_is_kept(self):
+    def test_whole_bond_is_kept_until_the_venue_opens(self):
         s = sit()
         s.t_hours, s.me = 2.7, {**s.me, "venue": None, "cash": 186}
         buy = Action("accept_offer", {"offer": 1, "expect": offer({"types": ["card:LAV-04"]}, {"cash": 20})}, "dealers")
-        self.assertTrue(rails.rail_cash(buy, s, ctx()).ok)        # 186 - 20 >= 40 + (270 - 150)
+        self.assertEqual(rails.rail_cash(buy, s, ctx()).rail, "cash")   # 186 - 20 < reserve + 270 (no grant today)
 
     def test_the_starter_stall_is_not_our_venue(self):
         s = sit()

@@ -232,7 +232,8 @@ class TestVenue(unittest.TestCase):
         me = {"cash": 400, "level": 2, "venue": None}
         sit = SimpleNamespace(t_hours=4.06, doors="open", paused=False, me=me)
         self.assertTrue(venue.should_open(sit, reserve=40))
-        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "t_hours": 4.0}), reserve=40))
+        self.assertTrue(venue.should_open(SimpleNamespace(**{**sit.__dict__, "t_hours": 2.7}), reserve=40))   # no hour gate now
+        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "paused": True}), reserve=40))
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "cash": 300}}), reserve=40))
         board = [{"venue": "v1", "rules": {"mechanism": "board"}, "bond": 250}]
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "venue": "v1"}, "venues": board}),

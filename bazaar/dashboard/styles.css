@@ -250,3 +250,8 @@ select {
 .closed-card.is-paused { border-color: var(--pause); }
 .closed-card.is-paused h2 .ic-wrap { color: var(--pause); }
 .closed-card.is-paused .closed-sub { color: var(--pause); }
+.refresh { margin-right: 6px; color: var(--ink-2); }
+.refresh:hover { color: var(--ink); }
+.refresh.spin svg { animation: refresh-spin .7s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .refresh.spin svg { animation: none; } }

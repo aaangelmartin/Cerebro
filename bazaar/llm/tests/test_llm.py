@@ -338,3 +338,21 @@ class RaceTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# These tests check the ladder logic with the original thresholds; live config keeps Opus until 97 %.
+_PINS = []
+
+
+def setUpModule():
+    from unittest import mock as _m
+    from bazaar import config as _c
+    _PINS.extend([_m.patch.object(_c, "DEGRADE_AT", 0.8), _m.patch.object(_c, "DEGRADE_HAIKU_AT", 0.92)])
+    for p in _PINS:
+        p.start()
+
+
+def tearDownModule():
+    for p in _PINS:
+        p.stop()
+    _PINS.clear()

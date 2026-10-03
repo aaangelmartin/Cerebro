@@ -425,6 +425,16 @@
   // ------------------------------------------------------------------ boot
   function boot() {
     buildNav();
+    $("refresh").addEventListener("click", async () => {
+      // Refresh every panel right now, without reloading the page (keeps filters, scroll and drawers).
+      const btn = $("refresh");
+      btn.classList.add("spin");
+      try {
+        if (window.api && window.api.clearCache) window.api.clearCache();
+        S.inflight = false;
+        await tick();
+      } finally { setTimeout(() => btn.classList.remove("spin"), 400); }
+    });
     $("bell").addEventListener("click", (e) => {
       e.stopPropagation();
       const p = $("bell-panel");
