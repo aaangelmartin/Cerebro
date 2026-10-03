@@ -43,6 +43,16 @@ class ClassificationTest(unittest.TestCase):
         self.assertIsNone(T.eligible(item(status="accepted", updated=300.0), running, now=400.0))
 
 
+class ClaudeEnvTest(unittest.TestCase):
+    def test_strips_api_keys_and_provider_switches(self):
+        env = {"HOME": "/Users/x", "PATH": "/bin", "ANTHROPIC_API_KEY": "k", "ANTHROPIC_API_KEY_A": "a",
+               "ANTHROPIC_API_KEY_B": "b", "ANTHROPIC_API_KEY_C": "c", "ANTHROPIC_AUTH_TOKEN": "t",
+               "ANTHROPIC_BASE_URL": "http://x", "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1",
+               "BAZAAR_ALLOW_REAL": "1"}
+        out = T.claude_env(env)
+        self.assertEqual(out, {"HOME": "/Users/x", "PATH": "/bin", "BAZAAR_ALLOW_REAL": "1"})
+
+
 class FakeSh:
     """Records git/test commands and answers like a happy repository."""
 
@@ -57,7 +67,11 @@ class FakeSh:
         if args[:3] == ["git", "diff", "--cached"]:
             out = "\n".join(self.changed)
         if args[:2] == ["git", "rev-parse"]:
-            out = "abc1234" if "--short" in args else "base"
+            out = "abc1234" if "--short" in args else ("abc1234def5678" if "--verify" in args else "base")
+        if args[:2] == ["git", "show"]:
+            out = "\n".join(self.changed)
+        if args[:2] == ["git", "log"]:
+            out = "docs(intel): add a package docstring"
         if args[:3] == ["git", "branch", "--show-current"]:
             out = T.BRANCH
         if "unittest" in args and not self.tests_ok:
@@ -133,6 +147,47 @@ class JobTest(unittest.TestCase):
         self.assertTrue(t.acquire())
         self.assertIsNone(self.make(FakeSh()).poll_once())
         t.release()
+
+
+class ForkModeTest(JobTest):
+    def test_next_finish_done(self):
+        sh = FakeSh(changed=["bazaar/broker/engine.py"])
+        t = self.make(sh)
+        job = t.next_job()
+        self.assertEqual((job["id"], job["class"], job["why"]), (self.it["id"], "auto", "auto"))
+        self.assertIsNone(t.next_job())                         # claimed: not handed out twice
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "done")
+        self.assertEqual(self.restarted, ["broker"])
+        self.assertTrue(any(c[:3] == ["git", "push", "-q"] and c[-1].endswith(":refs/heads/" + T.BRANCH)
+                            for c in sh.calls))
+        self.assertEqual(self.box.get(job["id"])["status"], "done")
+
+    def test_finish_with_red_tests_reverts_locally_and_reopens(self):
+        sh = FakeSh(tests_ok=False)
+        t = self.make(sh)
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "failed")
+        self.assertTrue(any(c[:2] == ["git", "revert"] for c in sh.calls))
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in sh.calls))
+        self.assertEqual(self.box.get(job["id"])["status"], "open")
+
+    def test_finish_touching_rails_without_accept_is_parked(self):
+        sh = FakeSh(changed=["bazaar/core/rails.py"])
+        t = self.make(sh)
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "needs_accept")
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in sh.calls))
+
+    def test_fail(self):
+        t = self.make(FakeSh())
+        job = t.next_job()
+        t.fail_job(job["id"], "the request is wrong")
+        got = self.box.get(job["id"])
+        self.assertEqual(got["status"], "open")
+        self.assertIn("the request is wrong", got["human_note"])
 
 
 if __name__ == "__main__":

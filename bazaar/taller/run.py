@@ -1,19 +1,22 @@
-"""El taller: implements el cerebro's code requests with Claude Code (headless), tests, pushes and deploys them.
+"""El taller: el cerebro's code requests (outbox kind "code") -> tested, pushed and deployed changes.
+
+The code itself is written by a fork of the main Claude Code conversation (the user's subscription), started from
+a /loop in that session. The taller hands out the work and closes it safely:
+
+    python -m bazaar.taller.run --next                         # claim the next eligible request, print it as JSON
+    python -m bazaar.taller.run --finish ID --commit HASH      # tests on a clean checkout, push, deploy, watch,
+                                                               # revert on errors, close the outbox item
+    python -m bazaar.taller.run --fail ID --reason "..."       # give it back with the reason
+    python -m bazaar.taller.run --list                         # what is eligible now (changes nothing)
 
 Policy chosen by the team (Saturday 3 Oct): "auto + deploy if the tests pass".
-- Auto class: low/medium severity requests that don't touch money, rails or keys. They are taken while "open".
+- Auto class: low/medium severity requests that don't touch money, rails or keys; taken while "open".
 - Gated class: critical severity, or anything about rails, the executor, cash/caps/never-lose, LLM keys/router or
-  .env. They wait until a human sets the outbox item to "accepted" (dashboard "Aceptar").
-
-One job at a time (lock file). Each job:
-  claim -> worktree from origin/feat/bazaar-v2 -> `claude -p` in it (restricted tools) -> full test suite ->
-  commit -> rebase + tests again -> push branch + fast-forward feat/bazaar-v2 -> update the local copy ->
-  restart the affected services -> watch their logs -> done (or revert + rejected).
+  .env; they wait until a human sets the outbox item to "accepted" (dashboard "Aceptar"). A commit that touches the
+  gated files without acceptance is reverted locally and parked.
 Every step goes to data/live/taller.jsonl and the outbox item's note.
 
-    python -m bazaar.taller.run              # loop (supervised)
-    python -m bazaar.taller.run --once ID    # one request now
-    python -m bazaar.taller.run --dry-run    # list what it would take, change nothing
+(--once / --loop-claude are an older headless mode that runs `claude -p`; it is not used.)
 """
 from __future__ import annotations
 
@@ -76,6 +79,20 @@ TERMINAL = {"done", "rejected", "failed", "needs_accept", "pending_integration"}
 
 
 # --------------------------------------------------------------------------- pure helpers
+# Claude Code must run on the Mac's logged-in Claude subscription, never on the game's API keys (the supervisor
+# loads .env into the environment). These variables would switch it to API billing or another provider.
+_AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+              "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "AWS_BEARER_TOKEN_BEDROCK",
+              "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "ANTHROPIC_CUSTOM_HEADERS")
+
+
+def claude_env(environ: dict) -> dict:
+    """The environment for `claude -p`: everything (HOME, PATH...) except API keys and provider switches."""
+    return {k: v for k, v in environ.items()
+            if not (k in _AUTH_VARS or k.startswith("ANTHROPIC_API_KEY") or k.startswith("ANTHROPIC_WORKSPACE"))}
+
+
+
 def is_gated(item: dict) -> bool:
     if (item.get("severity") or "medium") == "critical":
         return True
@@ -189,8 +206,9 @@ class Taller:
         tools = ["Read", "Edit", "Write", "Grep", "Glob",
                  f"Bash({PY} -m unittest:*)", "Bash(git diff:*)", "Bash(git status:*)"]
         args = ["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits",
+                "--settings", json.dumps({"apiKeyHelper": None}),
                 "--allowedTools", *tools, "--max-budget-usd", CLAUDE_BUDGET_USD, "--no-session-persistence"]
-        env = {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_API_KEY")}
+        env = claude_env(os.environ)
         try:
             r = subprocess.run(args, cwd=str(wt), capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S, env=env)
         except subprocess.TimeoutExpired:
@@ -199,14 +217,17 @@ class Taller:
             out = json.loads(r.stdout or "{}")
         except ValueError:
             out = {"result": (r.stdout or "")[-1500:]}
+        auth = {k: out[k] for k in ("apiKeySource", "api_key_source", "subscription", "account", "auth")
+                if k in out}
         return {"ok": r.returncode == 0 and not out.get("is_error"), "result": str(out.get("result") or "")[-1500:],
-                "cost_usd": out.get("total_cost_usd"), "error": (r.stderr or "")[-600:] if r.returncode else ""}
+                "cost_usd": out.get("total_cost_usd"), "auth": auth or "subscription (no API key in env)",
+                "error": (r.stderr or "")[-600:] if r.returncode else ""}
 
     def _pids(self, service: str) -> list[int]:
         mod = MODULE_OF.get(service)
         if not mod:
             return []
-        r = subprocess.run(["pgrep", "-f", f"-m {mod}"], capture_output=True, text=True)
+        r = subprocess.run(["pgrep", "-f", "--", f"-m {mod}"], capture_output=True, text=True)
         return [int(x) for x in r.stdout.split() if x.strip().isdigit() and int(x) != os.getpid()]
 
     def _restart(self, service: str) -> bool:
@@ -356,10 +377,17 @@ class Taller:
             self.sh(["git", "worktree", "remove", "--force", str(wt)])
         self.sh(["git", "branch", "-D", branch])
         self.sh(["git", "worktree", "add", "-b", branch, str(wt), f"{REMOTE}/{BRANCH}"], check=True)
+        friday = self.repo / "bazaar" / "data" / "friday"        # untracked read-only fixtures some tests need
+        if friday.exists() and (wt / "bazaar").exists():
+            (wt / "bazaar" / "data").mkdir(parents=True, exist_ok=True)
+            link = wt / "bazaar" / "data" / "friday"
+            if not link.exists():
+                link.symlink_to(friday, target_is_directory=True)
         self.log(iid, "worktree", path=str(wt), branch=branch)
 
         res = self.claude(wt, build_prompt(item))
-        self.log(iid, "claude", ok=res.get("ok"), cost_usd=res.get("cost_usd"), result=res.get("result", "")[:600],
+        self.log(iid, "claude", ok=res.get("ok"), auth=res.get("auth"), cost_usd_reported=res.get("cost_usd"),
+                 result=res.get("result", "")[:600],
                  error=res.get("error", "")[:300])
         msg_file = wt / ".taller_commit_msg"
         msg = msg_file.read_text().strip() if msg_file.exists() else ""
@@ -471,6 +499,97 @@ class Taller:
         self.finish(iid, "rejected", f"desplegado {head} pero dio errores, revertido: {'; '.join(errors)[:600]}",
                     status="rejected", commit=head, errors=errors)
 
+    # ---- fork mode: a fork of the main Claude Code conversation (user's subscription) writes the code ----------
+    def next_job(self) -> dict | None:
+        """Claim the next eligible request and describe it for the fork that will implement it."""
+        cands = self.candidates()
+        if not cands:
+            return None
+        item, why = cands[0]
+        iid = item["id"]
+        text = " ".join(str(item.get(k) or "") for k in ("title", "diagnosis", "proposed_change", "patch_sketch"))
+        paths = sorted(set(re.findall(r"bazaar/[\w/.-]+\.py", text)))
+        self.note(iid, "en curso (fork)", status="accepted")
+        self.set_state(iid, "running", mode="fork", why=why)
+        self.log(iid, "claimed", why=why, mode="fork", title=item.get("title"), severity=item.get("severity"))
+        return {"id": iid, "class": "gated" if is_gated(item) else "auto", "why": why,
+                "severity": item.get("severity"), "title": item.get("title"), "diagnosis": item.get("diagnosis"),
+                "evidence": item.get("evidence"), "proposed_change": item.get("proposed_change"),
+                "patch_sketch": item.get("patch_sketch"), "impact": item.get("impact"),
+                "paths_mentioned": paths, "affected_processes_guess": services_for(paths),
+                "gated_paths": list(GATED_PATHS),
+                "finish": f"python -m bazaar.taller.run --finish {iid} --commit <hash>",
+                "fail": f"python -m bazaar.taller.run --fail {iid} --reason '<why>'"}
+
+    def fail_job(self, iid: str, reason: str) -> dict:
+        self.log(iid, "fail", reason=reason[:600])
+        self.finish(iid, "failed", f"no aplicado: {reason[:500]}", status="open", reason=reason[:300])
+        return {"id": iid, "result": "failed"}
+
+    def finish_job(self, iid: str, commit: str) -> dict:
+        """The fork committed its change locally: test it on a clean checkout, push, deploy, watch, revert on errors."""
+        item = self.box.get(iid)
+        if not item:
+            raise KeyError(iid)
+        st = self.load_state().get(iid) or {}
+        r = self.sh(["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"])
+        if r.returncode != 0:
+            raise RuntimeError(f"no existe el commit {commit}")
+        full = r.stdout.strip()
+        files = [p for p in self.sh(["git", "show", "--name-only", "--format=", full]).stdout.split() if p]
+        self.log(iid, "finish_start", commit=full[:10], files=files)
+        bad = [p for p in files if FORBIDDEN_PATHS.search(p)]
+        gated = touches_gated(files)
+        if bad or (gated and st.get("why") != "accepted"):
+            self.sh(["git", "revert", "--no-edit", full])         # undo locally, nothing pushed
+            why = f"toca ficheros prohibidos: {bad}" if bad else \
+                f"toca {', '.join(gated)} (dinero/raíles/claves): pulsa Aceptar y se volverá a intentar"
+            self.finish(iid, "needs_accept" if not bad else "failed", f"no aplicado: {why}", status="open", files=files)
+            return {"id": iid, "result": "needs_accept" if not bad else "failed", "reason": why}
+        wt = self.work / f"check-{iid}"
+        if wt.exists():
+            self.sh(["git", "worktree", "remove", "--force", str(wt)])
+        self.sh(["git", "worktree", "add", "--detach", str(wt), full], check=True)
+        try:
+            friday = self.repo / "bazaar" / "data" / "friday"
+            if friday.exists() and (wt / "bazaar").exists():
+                (wt / "bazaar" / "data").mkdir(parents=True, exist_ok=True)
+                (wt / "bazaar" / "data" / "friday").symlink_to(friday, target_is_directory=True)
+            ok, tail = self._tests(wt)
+        finally:
+            self.sh(["git", "worktree", "remove", "--force", str(wt)])
+        self.log(iid, "tests", ok=ok, tail=tail[-300:])
+        if not ok:
+            self.sh(["git", "revert", "--no-edit", full])
+            self.finish(iid, "failed", f"los tests fallan con {full[:7]} (revertido en local): {tail[-300:]}",
+                        status="open")
+            return {"id": iid, "result": "failed", "tests": tail[-300:]}
+        r = self.sh(["git", "push", "-q", REMOTE, f"{full}:refs/heads/{BRANCH}"])
+        if r.returncode != 0:
+            self.log(iid, "push_failed", error=(r.stderr or "")[-300:])
+            return {"id": iid, "result": "push_failed",
+                    "error": "origin/feat/bazaar-v2 moved: `git pull --rebase origin feat/bazaar-v2` (no stash) and run "
+                             "--finish again with the new hash"}
+        head = full[:7]
+        self.log(iid, "pushed", commit=head)
+        services = services_for(files)
+        errors = self._deploy(iid, services)
+        if errors:
+            rv = self.sh(["git", "revert", "--no-edit", full])
+            if rv.returncode == 0:
+                self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"])
+                for s in services:
+                    self.restart(s)
+            self.log(iid, "reverted", commit=head, errors=errors, revert_ok=rv.returncode == 0)
+            self.finish(iid, "rejected", f"desplegado {head} pero dio errores, revertido: {'; '.join(errors)[:600]}",
+                        status="rejected", commit=head, errors=errors)
+            return {"id": iid, "result": "reverted", "commit": head, "errors": errors}
+        subject = self.sh(["git", "log", "-1", "--format=%s", full]).stdout.strip()[:160]
+        self.finish(iid, "done", f"hecho en {head} ({subject}); desplegado: {', '.join(services) or 'nada que reiniciar'}",
+                    status="done", commit=head, services=services)
+        self.log(iid, "done", commit=head, services=services)
+        return {"id": iid, "result": "done", "commit": head, "services": services}
+
     # ---- loop
     def heartbeat(self, extra: dict | None = None) -> None:
         p = self.live / "taller_status.json"
@@ -495,20 +614,49 @@ class Taller:
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--once", metavar="ID", help="run one outbox code request now (respects the gating policy)")
-    ap.add_argument("--dry-run", action="store_true", help="list what would be taken, change nothing")
+    ap.add_argument("--next", action="store_true", help="claim the next eligible request and print it as JSON")
+    ap.add_argument("--finish", metavar="ID", help="test, push, deploy and close a request (needs --commit)")
+    ap.add_argument("--commit", metavar="HASH", help="the fork's local commit for --finish")
+    ap.add_argument("--fail", metavar="ID", help="give a request back (needs --reason)")
+    ap.add_argument("--reason", default="", help="why --fail")
+    ap.add_argument("--list", action="store_true", help="list eligible requests, change nothing")
+    ap.add_argument("--loop-claude", action="store_true",
+                    help="(not used) the old headless mode: poll and run `claude -p` on each request")
+    ap.add_argument("--once", metavar="ID", help="(not used) one request with `claude -p`")
     a = ap.parse_args(argv)
-    t = Taller(dry_run=a.dry_run)
-    if a.dry_run:
+    t = Taller(dry_run=a.list)
+    out: Any
+    if a.list:
         t.poll_once()
+        return
+    if a.next:
+        if not t.acquire():
+            sys.exit("another taller job is running")
+        try:
+            out = t.next_job()
+        finally:
+            t.release()
+        print(json.dumps(out, ensure_ascii=False, default=str) if out else "null")
+        return
+    if a.finish:
+        if not a.commit:
+            sys.exit("--finish needs --commit <hash>")
+        if not t.acquire():
+            sys.exit("another taller job is running")
+        try:
+            out = t.finish_job(a.finish, a.commit)
+        finally:
+            t.release()
+        print(json.dumps(out, ensure_ascii=False, default=str))
+        return
+    if a.fail:
+        print(json.dumps(t.fail_job(a.fail, a.reason or "sin motivo"), ensure_ascii=False))
         return
     if a.once:
         it = t.box.get(a.once)
-        if not it:
-            sys.exit(f"no such outbox item {a.once}")
-        why = eligible(it, t.load_state())
+        why = eligible(it, t.load_state()) if it else None
         if not why:
-            sys.exit(f"{a.once} is not eligible (status {it.get('status')}, gated={is_gated(it)})")
+            sys.exit(f"{a.once} is not eligible")
         if not t.acquire():
             sys.exit("another taller job is running")
         try:
@@ -516,7 +664,10 @@ def main(argv: list[str] | None = None) -> None:
         finally:
             t.release()
         return
-    t.loop()
+    if a.loop_claude:
+        t.loop()
+        return
+    ap.print_help()
 
 
 if __name__ == "__main__":
