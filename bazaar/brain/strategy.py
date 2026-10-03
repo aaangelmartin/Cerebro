@@ -137,11 +137,71 @@ def sanitize(raw: Any) -> dict:
         if isinstance(raw.get("risks"), list) else [],
         "next_check_in_ticks": nxt,
         "findings": findings,
+        "points_plan": _points_plan(raw.get("points_plan")),
+        "expected_next_hour": {k: v for k, v in ((k, _float(v)) for k, v in
+                                                 (raw.get("expected_next_hour") or {}).items()
+                                                 if k in ("score_delta", "negotiating_delta", "market_delta",
+                                                          "deals", "cash_delta"))
+                               if v is not None} if isinstance(raw.get("expected_next_hour"), dict) else {},
+        "chat_reply": _clean(raw.get("chat_reply"), 1200),
+        "chat_summary": _clean(raw.get("chat_summary"), 1500),
+        "policies": [{k: _clean(p.get(k), 400) for k in ("id", "text", "status", "reason")}
+                     for p in (raw.get("policies") or [])[:6] if isinstance(p, dict)]
+        if isinstance(raw.get("policies"), list) else [],
+        **({"as_of_tick": _int(raw.get("as_of_tick"), 0, 10**6)} if raw.get("as_of_tick") is not None else {}),
         "cancel_offers": cancels,
         **({"avoid_buy_sets": avoid} if avoid is not None else {}),
         "accept_offers": accepts,
+        "post_offers": _post_offers(raw.get("post_offers")),
         **({"duel_claude_mode": duel_mode} if duel_mode in DUEL_MODES else {}),
     }
+
+
+def _post_offers(raw) -> list[dict]:
+    """Targeted offers the brain wants posted: {give: ref, want_card: ref?, want_cash: int?, to: team?, venue, why}."""
+    out = []
+    for x in (raw or [])[:5] if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        give = str(x.get("give") or "").upper().strip()
+        want_card = str(x.get("want_card") or "").upper().strip() or None
+        want_cash = _int(x.get("want_cash"), 1, 500)
+        if not REF_RX.match(give) or (want_card and not REF_RX.match(want_card)) or not (want_card or want_cash):
+            continue
+        to = str(x.get("to") or "").strip() or None
+        out.append({"give": give, "want_card": want_card, "want_cash": None if want_card else want_cash,
+                    "to": to if to and re.match(r"^t\d{2}$", to) else None,
+                    "venue": _clean(x.get("venue"), 12) or "rastro", "why": _clean(x.get("why"), 200)})
+    return out
+
+
+def post_offers(live: Path | None = None) -> list[dict]:
+    return list(_plan(live).get("post_offers") or [])
+
+
+def _float(x) -> float | None:
+    try:
+        return round(float(x), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _points_plan(raw) -> dict:
+    """{component: {now, target, leader, gap_to_leader, actions: [{action, expected_points}]}}"""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for comp, d in list(raw.items())[:6]:
+        if not isinstance(d, dict):
+            continue
+        acts = []
+        for a in (d.get("actions") or [])[:5] if isinstance(d.get("actions"), list) else []:
+            if isinstance(a, dict) and _clean(a.get("action"), 200):
+                acts.append({"action": _clean(a.get("action"), 200), "expected_points": _float(a.get("expected_points"))})
+        out[_clean(comp, 30)] = {"now": _float(d.get("now")), "target": _float(d.get("target")),
+                                 "leader": _clean(d.get("leader"), 20), "gap_to_leader": _float(d.get("gap_to_leader")),
+                                 "actions": acts}
+    return out
 
 
 def big_changes(old: dict | None, new: dict) -> list[str]:
@@ -307,7 +367,8 @@ def council_vote(old: dict | None, new: dict, picture: dict, changes: list[str],
     def one(role):
         res = llm.ask(purpose="council", system=council.ROLES[role] + STRATEGY_COUNCIL_NOTE + council.COMMON,
                       messages=[{"role": "user", "content": brief}], tools=[council.VOTE_TOOL],
-                      tool_choice={"type": "auto"}, model=None, max_tokens=700, deadline=deadline)
+                      tool_choice={"type": "auto"}, model=None, max_tokens=4000, deadline=deadline,
+                      effort="medium")
         v = council.parse_vote(res)
         if v is not None:
             v.update(role=role, model=getattr(res, "model", ""))

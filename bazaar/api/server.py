@@ -5,6 +5,8 @@
 GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
 GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
+GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
+GET  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
@@ -194,6 +196,8 @@ class Handler(BaseHTTPRequestHandler):
         m = SCREEN_RX.fullmatch(path)
         if m:
             return self._send_file(self.dashboard / "screens" / m.group(1), STATIC_TYPES[m.group(2)])
+        if path.startswith("/brain/"):
+            return self._get_brain(path, q)
         if path.startswith("/rec/") or path == "/notifications":
             try:
                 return self._get_rec(path, q)
@@ -254,6 +258,27 @@ class Handler(BaseHTTPRequestHandler):
             name = "control"
         if name in JOURNALS:
             return self._send(200, {"items": _tail(live / f"{name}.jsonl", since, limit)})
+        return self._send(404, {"error": "not_found", "message": path})
+
+    def _get_brain(self, path: str, q: dict):
+        """El cerebro: chat, events, memory. since = epoch seconds (float)."""
+        from ..strategist import brainio as B
+        try:
+            since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else None
+            limit = max(1, min(1000, int(q.get("limit") or 200)))
+        except ValueError:
+            return self._send(400, {"error": "bad_query", "message": "since must be a number (epoch), limit an integer"})
+        live = self.live
+        if path == "/brain/chat":
+            return self._send(200, {"items": B.chat_since(live, since, limit)})
+        if path == "/brain/events":
+            return self._send(200, {"items": B.read_rows(live / "brain_events.jsonl", since, limit)})
+        if path == "/brain/memory":
+            return self._send(200, B.memory(live))
+        if path == "/brain/findings":
+            return self._send(200, {"items": B.read_rows(live / "strategist_findings.jsonl", since, limit)})
+        if path == "/brain/reviews":
+            return self._send(200, {"items": B.read_rows(live / "strategist_reviews.jsonl", since, limit)})
         return self._send(404, {"error": "not_found", "message": path})
 
     def _get_rec(self, path: str, q: dict):
@@ -348,6 +373,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._stop(body)
             if path == "/control":
                 return self._send(200, apply_control(self.live, body))
+            if path == "/brain/chat":
+                from ..strategist import brainio as B
+                return self._send(200, B.chat_post(self.live, body.get("text"), by=str(body.get("by") or "equipo")))
             m = re.fullmatch(r"/lessons/([A-Za-z0-9_.:\-]+)", path)
             if m:
                 status = body.get("status")

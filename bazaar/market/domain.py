@@ -107,6 +107,34 @@ def _aid(a: Any) -> Any:
     return a.get("id") if isinstance(a, dict) else a
 
 
+ASK_GAIN_P, ASK_GAIN_FRAC = 1.5, 0.05      # a sell we post: value + max(1.5 P, 5 %) so it can sell near the market
+
+
+def ask_gain(value: float) -> float:
+    return max(ASK_GAIN_P, ASK_GAIN_FRAC * value)
+
+
+def _market_asks(books, my_id) -> tuple[dict, dict]:
+    """(cheapest live ask per card ref, median live ask per rarity) over every venue book, others' offers only."""
+    by_ref: dict[str, int] = {}
+    by_rar: dict[str, list[int]] = {}
+    for _venue, offers in books or []:
+        for o in offers or []:
+            if o.get("maker") == my_id or o.get("status", "open") != "open" or o.get("to"):
+                continue
+            g, w = o.get("give") or {}, o.get("want") or {}
+            assets = g.get("assets") or []
+            if len(assets) != 1 or not w.get("cash") or w.get("types") or w.get("assets"):
+                continue
+            ref, price = assets[0].get("ref"), int(w["cash"])
+            if ref:
+                by_ref[ref] = min(price, by_ref.get(ref, price))
+            if assets[0].get("rarity"):
+                by_rar.setdefault(assets[0]["rarity"], []).append(price)
+    med = {r: sorted(v)[len(v) // 2] for r, v in by_rar.items() if len(v) >= 3}
+    return by_ref, med
+
+
 def _strategy_text(domain: str) -> str:
     try:
         from bazaar.brain.strategy import prompt_block
@@ -142,14 +170,57 @@ class MarketDomain:
         self._cancelled: set[str] = set()             # offer ids we cancelled ourselves
         self._ctx: Any = None
         self._last_state: dict | None = None
+        self._brain_posted: set = set()              # brain offers already sent (key: give, want, cash)
 
     # ================================================================== protocol
     def fallback(self, sit, ctx) -> list[Action]:
         acc, posts, state = self._prepare(sit, ctx)
         return self._brain_first(self._code_plan(acc, posts, state), state)
 
+    def _brain_posts(self, me: dict, own_market: list[dict], can_give, counts: dict, control: dict) -> list[Action]:
+        """The brain's targeted offers (from the needs intel) not on the board yet: at most 2 per tick.
+        The rails still check value (never below value + margin) and the last-copy rule."""
+        try:
+            from bazaar.brain.strategy import post_offers
+            wanted = post_offers()
+        except Exception:  # noqa: BLE001
+            return []
+        from bazaar.core.goal import avoided as _avoided
+        live = {(tuple(a.get("ref") for a in (o.get("give") or {}).get("assets") or []),
+                 tuple(want_cards(o)), int((o.get("want") or {}).get("cash") or 0)) for o in own_market}
+        out = []
+        for p in wanted:
+            if len(out) >= 2:
+                break
+            if p.get("want_card") and _avoided(p["want_card"], control):
+                continue
+            key = ((p["give"],), (p["want_card"],) if p.get("want_card") else (), int(p.get("want_cash") or 0))
+            if key in live or key in self._brain_posted:
+                continue
+            copies = sorted((a for a in me.get("assets") or [] if a.get("ref") == p["give"] and can_give(a, counts)),
+                            key=lambda a: float(a.get("your_value") or 0))
+            if not copies:
+                continue
+            a = copies[0]
+            params = {"venue": p.get("venue") or "rastro", "give": {"assets": [a["id"]]},
+                      "want": {"cards": [p["want_card"]]} if p.get("want_card") else {"cash": int(p["want_cash"])},
+                      "expires_in_ticks": SWAP_EXPIRES if p.get("want_card") else LIST_EXPIRES}
+            if p.get("to"):
+                params["to"] = p["to"]
+            act = Action(kind="post_offer", params=params, domain=self.name, source="council",
+                         reason="the brain: " + (p.get("why") or f"targeted offer for {p['give']}"),
+                         expected={"kind": "swap" if p.get("want_card") else "ask", "points": 0.0}, priority=0.0)
+            self._sent[act.id] = {"kind": "post_offer", "team": p.get("to")}
+            self._brain_posted.add(key)
+            out.append(act)
+        return out
+
     def _brain_first(self, actions: list[Action], state: dict) -> list[Action]:
         """Offers addressed to us that the brain + council approved go first (at most one per tick)."""
+        posts = list(state.get("_brain_posts") or [])
+        state["_brain_posts"] = []                      # once per tick
+        if posts:
+            actions = actions + posts
         for c in state.get("_brain_accepts") or []:
             oid = c.offer.get("id")
             if any(a.kind == "accept_offer" and (a.params or {}).get("offer") == oid for a in actions):
@@ -362,8 +433,10 @@ class MarketDomain:
             brain_ok = _brain_ok()
         except Exception:  # noqa: BLE001
             brain_ok, _exc, _min_gain = set(), None, 5.0
-        for o in addressed:
-            if o.get("id") not in brain_ok or o.get("status", "open") != "open":
+        book_offers = [o for _v, offers in books for o in offers or []]
+        for o in addressed + [o for o in book_offers if o.get("id") in brain_ok and o.get("id") not in
+                              {x.get("id") for x in addressed}]:
+            if o.get("id") not in brain_ok or o.get("status", "open") != "open" or o.get("maker") == my_id:
                 continue
 
             def can_give_exc(a: dict, left: dict, _o=o) -> bool:
@@ -417,6 +490,7 @@ class MarketDomain:
         # sells
         posts: list[PostCand] = []
         room = max(0, min(MAX_OWN_LISTINGS - kinds.count("ask"), room_total))
+        market_ask, rarity_ask = _market_asks(books, my_id)
         if room:
             seen_refs: set[str] = set()
             for a in sorted(me.get("assets") or [], key=lambda a: float(a.get("your_value") or 0)):
@@ -430,10 +504,17 @@ class MarketDomain:
                 low_aff = values.affinity.get(s, 1.0) < 1.0
                 if not (spare or low_aff):
                     continue
-                min_ask = int(math.ceil(value + min_gain(value)))
                 fans = [t for t, _ in self.rivals.fans(s) if fair_ok(t)]
                 level = max([self.rivals.bid_level(t, s) or 0 for t in fans[:1]] + [0])
                 target_price = book * (min(1.3, level) if level else 1.0)
+                vchoice = choose_venue(venues, int(round(target_price)), 1)
+                # floor: our value + gain (the taker pays the venue fee, not us)
+                min_ask = int(math.ceil(value + ask_gain(value)))
+                # near the market: match the cheapest live ask of this card (or the usual price of its rarity),
+                # never below our floor
+                mkt = market_ask.get(ref) or rarity_ask.get(a.get("rarity") or values.rarity(ref) or "")
+                if mkt:
+                    target_price = min(target_price, mkt) if level < 1.1 else max(target_price, mkt)
                 max_ask = int(max(min_ask, math.floor(book * ASK_MARKUP_MAX)))
                 ask = int(min(max_ask, max(min_ask, round(target_price))))
                 if min_ask > max_ask:
@@ -441,7 +522,7 @@ class MarketDomain:
                 seen_refs.add(ref)
                 posts.append(PostCand(id=f"p{len(posts) + 1}", asset=a, value=round(value, 2), min_ask=min_ask,
                                       max_ask=max_ask, ask=ask, target=fans[0] if fans else None, fans=fans[:3],
-                                      venue=choose_venue(venues, ask, 1)))
+                                      venue=vchoice))
                 if len(posts) >= room:
                     break
 
@@ -504,6 +585,7 @@ class MarketDomain:
                 if offer_kind(o) == "bid" and o.get("id") not in seen:
                     stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
+        brain_posts = self._brain_posts(me, own_market, can_give, counts, control)
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,
                  "accept_candidates": [self._accept_row(c) for c in accepts],
@@ -520,6 +602,7 @@ class MarketDomain:
                  "cancelling": [{"offer": o.get("id"), "why": why} for o, why in stale],
                  "rival_fans_by_set": self.rivals.summary(sorted(values.affinity or ["LAV", "MAL", "SAL", "LAT"])),
                  "_bids": bids, "_swaps": swaps, "_stale": stale, "_brain_accepts": brain_accepts,
+                 "_brain_posts": brain_posts,
                  "_avail": {r: n - reserved_n.get(r, 0) for r, n in counts.items()}}
         return accepts, posts, state
 

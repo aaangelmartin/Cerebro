@@ -164,12 +164,13 @@ class ValueRail(unittest.TestCase):
         self.assertEqual(rails.check(sell(9), sit(), ctx()).rail, "value")
         self.assertTrue(rails.check(sell(10), sit(), ctx()).ok)
 
-    def test_dealer_pack_uses_hint(self):
+    def test_dealer_pack_ignores_the_proposers_hint(self):
+        # a pack's value comes from the catalog (dealers.values.pack_value), never from the action's own estimate
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"pack": "sobre_barrio"}}, "messages": []}
         a = Action("thread_message", {"thread": 4, "price": 22, "text": "22?"}, "dealers")
         self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "value")
         a.expected["value_get"] = 30
-        self.assertTrue(rails.check(a, sit(threads=[th]), ctx()).ok)
+        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "value")
 
     def test_dealer_item_from_its_offer(self):
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"rarity": "rare", "set": "LAV"}},

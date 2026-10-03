@@ -320,15 +320,15 @@ def _value_of(item: str, sit, ctx, action) -> float | None:
 
 def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
     """4. Buy at most at our private value minus a margin; sell at least at our value plus a margin."""
-    if action.kind not in ("accept_offer", "post_offer", "thread_message"):
-        return OK
+    if action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread"):
+        return OK                  # broker_match pairs other teams' offers: we are never a party to it
     give, get = flows(action, sit)
-    if action.kind == "thread_message" and (action.params or {}).get("price") is None:
+    if action.kind in ("thread_message", "open_thread") and (action.params or {}).get("price") is None:
         return OK                                              # words only, nothing on the table
     if not (give["assets"] or give["types"] or get["assets"] or get["types"]):
         return OK                                              # cash for cash: nothing to value
     held = _held(sit)
-    margin = _cap(ctx, "value_margin", VALUE_MARGIN)
+    margin = max(1.0, float(_cap(ctx, "value_margin", VALUE_MARGIN)))   # never below +1 P, whoever proposes
     v_give = 0.0
     for aid in give["assets"]:
         a = held.get(aid)
@@ -350,16 +350,61 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
         v_get += v
     for t in get["types"]:
         v = _value_of(t, sit, ctx, action)
-        if v is None and not str(t).startswith("card:") and hint is not None:
-            v = _num(hint, None)                               # pack/lot EV comes from the domain's estimate
+        if v is None and str(t).startswith("pack:"):
+            v = _pack_value(str(t)[5:], sit)                   # independent EV from the catalog, never the proposer's
+        elif v is None and not str(t).startswith("card:") and hint is not None:
+            v = _num(hint, None)                               # a lot's EV comes from the domain's estimate
         if v is None:
             return Verdict(False, "value", f"unknown value of {t}")
         v_get += v
-    surplus = v_get + get["cash"] - v_give - give["cash"]
+    fee = _taker_fee(action, sit, give, get)
+    surplus = v_get + get["cash"] - v_give - give["cash"] - fee
     if surplus < margin:
         return Verdict(False, "value", f"surplus {surplus:.1f} < margin {margin} "
-                                       f"(get {v_get:.1f}+{get['cash']}P, give {v_give:.1f}+{give['cash']}P)")
+                                       f"(get {v_get:.1f}+{get['cash']}P, give {v_give:.1f}+{give['cash']}P"
+                                       + (f", fee {fee:.1f}P" if fee else "") + ")")
     return OK
+
+
+def _taker_fee(action: Action, sit, give: dict, get: dict) -> float:
+    """The venue fee WE pay. The accepting side (taker) pays it, so only our accepts are charged: recomputed here
+    from the offer's venue (protocol.taker_fee), on top of the cash we give; a fee already folded into
+    params.give.cash by the domain is not counted twice (only the excess over what the offer itself asks)."""
+    if action.kind != "accept_offer":
+        return 0.0
+    p = action.params or {}
+    exp = p.get("expect") or {}
+    vid = exp.get("venue") or (p.get("venue")) or "rastro"
+    row = next((v for v in _get(sit, "venues") or [] if isinstance(v, dict) and (v.get("venue") or v.get("id")) == vid),
+               None)
+    if row is None and vid == "rastro":
+        row = {"fee_bps": 500, "fee_per_card": 1}
+    if row is None:
+        return 0.0
+    want = exp.get("want") or {}                          # what the maker wants from us (cash + cards)
+    cash = int(_num((exp.get("give") or {}).get("cash"), 0)) + int(_num(want.get("cash"), 0))
+    cards = len((exp.get("give") or {}).get("assets") or []) + len((exp.get("give") or {}).get("types") or []) \
+        + len(want.get("assets") or []) + len(want.get("types") or [])
+    try:
+        from bazaar.market.protocol import taker_fee
+        fee = float(taker_fee(row, cash, cards))
+    except Exception:  # noqa: BLE001
+        fee = cash * float(row.get("fee_bps") or 0) / 10000.0 + float(row.get("fee_per_card") or 0) * cards
+    folded = max(0, int(give.get("cash") or 0) - int(_num(want.get("cash"), 0)))   # fee the domain already added
+    return max(0.0, fee - folded)
+
+
+def _pack_value(pack_id: str, sit) -> float | None:
+    """Expected value of a sealed pack to us from the catalog (dealers.values.pack_value), None if unknown."""
+    try:
+        import json as _json
+        from bazaar import config as _cfg
+        from bazaar.dealers.values import Values, pack_value
+        me = _get(sit, "me") or {}
+        cat = _json.loads((_cfg.DATA / "record" / "latest" / "catalog.json").read_text())
+        return float(pack_value(pack_id, Values(me, cat), cat))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def own_venue(sit) -> str | None:

@@ -29,11 +29,14 @@ from typing import Any
 
 from bazaar import config
 from bazaar.brain import strategy as S
+from bazaar.strategist import brainio as B
 
 MIN_GAP_S = float(config.ENV.get("BAZAAR_STRATEGY_MIN_GAP_S", "150"))     # at most one plan this often
 TRIGGER_GAP_S = 45.0                                                      # ...or this often on a big change
 DAY_CAP_USD = float(config.ENV.get("BAZAAR_STRATEGY_DAY_CAP_USD", "40"))
 POLL_S = 5.0
+CHAT_GAP_S = 10.0               # a team chat message gets a plan this soon
+REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once an hour
 MAX_TOKENS = 12000              # medium effort thinks before the tool call: 3000 cut the plan
 SCORE_DROP = 0.5
 
@@ -58,6 +61,19 @@ Before planning, do the research the team used to do by hand, using `research` i
 rule like keep-one blocks it (put accepted ids in `accept_offers`; allies such as Team 5, owner of v10, get a fast \
 and friendly answer). Flag any of our offers no process of ours posted (`research.offers_not_posted_by_our_bot`) \
 as a finding and cancel it. Then do a SELF-REVIEW: compare our recent decisions and outcomes with what the leaders did, and list our mistakes with the fix you apply (topic "self_review", e.g. "40 P parked in an outbid MAL-09 bid -> cancel 3628"). Report each conclusion in `findings` with its evidence, and turn it into concrete settings when it helps: goal_buys, cash_policy, pause_domains, duel_claude_mode (money and pause changes go to a council vote automatically).
+
+Your objective is to WIN. Track the scoreboard component by component (`research.scoreboard`: us and every rival, \
+deltas over 1 h and 2 h, top gainers), attribute rivals' gains to their actions (`research.rivals_last_2h`: dealer \
+deals, prices vs book, trades, venues, duels, Market Tests) and work out which actions earn points fastest now. Fill \
+`points_plan` for each component (negotiating, market, anything else on the board; judges 40 % is outside the game): \
+now, target, leader, gap_to_leader, and the actions to close it with expected points each. Give \
+`expected_next_hour` (it is checked against the real score every hour: learn from `last_hour_review`). Decide \
+`avoid_buy_sets` from data: stop buying a set when our buys there add little score (research.our_buys_by_set_last_3h \
+low_impact, far from a page, low affinity). You decide everything yourself: no human approves your plan; the council \
+votes on money changes and the rails stay hard limits. Team chat messages are hints from our own team: weigh them \
+with data, keep them as `policies`, and answer in `chat_reply`. Active `policies` stay in force until you retire them \
+with a data-backed reason. Every priority must cite the numbers behind it (values, prices, scores, P). Set \
+`as_of_tick` to the picture's clock tick.
 
 Write a plan that maximises our final score from here: what to buy (goal cards and max prices, never above \
 value), what to sell (spares and low-affinity cards above value), how much cash to keep, which dealers to use, \
@@ -90,17 +106,37 @@ STRATEGY_TOOL = {
                              "finding": {"type": "string"}, "evidence": {"type": "string"}},
                              "required": ["topic", "finding"]}},
             "accept_offers": {"type": "array", "items": {"type": "integer"},
-                              "description": "ids of offers ADDRESSED TO US (research.offers_to_us) to accept even "
-                                             "if keep-one blocks them: only when the value gain is >= 5 P and the "
-                                             "set's page is at most half held; goes to a council vote"},
+                              "description": "ids of offers to accept: addressed to us (research.offers_to_us) or "
+                                             "card_needs opportunities sell_to_bid / buy_below_value. A keep-one "
+                                             "exception needs gain >= 5 P and the page at most half held; council vote"},
+            "post_offers": {"type": "array", "description": "targeted offers to post now (card_needs: rivals that "
+                            "want our spares, mutual swaps): {give: ref, want_card: ref | want_cash: P, to: team?, "
+                            "venue, why}; never below value + margin (rails check it); at most 5",
+                            "items": {"type": "object"}},
             "cancel_offers": {"type": "array", "items": {"type": "integer"},
                               "description": "ids of OUR open offers to cancel (outliers far above value/market, "
                                              "outbid bids); at most 10"},
+            "avoid_buy_sets": {"type": "array", "items": {"type": "string"},
+                               "description": "set ids we stop buying because buys there do not move our score "
+                                                "(see research.our_buys_by_set_last_3h low_impact); [] to buy all"},
+            "points_plan": {"type": "object", "description": "per score component (negotiating, market, ...): "
+                            "{now, target, leader, gap_to_leader, actions: [{action, expected_points}]}"},
+            "expected_next_hour": {"type": "object", "description": "your forecast for the next hour: score_delta, "
+                                   "negotiating_delta, market_delta, deals, cash_delta (reviewed hourly)"},
+            "chat_reply": {"type": "string", "description": "answer to the team chat messages in EVENTS (Spanish, "
+                                                            "short: what you understood and what you change)"},
+            "policies": {"type": "array", "description": "durable rules to add/update/retire (from chat or your own "
+                         "lessons): {id?, text, status: active|retired, reason}",
+                         "items": {"type": "object"}},
+            "as_of_tick": {"type": "integer", "description": "the clock tick of the picture you used"},
+            "chat_summary": {"type": "string", "description": "running summary of the whole team chat so far (what "
+                             "was asked, what you answered and decided); update it when there are chat events"},
             "duel_claude_mode": {"type": "string", "enum": list(S.DUEL_MODES),
                                  "description": "how much Claude's duel moves weigh; omit to keep it"},
             "next_check_in_ticks": {"type": "integer", "description": "3-6 (events trigger a plan at once)"},
         },
-        "required": ["situation", "priorities", "guidance", "findings", "next_check_in_ticks"],
+        "required": ["situation", "priorities", "guidance", "findings", "points_plan", "expected_next_hour",
+                     "as_of_tick", "next_check_in_ticks"],
     },
 }
 
@@ -136,6 +172,11 @@ def _wrap(text: Any, source: str) -> str:
         return wrap(text, source)
     except Exception:  # noqa: BLE001
         return "<untrusted>" + str(text or "")[:300].replace("<", "&lt;") + "</untrusted>"
+
+
+def _e(kind: str, text: str, data: dict | None = None) -> dict:
+    """One game event as the brain sees it (logged with ts/tick in brain_events.jsonl)."""
+    return {"kind": kind, "text": text, "data": data or {}}
 
 
 RIVAL_JUMP = 2.0               # a rival's score moving this much between snapshots is an event
@@ -187,49 +228,49 @@ class EventDetector:
         for k, d in b["dealers"].items():
             o = a["dealers"].get(k)
             if o is None:
-                ev.append(f"new dealer {d['name'] or k} ({k}): status {d['status']}, level {d['level']}, unlock {d['unlock']}")
+                ev.append(_e("dealer", f"new dealer {d['name'] or k} ({k}): status {d['status']}, level {d['level']}, unlock {d['unlock']}"))
                 continue
             for f in ("status", "level", "open_to_all", "unlock"):
                 if o.get(f) != d.get(f):
-                    ev.append(f"dealer {d['name'] or k}: {f} {o.get(f)} -> {d.get(f)}")
+                    ev.append(_e("dealer", f"dealer {d['name'] or k}: {f} {o.get(f)} -> {d.get(f)}"))
         for k, x in b["levels"].items():
             o = a["levels"].get(k)
             if o is None:
-                ev.append(f"new level/persona {x['name'] or k} ({k}): state {x['state']}"
+                ev.append(_e("level", f"new level/persona {x['name'] or k} ({k}): state {x['state']}"
                           + (f", opens to all at {x['opens_to_all_at_hours']} h" if x.get("opens_to_all_at_hours") else "")
-                          + (f", teaser {_wrap(x['teaser'], 'game')}" if x.get("teaser") else ""))
+                          + (f", teaser {_wrap(x['teaser'], 'game')}" if x.get("teaser") else "")))
             else:
                 for f in ("state", "open_to_all", "opens_to_all_at_hours"):
                     if o.get(f) != x.get(f):
-                        ev.append(f"level {x['name'] or k}: {f} {o.get(f)} -> {x.get(f)}")
+                        ev.append(_e("level", f"level {x['name'] or k}: {f} {o.get(f)} -> {x.get(f)}"))
         for k, rel in b["sets"].items():
             if rel and not a["sets"].get(k):
-                ev.append(f"card set {k} released")
+                ev.append(_e("set", f"card set {k} released"))
         added = sorted(set(b["schedule"]) - set(a["schedule"]))
         removed = sorted(set(a["schedule"]) - set(b["schedule"]))
         if added:
-            ev.append("schedule added: " + ", ".join(added[:4]))
+            ev.append(_e("schedule", "schedule added: " + ", ".join(added[:4])))
         if removed and b.get("t_hours") is not None:
             gone = [r for r in removed if float(r.split("|")[0] or 0) > float(b["t_hours"]) + 0.01]
             if gone:
-                ev.append("schedule removed (not yet due): " + ", ".join(gone[:4]))
+                ev.append(_e("schedule", "schedule removed (not yet due): " + ", ".join(gone[:4])))
         for k, v in b["venues"].items():
             o = a["venues"].get(k)
             if o is None:
-                ev.append(f"new venue {k} by {v['owner']} (fee {v['fee_bps']} bps)")
+                ev.append(_e("venue", f"new venue {k} by {v['owner']} (fee {v['fee_bps']} bps)"))
             elif o != v:
-                ev.append(f"venue {k}: {o} -> {v}")
+                ev.append(_e("venue", f"venue {k}: {o} -> {v}"))
         for k in set(a["venues"]) - set(b["venues"]):
-            ev.append(f"venue {k} closed")
+            ev.append(_e("venue", f"venue {k} closed"))
         for team, sc in b["scores"].items():
             before = a["scores"].get(team)
             if before is not None and abs(sc - before) >= RIVAL_JUMP:
-                ev.append(f"{'we' if team == 't10' else team} score {before:.1f} -> {sc:.1f}")
+                ev.append(_e("score", f"{'we' if team == 't10' else team} score {before:.1f} -> {sc:.1f}"))
         for oid, maker in (b.get("to_us") or {}).items():
             if oid not in (a.get("to_us") or {}):
-                ev.append(f"offer #{oid} addressed to us by {maker}")
+                ev.append(_e("offer", f"offer #{oid} addressed to us by {maker}"))
         if a["me"] != b["me"]:
-            ev.append(f"our level/unlocks {a['me']} -> {b['me']}")
+            ev.append(_e("us", f"our level/unlocks {a['me']} -> {b['me']}"))
         return ev
 
     def novelty(self) -> list[str]:
@@ -242,8 +283,8 @@ class EventDetector:
             return []
         new = [r for r in rows if int(r.get("id") or 0) > self.novelty_id]
         self.novelty_id = last
-        return [f"novelty {r.get('kind')}: " + _wrap(json.dumps(r.get("detail"), ensure_ascii=False, default=str)[:240],
-                                                      "game") for r in new]
+        return [_e("novelty", f"novelty {r.get('kind')}: " + _wrap(json.dumps(r.get("detail"), ensure_ascii=False, default=str)[:240],
+                                                      "game"), {"novelty": r.get("kind")}) for r in new]
 
     def poll(self) -> list[str]:
         cur = self.snapshot()
@@ -262,11 +303,14 @@ class Strategist:
         self.last_call = 0.0
         self.last_plan_tick: int | None = None
         self.last_score: float | None = None
-        self.seen_dealers: set[str] = set()
         self.seen_events: set[str] = set()
         self.errors: list[dict] = []
         self.detector = EventDetector(self.record, self.live)
-        self.pending_events: list[str] = []
+        self.pending_events: list[dict] = []
+        self.chat_seen_ts: float | None = max([float(m.get("ts") or 0) for m in B.chat_since(self.live, None, 50)
+                                                 if m.get("role") == "brain"] or [0.0]) or None
+        self.last_review = self.now()           # first hourly review one hour after start
+        self.last_review_row: dict | None = None
         self.calls = 0
         self.last_reason = ""
         prev = _read(S.path(self.live), {}) or {}            # keep the last plan across restarts
@@ -329,7 +373,7 @@ class Strategist:
         for ref, cs in held.items():
             for a in sorted(cs, key=lambda x: x.get("your_value") or 0)[: max(0, len(cs) - 1)] if len(cs) > 1 else []:
                 spares.append({"ref": ref, "id": a.get("id"), "rarity": a.get("rarity"), "value": a.get("your_value")})
-            if len(cs) == 1 and str(ref).split("-")[0] not in ("LAV", "MAL", "RET"):
+            if len(cs) == 1 and str(ref).split("-")[0] not in ("LAV", "MAL"):
                 spares.append({"ref": ref, "id": cs[0].get("id"), "rarity": cs[0].get("rarity"),
                                "value": cs[0].get("your_value"), "single_low_affinity": True})
 
@@ -456,32 +500,93 @@ class Strategist:
             "outcome_counts": oc,
             "recent_refusals": refusals[-8:],
             "spend": spend,
-            "previous_plan": {k: self.plan.get(k) for k in ("situation", "priorities", "goal_buys", "cash_policy")}
+            "previous_plan": {k: self.plan.get(k) for k in ("situation", "priorities", "goal_buys", "cash_policy",
+                                                            "avoid_buy_sets", "points_plan", "expected_next_hour")}
             if self.plan else None,
+            "control": {k: v for k, v in (_read(self.live / "control.json", {}) or {}).items() if k != "updated"},
+            "held_refs": sorted(held),
+            "our_open_offer_ids": [o.get("id") for o in mo or [] if o.get("maker") == "t10"
+                                   and o.get("status", "open") == "open"],
+            "allies": self._allies(),
+            "policies": [p for p in (B.memory(self.live).get("policies") or []) if p.get("status") == "active"],
+            "chat_recent": [{k: m.get(k) for k in ("ts", "role", "by", "text")}
+                            for m in B.chat_since(self.live, None, 16)],
+            "chat_summary_older": B.memory(self.live).get("chat_summary") or "",
+            "plan_history": [{"tick": d.get("tick"), "priorities": ((d.get("plan") or {}).get("priorities") or [])[:3],
+                              "expected_next_hour": (d.get("plan") or {}).get("expected_next_hour")}
+                             for d in _tail(S.history_path(self.live), 4)[:-1]],
+            "recent_findings": [{k: x.get(k) for k in ("tick", "topic", "finding")}
+                                for x in _tail(self.live / "strategist_findings.jsonl", 10)],
+            "last_hour_review": self.last_review_row,
+            "lab_lessons": self._lessons(),
+            "card_needs": self._needs(),
         }
 
+    @staticmethod
+    def _needs() -> dict:
+        """bazaar.intel.needs: which cards we and the rivals need, ranked opportunities (each with `why`)."""
+        try:
+            from bazaar.intel.needs import needs_report, summary_text
+            rep = needs_report()
+            return {"summary": summary_text(rep, max_chars=4000), "opportunities": (rep.get("opportunities") or [])[:20],
+                    "page_completers": (rep.get("ours") or {}).get("page_completers")}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"[:160]}
+
+    @staticmethod
+    def _allies() -> dict:
+        try:
+            from bazaar.market.protocol import ALLIED_VENUES
+            return {"venues": dict(ALLIED_VENUES), "teams": sorted(set(ALLIED_VENUES.values()))}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    @staticmethod
+    def _lessons(n: int = 12) -> list[dict]:
+        try:
+            from bazaar.lab.store import LessonStore
+            out = [l for l in LessonStore().all() if getattr(l, "status", "") == "active"][:n]
+            return [{"id": l.id, "scope": l.scope, "rule": str(l.rule)[:220]} for l in out]
+        except Exception:  # noqa: BLE001
+            return []
+
     # ------------------------------------------------------------------ triggers
+    def poll_inputs(self, tick) -> list[dict]:
+        """New game events and new chat messages, logged with ts/tick to brain_events.jsonl."""
+        now = self.now()
+        new: list[dict] = []
+        try:
+            new += self.detector.poll()
+        except Exception as e:  # noqa: BLE001
+            self.errors.append({"ts": now, "error": f"events: {type(e).__name__}: {e}"[:200]})
+        for m in B.chat_since(self.live, self.chat_seen_ts, 50):
+            if m.get("role") == "user":
+                new.append(_e("chat", f"{m.get('by') or 'equipo'}: " + _wrap(m.get("text"), "team-chat"),
+                              {"chat_ts": m.get("ts")}))
+            self.chat_seen_ts = max(self.chat_seen_ts or 0, float(m.get("ts") or 0))
+        rows = []
+        for ev in new:
+            rows.append(B.log_event(self.live, ev["kind"], ev["text"], tick, ev.get("data"), now))
+        self.pending_events = (self.pending_events + rows)[-25:]
+        return rows
+
     def due(self, pic: dict) -> str:
         """Why a new plan is due now ("" = not yet)."""
         clock = pic.get("clock") or {}
-        if clock.get("paused") or clock.get("doors") not in (None, "open"):
-            return ""
         tick = clock.get("tick")
+        self.poll_inputs(tick)
+        chat = any(e.get("kind") == "chat" for e in self.pending_events)
         now = self.now()
         since = now - self.last_call
-        try:
-            self.pending_events += self.detector.poll()
-        except Exception as e:  # noqa: BLE001
-            self.errors.append({"ts": now, "error": f"events: {type(e).__name__}: {e}"[:200]})
-        self.pending_events = self.pending_events[-20:]
+        if chat and since >= CHAT_GAP_S:
+            return "message in the team chat"
+        if clock.get("paused") or clock.get("doors") not in (None, "open"):
+            return ""
         reasons = [f"{len(self.pending_events)} game event(s)"] if self.pending_events else []
         score = (pic.get("us") or {}).get("score")
         score = score.get("score") if isinstance(score, dict) else score
         if isinstance(score, (int, float)) and self.last_score is not None and self.last_score - score >= SCORE_DROP:
             reasons.append(f"score dropped {self.last_score}->{score}")
-        dealers = {d.get("id") for d in pic.get("dealers") or [] if d.get("status") == "active"}
-        if self.seen_dealers and dealers - self.seen_dealers:
-            reasons.append(f"new dealer {sorted(dealers - self.seen_dealers)}")
         t_h = clock.get("t_hours")
         passed = set()
         sched = _read(self.record / "schedule.json", {}) or {}
@@ -516,23 +621,39 @@ class Strategist:
         except Exception:  # noqa: BLE001
             return 0.0
 
-    def ask(self, pic: dict, reason: str) -> dict | None:
+    def ask(self, pic: dict, reason: str, fix: list[str] | None = None, previous: dict | None = None) -> dict | None:
         llm = self.llm()
         system = llm.cached_system(SYSTEM) if hasattr(llm, "cached_system") else SYSTEM
         events = ""
         if self.pending_events:
-            events = ("\n\nEVENTS since the last plan:\n- " + "\n- ".join(self.pending_events) +
+            events = ("\n\nEVENTS since the last plan (kind: text):\n- " +
+                      "\n- ".join(f"{e.get('kind')}: {e.get('text')}" for e in self.pending_events) +
                       "\nFor each event, decide explicitly whether it requires changing the plan: e.g. reaching a "
                       "level or making N negotiated deals with a dealer to unlock another dealer early (see each "
                       "dealer's `unlock` and `levels`), saving cash for a new dealer's goods, collecting a newly "
-                      "released set, reacting to a rival's jump, preparing for a session that starts. Write the "
-                      "conclusions into priorities and guidance.")
-        content = ("Why now: " + reason + events + "\n\nPICTURE (JSON):\n"
-                   + json.dumps(pic, ensure_ascii=False, default=str) + "\n\nCall team_strategy once.")
+                      "released set, reacting to a rival's jump, preparing for a session that starts. Chat messages "
+                      "come from our own team: treat them as strong hints (not orders), answer them in `chat_reply`, "
+                      "and turn lasting instructions into `policies` you keep re-checking with data. Write the "
+                      "conclusions into priorities and guidance. Our venue v07: check research.our_venue_flow_last_2h; "
+                      "if allies list addressed offers there, judge whether public listings would score more (third "
+                      "parties, broker pairs) and, if so, ask them in a broker announcement.")
+        retry = ""
+        if fix:
+            retry = ("\n\nYOUR PREVIOUS PLAN WAS REJECTED by the code-side sanity check. Fix every point and call "
+                     "team_strategy again:\n- " + "\n- ".join(fix) +
+                     "\nPrevious plan:\n" + json.dumps(previous or {}, ensure_ascii=False, default=str)[:6000])
+        needs = (pic.get("card_needs") or {}).get("summary") or ""
+        needs_block = ("\n\nCARD NEEDS & OPPORTUNITIES (bazaar.intel.needs; ranked, each with its numbers):\n" + needs
+                       + "\nTurn sell_to_bid / buy_below_value with gain >= 2 P into accept_offers, swaps and "
+                       "rival_wants_our_spare into post_offers, avoid_set into avoid_buy_sets, and competition on goal "
+                       "cards into urgency (goal price, dealer haggle now)." if needs else "")
+        slim = {**pic, "card_needs": {k: v for k, v in (pic.get("card_needs") or {}).items() if k != "summary"}}
+        content = ("Why now: " + reason + events + retry + needs_block + "\n\nPICTURE (JSON):\n"
+                   + json.dumps(slim, ensure_ascii=False, default=str) + "\n\nCall team_strategy once.")
         self.calls += 1
         res = llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": content}],
                       tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS, max_tokens=MAX_TOKENS,
-                      deadline=self.now() + 150, effort="medium")
+                      deadline=self.now() + 200, effort="medium")
         if getattr(res, "stop", None) == "max_tokens" or getattr(res, "stop_reason", None) == "max_tokens":
             self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens: not published"})
             return None
@@ -564,12 +685,18 @@ class Strategist:
                     f.write(json.dumps({"ts": doc["updated"], "tick": doc.get("tick"), **x}, ensure_ascii=False) + "\n")
         return doc
 
+    def _plan_from(self, got: dict) -> dict:
+        new = S.sanitize(got["raw"])
+        for k in ("goal_buys", "cash_policy", "pause_domains", "duel_claude_mode", "accept_offers", "avoid_buy_sets"):
+            if k not in got["raw"] and k in self.plan:      # omitted by the model: keep what is in force
+                new[k] = self.plan[k]
+        return new
+
     def cycle(self, force: str = "", dry: bool = False) -> dict | None:
         pic = self.picture()
         reason = self.due(pic)
         reason = force or reason
         clock = pic.get("clock") or {}
-        self.seen_dealers |= {d.get("id") for d in pic.get("dealers") or [] if d.get("status") == "active"}
         if not reason:
             return None
         if dry:
@@ -577,6 +704,17 @@ class Strategist:
         if self.spent_today() >= DAY_CAP_USD:
             self.last_reason = f"day cap {DAY_CAP_USD} $ reached"
             return None
+        if self.now() - self.last_review >= REVIEW_EVERY_S:
+            self.last_review = self.now()
+            try:
+                row = B.hourly_review(self.live, (pic.get("research") or {}).get("scoreboard") or {}, self.now())
+            except Exception as e:  # noqa: BLE001
+                row = {"error": f"{type(e).__name__}: {e}"[:200]}
+            if row:
+                self.last_review_row = row
+                pic["last_hour_review"] = row
+                self.pending_events.append(B.log_event(self.live, "review", "hourly review: " + str(row.get("verdict")),
+                                                       clock.get("tick"), row, self.now()))
         self.last_call = self.now()
         self.last_reason = reason
         got = self.ask(pic, reason)
@@ -586,13 +724,21 @@ class Strategist:
         if got is None:
             self.errors.append({"ts": self.now(), "error": "no plan in the answer"})
             return None
-        new = S.sanitize(got["raw"])
+        new = self._plan_from(got)
+        errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
+        rejected = []
+        if errors:
+            rejected = errors
+            got2 = self.ask(pic, reason, fix=errors, previous=got["raw"])
+            if got2 is not None:
+                got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
+                new = self._plan_from(got2)
+                errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
+            if errors:
+                new = B.repair(new, pic, errors)
         if not new["priorities"]:
             self.errors.append({"ts": self.now(), "error": "plan without priorities: not published"})
             return None
-        for k in ("goal_buys", "cash_policy", "pause_domains", "duel_claude_mode", "accept_offers"):
-            if k not in got["raw"] and k in self.plan:      # omitted by the model: keep what is in force
-                new[k] = self.plan[k]
         changes = S.big_changes(self.plan, new)
         council = None
         ok = True
@@ -601,14 +747,26 @@ class Strategist:
             ok = council["ok"]
         plan = S.merge_accepted(self.plan, new, ok)
         events, self.pending_events = self.pending_events, []
-        meta = {"reason": reason, "events": events, "model": got.get("model"), "cost_usd": round(float(got.get("cost") or 0), 4),
+        us_now = ((pic.get("research") or {}).get("scoreboard") or {}).get("us_now") or {}
+        meta = {"reason": reason, "events": events, "model": got.get("model"),
+                "cost_usd": round(float(got.get("cost") or 0), 4),
                 "big_changes": changes, "council": None if council is None else
                 {"ok": council["ok"], "yes": council["yes"],
                  "votes": [{k: v.get(k) for k in ("role", "verdict", "reason")} for v in council["votes"]],
                  "errors": council["errors"]},
-                "proposed": new if not ok else None}
+                "proposed": new if not ok else None,
+                "validation": {"first_try_errors": rejected, "remaining_errors": errors},
+                "score_at_plan": {k: us_now.get(k) for k in ("score", "negotiating", "market")}}
         doc = self.publish(plan, pic, meta)
         self.plan = plan
+        if new.get("policies"):
+            B.apply_policies(self.live, new["policies"], by="cerebro", now=self.now())
+        if new.get("chat_summary"):
+            B.set_memory(self.live, "chat_summary", new["chat_summary"])
+        if new.get("chat_reply") and any(e.get("kind") == "chat" for e in events):
+            B.chat_post(self.live, new["chat_reply"], by="cerebro", role="brain",
+                        refs={"plan_tick": doc.get("tick"), "council": None if council is None else council["ok"]},
+                        now=self.now())
         return doc
 
     def heartbeat(self, extra: dict | None = None):

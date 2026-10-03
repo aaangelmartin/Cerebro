@@ -144,37 +144,103 @@ class GoalPrecedenceTest(unittest.TestCase):
         self.assertEqual(got, {"MAL-09": 90, "RET-06": 25})
 
 
+GOOD = {"situation": "s", "priorities": ["buy MAL-09 below its 91 P value"], "goal_buys": {"MAL-09": 88},
+        "guidance": {"market": "m"}, "next_check_in_ticks": 4, "as_of_tick": 300,
+        "points_plan": {"negotiating": {"now": 13.9, "target": 20, "leader": "t18", "gap_to_leader": 9.1,
+                                        "actions": [{"action": "6 Abuela deals", "expected_points": 3}]}},
+        "expected_next_hour": {"score_delta": 2.5}}
+
+
+class SeqLLM(FakeLLM):
+    """Answers strategy calls with plans in order (the last one repeats)."""
+
+    def __init__(self, plans, votes=("approve", "approve", "approve"), reply=None):
+        super().__init__(plans[0], votes)
+        self.plans, self.prompts = list(plans), []
+
+    def ask(self, *, purpose, system, messages, tools=None, **kw):
+        if purpose == "strategy":
+            self.prompts.append(messages[0]["content"])
+            self.plan = self.plans.pop(0) if len(self.plans) > 1 else self.plans[0]
+        return super().ask(purpose=purpose, system=system, messages=messages, tools=tools, **kw)
+
+
 class StrategistTest(unittest.TestCase):
     def setUp(self):
         self.live = Path(tempfile.mkdtemp())
         self.record = Path(tempfile.mkdtemp())
         (self.record / "clock.json").write_text(json.dumps({"tick": 300, "t_hours": 4.0, "doors": "open",
                                                            "paused": False}))
+        cards = [{"id": f"MAL-{i:02d}", "rarity": "rare" if i > 8 else "common", "page": True,
+                  "book": 70 if i > 8 else 10} for i in range(1, 11)]
+        (self.record / "catalog.json").write_text(json.dumps({"rarities": {"common": {"book": 10}, "rare": {"book": 70}},
+                                                              "sets": [{"id": "MAL", "released": True, "cards": cards}]}))
+        (self.record / "me.json").write_text(json.dumps({"cash": 66, "affinity": {"MAL": 1.3}, "assets": [
+            {"id": i, "kind": "card", "ref": f"MAL-{i:02d}", "rarity": "common", "your_value": 13} for i in range(1, 9)]}))
 
     def test_plan_with_council_approval(self):
         from bazaar.strategist.run import Strategist
-        plan = {"situation": "s", "priorities": ["p1"], "goal_buys": {"MAL-09": 88},
-                "guidance": {"market": "m"}, "next_check_in_ticks": 4}
-        llm = FakeLLM(plan)
+        llm = SeqLLM([GOOD])
         st = Strategist(live=self.live, record=self.record, llm=llm)
         doc = st.cycle(force="test")
         self.assertEqual(doc["plan"]["goal_buys"], {"MAL-09": 88})
         self.assertTrue(doc["council"]["ok"])
         self.assertEqual(llm.calls.count("council"), 3)
+        self.assertEqual(doc["validation"]["first_try_errors"], [])
         saved = json.loads((self.live / "strategy.json").read_text())
-        self.assertEqual(saved["plan"]["priorities"], ["p1"])
+        self.assertEqual(saved["plan"]["priorities"], GOOD["priorities"])
         self.assertEqual(len((self.live / "strategy.jsonl").read_text().splitlines()), 1)
 
     def test_council_rejects_money_part(self):
         from bazaar.strategist.run import Strategist
-        plan = {"situation": "s", "priorities": ["p1"], "goal_buys": {"MAL-09": 88},
-                "guidance": {"market": "m"}, "next_check_in_ticks": 4}
-        st = Strategist(live=self.live, record=self.record, llm=FakeLLM(plan, votes=("reject", "reject", "approve")))
+        st = Strategist(live=self.live, record=self.record, llm=SeqLLM([GOOD], votes=("reject", "reject", "approve")))
         doc = st.cycle(force="test")
         self.assertFalse(doc["council"]["ok"])
         self.assertEqual(doc["plan"]["goal_buys"], {})
-        self.assertEqual(doc["plan"]["priorities"], ["p1"])
+        self.assertEqual(doc["plan"]["priorities"], GOOD["priorities"])
         self.assertEqual(doc["proposed"]["goal_buys"], {"MAL-09": 88})
+
+    def test_invalid_plan_is_reasked_then_repaired(self):
+        from bazaar.strategist.run import Strategist
+        bad = {**GOOD, "priorities": ["buy more"], "goal_buys": {"MAL-09": 95, "LAV-01": 5}}
+        llm = SeqLLM([bad, bad])
+        st = Strategist(live=self.live, record=self.record, llm=llm)
+        doc = st.cycle(force="test")
+        self.assertEqual(llm.calls.count("strategy"), 2)
+        self.assertIn("REJECTED", llm.prompts[1])
+        errs = doc["validation"]["first_try_errors"]
+        self.assertTrue(any("not below its value" in e for e in errs))
+        self.assertTrue(any("cites no number" in e for e in errs))
+        self.assertTrue(any("LAV-01 is not a missing page card" in e for e in errs))
+        self.assertEqual(doc["plan"]["goal_buys"], {})                  # both bad goals dropped by repair
+        good_llm = SeqLLM([bad, GOOD])
+        doc2 = Strategist(live=Path(tempfile.mkdtemp()), record=self.record, llm=good_llm).cycle(force="t")
+        self.assertEqual(doc2["validation"]["remaining_errors"], [])
+        self.assertEqual(doc2["plan"]["goal_buys"], {"MAL-09": 88})
+
+    def test_chat_round_trip_and_policy(self):
+        from bazaar.strategist import brainio as B
+        from bazaar.strategist.run import Strategist
+        B.chat_post(self.live, "no compres Retiro, no nos suma", by="angel")
+        plan = {**GOOD, "chat_reply": "Entendido: dejo de comprar RET.", "avoid_buy_sets": ["RET"],
+                "policies": [{"text": "No comprar RET mientras no sume puntos", "status": "active",
+                              "reason": "chat + 0.2 P de excedente por P"}]}
+        llm = SeqLLM([plan])
+        st = Strategist(live=self.live, record=self.record, llm=llm, now=lambda: time.time())
+        st.last_plan_tick, st.last_call = 300, 0.0
+        doc = st.cycle()
+        self.assertEqual(doc["reason"], "message in the team chat")
+        self.assertIn("no compres Retiro", llm.prompts[0])
+        self.assertEqual(doc["plan"]["avoid_buy_sets"], ["RET"])
+        chat = B.chat_since(self.live)
+        self.assertEqual([m["role"] for m in chat], ["user", "brain"])
+        self.assertIn("RET", chat[-1]["text"])
+        pols = B.memory(self.live)["policies"]
+        self.assertEqual(pols[0]["id"], "P1")
+        ev = B.read_rows(self.live / "brain_events.jsonl")
+        self.assertEqual(ev[0]["kind"], "chat")
+        self.assertEqual(set(ev[0]) >= {"ts", "tick", "kind", "text", "data"}, True)
+        self.assertIsNone(st.cycle())                                  # the message is not processed twice
 
     def test_not_due_while_paused(self):
         from bazaar.strategist.run import Strategist
@@ -216,7 +282,8 @@ class EventDetectorTest(unittest.TestCase):
                    teams=[{"team": "t12", "score": 25.5}], level=3)
         (self.live / "novelty.jsonl").write_text(json.dumps({"id": 5, "kind": "dealer", "detail": {"id": "x"}}) + "\n")
         ev = det.poll()
-        text = " | ".join(ev)
+        text = " | ".join(e["text"] for e in ev)
+        self.assertTrue(all(set(e) == {"kind", "text", "data"} for e in ev))
         for needle in ("new dealer El Chato", "early_min_deals", "new level/persona Doña Pilar", "<untrusted",
                        "card set RET released", "schedule added: 5.15|duels|Duels I", "new venue v07",
                        "t12 score 20.0 -> 25.5", "our level/unlocks"):
@@ -225,7 +292,7 @@ class EventDetectorTest(unittest.TestCase):
         (self.live / "novelty.jsonl").write_text(
             json.dumps({"id": 5, "kind": "dealer", "detail": {}}) + "\n" +
             json.dumps({"id": 6, "kind": "event_type", "detail": {"type": "level.announced"}}) + "\n")
-        self.assertTrue(any("novelty event_type" in e for e in det.poll()))
+        self.assertTrue(any("novelty event_type" in e["text"] for e in det.poll()))
 
     def test_events_trigger_a_plan_and_reach_the_prompt(self):
         from bazaar.strategist.run import Strategist

@@ -329,6 +329,104 @@ def unknown_offers(my_offers: list[dict], live: Path) -> list[dict]:
     return out
 
 
+COMPONENTS = ("score", "negotiating", "market", "deals", "album_filled", "pages_complete")
+
+
+def scoreboard(record: Path, now: float | None = None) -> dict:
+    """Every team's score components now, and their change over the last 1 h and 2 h (leaderboard stream)."""
+    now = now or time.time()
+    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    rows = read_jsonl(Path(record).parent / "leaderboard" / f"{day}.jsonl")
+    snaps = [(float(r.get("ts") or 0), {t.get("team"): t for t in (r.get("data") or {}).get("teams") or []})
+             for r in rows if (r.get("data") or {}).get("teams")]
+    if not snaps:
+        return {}
+    cur_ts, cur = snaps[-1]
+
+    def at(ago: float) -> dict:
+        target = now - ago
+        best = snaps[0]
+        for ts, d in snaps:
+            if ts <= target:
+                best = (ts, d)
+        return best[1]
+
+    h1, h2 = at(3600), at(7200)
+    teams = {}
+    for tid, t in cur.items():
+        row = {k: t.get(k) for k in COMPONENTS}
+        for label, past in (("d1h", h1), ("d2h", h2)):
+            p = past.get(tid) or {}
+            row[label] = {k: round(float(t.get(k) or 0) - float(p.get(k) or 0), 2) for k in COMPONENTS
+                          if p.get(k) is not None}
+        row["rank"] = t.get("rank")
+        teams[tid] = row
+    gainers = {}
+    for k in ("score", "negotiating", "market"):
+        gainers[k] = sorted(([tid, (r.get("d1h") or {}).get(k, 0)] for tid, r in teams.items()),
+                            key=lambda x: -x[1])[:5]
+    lead = {k: max(teams.items(), key=lambda kv: kv[1].get(k) or 0)[0] for k in ("score", "negotiating", "market")}
+    return {"tick": (rows[-1].get("data") or {}).get("tick"), "weights": (rows[-1].get("data") or {}).get("weights"),
+            "us_now": teams.get(US), "leaders": {k: {"team": v, **{c: teams[v].get(c) for c in COMPONENTS}}
+                                                 for k, v in lead.items()},
+            "top_gainers_1h": gainers, "teams": teams, "snapshots": len(snaps),
+            "note": "judges (40 %) are scored outside the game; this board covers negotiation and market-making"}
+
+
+def buy_impact(feed: list[dict], me: dict, since_ts: float) -> dict:
+    """Our recent buys per set: what we paid against our value now, and how far each page is.
+    A set whose buys add little value and whose page is far from complete is a candidate for avoid_buy_sets."""
+    vals = {}
+    for a in me.get("assets") or []:
+        vals.setdefault(a.get("ref"), []).append(a.get("your_value") or 0)
+    pages = {p.get("set"): p for p in (me.get("album") or {}).get("pages") or []}
+    aff = me.get("affinity") or {}
+    per: dict[str, dict] = {}
+    for r in feed:
+        if float(r.get("ts") or 0) < since_ts or r.get("type") != "settlement":
+            continue
+        p = r.get("payload") or {}
+        for it in p.get("items") or []:
+            if it.get("to") != US or not it.get("ref") or it.get("kind") == "pack":
+                continue
+            st = str(it["ref"]).split("-")[0]
+            d = per.setdefault(st, {"buys": 0, "spent": 0, "value_now": 0.0})
+            d["buys"] += 1
+            d["spent"] += int(p.get("price") or 0)
+            d["value_now"] += max(vals.get(it["ref"]) or [0])
+    out = {}
+    for st, d in per.items():
+        pg = pages.get(st) or {}
+        share = (pg.get("have") or 0) / (pg.get("of") or 10)
+        surplus = d["value_now"] - d["spent"]
+        out[st] = {**d, "surplus": round(surplus, 1), "surplus_per_P": round(surplus / max(1, d["spent"]), 2),
+                   "page": f"{pg.get('have')}/{pg.get('of')}", "affinity": aff.get(st),
+                   "low_impact": bool(share <= 0.5 and (aff.get(st) or 1) < 1.2
+                                      and surplus / max(1, d["spent"]) < 0.25)}
+    return out
+
+
+def venue_flow(feed: list[dict], venue: str | None, since_ts: float) -> dict:
+    """Listings on our venue split into addressed (to a team: invisible on the public board) and public, and the
+    fills there. Public offers attract third parties and let our broker pair them (market-making score)."""
+    if not venue:
+        return {}
+    addressed, public, fills = {}, {}, []
+    for r in feed:
+        if float(r.get("ts") or 0) < since_ts:
+            continue
+        p = r.get("payload") or {}
+        if r.get("type") == "offer.listed" and p.get("venue") == venue:
+            o = p.get("offer") or {}
+            bucket = addressed if o.get("to") else public
+            bucket[r.get("actor") or o.get("maker")] = bucket.get(r.get("actor") or o.get("maker"), 0) + 1
+        elif r.get("type") == "settlement" and p.get("venue") == venue:
+            fills.append({"parties": p.get("parties"), "price": p.get("price"),
+                          "items": [it.get("ref") for it in p.get("items") or []]})
+    return {"venue": venue, "addressed_listings_by_maker": addressed, "public_listings_by_maker": public,
+            "fills": len(fills), "last_fills": fills[-6:]}
+
+
 def _allies() -> dict:
     try:
         from bazaar.market.protocol import ALLIED_VENUES
@@ -352,7 +450,10 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venues", lambda: venues(venue_list, our_venue)),
                      ("our_offer_outliers", lambda: offer_outliers(my_offers, me, record)),
                      ("offers_to_us", lambda: offers_to_us(my_offers, me, _allies())),
-                     ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live))):
+                     ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live)),
+                     ("scoreboard", lambda: scoreboard(record, now)),
+                     ("our_buys_by_set_last_3h", lambda: buy_impact(feed, me, now - 3 * 3600)),
+                     ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600))):
         try:
             out[name] = fn()
         except Exception as e:  # noqa: BLE001 - one broken analysis must not stop the plan
