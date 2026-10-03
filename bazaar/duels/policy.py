@@ -8,10 +8,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .model import DAYS_MAX, MIN_SURPLUS, TICKS_PER_DUEL, DuelView, points, price_for
+from .model import DAYS_MAX, MIN_SURPLUS, DuelView, points, price_for
 
 PARAMS = {
     "OPEN": 0.9,           # opening ask, as a share of the estimated pie
+    "OPEN_BUYER": 0.8,     # as buyer open a little closer: 2.2 rounds per deal against 1.7 as seller in Duels II
     "END": 0.12,           # last-tick ask against a silent rival (rounds do not grow while they are mute)
     "BETA": 2.0,           # >1: hold early, concede late
     "ACCEPT_SHARE": 0.6,   # accept any rival offer that already gives us this share of the pie
@@ -95,10 +96,34 @@ def _days_when_they_cost(v: DuelView, w: float, pie: float | None) -> int:
     return 0
 
 
+DAY_PRIOR_RATIO = 1.25   # the rival must care this much more than we do: the prior is a median of other duels
+DAY_PRIOR_GAP = 0.5      # and by at least this many points a day
+
+
+def rival_cares_more(v: DuelView) -> bool:
+    """True when a delivery day is worth clearly more to the rival than to us (opponent.rival_day_prior).
+    The seller gains with every later day and the buyer loses, so the day belongs to whoever has the larger
+    weight: Duels II left about 7.6 points of pie per deal on the table by always asking for our own day."""
+    r, w = v.rival_w_prior, abs(days_weight(v))
+    return r is not None and not v.days_ambiguous and r >= DAY_PRIOR_RATIO * w and r - w >= DAY_PRIOR_GAP
+
+
+def joint_days_bonus(v: DuelView, days: int | None) -> float:
+    """Pie added by giving the rival `days` that cost us less than they are worth to it."""
+    if not days or not rival_cares_more(v) or days_weight(v) >= 0:
+        return 0.0
+    return (v.rival_w_prior - abs(days_weight(v))) * days
+
+
 def choose_days(v: DuelView, pie: float | None = None) -> int | None:
     if not v.uses_days:
         return None
     w = days_weight(v)
+    if rival_cares_more(v):
+        # Give the day to whoever cares more and charge it in the price (utility-based asks do that):
+        # days cost us -> the rival's gain is larger, so deliver late; days pay us -> its loss is larger,
+        # so deliver at once and ask for more money instead.
+        return DAYS_MAX if w < 0 else 0
     if v.days_ambiguous:
         # We do not know if days help or hurt us, so every offer is priced safe under both readings: the
         # padding is |w| x days. Give the rival its own last days only while that padding is small.
@@ -149,9 +174,10 @@ def economics(v: DuelView, opp: dict, ask: tuple[int, int | None] | None = None)
 
 # --- the fallback ---------------------------------------------------------------------------------------
 def _target_share(v: DuelView, p=PARAMS) -> float:
-    T = max(2, TICKS_PER_DUEL)
+    T = max(2, v.total_ticks)
     x = min(1.0, v.elapsed / (T - 1))
-    return p["OPEN"] - (p["OPEN"] - p["END"]) * (x ** p["BETA"])
+    top = p.get("OPEN_BUYER", p["OPEN"]) if v.role == "buyer" else p["OPEN"]
+    return top - (top - p["END"]) * (x ** p["BETA"])
 
 
 def _their_steps(v: DuelView) -> list[float]:
@@ -200,7 +226,7 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
     d_off = choose_days(v, pie)
     last_ticks = last_ticks_for(opp, p)
     days_bonus = (w * d_off) if (v.uses_days and d_off is not None and not v.days_ambiguous) else 0.0
-    pie_u = pie + max(0.0, days_bonus)
+    pie_u = pie + max(0.0, days_bonus) + joint_days_bonus(v, d_off)
     q = 1.0 - v.decay
     share = _target_share(v, p)
     u_target = max(MIN_SURPLUS, share * pie_u)

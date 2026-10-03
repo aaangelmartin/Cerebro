@@ -122,6 +122,8 @@ class DuelsDomain:
                 v.days_sign_override = ds
             if self.memory.note_days_reading(v):
                 log.info("duels II session %s: days sign reading = %s", v.session, v.days_label)
+            v.rival_w_prior = self.memory.rival_day_prior(v)
+            v.total_ticks = self.memory.duel_length(v)
             if v.sent_this_tick() or used.get(conv_key(Action(kind="duel_message", params={"duel": v.id}, domain=self.name))):
                 continue          # one message per conversation per tick: already spent (core conv_key)
             out.append(v)

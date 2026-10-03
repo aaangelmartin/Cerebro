@@ -123,6 +123,13 @@ def user_message(v: DuelView, opp: dict, econ: dict, baseline: Move) -> str:
         state["duels_ii"] = {"our_points_per_day": round(v.days_w, 3), "raw_your_days_weight": v.w,
                              "days_meaning": v.days_meaning, "sign_reading": v.days_label,
                              "our_margin_formula": "price margin + our_points_per_day x days"}
+        if v.rival_w_prior is not None:
+            gap = round(v.rival_w_prior - abs(v.days_w), 2)
+            state["duels_ii"]["rival_points_per_day_estimate"] = v.rival_w_prior
+            state["duels_ii"]["who_cares_more_about_days"] = (
+                "rival: give it its day (10 if we buy, 0 if we sell) and charge it in the price" if gap > 0
+                else "us: keep our day (0 if we buy, 10 if we sell)")
+            state["duels_ii"]["estimate_source"] = "median of our own duels on this item in the other role"
         if v.days_ambiguous:
             state["duels_ii"]["warning"] = ("the sign of the days weight is ambiguous: code only accepts a package "
                                             "worth >= 1 under BOTH signs; prefer days near 0")
