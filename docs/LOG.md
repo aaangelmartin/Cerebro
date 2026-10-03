@@ -2,6 +2,15 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-03 02:25 — Bot nuevo (`bazaar/`) listo para las 09:00
+
+- **Bot reescrito de cero** en `bazaar/` (rama `feat/bazaar-v2`). Lo explica todo [`bazaar/README.md`](../bazaar/README.md) y las interfaces están en [`bazaar/CONTRACTS.md`](../bazaar/CONTRACTS.md). El código del viernes pasa a `legacy/`.
+- **Claude decide.** Opus 5.5 con esfuerzo bajo; un consejo (3 opiniones + juez) para aceptar, cerrar duelos y compras de más de 60 P. El código pone 10 raíles con tests.
+- **Laboratorio:** aprende solo de nuestros datos y de los de todos los equipos. Propone lecciones, las prueba (backtest, simulador, sombra) y las promueve con una puerta de código. Arranca con 25 lecciones del viernes.
+- **Mercado:** tienda propia `board` con comisión 0 a las ~09:03 y broker en código para el Market Test.
+- **Medido:** Opus responde en 3–7 s con ticks de 30 s, y 32 de 35 llamadas llegaron a tiempo. En simulación el broker empata o supera al puesto gratis (0,92 en normal, 0,87 frente a 0,86 en el difícil). No hay ningún acuerdo fuera del límite.
+- **Ojo:** en muestras pequeñas del simulador, Claude no superó a la regla de código ni en duelos ni con dealers. Por eso el prompt le da la sugerencia del código y le pide desviarse solo con un motivo concreto. El juego real dirá quién acierta más.
+
 ## 2026-10-02 22:45 — Duelos de práctica: fórmula de puntuación confirmada
 
 Con los 7 acuerdos de la sesión de práctica queda confirmado, al decimal:
