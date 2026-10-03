@@ -134,6 +134,42 @@
     } finally { if (gen === S.gen) S.inflight = false; }
     pollNotifications();
     pollOutbox();
+    pollKeys();
+  }
+  // Anthropic keys: one model for the sidebar, the banner, the toasts and the Bot screen (window.__keyHealth)
+  let keysAt = 0, keysPrev = null, healthMissing = false;
+  async function pollKeys(force) {
+    if (!force && Date.now() - keysAt < 12000) return;
+    keysAt = Date.now();
+    try {
+      let health = null;
+      if (!healthMissing) { try { health = await api.llmHealth(); } catch (e) { if (e && e.status === 404) healthMissing = true; } }
+      const [sp, llm] = await Promise.all([api.spend(), health ? Promise.resolve(null) : api.llm(null, 400).catch(() => null)]);
+      const kh = window.ui.keyHealth(sp, (llm && llm.items) || [], health);
+      window.__keyHealth = kh;
+      const sig = kh.keys.map((k) => k.label + ":" + k.state).join(",");
+      if (keysPrev !== null && sig !== keysPrev) {
+        const before = Object.fromEntries(keysPrev.split(",").filter(Boolean).map((x) => x.split(":")));
+        for (const k of kh.keys) {
+          if (!k.ok && before[k.label] === "ok") window.ui.toast({ type: "error", title: `Clave ${k.label}: ${k.chip.toLowerCase()}`,
+            text: kh.allDown ? "Ninguna clave funciona: el bot juega sin Claude." : "El bot sigue con " + listKeys(kh.okLabels) + ". " + k.text, href: "#bot", ttl: 12000 });
+          if (k.ok && before[k.label] && before[k.label] !== "ok") window.ui.toast({ type: "deal", title: `Clave ${k.label} vuelve a funcionar`, href: "#bot" });
+        }
+      }
+      keysPrev = sig;
+      if (S.data) { renderStatus(S.data); renderBanners(S.data); }
+    } catch (e) { /* the API banner already covers a dead API */ }
+  }
+  const listKeys = (ls) => (ls.length ? ls.slice(0, -1).join(", ") + (ls.length > 1 ? " y " : "") + ls[ls.length - 1] : "ninguna");
+  function keysBlock() {
+    const kh = window.__keyHealth;
+    if (!kh || !kh.keys.length) return null;
+    const n = kh.keys.length, ok = n - kh.bad.length;
+    const tone = kh.allDown ? "bad" : kh.bad.some((k) => k.tone === "bad") ? "bad" : kh.bad.length ? "warn" : "ok";
+    return el("a", { class: "sb-sec sb-keys", href: "#bot" },
+      el("div", { class: "sb-line" }, el("span", null, "Claude"), pill(kh.allDown ? "SIN CLAUDE" : ok + "/" + n + " CLAVES", tone)),
+      el("div", { class: "sb-sub" }, kh.allDown ? "ninguna clave funciona: juega con reglas" : kh.bad.length
+        ? kh.bad.map((k) => "Clave " + k.label + ": " + k.chip.toLowerCase()).join(" · ") : "todas las claves responden"));
   }
   // open items in the brain's outbox (what the team must do by hand) -> badge on the Cerebro nav entry
   let outboxAt = 0;
@@ -334,6 +370,7 @@
         el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : paused ? "EN PAUSA" : "CERRADO", open ? "ok" : paused ? "pause" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
       recorderBlock(d.recorder || {}),
+      keysBlock() || "",
       el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),
         window.ui.meter({ label: "Aceptar", value: accepted, max: limits.accepts_per_team_per_tick }),
         window.ui.meter({ label: "Conversac.", value: threads, max: limits.max_open_threads_per_team }),
@@ -357,6 +394,15 @@
         el("strong", null, "API de Anthropic con problemas" + (a && a.ts ? " desde " + fmtTime(a.ts, false) : "")),
         el("div", null, "El bot sigue en modo Código: sin Opus ni Consejo, solo reglas y raíles. " + (a ? String(a.text || "").slice(0, 160) : ""))),
         el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
+    }
+    const kh = window.__keyHealth;
+    if (!S.apiDown && kh && kh.bad.length) {
+      const hard = kh.allDown || kh.bad.some((k) => k.tone === "bad");
+      items.push(el("div", { class: "banner tone-" + (hard ? "bad" : "warn") }, icon("alert", 18), el("div", null,
+        el("strong", null, kh.allDown ? "El bot juega sin Claude: ninguna clave funciona"
+          : kh.bad.map((k) => "Clave " + k.label + " " + k.chip.toLowerCase()).join(" · ") + ": el bot sigue con " + listKeys(kh.okLabels)),
+        el("div", null, kh.bad.map((k) => "Clave " + k.label + ": " + k.text.replace(/\.$/, "") + ".").join(" "))),
+        el("a", { class: "btn", href: "#bot" }, "Ver claves ", icon("arrow", 12))));
     }
     if (d && d.status && d.status.stop_file) {
       items.push(el("div", { class: "banner tone-bad" }, icon("alert", 18), el("div", null, el("strong", null, "STOP activo"),

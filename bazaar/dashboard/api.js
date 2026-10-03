@@ -65,6 +65,7 @@
     setLesson: (id, status, why) => write("POST", "lessons/" + enc(id), { status, why }),
     novelty: (since, limit) => get("novelty", { since, limit }),
     spend: () => get("spend"),
+    llmHealth: () => get("llm/health", {}, 5000),
     strategy: (limit) => get("strategy", { limit }),
     brainChat: (since) => get("brain/chat", { since }, 0),
     brainSay: (text, by) => write("POST", "brain/chat", { text, by: by || "equipo" }),

@@ -236,6 +236,36 @@
   }
   const PURPOSE = (window.ui && window.ui.PURPOSE_LABEL) || {};
 
+  // "Por clave": state chip, reason and since when, errors in the last 15 min, last error, spend today vs cap
+  function keyList(sp) {
+    const kh = window.__keyHealth || (window.ui.keyHealth ? window.ui.keyHealth(sp, [], null) : { keys: [] });
+    const max = Math.max(0.0001, ...kh.keys.map((k) => Math.max(k.usd, +k.cap || 0)));
+    const t = (ts) => (ts ? window.ui.fmtTime(ts) : null);
+    return el("div", { class: "bot-blist bot-keys" }, el("div", { class: "bot-cap" }, "Por clave"),
+      ...(kh.keys.length ? kh.keys.map((k) => el("div", { class: "bot-key tone-" + k.tone },
+        el("div", { class: "bot-brow-h" }, el("b", {}, "Clave " + k.label),
+          el("span", { class: "tag res tone-" + (k.tone === "ok" ? "ok" : k.tone) + " bot-key-chip" }, k.chip),
+          el("span", { class: "bot-mono" }, usd(k.usd) + (k.cap ? " / " + fmt(k.cap, 0) + " $" : ""))),
+        el("div", { class: "bot-bar" }, el("span", { style: `width:${Math.max(1, Math.round((k.usd / max) * 100))}%` })),
+        k.ok ? el("div", { class: "bot-muted bot-small", title: k.lastError || "" }, k.errors15
+            ? `ya responde · ${k.errors15} errores en 15 min` + (k.lastErrorTs ? `, el último a las ${t(k.lastErrorTs)}` : "") + (window.ui.keyProblem(k.lastError) ? ` (${window.ui.keyProblem(k.lastError).label.toLowerCase()})` : "")
+            : "sin errores en los últimos 15 min")
+          : el("div", { class: "bot-key-why" },
+            el("div", {}, k.text),
+            el("div", { class: "bot-muted bot-small bot-mono" }, [k.since ? "desde " + t(k.since) : null, k.errors15 + " errores en 15 min"].filter(Boolean).join(" · ")),
+            k.lastError ? el("div", { class: "bot-muted bot-small bot-key-last", title: k.lastError }, "Último error: " + k.lastError) : null)))
+        : [el("div", { class: "bot-muted bot-small" }, "sin claves")]));
+  }
+  function keyAlert() {
+    const kh = window.__keyHealth;
+    if (!kh || !kh.bad.length) return null;
+    const hard = kh.allDown || kh.bad.some((k) => k.tone === "bad");
+    const okL = kh.okLabels;
+    return el("div", { class: "bot-keyalert tone-" + (hard ? "bad" : "warn") }, ic("warn", 16),
+      el("div", {}, el("b", {}, kh.allDown ? "El bot juega sin Claude: ninguna clave funciona."
+        : kh.bad.map((k) => `Clave ${k.label} ${k.chip.toLowerCase()}`).join(" · ") + ": el bot sigue con " + (okL.length ? okL.join(", ") : "ninguna") + "."),
+        ...kh.bad.map((k) => el("div", { class: "bot-small" }, `Clave ${k.label}: ${k.text}` + (k.since ? ` (desde ${window.ui.fmtTime(k.since)})` : "")))));
+  }
   function paintSpend() {
     const box = S.root.querySelector(".bot-spend");
     const sp = S.spend || (S.ov && S.ov.spend);
@@ -248,12 +278,13 @@
     S.root.querySelector(".bot-spend-sub").textContent = `${sp.day || "hoy"} · tope efectivo ${usd(cap)}` + (num(sp.cap_config) != null ? ` (config ${fmt(sp.cap_config, 0)} $${num(sp.share) != null ? ` × ${fmt(sp.share, 2)}` : ""})` : "");
     const calls = sp.calls;
     box.replaceChildren(
+      keyAlert() || "",
       el("div", { class: "bot-spend-top" },
         el("div", {}, el("div", { class: "bot-big bot-mono" }, usd(sp.usd)), el("div", { class: "bot-muted bot-small bot-mono" }, `${calls ?? "—"} llamadas · ahora ${modelName(sp.model_now)}`)),
         el("div", { class: "bot-gauge" }, el("div", { class: "bot-gauge-bar" }, el("span", { style: `width:${pctOf(sp.usd || 0)}` }), ...marks),
           el("div", { class: "bot-mono bot-small bot-muted" }, cap ? `${Math.round(((sp.usd || 0) / cap) * 100)} % del tope` : ""))),
       el("div", { class: "bot-spend-cols" },
-        barList("Por clave", sp.by_key, null, { label: (k) => `Clave ${k}`, note: (k) => { const v = sp.by_key[k] || {}; return v.dead ? "muerta" : v.cooldown_s > 0 ? `espera ${Math.round(v.cooldown_s)} s` : num(v.usd_total) != null ? `total ${fmt(v.usd_total, 2)}` : ""; } }),
+        keyList(sp),
         barList("Por propósito", sp.by_purpose, null, { label: (k) => PURPOSE[k] || k }),
         barList("Por modelo", sp.by_model, null, { label: modelName })));
     // ladder

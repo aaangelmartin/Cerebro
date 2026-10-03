@@ -583,10 +583,64 @@
     smoke: "Pruebas", brain_eval: "Pruebas del cerebro", external_intel: "Mensajes externos", broker: "Broker" };
   const purposeLabel = (k) => PURPOSE_LABEL[k] || k;
 
+  // ---- Anthropic key health, for the Bot screen, the sidebar and the alerts --------------------------------
+  // Preferred source: GET llm/health -> {keys:[{label,state,reason,since,errors_15m,last_error,usd_today}], all_down}.
+  // Until it exists: GET spend (by_key: usd_today, cap, dead, cooldown_s) + the recent GET llm rows (key, error, ts).
+  function keyProblem(text) {
+    const t = String(text || ""), l = t.toLowerCase();
+    if (!t) return null;
+    if (/usage limit|spend limit|credit balance|billing|api usage limits|workspace.*limit/.test(l)) {
+      const m = t.match(/(?:regain access on|access on|until)\s+(\d{4}-\d{2}-\d{2})/i);
+      let back = "";
+      if (m) { const d = new Date(m[1] + "T00:00:00Z"); if (!isNaN(d)) back = "; vuelve el " + d.getUTCDate() + " " + ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][d.getUTCMonth()]; }
+      return { state: "agotada", label: "Agotada: límite de gasto", tone: "bad", text: "Límite de gasto de la cuenta alcanzado" + back + ", o súbelo en console.anthropic.com → Settings → Limits" };
+    }
+    if (/not scoped to a workspace|workspace-id/.test(l)) return { state: "rechazada", label: "Rechazada", tone: "bad", text: "La API rechaza la clave: no está asignada a un workspace (parece una clave de administración). Hace falta una clave normal de API." };
+    if (/\b401\b|\b403\b|authentication|invalid x-api-key|invalid_api_key|permission/.test(l)) return { state: "rechazada", label: "Rechazada", tone: "bad", text: "La API rechaza la clave (no válida o sin permiso). Revísala en console.anthropic.com → API keys." };
+    if (/\b429\b|rate.?limit/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "Demasiadas peticiones por minuto; la clave descansa y vuelve sola." };
+    if (/\b529\b|overloaded/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "La API de Anthropic está saturada; reintenta sola." };
+    if (/timeout|timed out/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "La API tarda demasiado en responder; reintenta sola." };
+    if (/connection|network/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "Sin conexión con la API de Anthropic; reintenta sola." };
+    return { state: "error", label: "Con errores", tone: "warn", text: t.replace(/\s+/g, " ").slice(0, 140) };
+  }
+  function keyHealth(spend, llmRows, health, now) {
+    now = now || Date.now() / 1000;
+    const out = [];
+    if (health && Array.isArray(health.keys)) {
+      for (const k of health.keys) {
+        const p = k.state && k.state !== "ok" ? (keyProblem(k.reason || k.last_error) || { state: k.state, label: k.state, tone: "bad", text: k.reason || "" }) : null;
+        out.push({ label: k.label, ok: !p, state: p ? p.state : "ok", chip: p ? p.label : "OK", tone: p ? p.tone : "ok", text: p ? p.text : "", since: k.since || null,
+          errors15: +k.errors_15m || 0, lastError: k.last_error || "", usd: +k.usd_today || 0, cap: k.cap ?? null });
+      }
+    } else {
+      const by = (spend && spend.by_key) || {};
+      const rows = (llmRows || []).filter((r) => r && r.key);
+      for (const label of Object.keys(by).sort()) {
+        const v = by[label] || {};
+        const mine = rows.filter((r) => r.key === label).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const errs = mine.filter((r) => r.error);
+        const errs15 = errs.filter((r) => now - (r.ts || 0) <= 900);
+        const lastErr = errs[errs.length - 1], lastOk = mine.filter((r) => !r.error).slice(-1)[0];
+        let p = null, since = null;
+        if (v.dead) { p = keyProblem(typeof v.dead === "string" ? v.dead : (v.dead.reason || v.dead.why || JSON.stringify(v.dead))); since = (v.dead && v.dead.since) || v.dead_since || (lastErr && lastErr.ts) || null; if (p && p.tone !== "bad") p = { ...p, tone: "bad", label: "Rechazada", state: "rechazada" }; }
+        else if (+v.cooldown_s > 0) { p = keyProblem(lastErr && lastErr.error) || { state: "espera", label: "En espera", tone: "warn", text: "La clave descansa tras un error." }; p = { ...p, state: "espera", label: "En espera", tone: "warn", text: p.text + " Vuelve en " + Math.round(v.cooldown_s) + " s." }; since = lastErr && lastErr.ts; }
+        else if (errs15.length >= 3 && lastErr && (!lastOk || lastOk.ts < lastErr.ts)) { p = keyProblem(lastErr.error); }
+        if (p && !since) { // since = first error of the current run of failures
+          let i = mine.length - 1; while (i >= 0 && mine[i].error) i--; since = (mine[i + 1] || lastErr || {}).ts || null;
+        }
+        out.push({ label, ok: !p, state: p ? p.state : "ok", chip: p ? p.label : "OK", tone: p ? p.tone : "ok", text: p ? p.text : "", since,
+          errors15: errs15.length, lastError: lastErr ? String(lastErr.error).replace(/\s+/g, " ").slice(0, 200) : "", lastErrorTs: lastErr ? lastErr.ts : null,
+          usd: +v.usd_today || 0, cap: v.cap ?? null });
+      }
+    }
+    const bad = out.filter((k) => !k.ok);
+    return { keys: out, bad, allDown: out.length > 0 && bad.length === out.length && (health ? !!health.all_down || true : true), okLabels: out.filter((k) => k.ok).map((k) => k.label) };
+  }
+
   window.ui = {
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL, keyHealth, keyProblem,
   };
 })();

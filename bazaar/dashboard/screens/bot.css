@@ -128,3 +128,16 @@
 .scr-bot .bot-cap-f { display: flex; align-items: center; gap: 6px; }
 .scr-bot .bot-mark.is-low .bot-mark-l { bottom: auto; top: 100%; padding: 2px 0 0; }
 .scr-bot .bot-gauge { padding-bottom: 14px; }
+
+/* keys: state per key and alert */
+.scr-bot .bot-key { padding: 8px 0; border-bottom: 1px solid var(--bx-line, var(--line)); display: flex; flex-direction: column; gap: 5px; }
+.scr-bot .bot-key:last-child { border-bottom: 0; }
+.scr-bot .bot-key .bot-brow-h { display: flex; align-items: center; gap: 8px; }
+.scr-bot .bot-key .bot-brow-h .bot-mono { margin-left: auto; }
+.scr-bot .bot-key.tone-bad .bot-bar span { background: var(--bad); } .scr-bot .bot-key.tone-warn .bot-bar span { background: var(--warn); }
+.scr-bot .bot-key-why { font-size: 12.5px; line-height: 1.4; display: flex; flex-direction: column; gap: 3px; border-left: 3px solid var(--bad); padding-left: 8px; }
+.scr-bot .bot-key.tone-warn .bot-key-why { border-left-color: var(--warn); }
+.scr-bot .bot-key-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-bot .bot-keyalert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--bad); border-left-width: 3px;
+  background: var(--bad-soft); font-size: 13px; line-height: 1.4; }
+.scr-bot .bot-keyalert.tone-warn { border-color: var(--warn); background: var(--warn-soft); }

@@ -263,3 +263,6 @@ select {
 .topbar .tb-clock { margin-left: 0; }
 .refresh.ok-flash { border-color: var(--ok); color: var(--ok); transition: border-color .2s, color .2s; }
 .nav-badge.is-alert { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+a.sb-keys { text-decoration: none; color: inherit; }
+a.sb-keys:hover { background: var(--s2); }
+.banner.tone-warn { background: linear-gradient(90deg, var(--warn-soft), var(--s2) 60%); } .banner.tone-warn > .ic-wrap { color: var(--warn); }
