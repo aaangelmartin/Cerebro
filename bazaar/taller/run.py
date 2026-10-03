@@ -45,7 +45,9 @@ CLAUDE_TIMEOUT_S = 20 * 60
 TEST_TIMEOUT_S = 15 * 60
 CLAUDE_BUDGET_USD = "4"
 WATCH_S = 95                     # ~3 ticks of 30 s
-RESTART_WAIT_S = 60
+OLD_EXIT_WAIT_S = 150            # a killed service may finish its current work first (an Opus call takes up to 150 s)
+RESTART_WAIT_S = 45              # after the old process is gone: bazaar.supervise starts a new one after ~10 s
+RESTART_POLL_S = 3
 CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 TEST_CMD = [PY, "-m", "unittest", "discover", "-s", "bazaar", "-t", "."]
 
@@ -75,7 +77,7 @@ MODULE_OF = {"api": "bazaar.api.server", "bot": "bazaar.run", "broker": "bazaar.
              "recorder": "bazaar.recorder.run", "strategist": "bazaar.strategist.run",
              "official": "bazaar.intel.official"}
 
-TERMINAL = {"done", "rejected", "failed", "needs_accept", "pending_integration"}
+TERMINAL = {"done", "rejected", "failed", "needs_accept", "pending_integration", "revert_failed"}
 
 
 # --------------------------------------------------------------------------- pure helpers
@@ -179,7 +181,10 @@ class Taller:
                  claude: Callable[[Path, str], dict] | None = None,
                  restart: Callable[[str], bool] | None = None,
                  watch: Callable[[list[str], float], list[str]] | None = None,
-                 clock: Callable[[], float] = time.time, dry_run: bool = False):
+                 clock: Callable[[], float] = time.time, dry_run: bool = False,
+                 sleep: Callable[[float], None] | None = None,
+                 pids: Callable[[str], list[int]] | None = None,
+                 kill: Callable[[int, int], None] | None = None):
         self.box = outbox or Outbox()
         self.repo, self.work, self.live = Path(repo), Path(work), Path(live)
         self.sh = sh or self._sh
@@ -188,6 +193,9 @@ class Taller:
         self.watch = watch or self._watch
         self.clock = clock
         self.dry_run = dry_run
+        self.sleep = sleep or time.sleep
+        self.pids = pids or self._pids
+        self.kill = kill or os.kill
         self.work.mkdir(parents=True, exist_ok=True)
         self.state_path = self.work / "state.json"
         self.lock = self.work / "lock"
@@ -231,20 +239,29 @@ class Taller:
         return [int(x) for x in r.stdout.split() if x.strip().isdigit() and int(x) != os.getpid()]
 
     def _restart(self, service: str) -> bool:
-        """SIGTERM the service; bazaar.supervise starts it again. True when a new process shows up."""
-        old = set(self._pids(service))
+        """SIGTERM the service; bazaar.supervise starts it again. True when a new process shows up.
+
+        Two waits, so a slow shutdown is not mistaken for a failed restart: first for the old process to
+        exit (it may finish an Opus call), then up to RESTART_WAIT_S for the supervisor's new one."""
+        old = set(self.pids(service))
         for pid in old:
             try:
-                os.kill(pid, signal.SIGTERM)
+                self.kill(pid, signal.SIGTERM)
             except OSError:
                 pass
-        end = time.time() + RESTART_WAIT_S
-        while time.time() < end:
-            time.sleep(3)
-            now = set(self._pids(service))
-            if now and not (now & old):
-                return True
-        return False
+        end = self.clock() + OLD_EXIT_WAIT_S
+        now = set(self.pids(service))
+        while (now & old) and not (now - old) and self.clock() < end:
+            self.sleep(RESTART_POLL_S)
+            now = set(self.pids(service))
+        end = self.clock() + RESTART_WAIT_S
+        while True:
+            if now - old:
+                return True                       # a new process runs the module
+            if self.clock() >= end:
+                return False
+            self.sleep(RESTART_POLL_S)
+            now = set(self.pids(service))
 
     def _watch(self, services: list[str], since: float) -> list[str]:
         """Watch the services' logs for ~3 ticks; return new error lines."""
@@ -430,8 +447,8 @@ class Taller:
             return {"id": iid, "result": "pending_integration", "commit": head}
         errors = self._deploy(iid, services)
         if errors:
-            self._revert(iid, wt, head, services, errors)
-            return {"id": iid, "result": "reverted", "commit": head, "errors": errors}
+            res = self._revert(iid, wt, head, services, errors)
+            return {"id": iid, "result": res, "commit": head, "errors": errors}
         summary = subject.splitlines()[0][:160]
         self.finish(iid, "done", f"hecho en {head} ({summary}); desplegado: {', '.join(services) or 'nada que reiniciar'}",
                     status="done", commit=head, services=services)
@@ -486,18 +503,36 @@ class Taller:
         self.log(iid, "watch", services=services, errors=errors)
         return errors
 
-    def _revert(self, iid: str, wt: Path, head: str, services: list[str], errors: list[str]) -> None:
+    def _revert(self, iid: str, wt: Path, head: str, services: list[str], errors: list[str]) -> str:
         self.sh(["git", "fetch", REMOTE, BRANCH], cwd=wt, check=True)
         self.sh(["git", "checkout", "-q", "--detach", f"{REMOTE}/{BRANCH}"], cwd=wt, check=True)
         r = self.sh(["git", "revert", "--no-edit", head], cwd=wt)
-        if r.returncode == 0:
-            self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"], cwd=wt)
+        p = self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"], cwd=wt) if r.returncode == 0 else r
+        if r.returncode != 0:
+            self.sh(["git", "revert", "--abort"], cwd=wt)
+        if p.returncode == 0:
             self.sh(["git", "pull", "-q", "--ff-only", REMOTE, BRANCH])
+        return self._close_revert(iid, head, services, errors, p.returncode == 0,
+                                  (p.stderr or p.stdout or "") if p.returncode else "")
+
+    def _close_revert(self, iid: str, head: str, services: list[str], errors: list[str], ok: bool,
+                      why: str = "") -> str:
+        """Last word after a deploy that gave errors. Reverted: restart and mark rejected. Could not revert:
+        say so loudly, leave the request open for a human, never pretend it was undone."""
+        if ok:
             for s in services:
                 self.restart(s)
-        self.log(iid, "reverted", commit=head, errors=errors, revert_ok=r.returncode == 0)
-        self.finish(iid, "rejected", f"desplegado {head} pero dio errores, revertido: {'; '.join(errors)[:600]}",
-                    status="rejected", commit=head, errors=errors)
+            self.log(iid, "reverted", commit=head, errors=errors, revert_ok=True)
+            self.finish(iid, "rejected", f"desplegado {head} pero dio errores, revertido: {'; '.join(errors)[:600]}",
+                        status="rejected", commit=head, errors=errors)
+            return "reverted"
+        self.log(iid, "revert_failed", commit=head, errors=errors, revert_ok=False, why=why[-300:])
+        self.finish(iid, "revert_failed",
+                    f"ATENCIÓN: {head} sigue desplegado y NO se pudo revertir ({why.strip()[-200:] or 'git revert falló'}). "
+                    f"Errores tras desplegar: {'; '.join(errors)[:400]}. Revisar a mano: si el cambio está bien, "
+                    "marcar Hecho; si no, revertirlo y pulsar Aceptar para reintentar.",
+                    status="open", commit=head, errors=errors)
+        return "revert_failed"
 
     # ---- fork mode: a fork of the main Claude Code conversation (user's subscription) writes the code ----------
     def next_job(self) -> dict | None:
@@ -618,14 +653,12 @@ class Taller:
         errors = self._deploy(iid, services)
         if errors:
             rv = self.sh(["git", "revert", "--no-edit", full])
-            if rv.returncode == 0:
-                self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"])
-                for s in services:
-                    self.restart(s)
-            self.log(iid, "reverted", commit=head, errors=errors, revert_ok=rv.returncode == 0)
-            self.finish(iid, "rejected", f"desplegado {head} pero dio errores, revertido: {'; '.join(errors)[:600]}",
-                        status="rejected", commit=head, errors=errors)
-            return {"id": iid, "result": "reverted", "commit": head, "errors": errors}
+            pv = self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"]) if rv.returncode == 0 else rv
+            if rv.returncode != 0:
+                self.sh(["git", "revert", "--abort"])            # leave the working tree as it was
+            res = self._close_revert(iid, head, services, errors, pv.returncode == 0,
+                                     (pv.stderr or pv.stdout or "") if pv.returncode else "")
+            return {"id": iid, "result": res, "commit": head, "errors": errors}
         subject = self.sh(["git", "log", "-1", "--format=%s", full]).stdout.strip()[:160]
         self.finish(iid, "done", f"hecho en {head} ({subject}); desplegado: {', '.join(services) or 'nada que reiniciar'}",
                     status="done", commit=head, services=services)

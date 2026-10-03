@@ -226,6 +226,80 @@ class ForkModeTest(JobTest):
         self.assertEqual(got["status"], "open")
         self.assertIn("the request is wrong", got["human_note"])
 
+    def test_finish_reverts_and_rejects_when_the_deploy_gives_errors(self):
+        sh = FakeSh(changed=["bazaar/broker/engine.py"])
+        t = self.make(sh, watch_errors=["broker: Traceback"])
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "reverted")
+        self.assertEqual(self.restarted, ["broker", "broker"])          # deploy, then again after the revert
+        self.assertEqual(self.box.get(job["id"])["status"], "rejected")
+
+    def test_finish_says_so_when_the_revert_fails(self):
+        class NoRevert(FakeSh):
+            def __call__(self, args, **kw):
+                if args[:3] == ["git", "revert", "--no-edit"]:
+                    self.calls.append(list(args))
+                    return subprocess.CompletedProcess(args, 1, "", "error: could not revert abc1234: conflict")
+                return super().__call__(args, **kw)
+
+        sh = NoRevert(changed=["bazaar/broker/engine.py"])
+        t = self.make(sh, watch_errors=["broker: Traceback"])
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "revert_failed")
+        self.assertIn(["git", "revert", "--abort"], sh.calls)           # the working tree is left as it was
+        self.assertEqual(self.restarted, ["broker"])                    # no second restart: nothing was undone
+        got = self.box.get(job["id"])
+        self.assertEqual(got["status"], "open")                         # never marked rejected silently
+        self.assertIn("NO se pudo revertir", got["human_note"])
+        self.assertIsNone(t.next_job())                                 # parked for a human, not retried in a loop
+        self.assertFalse(t.lock.exists())
+
+
+class RestartWaitTest(unittest.TestCase):
+    """_restart with a fake clock: `timeline` says which pids run the module at each moment."""
+
+    def run_restart(self, timeline):
+        now = [0.0]
+        killed = []
+
+        def pids(service):
+            cur = []
+            for t0, ps in timeline:
+                if now[0] >= t0:
+                    cur = ps
+            return list(cur)
+
+        with tempfile.TemporaryDirectory() as d:
+            t = T.Taller(outbox=Outbox(Path(d) / "o.jsonl"), repo=Path(d), work=Path(d) / "w", live=Path(d) / "l",
+                         clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s), pids=pids,
+                         kill=lambda pid, sig: killed.append(pid))
+            ok = t._restart("strategist")
+        return ok, killed, now[0]
+
+    def test_slow_shutdown_then_supervisor_restart_is_not_a_failure(self):
+        # the old process needs 70 s to finish its Opus call; the supervisor starts a new one 12 s later
+        ok, killed, at = self.run_restart([(0, [111]), (70, []), (82, [222])])
+        self.assertTrue(ok)
+        self.assertEqual(killed, [111])
+        self.assertLess(at, 90)
+
+    def test_no_new_process_within_the_wait_is_a_failure(self):
+        ok, _, at = self.run_restart([(0, [111]), (5, [])])
+        self.assertFalse(ok)
+        self.assertGreaterEqual(at, 5 + T.RESTART_WAIT_S - T.RESTART_POLL_S)
+
+    def test_polls_every_three_seconds_for_up_to_45(self):
+        self.assertEqual((T.RESTART_WAIT_S, T.RESTART_POLL_S), (45, 3))
+        ok, _, at = self.run_restart([(0, [111]), (3, []), (40, [333])])
+        self.assertTrue(ok)
+        self.assertLessEqual(at, 45)
+
+    def test_a_process_that_never_exits_is_a_failure(self):
+        ok, _, _ = self.run_restart([(0, [111])])
+        self.assertFalse(ok)
+
 
 if __name__ == "__main__":
     unittest.main()
