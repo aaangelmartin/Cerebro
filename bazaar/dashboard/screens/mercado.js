@@ -280,8 +280,8 @@
     const counts = {};
     for (const e of events) counts[e.type] = (counts[e.type] || 0) + 1;
     const seg = h("div", { class: "mk-seg-row" },
-      h("div", { class: "mk-seg" }, h("button", { class: "on" }, "● En vivo"), h("button", { onclick: () => { location.hash = "#mercado/historial"; } }, "Historial")),
-      h("div", { class: "mk-seg" }, ["todos", "nosotros"].map((s) => h("button", { class: f.scope === s ? "on" : "", onclick: () => { f.scope = s; renderSide(root, ctx); } }, s === "todos" ? "Todos" : "Nosotros"))));
+      h("div", { class: "mk-seg" }, ["todos", "nosotros"].map((s) => h("button", { class: f.scope === s ? "on" : "", onclick: () => { f.scope = s; renderSide(root, ctx); } }, s === "todos" ? "Todos" : "Nosotros"))),
+      h("div", { class: "mk-seg" }, h("button", { class: "on" }, "● En vivo"), h("button", { onclick: () => { location.hash = "#mercado/historial"; } }, "Historial")));
     let fb = side.querySelector(".mk-fb");
     if (!fb) {
       if (U().filterBar) {

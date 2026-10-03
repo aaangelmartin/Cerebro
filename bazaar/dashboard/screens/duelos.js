@@ -143,7 +143,8 @@
   const S = {
     view: "vivo", team: "todos", filter: null, root: null, drawerFor: null, scrolls: {},
     transcripts: {}, // id -> {count, data}
-    hist: { role: "", status: "", q: "", limit: 24 },
+    hist: { sub: "conv", role: "", status: "", q: "", limit: 24 },
+    ev: { kind: "", who: "", duel: "", from: "", to: "", us: false, q: "", page: 0, csv: "" },
   };
 
   async function getTranscript(head) {
@@ -398,24 +399,125 @@
         h("b", { class: "mk-mono " + ((r || 0) > 0 ? "dl-ok" : (r || 0) < 0 ? "dl-bad" : "dl-muted") }, st === "live" ? "en juego" : pts(r) + " pts")));
     return card;
   }
+  // ---------- historial · eventos: every duel event (our transcripts + the whole feed) ----------
+  const EV_LABEL = { open: "Abierto", msg: "Mensaje", deal: "Acuerdo", no_deal: "Sin acuerdo", session: "Sesión" };
+  function duelEvents(ctx) {
+    const out = [];
+    for (const hd of ctx.heads) {
+      const id = +(hd.duel ?? hd.id);
+      const d = (S.transcripts[id] && S.transcripts[id].data) || hd;
+      const msgs = d.messages || [];
+      const first = msgs.length ? Math.min(...msgs.map((m) => +m.tick || 0)) : null;
+      if (first !== null) out.push({ ts: U().tickWall ? U().tickWall(first) : null, tick: first, kind: "open", who: "t10", duel: id, rival: d.rival, us: true,
+        text: `${d.role === "buyer" ? "Compramos" : "Vendemos"} ${d.item || ""} a ${d.rival || "rival"} · sesión ${d.session ?? "?"} · límite ${d.your_limit ?? "?"}`, price: null });
+      for (const m of msgs) {
+        const ours = isOurs(m);
+        out.push({ ts: U().tickWall ? U().tickWall(m.tick) : null, tick: m.tick, kind: "msg", who: ours ? "t10" : d.rival || "Rival", duel: id, rival: d.rival, us: true,
+          text: (m.text || "") + (num(m.days) !== null ? ` · ${m.days} d` : ""), price: num(m.price) });
+      }
+    }
+    for (const e of DF.rows) {
+      const p = e.payload || {};
+      if (e.type === "duel.closed") {
+        const id = +p.duel, ours = ctx.ourIds.has(id), hd = ctx.byId[id];
+        out.push({ ts: num(e.seen_at) || num(e.ts), tick: e.tick, kind: p.status === "deal" ? "deal" : "no_deal", who: ours ? "t10" : "", duel: id, rival: hd && hd.rival, us: ours,
+          text: `${p.item || ""}${hd ? " · vs " + (hd.rival || "") : ""}${hd && num(hd.result) !== null ? " · " + pts(num(hd.result)) + " pts" : ""} · sesión ${p.session ?? "?"}`, price: hd && p.status === "deal" ? num(hd.price) : null });
+      } else out.push({ ts: num(e.seen_at) || num(e.ts), tick: e.tick, kind: "session", who: "", duel: null, us: false, text: `${p.name || e.type} · ${e.type === "duels.finished" ? "termina" : "empieza"}`, price: null });
+    }
+    return out.sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.tick || 0) - (a.tick || 0));
+  }
+  function evFiltered(rows) {
+    const f = S.ev, q = f.q.toLowerCase();
+    const from = f.from ? new Date(f.from).getTime() / 1000 : null, to = f.to ? new Date(f.to).getTime() / 1000 : null;
+    return rows.filter((r) => (!f.kind || r.kind === f.kind) && (!f.us || r.us) && (!f.who || r.who === f.who || r.rival === f.who) &&
+      (!f.duel || String(r.duel) === f.duel.replace("#", "")) && (!from || (r.ts || 0) >= from) && (!to || (r.ts || 0) <= to) &&
+      (!q || `${r.text} ${r.rival || ""} #${r.duel}`.toLowerCase().includes(q)));
+  }
+  const csvCell = (v) => { const x = v == null ? "" : String(v); return /[",\n;]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  async function renderEvents(root, ctx) {
+    const host = root.querySelector(".mk-hist"); if (!host) return;
+    // transcripts of all our duels (closed ones stay cached)
+    await Promise.all(ctx.heads.map((hd) => getTranscript(hd)));
+    if (!root.isConnected) return;
+    const all = duelEvents(ctx), rows = evFiltered(all), f = S.ev;
+    const whoSel = host.querySelector("[data-f=who]");
+    const whos = [...new Set(all.map((r) => r.rival).filter(Boolean))].sort();
+    if (whoSel.options.length - 1 !== whos.length) { const cur = whoSel.value; whoSel.replaceChildren(h("option", { value: "" }, "Rival: todos"), ...whos.map((w) => h("option", { value: w }, w))); whoSel.value = cur; }
+    const per = 50, pages = Math.max(1, Math.ceil(rows.length / per)); f.page = Math.min(f.page, pages - 1);
+    const slice = rows.slice(f.page * per, f.page * per + per);
+    const nUs = rows.filter((r) => r.us).length;
+    host.querySelector(".mk-hist-sum").textContent = `${rows.length} de ${all.length} eventos · Nosotros: ${nUs}` + (DF.busy ? " · cargando…" : "");
+    const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+    const fmtTs = (ts) => (ts ? DAYS[new Date(ts * 1000).getDay()] + " " + (U().fmtTime ? U().fmtTime(ts) : new Date(ts * 1000).toLocaleTimeString("es-ES")) : "—");
+    const table = h("table", { class: "mk-table" },
+      h("thead", null, h("tr", null, ["Fecha", "Tick", "Tipo", "Quién", "Detalle", "Duelo", "Precio"].map((x) => h("th", null, x)))),
+      h("tbody", null, slice.map((r) => h("tr", { class: "mk-t-duelo" + (r.us ? " is-us" : ""), onclick: r.duel != null && r.us ? () => { location.hash = "#duelos/" + r.duel; } : null },
+        h("td", { class: "mk-mono" }, fmtTs(r.ts)), h("td", { class: "mk-mono" }, r.tick != null ? "t" + r.tick : ""),
+        h("td", null, comp("typeChip", "duelo", EV_LABEL[r.kind]) || EV_LABEL[r.kind]),
+        h("td", null, r.who === "t10" ? comp("teamTag", "t10", { us: true }) || "Nosotros" : h("span", { class: "mk-team" }, r.who || "—")),
+        h("td", { class: "mk-det" }, r.text), h("td", { class: "mk-mono" }, r.duel != null ? "#" + r.duel : ""),
+        h("td", { class: "mk-mono mk-r" }, r.price != null ? fmtP(r.price) : "")))));
+    host.querySelector(".mk-hist-table").replaceChildren(slice.length ? table : comp("empty", "Ningún evento coincide con los filtros.") || h("div", {}, "Nada"));
+    const pg = host.querySelector(".mk-pager");
+    const btn = (label, p, on) => h("button", { class: on ? "on" : "", disabled: p < 0 || p >= pages ? "disabled" : null, onclick: () => { f.page = p; renderEvents(root, ctx); } }, label);
+    const list = [...new Set([0, pages - 1, f.page - 1, f.page, f.page + 1].filter((p) => p >= 0 && p < pages))].sort((a, b) => a - b);
+    const parts = [btn("‹", f.page - 1)];
+    list.forEach((p, i) => { if (i && p - list[i - 1] > 1) parts.push(h("span", null, "…")); parts.push(btn(String(p + 1), p, p === f.page)); });
+    parts.push(btn("›", f.page + 1));
+    pg.replaceChildren(h("span", { class: "mk-muted" }, `${rows.length ? f.page * per + 1 : 0}–${Math.min(rows.length, (f.page + 1) * per)} de ${rows.length}`), h("span", { class: "mk-grow" }), ...parts);
+    const lines = [["fecha", "tick", "tipo", "quien", "rival", "duelo", "detalle", "precio", "nosotros"].join(",")];
+    for (const r of rows) lines.push([r.ts ? new Date(r.ts * 1000).toISOString() : "", r.tick, EV_LABEL[r.kind], r.who, r.rival, r.duel, r.text, r.price, r.us ? "sí" : ""].map(csvCell).join(","));
+    f.csv = lines.join("\n");
+    const a = host.querySelector(".mk-export");
+    a.setAttribute("href", "data:text/csv;charset=utf-8," + encodeURIComponent("\ufeff" + f.csv));
+  }
+  function buildEvents() {
+    const f = S.ev;
+    const upd = (k) => (e) => { f[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value; f.page = 0; refreshNow(); };
+    const copyBtn = h("button", { class: "mk-btn", type: "button", onclick: async (ev) => {
+      let ok = false; try { await navigator.clipboard.writeText(f.csv || ""); ok = true; } catch (e) { ok = false; }
+      ev.target.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { ev.target.textContent = "Copiar CSV"; }, 1800);
+    } }, "Copiar CSV");
+    return h("div", { class: "mk-hist" },
+      h("div", { class: "mk-hfilters" },
+        h("select", { class: "mk-input", onchange: upd("kind") }, h("option", { value: "" }, "Tipo: todos"), Object.entries(EV_LABEL).map(([k, l]) => h("option", { value: k, selected: f.kind === k ? "selected" : null }, l))),
+        h("select", { class: "mk-input", "data-f": "who", onchange: upd("who") }, h("option", { value: "" }, "Rival: todos")),
+        h("input", { class: "mk-input", placeholder: "Duelo (#291)", value: f.duel, onchange: upd("duel") }),
+        h("label", { class: "mk-muted" }, "desde ", h("input", { class: "mk-input", type: "datetime-local", value: f.from, onchange: upd("from") })),
+        h("label", { class: "mk-muted" }, "hasta ", h("input", { class: "mk-input", type: "datetime-local", value: f.to, onchange: upd("to") })),
+        h("label", { class: "mk-muted" }, h("input", { type: "checkbox", checked: f.us ? "checked" : null, onchange: upd("us") }), " solo nosotros"),
+        h("input", { class: "mk-input mk-q", placeholder: "Buscar texto…", value: f.q, onchange: upd("q") }),
+        h("span", { class: "mk-grow" }),
+        h("a", { class: "mk-btn mk-export", href: "#", download: "bazaar-duelos.csv" }, "Exportar CSV"), copyBtn),
+      h("div", { class: "mk-hist-sum mk-muted" }),
+      h("div", { class: "mk-hist-table" }, window.ui.loading()),
+      h("div", { class: "mk-pager" }));
+  }
+
   function buildHist(root) {
     const f = S.hist;
     const rerender = () => refreshNow();
     const sel = (key, opts) => h("select", { class: "mk-input", onchange: (e) => { f[key] = e.target.value; f.limit = 24; rerender(); } },
       opts.map(([v, l]) => h("option", { value: v, selected: f[key] === v ? "selected" : null }, l)));
     root.replaceChildren(h("div", { class: "scr-mercado is-hist dl-hist" },
-      h("div", { class: "mk-head" }, h("h1", null, "Duelos · Historial"), h("span", { class: "mk-muted" }, "todos nuestros duelos, completos"),
-        h("span", { class: "mk-grow" }), viewSeg()),
+      h("div", { class: "mk-head" }, h("h1", null, "Duelos · Historial"),
+        h("span", { class: "mk-muted" }, S.hist.sub === "conv" ? "todos nuestros duelos, completos" : "todos los eventos de duelos desde el viernes"),
+        h("span", { class: "mk-grow" }),
+        h("div", { class: "mk-seg mk-histview" }, [["conv", "Conversaciones"], ["eventos", "Eventos"]].map(([v, l]) =>
+          h("button", { type: "button", class: S.hist.sub === v ? "on" : "", onclick: () => { if (S.hist.sub === v) return; S.hist.sub = v; buildHist(root); refreshNow(); } }, l))),
+        viewSeg()),
       h("div", { class: "dl-scorehost" }),
+      S.hist.sub === "eventos" ? buildEvents() : h("div", { class: "mk-conv" },
       h("div", { class: "mk-hfilters" },
         sel("role", [["", "Rol: todos"], ["compra", "Compramos"], ["venta", "Vendemos"]]),
         sel("status", [["", "Resultado: todos"], ["won", "Ganados"], ["deal", "Con acuerdo"], ["no_deal", "Sin acuerdo"], ["live", "En juego"]]),
         h("input", { class: "mk-input mk-q", placeholder: "Buscar rival, carta o #id…", value: f.q, onchange: (e) => { f.q = e.target.value; f.limit = 24; rerender(); } })),
       h("div", { class: "mk-conv-sum mk-muted" }),
-      h("div", { class: "mk-conv-list" }, window.ui.loading())));
+      h("div", { class: "mk-conv-list" }, window.ui.loading()))));
   }
   async function renderHist(root, ctx) {
     const sc = root.querySelector(".dl-scorehost"); if (sc) sc.replaceChildren(scoreboard(ctx));
+    if (S.hist.sub === "eventos") return renderEvents(root, ctx);
     const host = root.querySelector(".mk-conv-list"); if (!host) return;
     if (ctx.listErr && !ctx.heads.length) { host.replaceChildren(comp("error", ctx.listErr) || h("div", {}, "Error")); return; }
     const rows = histFiltered(ctx.heads);
@@ -437,6 +539,26 @@
   }
   let setView = () => {};
 
+  // every duel event of the whole feed (all days), paged by since_seq and kept incrementally
+  const DF = { rows: [], last: 0, busy: null, err: null };
+  function pullDuelFeed() {
+    if (DF.busy) return DF.busy;
+    DF.busy = (async () => {
+      try {
+        for (let guard = 0; guard < 100; guard++) {
+          const r = await A().recStream("feed", { since_seq: DF.last, limit: 2000 });
+          const rows = items(r, "rows");
+          if (!rows.length) break;
+          for (const e of rows) if (/^duels?\./.test(e.type || "")) DF.rows.push(e);
+          DF.last = rows[rows.length - 1].seq;
+          if (rows.length < 2000) break;
+        }
+        DF.err = null;
+      } catch (e) { DF.err = e; } finally { DF.busy = null; }
+    })();
+    return DF.busy;
+  }
+
   // ---------- load ----------
   async function load(data) {
     const [liveR, listR, decR, couR, outR, feedR, statR] = await Promise.all([
@@ -445,7 +567,7 @@
       safe(() => A().decisions(), { items: [] }),
       safe(() => A().council(), { items: [] }),
       safe(() => A().outcomes(), { items: [] }),
-      safe(() => A().recStream("feed", { tail: 1500 }), { rows: [] }),
+      pullDuelFeed(),
       safe(() => A().status(), {}),
     ]);
     const live = val(liveR) || {};
@@ -457,7 +579,8 @@
     for (const r of decs) { const id = num(((r.action || {}).params || {}).duel); if (id !== null) (decsByDuel[id] = decsByDuel[id] || []).push(r); }
     const councilByAction = {}; for (const c of items(val(couR))) if (c.action_id) councilByAction[c.action_id] = c;
     const outByAction = {}; for (const o of items(val(outR))) if (o.action_id) outByAction[o.action_id] = o;
-    const tape = items(val(feedR), "rows").filter((e) => e.type === "duel.closed").sort((a, b) => (b.tick - a.tick) || (b.id - a.id));
+    void feedR;
+    const tape = DF.rows.filter((e) => e.type === "duel.closed").sort((a, b) => (b.seq || 0) - (a.seq || 0));
     const byId = {}; for (const hd of heads) byId[+(hd.duel ?? hd.id)] = hd;
     const ourIds = new Set(Object.keys(byId).map(Number));
     // live duels: server dicts merged with the recorder transcript
@@ -479,7 +602,7 @@
     const closedOurs = heads.filter((x) => x.status && x.status !== "live");
     return {
       tick, shown, heads, byId, ourIds, decsByDuel, councilByAction, outByAction, tape, closedOurs,
-      liveErr: isErr(liveR) ? liveR.__error : null, listErr: isErr(listR) ? listR.__error : null, tapeErr: isErr(feedR) ? feedR.__error : null,
+      liveErr: isErr(liveR) ? liveR.__error : null, listErr: isErr(listR) ? listR.__error : null, tapeErr: DF.rows.length ? null : DF.err,
       liveCount: liveDuels.length || heads.filter((x) => x.status === "live").length,
     };
   }
@@ -536,6 +659,7 @@
   window.Screens["duelos"] = {
     title: "Duelos",
     mount(root, params) {
+      if (params === "eventos" || params === "conversaciones") { S.hist.sub = params === "eventos" ? "eventos" : "conv"; params = "historial"; }
       if (params === "historial" || params === "vivo") { S.view = params; params = ""; }
       S.root = root; S.drawerFor = null; S.params = params;
       root.classList.add("scr-duelos");
@@ -552,14 +676,14 @@
       const segs = h("div", { class: "dl-segs" });
       const drawSegs = () => segs.replaceChildren(
         segmented([["todos", "Todos"], ["nosotros", "Nosotros"]], S.team, (v) => { S.team = v; drawSegs(); refreshNow(); }),
-        segmented([["vivo", "En vivo"], ["historial", "Historial"]], S.view, (v) => setView(v)));
+        segmented([["vivo", "● En vivo"], ["historial", "Historial"]], S.view, (v) => setView(v)));
       drawSegs();
       const fb = S.fb = comp("filterBar", { types: ["compra", "venta"], team: false, search: true, onChange: (st) => { S.filter = st; refreshNow(); } });
       const side = h("aside", { class: "dl-side" }, segs, fb ? h("div", { class: "dl-fb" }, fb) : null, h("div", { class: "dl-side-body" }, window.ui.loading()));
       root.replaceChildren(h("div", { class: "dl-layout" }, h("section", { class: "dl-main" }, titleBar, h("div", { class: "dl-scorehost" }), grid), side));
     },
     async refresh(root, data, params) {
-      if (params === "historial" || params === "vivo") params = "";
+      if (["historial", "vivo", "eventos", "conversaciones"].includes(params)) params = "";
       if (this._remember) this._remember(data);
       S.params = params;
       try {
@@ -574,6 +698,7 @@
       }
     },
     onParams(root, params) {
+      if (params === "eventos" || params === "conversaciones") { S.hist.sub = params === "eventos" ? "eventos" : "conv"; S.params = ""; if (S.view === "historial") { this._build(root); refreshNow(); } else setView("historial"); return; }
       if (params === "historial" || params === "vivo") { const v = params; S.params = ""; setView(v); return; }
       S.params = params; if (!params) { S.drawerFor = null; comp("closeDrawer", true); } },
     unmount(root) { S.root = null; S.drawerFor = null; root.classList.remove("scr-duelos"); },
