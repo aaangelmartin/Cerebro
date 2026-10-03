@@ -32,6 +32,8 @@ META_EVERY_S = 120.0          # dealers, levels, schedule
 CATALOG_EVERY_S = 900.0
 DEALER_DETAIL_EVERY_S = 1800.0
 BOOK_SNAPSHOT_EVERY = 20      # ticks between full snapshots of each venue's book
+BOOK_ALWAYS = ("v07", "v10")  # our venue and the allied one: read every tick even when rate-limited
+BOOK_SQUEEZED_EVERY = 3       # while rate-limited, every other venue's book is read once in this many ticks
 THREADS_ALL_EVERY = 20        # ticks between reads of every thread (not only the open ones)
 DUELS_DONE_EVERY = 10         # ticks between reads of finished duels
 KEYED_AT = 0.3                # share of the tick at which our private reads start (after the bot's own reads)
@@ -473,9 +475,15 @@ class Recorder:
             self._rec("books", {"venue": gone, "added": [], "removed": list(prev), "changed": [],
                                 "venue_gone": True})
             self._dirty = True
+        # While the game is rate-limiting our address, the essential reads (feed, clock, leaderboard, our own
+        # state) go first: only El Rastro, our venue and a rotating third of the other books are read per tick.
+        squeezed = self.lanes["public"].limited_recently() > 0
+        core = {"rastro", str(self.state.get("own_venue") or ""), *BOOK_ALWAYS}
         for i, vid in enumerate(ids):
+            if squeezed and vid not in core and (i + int(self.tick or 0)) % BOOK_SQUEEZED_EVERY:
+                continue
             self.enqueue("public", f"book:{vid}", f"/api/venues/{vid}/offers",
-                         lambda data, v=vid: self.on_book(v, data), prio=3,
+                         lambda data, v=vid: self.on_book(v, data), prio=3 if vid in core else 4,
                          on_error=lambda e, v=vid: self._book_error(v, e))
 
     def _book_error(self, vid: str, e: GameError) -> None:
@@ -659,8 +667,9 @@ class Recorder:
         public_down = self.lanes["public"].down_since is not None
         state = ("public_down" if public_down else "gateway_down" if keyed_down
                  else "running" if self.open else "closed" if self.clock else "starting")
+        limited = {k: v.limited_recently() for k, v in self.lanes.items() if v.limited_recently()}
         c = self.state["cards"]
-        return {"updated": round(self.now(), 3), "state": state, "tick": self.tick,
+        return {"updated": round(self.now(), 3), "state": state, "rate_limited": limited, "tick": self.tick,
                 "doors": self.clock.get("doors"), "paused": self.clock.get("paused"),
                 "tick_seconds": self.clock.get("tick_seconds"), "last_event_id": self.state["last_event_id"],
                 "feed_gaps": self.state["gaps"], "feed_busy": self.feed_busy, "lanes": lanes,

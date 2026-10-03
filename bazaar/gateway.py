@@ -7,6 +7,7 @@ Every verb takes an optional `timeout=` (seconds) for that single call; the defa
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 import urllib.error
@@ -18,6 +19,7 @@ from . import config
 TIMEOUT_S = 10.0
 MAX_RPS = 4.0                    # per process; the team key allows 5/s shared with the dashboard
 RETRY_READ_CODES = {"rate_limited", "upstream", "network", "timeout", "server_error"}
+RATE_LIMIT_RETRY_S = (0.35, 0.9)  # waits before each retry of a rate-limited read (each x 1..2 with jitter)
 
 
 class GameError(Exception):
@@ -63,8 +65,20 @@ class Gateway:
         except GameError as e:
             if e.code not in RETRY_READ_CODES:
                 raise
-            time.sleep(0.5)
-            return self._request("GET", full, timeout=timeout)
+            if e.code != "rate_limited":
+                time.sleep(0.5)
+                return self._request("GET", full, timeout=timeout)
+        # rate_limited: the game allows 60 requests/s per ADDRESS and the venue network shares one, so the
+        # squeeze is usually other teams' traffic and passes in a second or two. Two spaced retries with
+        # jitter (about 2.5 s at most) instead of one blind retry at a fixed 0.5 s.
+        for i, base in enumerate(RATE_LIMIT_RETRY_S):
+            time.sleep(base * (1.0 + random.random()))
+            try:
+                return self._request("GET", full, timeout=timeout)
+            except GameError as e:
+                if e.code != "rate_limited" or i == len(RATE_LIMIT_RETRY_S) - 1:
+                    raise
+        raise GameError("rate_limited", "rate_limited after retries")   # not reached
 
     def post(self, path: str, body: dict | None = None, broker_key: str | None = None,
              timeout: float | None = None) -> dict:

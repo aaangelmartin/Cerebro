@@ -6,6 +6,7 @@ the game. The page polls it every 3 s with ?since=<last decision id> so the acti
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -259,9 +260,28 @@ def recorder_view(live: Path, now: float) -> dict:
     st = _read_json(live / "recorder_status.json", {}) or {}
     lanes = st.get("lanes") or {}
     down = [k for k, v in lanes.items() if (v or {}).get("down_since")]
+    # the game's own rate limit (60 requests/s per address): a squeeze, not an outage
+    limited = {k: int((v or {}).get("limited_90s") or 0) for k, v in lanes.items() if (v or {}).get("limited_90s")}
+    last = max((float(e.get("t") or 0) for v in lanes.values() for e in (v or {}).get("last_errors") or []
+                if e.get("code") == "rate_limited"), default=0.0)
     return {"state": st.get("state"), "age_s": _age(st.get("updated"), now), "feed_gaps": st.get("feed_gaps", 0),
             "last_event_id": st.get("last_event_id"), "down": down,
+            "rate_limited": limited, "rate_limited_last": last or None,
             "rps": {k: (v or {}).get("rps_60s") for k, v in lanes.items()}}
+
+
+_GAME_LIMIT_RX = re.compile(r"rate_limited|at most \d+ requests per second", re.I)
+_LLM_RX = re.compile(r"anthropic|overloaded|\b529\b|llmunavailable|llmtimeout|usage limits|api key|claude", re.I)
+
+
+def alert_source(where, text) -> str:
+    """Who an error comes from: "game" (the Bazaar API, e.g. its 60 requests/s limit), "llm" (Anthropic) or ""."""
+    blob = f"{where or ''} {text or ''}"
+    if _GAME_LIMIT_RX.search(blob):
+        return "game"
+    if _LLM_RX.search(blob):
+        return "llm"
+    return ""
 
 
 # --------------------------------------------------------------------------- alerts
@@ -283,6 +303,10 @@ def alerts(live: Path, status: dict, broker: dict, lab_v: dict) -> list[dict]:
         out.append({"ts": n.get("at") or n.get("ts"), "level": "warn", "kind": "novelty", "where": n.get("kind"),
                     "text": n.get("detail") if isinstance(n.get("detail"), str)
                     else json.dumps(n.get("detail"), ensure_ascii=False, default=str)[:200], "raw": n})
+    for a in out:
+        a["source"] = alert_source(a.get("where"), a.get("text"))
+        if a["source"] == "game" and a.get("level") != "bad":
+            a["kind"] = "game_limit"
     out.sort(key=lambda a: _num(a.get("ts")) or 0, reverse=True)
     return out[:12]
 

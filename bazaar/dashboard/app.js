@@ -284,10 +284,38 @@
     const t = rc.closes ? Date.parse(rc.closes) : NaN;
     return isNaN(t) ? null : t / 1000;
   }
-  function degraded(d) {
+  // An alert about the GAME's own request limit (60 requests/s per address) is not an Anthropic problem.
+  const GAME_LIMIT_RX = /rate_limited|at most \d+ requests per second/i;
+  const LLM_RX = /529|overload|anthropic|llmunavailable|llmtimeout|usage limits|api key/i;
+  function alertSource(a) {
+    if (a && a.source !== undefined && a.source !== null) return a.source;
+    const blob = String((a && a.text) || "") + " " + String((a && a.where) || "");
+    return GAME_LIMIT_RX.test(blob) ? "game" : LLM_RX.test(blob) ? "llm" : "";
+  }
+  function llmAlert(d) {
     const now = Date.now() / 1000;
-    return (d.alerts || []).some((a) => (Number(a.ts) || 0) > now - 600 &&
-      /529|overload|anthropic|rate.?limit/i.test(String(a.text || "") + " " + String(a.where || "")));
+    return (d.alerts || []).find((a) => (Number(a.ts) || 0) > now - 600 && alertSource(a) === "llm");
+  }
+  function degraded(d) {
+    // "Sin Opus" only when the LLM really fails: an LLM alert, and not while the keys are answering fine.
+    const kh = window.__keyHealth;
+    if (kh && kh.allDown) return true;
+    if (kh && kh.keys && kh.keys.length && !kh.bad.length) return false;
+    return !!llmAlert(d);
+  }
+  function gameLimit(d) {
+    // {since, last, what[]} while the game is rate-limiting our address (recorder lanes or the bot's reads).
+    const now = Date.now() / 1000;
+    const r = d.recorder || {};
+    const lanes = Object.keys(r.rate_limited || {});
+    const alerts = (d.alerts || []).filter((a) => alertSource(a) === "game" && (Number(a.ts) || 0) > now - 120);
+    const recLast = Number(r.rate_limited_last) || 0;
+    if (!lanes.length && !alerts.length) return null;
+    const what = [];
+    if (lanes.length) what.push("la grabadora (" + lanes.map((k) => k === "public" ? "lecturas públicas" : "lecturas con clave").join(" y ") + ")");
+    if (alerts.length) what.push("las lecturas del bot (" + [...new Set(alerts.map((a) => a.where || "juego"))].join(", ") + ")");
+    const times = alerts.map((a) => Number(a.ts) || 0).concat(recLast ? [recLast] : []);
+    return { last: Math.max(...times, 0) || null, what };
   }
   function botState(d) {
     // Real state: ENCENDIDO only when switched on, no STOP, and the bot process is alive (fresh heartbeat).
@@ -317,8 +345,10 @@
     if (stale || r.state == null) { text = "APAGADA"; tone = "bad"; }
     else if (down || /down/.test(String(r.state))) { text = "APAGADA"; tone = "bad"; }
     const gaps = Number(r.feed_gaps || 0);
+    const squeezed = Object.keys(r.rate_limited || {}).length > 0;
     const what = text === "APAGADA" ? (down ? "sin red con el juego" : "proceso sin latido")
-      : r.state === "closed" ? "puertas cerradas: vigila cada 30 s" : "grabando todo lo que pasa";
+      : r.state === "closed" ? "puertas cerradas: vigila cada 30 s"
+      : squeezed ? "el juego nos limita: graba más despacio" : "grabando todo lo que pasa";
     const sub = what + " · " + (gaps ? gaps + " huecos en el feed" : "feed sin huecos");
     return el("div", { class: "sb-sec" },
       el("div", { class: "sb-line" }, el("span", null, "Grabación"), pill(text, tone)),
@@ -389,11 +419,18 @@
         el("strong", null, "Sin conexión con la API del dashboard"),
         el("div", null, S.lastOk ? "Último dato hace " + fmtAgo(S.lastOk / 1000) + ". Reintento automático cada 3 s; lo que ves puede estar desfasado." : "Reintentando cada 3 s."))));
     } else if (d && degraded(d)) {
-      const a = (d.alerts || []).find((x) => /529|overload|anthropic|rate.?limit/i.test(String(x.text || "") + " " + String(x.where || "")));
+      const a = llmAlert(d);
       items.push(el("div", { class: "banner tone-bad" }, icon("cloud", 18), el("div", null,
         el("strong", null, "API de Anthropic con problemas" + (a && a.ts ? " desde " + fmtTime(a.ts, false) : "")),
         el("div", null, "El bot sigue en modo Código: sin Opus ni Consejo, solo reglas y raíles. " + (a ? String(a.text || "").slice(0, 160) : ""))),
         el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
+    }
+    const gl = !S.apiDown && d ? gameLimit(d) : null;
+    if (gl) {
+      items.push(el("div", { class: "banner tone-warn" }, icon("alert", 18), el("div", null,
+        el("strong", null, "El juego limita nuestras peticiones (60/s por dirección)" + (gl.last ? " · último aviso " + fmtTime(gl.last, false) : "")),
+        el("div", null, "Afecta a " + gl.what.join(" y ") + ". No es un fallo de Claude: el bot sigue decidiendo con Opus. " +
+          "El límite es por dirección de red y la compartimos con otros equipos; reintentamos solos con espera y se quita al recuperarse."))));
     }
     const kh = window.__keyHealth;
     if (!S.apiDown && kh && kh.bad.length) {
