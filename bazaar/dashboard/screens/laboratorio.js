@@ -4,6 +4,7 @@
   "use strict";
   const U = () => window.ui || {};
   const A = () => window.api || {};
+  const t = (k, v) => window.I18N.t(k, v);
 
   // ---------- helpers ----------
   function el(tag, attrs, ...kids) {
@@ -22,21 +23,21 @@
     return n;
   }
   const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
-  const fmt = (v, d = 2) => (num(v) == null ? "—" : v.toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const fmt = (v, d = 2) => (num(v) == null ? "—" : v.toLocaleString(window.I18N.locale, { minimumFractionDigits: d, maximumFractionDigits: d }));
   const pct = (v) => (num(v) == null ? "—" : (v > 0 ? "+" : "") + Math.round(v * 100) + " %");
   function fmtTime(ts) {
     if (U().fmtTime) try { return U().fmtTime(ts, false); } catch (e) { /* fall through */ }
     if (!num(ts)) return "—";
     const d = new Date(ts * 1000);
-    return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(window.I18N.locale, { hour: "2-digit", minute: "2-digit" });
   }
   function fmtAgo(ts) {
     if (!num(ts)) return "—";
     const s = Math.max(0, Date.now() / 1000 - ts);
-    if (s < 60) return `hace ${Math.round(s)} s`;
-    if (s < 3600) return `hace ${Math.round(s / 60)} min`;
-    if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
-    return `hace ${Math.round(s / 86400)} d`;
+    if (s < 60) return t("laboratorio.ago.s", { n: Math.round(s) });
+    if (s < 3600) return t("laboratorio.ago.min", { n: Math.round(s / 60) });
+    if (s < 86400) return t("laboratorio.ago.h", { n: Math.round(s / 3600) });
+    return t("laboratorio.ago.d", { n: Math.round(s / 86400) });
   }
   async function setLesson(id, status, why) {
     if (A().setLesson) return A().setLesson(id, status, why);
@@ -64,9 +65,9 @@
   function toast(type, title, text) {
     if (U().toast) try { U().toast({ type, title, text }); return; } catch (e) { /* ignore */ }
   }
-  const loading = () => (U().loading ? U().loading() : el("div", { class: "lab-state" }, "Cargando…"));
-  const empty = (t) => (U().empty ? U().empty(t) : el("div", { class: "lab-state" }, t));
-  const errorBox = (e) => (U().error ? U().error(e) : el("div", { class: "lab-state lab-bad" }, "Error: " + (e && e.message || e)));
+  const loading = () => (U().loading ? U().loading() : el("div", { class: "lab-state" }, t("common.loading")));
+  const empty = (x) => (U().empty ? U().empty(x) : el("div", { class: "lab-state" }, x));
+  const errorBox = (e) => (U().error ? U().error(e) : el("div", { class: "lab-state lab-bad" }, t("laboratorio.error", { msg: e && e.message || e })));
 
   // ---------- icons (inline SVG, stroke = currentColor) ----------
   const P = {
@@ -91,22 +92,14 @@
     html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">${P[k] || ""}</svg>`,
   });
 
-  const STATES = [
-    { id: "proposed", label: "Propuesta", sub: "esperan evidencia y backtest" },
-    { id: "shadow", label: "Sombra", sub: "decide en paralelo, no actúa" },
-    { id: "canary", label: "Canary", sub: "actúa en una parte de los casos" },
-    { id: "active", label: "Activa", sub: "manda en el bot" },
-    { id: "retired", label: "Retirada", sub: "empeoraron o se retiraron a mano" },
-  ];
+  // labels are read on every render so they follow the language
+  const STATES = ["proposed", "shadow", "canary", "active", "retired"].map((id) => ({
+    id, get label() { return t("laboratorio.state." + id); }, get sub() { return t("laboratorio.state." + id + ".sub"); },
+  }));
   const STATE = Object.fromEntries(STATES.map((s) => [s.id, s]));
   const NEXT = { proposed: "shadow", shadow: "canary", canary: "active" };
-  const SCOPES = [
-    { id: "duelos", label: "Duelos", icon: "duel" },
-    { id: "dealers", label: "Dealers", icon: "dealer" },
-    { id: "mercado", label: "Mercado", icon: "market" },
-    { id: "broker", label: "Broker", icon: "broker" },
-    { id: "global", label: "Global", icon: "global" },
-  ];
+  const SCOPES = [["duelos", "duel"], ["dealers", "dealer"], ["mercado", "market"], ["broker", "broker"], ["global", "global"]]
+    .map(([id, icon]) => ({ id, icon, get label() { return t("laboratorio.scope." + id); } }));
   const SCOPE = Object.fromEntries(SCOPES.map((s) => [s.id, s]));
   function scopeOf(scope) {
     const s = String(scope || "");
@@ -162,13 +155,13 @@
       const today = (S.data.notices || []).filter((n) => n.kind === "lesson_status" && n.to === s.id && (n.ts || 0) > day).length;
       const card = el("button", {
         class: `lab-stage lab-st-${s.id}` + (S.filter.states.has(s.id) ? " is-on" : ""), type: "button",
-        title: `Filtrar: ${s.label}`,
+        title: t("laboratorio.filter.by", { label: s.label }),
         onclick: () => { toggle(S.filter.states, s.id); paint(); },
       },
       el("div", { class: "lab-stage-h" }, icon(s.id, 15), el("span", {}, s.label), el("b", { class: "lab-mono" }, counts[s.id])),
       el("div", { class: "lab-blocks" }, ...Array.from({ length: Math.min(counts[s.id], 16) }, () => el("i"))),
       el("div", { class: "lab-stage-sub" }, s.sub),
-      el("div", { class: "lab-stage-f lab-mono" }, s.id === "active" ? `peso medio ${avgW == null ? "—" : fmt(avgW)}` : (today ? `+${today} hoy` : " ")));
+      el("div", { class: "lab-stage-f lab-mono" }, s.id === "active" ? t("laboratorio.pipe.avg_weight", { w: avgW == null ? "—" : fmt(avgW) }) : (today ? t("laboratorio.pipe.today", { n: today }) : " ")));
       return i < STATES.length - 1 ? [card, el("span", { class: "lab-arrow" }, "›")] : [card];
     }));
     return lessons.length;
@@ -191,24 +184,24 @@
     let search = box.querySelector("input.lab-search");
     const focused = search && document.activeElement === search;
     if (!search) {
-      search = el("input", { class: "lab-search", type: "search", placeholder: "Buscar lección…", "aria-label": "Buscar lección" });
+      search = el("input", { class: "lab-search", type: "search", placeholder: t("laboratorio.filter.search"), "aria-label": t("laboratorio.filter.search_aria") });
       search.addEventListener("input", () => { S.filter.q = search.value; paintList(); });
     }
     const clear = (S.filter.states.size || S.filter.scopes.size || S.filter.q) ? el("button", {
       type: "button", class: "lab-link", onclick: () => { S.filter.states.clear(); S.filter.scopes.clear(); S.filter.q = ""; search.value = ""; paint(); },
-    }, "Quitar filtros") : null;
+    }, t("laboratorio.filter.clear")) : null;
     box.replaceChildren(
       el("div", { class: "lab-frow" }, ...chips1, el("span", { class: "lab-grow" }), clear, el("label", { class: "lab-searchbox" }, icon("search", 13), search)),
-      el("div", { class: "lab-frow" }, el("span", { class: "lab-flabel" }, "Ámbito"), ...chips2));
+      el("div", { class: "lab-frow" }, el("span", { class: "lab-flabel" }, t("laboratorio.col.scope")), ...chips2));
     if (focused) search.focus();
   }
 
   function actionButtons(l) {
     const busy = S.busy.has(l.id);
     const out = [];
-    if (NEXT[l.status]) out.push(el("button", { type: "button", class: "lab-btn", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, NEXT[l.status]); } }, icon("up", 12), "Promover"));
-    if (l.status !== "retired") out.push(el("button", { type: "button", class: "lab-btn lab-btn-q", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, "retired"); } }, "Retirar"));
-    else out.push(el("button", { type: "button", class: "lab-btn lab-btn-q", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, "proposed"); } }, "Recuperar"));
+    if (NEXT[l.status]) out.push(el("button", { type: "button", class: "lab-btn", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, NEXT[l.status]); } }, icon("up", 12), t("laboratorio.promote")));
+    if (l.status !== "retired") out.push(el("button", { type: "button", class: "lab-btn lab-btn-q", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, "retired"); } }, t("laboratorio.retire")));
+    else out.push(el("button", { type: "button", class: "lab-btn lab-btn-q", disabled: busy, onclick: (e) => { e.stopPropagation(); change(l, "proposed"); } }, t("laboratorio.restore")));
     return el("div", { class: "lab-actions" }, ...out);
   }
 
@@ -219,10 +212,10 @@
     if (!S.data) { box.replaceChildren(loading()); return; }
     const rows = filtered();
     const head = el("div", { class: "lab-row lab-head" },
-      el("span", {}, "Lección"), el("span", {}, "Ámbito"), el("span", {}, "Estado"), el("span", {}, "Peso"),
-      el("span", {}, "Evidencia"), el("span", {}, "Efecto"), el("span", {}, "Actualizada"), el("span", {}, ""));
+      el("span", {}, t("laboratorio.col.lesson")), el("span", {}, t("laboratorio.col.scope")), el("span", {}, t("laboratorio.col.state")), el("span", {}, t("laboratorio.col.weight")),
+      el("span", {}, t("laboratorio.col.evidence")), el("span", {}, t("laboratorio.col.effect")), el("span", {}, t("laboratorio.col.updated")), el("span", {}, ""));
     if (!rows.length) {
-      box.replaceChildren(head, empty((S.data.lessons || []).length ? "Ninguna lección cumple los filtros." : "El laboratorio aún no tiene lecciones."));
+      box.replaceChildren(head, empty((S.data.lessons || []).length ? t("laboratorio.empty_filter") : t("laboratorio.empty_all")));
       return;
     }
     box.replaceChildren(head, ...rows.map((l) => {
@@ -236,7 +229,7 @@
       el("span", {}, scopeChip(l.scope)),
       el("span", {}, stateChip(l.status)),
       el("span", {}, weightBar(l.weight)),
-      el("span", { class: "lab-mono lab-muted" }, `${l.n ?? "—"} · ${l.sources ?? "—"} ${l.sources === 1 ? "fuente" : "fuentes"}`),
+      el("span", { class: "lab-mono lab-muted" }, window.I18N.plural(l.sources, "laboratorio.evidence", { cases: l.n ?? "—", n: l.sources ?? "—" })),
       el("span", { class: "lab-mono " + (lift == null ? "lab-muted" : lift > 0 ? "lab-ok" : lift < 0 ? "lab-bad" : "") }, pct(lift)),
       el("span", { class: "lab-mono lab-muted", title: fmtTime(l.updated) }, fmtAgo(l.updated)),
       actionButtons(l));
@@ -262,19 +255,19 @@
         class: `lab-note lab-nk-${n.to || n.kind}` + (n.lesson_id ? " is-link" : ""),
         onclick: n.lesson_id ? () => openLesson(n.lesson_id) : null,
       }, icon(noticeIcon(n), 14), el("div", { class: "lab-note-b" }, el("div", {}, n.text || n.kind), n.lesson_id ? el("div", { class: "lab-muted lab-small" }, `${n.lesson_id} · ${scopeLabel(n.scope)}`) : null),
-      el("span", { class: "lab-mono lab-muted lab-small" }, fmtTime(n.ts)))) : [empty("Sin avisos del laboratorio.")]));
+      el("span", { class: "lab-mono lab-muted lab-small" }, fmtTime(n.ts)))) : [empty(t("laboratorio.notices.empty"))]));
     }
     if (vb) {
       const items = S.novelty && (S.novelty.items || S.novelty.novelty || (Array.isArray(S.novelty) ? S.novelty : [])) || [];
       const list = items.slice().sort((a, b) => (b.at || b.ts || 0) - (a.at || a.ts || 0)).slice(0, 15);
       S.root.querySelector(".lab-novelty-n").textContent = list.length || "";
-      vb.replaceChildren(...(S.novelty == null ? [S.novErr ? empty("Novedades no disponibles.") : loading()] : list.length ? list.map((n) => {
+      vb.replaceChildren(...(S.novelty == null ? [S.novErr ? empty(t("laboratorio.novelty.unavailable")) : loading()] : list.length ? list.map((n) => {
         const d = n.detail;
         const text = typeof d === "string" ? d : d ? JSON.stringify(d).slice(0, 160) : "";
         return el("div", { class: "lab-note lab-nk-novelty" }, icon("bell", 14),
-          el("div", { class: "lab-note-b" }, el("div", {}, n.title || n.kind || "Novedad"), text ? el("div", { class: "lab-muted lab-small" }, text) : null),
+          el("div", { class: "lab-note-b" }, el("div", {}, n.title || n.kind || t("laboratorio.novelty.item")), text ? el("div", { class: "lab-muted lab-small" }, text) : null),
           el("span", { class: "lab-mono lab-muted lab-small" }, fmtTime(n.at || n.ts)));
-      }) : [empty("Sin novedades del juego.")]));
+      }) : [empty(t("laboratorio.novelty.empty"))]));
     }
   }
 
@@ -284,7 +277,7 @@
     const total = S.root.querySelector(".lab-total");
     if (S.data) {
       const n = renderPipeline(pipe);
-      total.textContent = `${n} en total · el laboratorio aprende solo y promueve con evidencia`;
+      total.textContent = t("laboratorio.total", { n });
       renderFilters(S.root.querySelector(".lab-filters"));
     } else {
       pipe.replaceChildren(S.err ? errorBox(S.err) : loading());
@@ -296,12 +289,12 @@
 
   // ---------- actions ----------
   async function change(l, to) {
-    const verb = to === "retired" ? "Retirar" : to === "proposed" ? "Recuperar" : "Promover";
+    const verb = to === "retired" ? "retire" : to === "proposed" ? "restore" : "promote";
     const ok = await confirmBox({
-      title: `${verb} la lección`,
-      text: `«${l.rule}» Pasa de ${(STATE[l.status] || {}).label || l.status} a ${(STATE[to] || {}).label || to}.` +
-        (to === "active" ? " Mandará en las decisiones del bot." : to === "retired" ? " El bot dejará de usarla." : ""),
-      confirmLabel: `Sí, ${verb.toLowerCase()}`, danger: to === "retired",
+      title: t("laboratorio.confirm.title." + verb),
+      text: t("laboratorio.confirm.text", { rule: l.rule, from: (STATE[l.status] || {}).label || l.status, to: (STATE[to] || {}).label || to }) +
+        (to === "active" ? " " + t("laboratorio.confirm.to_active") : to === "retired" ? " " + t("laboratorio.confirm.to_retired") : ""),
+      confirmLabel: t("laboratorio.confirm.yes." + verb), danger: to === "retired",
     });
     if (!ok) return;
     S.busy.add(l.id); paintList();
@@ -309,19 +302,19 @@
       const res = await setLesson(l.id, to, "dashboard");
       const i = (S.data.lessons || []).findIndex((x) => x.id === l.id);
       if (i >= 0 && res && res.id) S.data.lessons[i] = res;
-      toast("outcome", "Lección actualizada", `${l.id}: ahora ${(STATE[to] || {}).label || to}`);
+      toast("outcome", t("laboratorio.toast.updated"), t("laboratorio.toast.now", { id: l.id, state: (STATE[to] || {}).label || to }));
     } catch (e) {
-      toast("error", "No se pudo cambiar la lección", e.message || String(e));
-      if (!U().toast) alertInline(`No se pudo cambiar ${l.id}: ${e.message}`);
+      toast("error", t("laboratorio.toast.fail"), e.message || String(e));
+      if (!U().toast) alertInline(t("laboratorio.toast.fail_inline", { id: l.id, msg: e.message }));
     } finally {
       S.busy.delete(l.id);
       paint();
       load(true);
     }
   }
-  function alertInline(t) {
+  function alertInline(msg) {
     const b = S.root && S.root.querySelector(".lab-msg");
-    if (b) { b.textContent = t; b.hidden = false; setTimeout(() => { b.hidden = true; }, 6000); }
+    if (b) { b.textContent = msg; b.hidden = false; setTimeout(() => { b.hidden = true; }, 6000); }
   }
 
   // ---------- drawer ----------
@@ -329,7 +322,7 @@
   function renderDrawer(id, open) {
     const l = (S.data && S.data.lessons || []).find((x) => x.id === id);
     if (!l) {
-      if (open && U().drawer) U().drawer({ title: `Lección ${id}`, body: S.data ? empty("No existe esa lección.") : loading() });
+      if (open && U().drawer) U().drawer({ title: t("laboratorio.drawer.title", { id }), body: S.data ? empty(t("laboratorio.drawer.missing")) : loading() });
       return;
     }
     const bt = l.backtest || {};
@@ -340,33 +333,33 @@
       el("div", { class: "lab-drow" }, stateChip(l.status), scopeChip(l.scope), el("span", { class: "lab-mono lab-muted" }, `v${l.version ?? 1} · ${l.created_by || "—"}`)),
       el("p", { class: "lab-drule" }, l.rule || "—"),
       actionButtons(l),
-      el("h4", {}, "Peso y evidencia"),
+      el("h4", {}, t("laboratorio.drawer.weight")),
       weightBar(l.weight),
-      kv("Casos", `${l.n ?? "—"} · ${l.sources ?? "—"} fuentes`),
-      el("h4", {}, "Backtest"),
-      kv("Acierto", num(bt.hit) == null ? "—" : `${Math.round(bt.hit * 100)} %` + (num(bt.baseline_hit) != null ? ` (base ${Math.round(bt.baseline_hit * 100)} %)` : "")),
-      kv("Lift", pct(bt.lift)),
-      bt.kind ? kv("Tipo", bt.kind) : null,
-      num(bt.n_eff) != null ? kv("Casos efectivos", fmt(bt.n_eff, 1)) : null,
-      bt.note ? kv("Nota", bt.note) : null,
+      kv(t("laboratorio.drawer.cases"), t("laboratorio.drawer.cases_v", { cases: l.n ?? "—", n: l.sources ?? "—" })),
+      el("h4", {}, t("laboratorio.drawer.backtest")),
+      kv(t("laboratorio.drawer.hit"), num(bt.hit) == null ? "—" : `${Math.round(bt.hit * 100)} %` + (num(bt.baseline_hit) != null ? " " + t("laboratorio.drawer.base", { n: Math.round(bt.baseline_hit * 100) }) : "")),
+      kv(t("laboratorio.drawer.lift"), pct(bt.lift)),
+      bt.kind ? kv(t("laboratorio.drawer.type"), bt.kind) : null,
+      num(bt.n_eff) != null ? kv(t("laboratorio.drawer.n_eff"), fmt(bt.n_eff, 1)) : null,
+      bt.note ? kv(t("laboratorio.drawer.note"), bt.note) : null,
       bt.gate ? el("div", { class: "lab-gate" }, ...Object.entries(bt.gate).map(([k, v]) => el("span", { class: "lab-chip " + (v ? "lab-ok" : "lab-muted") }, (v ? "✓ " : "· ") + k))) : null,
-      el("h4", {}, "Usos"),
-      kv("En vivo", `${live.s ?? 0} bien · ${live.f ?? 0} mal` + (num(bt.live_hit) != null ? ` · acierto ${Math.round(bt.live_hit * 100)} %` : "")),
-      shadow.n != null ? kv("En sombra", `${shadow.n} casos · neto ${fmt(shadow.net, 1)} · ${shadow.pos ?? 0}+ / ${shadow.neg ?? 0}−`) : null,
-      bt.sim && bt.sim.applicable ? kv("Simulación", `${bt.sim.episodes ?? "—"} episodios · Δ ${fmt(bt.sim.delta, 2)}`) : null,
-      el("h4", {}, "Parámetros"),
-      Object.keys(l.params || {}).length ? el("pre", { class: "lab-pre" }, JSON.stringify(l.params, null, 2)) : el("div", { class: "lab-muted" }, "Sin parámetros."),
-      el("h4", {}, `Evidencia (${(l.evidence || []).length})`),
-      (l.evidence || []).length ? el("div", { class: "lab-ev" }, ...(l.evidence || []).map((e) => el("span", { class: "lab-mono" }, e))) : el("div", { class: "lab-muted" }, "Sin ids de evidencia."),
-      el("h4", {}, "Historial de estado"),
+      el("h4", {}, t("laboratorio.drawer.uses")),
+      kv(t("laboratorio.drawer.live"), t("laboratorio.drawer.live_v", { s: live.s ?? 0, f: live.f ?? 0 }) + (num(bt.live_hit) != null ? " · " + t("laboratorio.drawer.live_hit", { n: Math.round(bt.live_hit * 100) }) : "")),
+      shadow.n != null ? kv(t("laboratorio.drawer.shadow"), t("laboratorio.drawer.shadow_v", { n: shadow.n, net: fmt(shadow.net, 1), pos: shadow.pos ?? 0, neg: shadow.neg ?? 0 })) : null,
+      bt.sim && bt.sim.applicable ? kv(t("laboratorio.drawer.sim"), t("laboratorio.drawer.sim_v", { n: bt.sim.episodes ?? "—", delta: fmt(bt.sim.delta, 2) })) : null,
+      el("h4", {}, t("laboratorio.drawer.params")),
+      Object.keys(l.params || {}).length ? el("pre", { class: "lab-pre" }, JSON.stringify(l.params, null, 2)) : el("div", { class: "lab-muted" }, t("laboratorio.drawer.no_params")),
+      el("h4", {}, t("laboratorio.drawer.evidence", { n: (l.evidence || []).length })),
+      (l.evidence || []).length ? el("div", { class: "lab-ev" }, ...(l.evidence || []).map((e) => el("span", { class: "lab-mono" }, e))) : el("div", { class: "lab-muted" }, t("laboratorio.drawer.no_evidence")),
+      el("h4", {}, t("laboratorio.drawer.history")),
       hist.length ? el("div", {}, ...hist.map((n) => el("div", { class: "lab-hist" },
         el("span", { class: "lab-mono lab-muted" }, fmtTime(n.ts)),
         el("span", {}, `${(STATE[n.from] || {}).label || n.from || "—"} → ${(STATE[n.to] || {}).label || n.to}`),
-        el("span", { class: "lab-muted" }, n.by || "")))) : el("div", { class: "lab-muted" }, "Sin cambios registrados en los avisos."),
-      kv("Actualizada", `${fmtTime(l.updated)} (${fmtAgo(l.updated)})`));
+        el("span", { class: "lab-muted" }, n.by || "")))) : el("div", { class: "lab-muted" }, t("laboratorio.drawer.no_history")),
+      kv(t("laboratorio.col.updated"), `${fmtTime(l.updated)} (${fmtAgo(l.updated)})`));
     const d = document.querySelector(".lab-drawer");
     if (!open && d && d.isConnected) { d.replaceWith(body); return; }
-    if (open && U().drawer) U().drawer({ title: `Lección ${l.id}`, body, wide: true, onClose: closedDrawer });
+    if (open && U().drawer) U().drawer({ title: t("laboratorio.drawer.title", { id: l.id }), body, wide: true, onClose: closedDrawer });
   }
   function closedDrawer() {
     S.drawerId = null;
@@ -395,24 +388,24 @@
 
   window.Screens = window.Screens || {};
   window.Screens["laboratorio"] = {
-    title: "Laboratorio",
+    get title() { return t("laboratorio.title"); },
     mount(root, params) {
       S.root = root;
       S.drawerId = null;
       root.classList.add("scr-laboratorio");
       root.replaceChildren(
         el("section", { class: "lab-panel lab-cycle" },
-          el("div", { class: "lab-ph" }, el("h2", {}, "Ciclo de las lecciones"), el("span", { class: "lab-total lab-mono lab-muted" }), el("span", { class: "lab-grow" }), el("span", { class: "lab-cycle-age lab-mono lab-ok" })),
+          el("div", { class: "lab-ph" }, el("h2", {}, t("laboratorio.cycle")), el("span", { class: "lab-total lab-mono lab-muted" }), el("span", { class: "lab-grow" }), el("span", { class: "lab-cycle-age lab-mono lab-ok" })),
           el("div", { class: "lab-pipe" }, loading())),
         el("div", { class: "lab-msg", hidden: true }),
         el("div", { class: "lab-grid" },
           el("section", { class: "lab-panel" },
-            el("div", { class: "lab-ph" }, el("h2", {}, "Lecciones")),
+            el("div", { class: "lab-ph" }, el("h2", {}, t("laboratorio.lessons"))),
             el("div", { class: "lab-filters" }),
             el("div", { class: "lab-list" }, loading())),
           el("div", { class: "lab-side" },
-            el("section", { class: "lab-panel" }, el("div", { class: "lab-ph" }, el("h2", {}, "Avisos del laboratorio"), el("span", { class: "lab-notices-n lab-mono lab-muted" })), el("div", { class: "lab-notices" }, loading())),
-            el("section", { class: "lab-panel" }, el("div", { class: "lab-ph" }, el("h2", {}, "Novedades del juego"), el("span", { class: "lab-novelty-n lab-mono lab-muted" })), el("div", { class: "lab-novelty" }, loading())))));
+            el("section", { class: "lab-panel" }, el("div", { class: "lab-ph" }, el("h2", {}, t("laboratorio.notices.title")), el("span", { class: "lab-notices-n lab-mono lab-muted" })), el("div", { class: "lab-notices" }, loading())),
+            el("section", { class: "lab-panel" }, el("div", { class: "lab-ph" }, el("h2", {}, t("laboratorio.novelty.title")), el("span", { class: "lab-novelty-n lab-mono lab-muted" })), el("div", { class: "lab-novelty" }, loading())))));
       if (params) S.pendingOpen = decodeURIComponent(params);
     },
     async refresh(root, data, params) {
@@ -420,7 +413,7 @@
       await load();
       const lab = data && data.lab;
       const age = root.querySelector(".lab-cycle-age");
-      if (age) age.textContent = lab && num(lab.updated) ? `último ciclo ${fmtAgo(lab.updated)}` : "";
+      if (age) age.textContent = lab && num(lab.updated) ? t("laboratorio.last_cycle", { ago: fmtAgo(lab.updated) }) : "";
       paint();
       const p = params ? decodeURIComponent(params) : null;
       if (p && S.pendingOpen === p && S.data) { S.pendingOpen = null; openLesson(p); }
