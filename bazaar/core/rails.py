@@ -29,7 +29,8 @@ def kept_sets(control=None) -> set[str]:
     avoid = {str(x).upper()[:3] for x in (control or {}).get("avoid_buy_sets") or []}
     return SCARCE_SETS - avoid
 WRITE_KINDS = {"open_thread", "thread_message", "close_thread", "accept_offer", "post_offer", "cancel_offer",
-               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack"}
+               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack",
+               "taller"}
 VENUE_COST = 270                 # bond 250 (refundable) + 20
 OK = Verdict(True)
 
@@ -553,7 +554,42 @@ def rail_pack(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
-RAILS = [rail_armed, rail_pack, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
+def rail_taller(action: Action, sit=None, ctx=None) -> Verdict:
+    """The Workshop: exactly three spare cards of ours, one rarity, none promised elsewhere, one unpromised copy of
+    each card kept, and an expected value (mean of a released card of the next rarity, recomputed here from the
+    catalog) above what the three copies are worth to us. Never trusts the proposer's numbers."""
+    if action.kind != "taller":
+        return OK
+    from bazaar.workshop import planner as W
+    ids = list((action.params or {}).get("assets") or [])
+    if len(ids) != 3 or len(set(ids)) != 3:
+        return Verdict(False, "taller", "needs exactly three different assets")
+    control = _control(ctx)
+    pool = W.spare_pool(sit, control)
+    by_id = {x["id"]: (r, x) for r, lst in pool.items() for x in lst}
+    held = _held(sit)
+    for i in ids:
+        if i not in by_id:
+            a = held.get(i)
+            why = "not ours" if a is None else "not a usable spare (last unpromised copy, promised, protected or no value)"
+            return Verdict(False, "taller", f"asset {i} ({(a or {}).get('ref')}) is {why}")
+    rar = {by_id[i][0] for i in ids}
+    if len(rar) != 1:
+        return Verdict(False, "taller", f"mixed rarities {sorted(rar)}")
+    rarity = rar.pop()
+    if not W.within_usable([by_id[i][1] for i in ids]):
+        return Verdict(False, "taller", "would leave no unpromised copy of one of the cards")
+    ev = W.expected_value(W.load_values(_get(sit, "me") or {}), W.NEXT_RARITY[rarity])
+    if ev is None:
+        return Verdict(False, "taller", f"unknown value of a {W.NEXT_RARITY[rarity]} pull")
+    give = W.triple_value([by_id[i][1] for i in ids])
+    margin = max(1.0, float(_cap(ctx, "value_margin", VALUE_MARGIN)))
+    if ev - give < margin:
+        return Verdict(False, "taller", f"expected {ev:.1f} P - given {give:.1f} P < margin {margin}")
+    return OK
+
+
+RAILS = [rail_armed, rail_pack, rail_taller, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
          rail_fair]
 
 

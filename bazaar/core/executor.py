@@ -125,6 +125,8 @@ def _call(action: Action, gw):
         return "patch", f"/api/venues/{p['venue']}", body, None
     if k == "open_pack":
         return "post", f"/api/packs/{int(p['asset'])}/open", {}, None
+    if k == "taller":
+        return "post", "/api/taller", {"assets": [int(a) for a in p["assets"]]}, None
     if k == "broker_match":
         return "post", "/api/broker/matches", {"sell": p["sell"], "buy": p["buy"], "price": p["price"]}, "broker"
     if k == "broker_announce":

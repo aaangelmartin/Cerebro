@@ -788,6 +788,28 @@ def dealer_ladder(record: Path, live: Path, me: dict, feed: list[dict], now: flo
     return report(live, me, personas, feed)
 
 
+def workshop(record: Path, live: Path, me: dict, my_offers: list[dict]) -> dict:
+    """The Workshop (taller): our usable spares, what a pull is worth to us, and whether buying duplicates of cards
+    we already hold to craft them pays (cheapest El Rastro ask per rarity, fee included)."""
+    from bazaar.workshop import planner as W
+    held = {a.get("ref"): a.get("rarity") for a in me.get("assets") or [] if isinstance(a, dict) and a.get("ref")}
+    cheapest: dict[str, float] = {}
+    try:
+        book = json.loads((Path(record) / "books" / "rastro.json").read_text(encoding="utf-8"))
+        for o in (book.get("data", book) if isinstance(book, dict) else {}).get("offers") or []:
+            give, want = o.get("give") or {}, o.get("want") or {}
+            assets = give.get("assets") or []
+            if o.get("maker") == me.get("id") or len(assets) != 1 or not want.get("cash") or o.get("to"):
+                continue
+            ref = assets[0].get("ref") if isinstance(assets[0], dict) else None
+            if ref in held:
+                r = held[ref]
+                cheapest[r] = min(cheapest.get(r, 1e9), float(want["cash"]))
+    except (OSError, ValueError, AttributeError):
+        pass
+    return W.facts({"me": me, "my_offers": my_offers, "threads": []}, {}, cheapest, Path(live))
+
+
 def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: dict, venue_list: list[dict],
               my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict], status: dict,
               spend: dict, now: float | None = None, hours: float = 2.0) -> dict[str, Any]:
@@ -812,6 +834,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("our_venue_growth", lambda: venue_growth(record, feed, venue_list, me, our_venue, now)),
                      ("venue_listing_mix_today", lambda: venue_mix(feed, venue_list, our_venue)),
                      ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
+                     ("workshop", lambda: workshop(record, live, me, my_offers)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()

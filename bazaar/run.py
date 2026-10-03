@@ -534,6 +534,14 @@ class Runner:
                     self.announce_retry_tick = sit.tick + 20
                 elif a.kind == "open_pack":
                     self.pack_backoff[(a.params or {}).get("asset")] = sit.tick + 20
+                if a.kind == "taller":                          # the Workshop: log what came out; back off on refusal
+                    try:
+                        from bazaar.workshop import planner as _ws
+                        _ws.record_result(a, outcome, sit.tick, self.live)
+                        if outcome.status not in ("sent", "deal"):
+                            self.workshop_retry_tick = sit.tick + _ws.BACKOFF_TICKS
+                    except Exception as e:  # noqa: BLE001
+                        self._err("workshop.record", e)
             report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
                            "reason": a.reason, "verdict": {"ok": verdict.ok, "rail": verdict.rail,
                                                            "detail": verdict.detail}, "status": status})
@@ -635,6 +643,14 @@ class Runner:
         if packs:                                               # cards in the album and tradeable; one pack per tick
             out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="packs", source="code",
                               reason=f"Open {packs[0].get('ref', 'pack')}: its cards count in the album and can be traded."))
+        if sit.tick >= getattr(self, "workshop_retry_tick", -1):   # the Workshop: 3 spares -> 1 card of the next rarity
+            try:
+                from bazaar.brain import strategy as _st
+                from bazaar.workshop import planner as _ws
+                control = ctx.control if ctx is not None else self.control()
+                out.extend(_ws.plan_actions(sit, control, _st.workshop_orders(self.live)))
+            except Exception as e:  # noqa: BLE001
+                self._err("workshop.plan", e)
         if sit.tick % 5 == 0:
             duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)
             if duels is not None and hasattr(duels, "observe_closed"):
@@ -655,6 +671,17 @@ class Runner:
         domains = self.active_domains(sit, control)
         actions = self.collect(sit, ctx, domains)
         actions.extend(self.scheduled_actions(sit, ctx))
+        crafting = {i for a in actions if a.kind == "taller" for i in (a.params or {}).get("assets") or []}
+        if crafting:                # a card going into the Workshop is not listed or given in the same tick (any copy:
+            ref_of = {x.get("id"): x.get("ref") for x in (sit.me or {}).get("assets") or []}   # counts change at once)
+            refs = {ref_of.get(i) for i in crafting}
+
+            def _gives(a) -> set:
+                give = (a.params or {}).get("give") or {}
+                out = {ref_of.get(x.get("id") if isinstance(x, dict) else x) for x in give.get("assets") or []}
+                return out | {str(t).partition(":")[2] for t in give.get("types") or []} | set(give.get("cards") or [])
+            actions = [a for a in actions if not (a.kind in ("post_offer", "accept_offer", "open_thread")
+                                                  and a.domain != "workshop" and refs & _gives(a))]
         if ctx.cautious:
             dropped = [a for a in actions if _is_buy(a)]
             actions = [a for a in actions if not _is_buy(a)]

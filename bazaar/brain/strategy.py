@@ -163,6 +163,7 @@ def sanitize(raw: Any) -> dict:
         "accept_offers": accepts,
         "post_offers": _post_offers(raw.get("post_offers")),
         "dealer_orders": _dealer_orders(raw.get("dealer_orders")),
+        "workshop_orders": _workshop_orders(raw.get("workshop_orders")),
         "whatsapp_replies": [{"reply_to": _clean(x.get("reply_to"), 60), "text": _clean(x.get("text"), 1500),
                               "why": _clean(x.get("why"), 400), "conclusion": _clean(x.get("conclusion"), 600)}
                              for x in (raw.get("whatsapp_replies") or [])[:6]
@@ -299,6 +300,25 @@ def _dealer_orders(raw) -> list[dict]:
                     "bound": bound, "max_messages": _int(x.get("max_messages"), 1, 8) or 4,
                     "why": _clean(x.get("why"), 200)})
     return out
+
+
+def _workshop_orders(raw):
+    """"auto" (code crafts when it gains), "off", or up to 3 triples of asset ids the brain wants crafted."""
+    if raw in ("auto", "off"):
+        return raw
+    out = []
+    for tri in (raw if isinstance(raw, list) else [])[:3]:
+        try:
+            ids = [int(x) for x in tri]
+        except (TypeError, ValueError):
+            continue
+        if len(ids) == 3 and len(set(ids)) == 3:
+            out.append(ids)
+    return out or "auto"
+
+
+def workshop_orders(live: Path | None = None):
+    return _plan(live).get("workshop_orders") or "auto"
 
 
 def dealer_orders(live: Path | None = None) -> list[dict]:

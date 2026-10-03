@@ -220,6 +220,11 @@ STRATEGY_TOOL = {
                             "that want our spares, mutual swaps: {give: ref, want_card: ref | want_cash: P, to: team?, "
                             "venue, why}; never below value + margin (rails check it); at most 5",
                             "items": {"type": "object"}},
+            "workshop_orders": {"description": "The Workshop (research.workshop): \"auto\" (default: the bot crafts 3 "
+                                "usable spares of one rarity into one card of the next rarity whenever the expected "
+                                "value gain is 3 P or more), \"off\", or up to 3 triples of our asset ids to craft. "
+                                "The pull is luck and never scored; buy duplicates to craft only if research.workshop."
+                                "buy_to_craft says it is worth it"},
             "dealer_orders": {"type": "array", "description": "dealer threads to open NOW (prose in guidance is "
                               "not executed; this is): {dealer: abuela|chato|pilar|..., action: sell|buy, ref: card, "
                               "open: our first price, floor_or_cap: lowest sell price or highest buy price, "

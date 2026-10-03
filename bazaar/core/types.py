@@ -20,6 +20,7 @@ ActionKind = Literal[
     "broker_match",     # params: sell, buy, price                  (broker key)
     "broker_announce",  # params: text
     "open_pack",        # params: asset (id of a sealed pack we hold)  -> POST /api/packs/{id}/open
+    "taller",           # params: assets [3 spare card ids of one rarity]  -> POST /api/taller (the Workshop)
     "noop",
 ]
 
