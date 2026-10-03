@@ -8,6 +8,8 @@ Services (each logs to data/live/<name>.out):
                                           restarted when status.json is older than 3 ticks
   broker  python -m bazaar.broker.run     restarted when broker_status.json `updated` is older than 2 ticks
   lab     python -m bazaar.lab.run
+  strategist python -m bazaar.strategist.run   el cerebro: Opus researches and plans every few ticks (data/live/strategy.json);
+                                          restarted when strategist_status.json is older than 4 ticks
   recorder python -m bazaar.recorder.run  read-only data recorder (data/record/); runs even with bazaar/STOP;
                                           restarted when recorder_status.json `updated` is older than 3 ticks
 
@@ -123,6 +125,8 @@ def default_services() -> list[Service]:
                 obeys_stop=True),
         Service("broker", [PY, "-u", "-m", "bazaar.broker.run"], heartbeat="broker_status.json", stale_ticks=2),
         Service("lab", [PY, "-u", "-m", "bazaar.lab.run"]),
+        Service("strategist", [PY, "-u", "-m", "bazaar.strategist.run"], heartbeat="strategist_status.json",
+                stale_ticks=4),
         Service("recorder", [PY, "-u", "-m", "bazaar.recorder.run"], heartbeat="recorder_status.json",
                 stale_ticks=3),
     ]

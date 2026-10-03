@@ -1,0 +1,360 @@
+"""Research the strategist does by itself before every plan (pure functions over recorded data).
+
+    rivals(feed, leaderboard, catalog, since_ts)  -> what the leading teams buy and sell, from whom, at what price
+    idle(live, me, my_offers, goals, now)         -> is our bot idle, and the likely reasons
+    llm_health(live, spend, now)                  -> API errors by key/kind, dead keys, spend anomalies
+    venues(venues, our_id)                        -> traffic and fees per venue, ours compared
+    offer_outliers(my_offers, me, record)         -> our open offers far above value/market, or outbid
+    offers_to_us(my_offers, me, allies)           -> offers addressed to us, values, last copies, page completion
+    unknown_offers(my_offers, live)               -> our open offers no process of ours posted
+    gap(leaderboard)                              -> our negotiating/market split against the leaders
+
+Everything is summarised to fit a prompt. Text written by other players never appears here except
+card refs and numbers.
+"""
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+US = "t10"
+
+
+def read_jsonl(path: Path, max_bytes: int = 3_000_000) -> list[dict]:
+    try:
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            raw = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    if raw and max_bytes < size:
+        raw = raw[1:]                      # first line may be cut
+    out = []
+    for ln in raw:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+    return out
+
+
+def _book(catalog: dict) -> dict[str, dict]:
+    out = {}
+    rar = catalog.get("rarities") or {}
+    for st in catalog.get("sets") or []:
+        for c in st.get("cards") or []:
+            out[c.get("id")] = {"rarity": c.get("rarity"), "book": c.get("book") or (rar.get(c.get("rarity")) or {}).get("book")}
+    return out
+
+
+def gap(leaderboard: dict) -> dict:
+    teams = leaderboard.get("teams") or []
+    us = next((t for t in teams if t.get("team") == US), {})
+    if not teams:
+        return {}
+    lead_neg = max(teams, key=lambda t: t.get("negotiating") or 0)
+    lead_mkt = max(teams, key=lambda t: t.get("market") or 0)
+    lead = teams[0]
+    return {"our_rank": us.get("rank"), "our_score": us.get("score"),
+            "our_negotiating": us.get("negotiating"), "our_market": us.get("market"),
+            "leader": {k: lead.get(k) for k in ("team", "score", "negotiating", "market")},
+            "best_negotiating": {k: lead_neg.get(k) for k in ("team", "negotiating", "deals")},
+            "best_market": {k: lead_mkt.get(k) for k in ("team", "market", "venue")},
+            "gap_negotiating": round((lead_neg.get("negotiating") or 0) - (us.get("negotiating") or 0), 2),
+            "gap_market": round((lead_mkt.get("market") or 0) - (us.get("market") or 0), 2),
+            "our_deals": us.get("deals"), "median_deals": sorted(t.get("deals") or 0 for t in teams)[len(teams) // 2]}
+
+
+def rivals(feed: list[dict], leaderboard: dict, catalog: dict, since_ts: float, top: int = 5) -> dict:
+    """Deals (settlements) of the leading teams since `since_ts`: buys/sells with price vs book, partners."""
+    teams = leaderboard.get("teams") or []
+    lead = [t.get("team") for t in sorted(teams, key=lambda t: -(t.get("negotiating") or 0))[:top]]
+    lead += [t.get("team") for t in teams[:3] if t.get("team") not in lead]
+    if US not in lead:
+        lead.append(US)
+    book = _book(catalog)
+    per: dict[str, dict] = {t: {"buys": [], "sells": [], "partners": {}, "messages": 0, "threads": 0,
+                                 "listings": 0} for t in lead}
+    for r in feed:
+        if float(r.get("ts") or 0) < since_ts:
+            continue
+        p = r.get("payload") or {}
+        typ = r.get("type")
+        if typ == "settlement":
+            price = p.get("price")
+            parties = p.get("parties") or []
+            for it in p.get("items") or []:
+                ref = it.get("ref")
+                b = (book.get(ref) or {}).get("book")
+                row = {"ref": ref, "price": price, "book": b, "via": p.get("persona") or p.get("venue")}
+                if it.get("to") in per:
+                    per[it["to"]]["buys"].append({**row, "from": it.get("frm")})
+                if it.get("frm") in per:
+                    per[it["frm"]]["sells"].append({**row, "to": it.get("to")})
+            for t in parties:
+                if t in per:
+                    for o in parties:
+                        if o != t:
+                            per[t]["partners"][o] = per[t]["partners"].get(o, 0) + 1
+        elif typ == "thread.message":
+            t = p.get("team")
+            if t in per:
+                per[t]["messages"] += 1
+        elif typ == "thread.opened":
+            t = p.get("team")
+            if t in per:
+                per[t]["threads"] += 1
+        elif typ == "offer.listed":
+            t = r.get("actor")
+            if t in per:
+                per[t]["listings"] += 1
+    by_score = {t.get("team"): t for t in teams}
+    out = {}
+    for t, d in per.items():
+        sets: dict[str, int] = {}
+        for b in d["buys"]:
+            s = str(b["ref"] or "").split("-")[0]
+            sets[s] = sets.get(s, 0) + 1
+        paid = [b["price"] for b in d["buys"] if isinstance(b.get("price"), (int, float))]
+        sc = by_score.get(t) or {}
+        out[t] = {"score": sc.get("score"), "negotiating": sc.get("negotiating"), "market": sc.get("market"),
+                  "deals_total": sc.get("deals"), "buys": len(d["buys"]), "sells": len(d["sells"]),
+                  "spent": sum(paid), "sets_bought": sets, "partners": d["partners"],
+                  "dealer_messages": d["messages"], "threads_opened": d["threads"], "listings": d["listings"],
+                  "messages_per_deal": round(d["messages"] / max(1, len(d["buys"]) + len(d["sells"])), 1),
+                  "last_buys": d["buys"][-8:], "last_sells": d["sells"][-6:]}
+    return {"since_minutes": round((time.time() - since_ts) / 60), "teams": out}
+
+
+def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict],
+         status: dict) -> dict:
+    """Ticks without actions lately and the likely causes."""
+    ticks = [int(d.get("tick")) for d in decisions if isinstance(d.get("tick"), int)]
+    cur = status.get("tick") or (max(ticks) if ticks else None)
+    window = 20
+    acted = {t for t in ticks if cur is not None and t > cur - window}
+    idle_ticks = window - len(acted) if cur is not None else None
+    cash = int(me.get("cash") or 0)
+    locked = sum(int((o.get("give") or {}).get("cash") or 0) for o in my_offers
+                 if o.get("maker") == US and o.get("status", "open") == "open" and o.get("thread") is None)
+    vetoes: dict[str, int] = {}
+    for d in decisions:
+        v = d.get("verdict") or {}
+        if v.get("ok") is False:
+            vetoes[v.get("rail") or "?"] = vetoes.get(v.get("rail") or "?", 0) + 1
+    refused: dict[str, int] = {}
+    for o in outcomes:
+        if o.get("status") in ("refused", "error"):
+            k = f"{o.get('kind')}: {str((o.get('response') or {}).get('message') or (o.get('response') or {}).get('error') or '')[:60]}"
+            refused[k] = refused.get(k, 0) + 1
+    sources: dict[str, int] = {}
+    for d in decisions:
+        sources[d.get("source") or "?"] = sources.get(d.get("source") or "?", 0) + 1
+    causes = []
+    if locked and cash - locked < 20:
+        causes.append(f"{locked} P of our {cash} P is locked in open market bids")
+    if goals:
+        causes.append(f"saving for goal cards {goals}: other buys are limited")
+    if vetoes:
+        causes.append(f"rail vetoes {vetoes}")
+    if refused:
+        causes.append(f"game refusals {dict(list(refused.items())[:4])}")
+    if sources.get("fallback", 0) > sources.get("opus", 0) + sources.get("council", 0):
+        causes.append("most decisions came from code fallback, not Claude (check llm health)")
+    doms = status.get("domains") or {}
+    quiet = [k for k, v in doms.items() if isinstance(v, dict) and not v.get("actions")]
+    return {"tick": cur, "ticks_without_actions_last_20": idle_ticks, "cash": cash, "cash_locked_in_bids": locked,
+            "decision_sources": sources, "rail_vetoes": vetoes, "refusals": refused,
+            "domains_without_actions_now": quiet, "likely_causes": causes}
+
+
+def llm_health(live: Path, spend: dict, now: float | None = None, window_s: float = 1800) -> dict:
+    now = now or time.time()
+    rows = [r for r in read_jsonl(live / "llm.jsonl", 600_000) if now - float(r.get("ts") or 0) <= window_s]
+    by: dict[str, dict] = {}
+    for r in rows:
+        k = r.get("key") or "?"
+        b = by.setdefault(k, {"ok": 0, "errors": {}})
+        if r.get("error"):
+            kind = r.get("error_kind") or "error"
+            b["errors"][kind] = b["errors"].get(kind, 0) + 1
+            b["last_error"] = str(r.get("error"))[:120]
+        elif r.get("usage") is not None or r.get("cost_usd") is not None:
+            b["ok"] += 1
+    keys = {k: {kk: v.get(kk) for kk in ("usd_today", "dead", "cooldown_s")} for k, v in
+            (spend.get("by_key") or {}).items()}
+    anomalies = []
+    for k, b in by.items():
+        errs = sum(b["errors"].values())
+        if errs and errs >= b["ok"]:
+            anomalies.append(f"key {k}: {errs} errors vs {b['ok']} ok in 30 min ({b.get('last_error', '')[:80]})")
+    for k, v in keys.items():
+        if v.get("dead"):
+            anomalies.append(f"key {k} is dead: {str(v['dead'])[:80]}")
+    usd, cap = spend.get("usd"), spend.get("cap")
+    if isinstance(usd, (int, float)) and isinstance(cap, (int, float)) and cap and usd / cap > 0.8:
+        anomalies.append(f"spend {usd:.1f} $ is {usd / cap:.0%} of today's cap")
+    return {"calls_30min": len(rows), "by_key_30min": by, "keys": keys, "spend_today": usd,
+            "by_purpose": spend.get("by_purpose"), "model_now": spend.get("model_now"), "anomalies": anomalies}
+
+
+def venues(venue_list: list[dict], our_id: str | None) -> dict:
+    rows = []
+    for v in venue_list:
+        rows.append({k: v.get(k) for k in ("venue", "owner", "fee_bps", "fee_per_card", "trades", "volume",
+                                           "fees", "traders", "pairs", "value_created", "starter", "status")})
+    rows.sort(key=lambda r: -(r.get("trades") or 0))
+    ours = next((r for r in rows if r.get("venue") == our_id), None)
+    return {"ours": ours, "busiest": rows[:6], "count": len(rows),
+            "team_venues_with_trades": sum(1 for r in rows if (r.get("trades") or 0) > 0 and r.get("owner") != "world")}
+
+
+def offer_outliers(my_offers: list[dict], me: dict, record: Path, limit: int = 12) -> dict:
+    """Our own open offers priced far from our value or from the rest of the market (to cancel or reprice).
+
+    sell (we give a card for cash): ask > max(2 x our value + 5, 1.5 x the cheapest other ask of that card + 3)
+    bid (we give cash for a card): price >= our value of the card (paying above value loses points), or
+    the bid has been open > 60 ticks while others bid more for the same card."""
+    held = {a.get("id"): a for a in me.get("assets") or []}
+    asks: dict[str, list[int]] = {}
+    bids: dict[str, list[int]] = {}
+    books = Path(record) / "books"
+    try:
+        files = list(books.glob("*.json"))
+    except OSError:
+        files = []
+    for p in files:
+        try:
+            b = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        for o in b.get("offers") or []:
+            if o.get("maker") == US or o.get("status", "open") != "open":
+                continue
+            g, w = o.get("give") or {}, o.get("want") or {}
+            if w.get("cash") and len(g.get("assets") or []) == 1:
+                asks.setdefault(g["assets"][0].get("ref"), []).append(int(w["cash"]))
+            if g.get("cash"):
+                for t in w.get("types") or []:
+                    if t.startswith("card:"):
+                        bids.setdefault(t[5:], []).append(int(g["cash"]))
+    out = []
+    for o in my_offers:
+        if o.get("maker") != US or o.get("status", "open") != "open" or o.get("thread") is not None:
+            continue
+        g, w = o.get("give") or {}, o.get("want") or {}
+        if w.get("cash") and g.get("assets"):
+            a = g["assets"][0]
+            ref = a.get("ref")
+            value = (held.get(a.get("id")) or {}).get("your_value")
+            best = min(asks.get(ref) or [0]) or None
+            ask = int(w["cash"])
+            limit_v = 2 * (value or 0) + 5 if value is not None else None
+            limit_m = 1.5 * best + 3 if best else None
+            if (limit_v is not None and ask > limit_v) and (limit_m is None or ask > limit_m):
+                out.append({"offer": o.get("id"), "venue": o.get("venue"), "kind": "sell", "card": ref, "ask": ask,
+                            "our_value": value, "cheapest_other_ask": best,
+                            "why": "ask far above our value and the market: it will not fill and holds the card"})
+        elif g.get("cash"):
+            refs = [t[5:] for t in w.get("types") or [] if t.startswith("card:")]
+            price = int(g["cash"])
+            for ref in refs:
+                top = max(bids.get(ref) or [0]) or None
+                if top and top > price:
+                    out.append({"offer": o.get("id"), "venue": o.get("venue"), "kind": "bid", "card": ref,
+                                "price": price, "best_rival_bid": top,
+                                "why": "outbid by another team: the cash is parked in a bid that will not fill"})
+    return {"outliers": out[:limit], "checked": len(my_offers)}
+
+
+def offers_to_us(my_offers: list[dict], me: dict, allies: dict) -> list[dict]:
+    """Offers other teams addressed to us, with what each side gives at our values and the page completion
+    of the sets we would give from (the keep-one rule protects the last copy of LAV/MAL/RET cards)."""
+    held = {a.get("id"): a for a in me.get("assets") or []}
+    counts: dict[str, int] = {}
+    for a in held.values():
+        counts[a.get("ref")] = counts.get(a.get("ref"), 0) + 1
+    pages = {p.get("set"): p for p in (me.get("album") or {}).get("pages") or []}
+    out = []
+    for o in my_offers:
+        if o.get("to") != US or o.get("maker") == US or o.get("status", "open") != "open" or o.get("thread") is not None:
+            continue
+        g, w = o.get("give") or {}, o.get("want") or {}
+        we_give = []
+        for a in w.get("assets") or []:
+            mine = held.get(a.get("id")) or {}
+            we_give.append({"ref": a.get("ref"), "id": a.get("id"), "value": mine.get("your_value"),
+                            "copies_held": counts.get(a.get("ref"), 0)})
+        for t in w.get("types") or []:
+            if t.startswith("card:"):
+                ref = t[5:]
+                vals = sorted((x.get("your_value") or 0) for x in held.values() if x.get("ref") == ref)
+                we_give.append({"ref": ref, "value": vals[0] if vals else None, "copies_held": counts.get(ref, 0)})
+        give_value = sum((x.get("value") or 0) for x in we_give) + int(w.get("cash") or 0)
+        get_value = int(g.get("cash") or 0)
+        sets = {str(x["ref"]).split("-")[0] for x in we_give if x.get("ref")}
+        out.append({"offer": o.get("id"), "maker": o.get("maker"), "ally": o.get("maker") in allies.values(),
+                    "venue": o.get("venue"), "expires_tick": o.get("expires_tick"),
+                    "they_give": {"cash": g.get("cash"), "cards": [a.get("ref") for a in g.get("assets") or []]
+                                  + [t[5:] for t in g.get("types") or [] if t.startswith("card:")]},
+                    "we_give": we_give, "we_give_cash": w.get("cash"),
+                    "value_gain_cash_only": round(get_value - give_value, 1),
+                    "last_copy": any(x.get("copies_held", 0) <= 1 for x in we_give),
+                    "page_completion": {st: f"{(pages.get(st) or {}).get('have')}/{(pages.get(st) or {}).get('of')}"
+                                        for st in sets}})
+    return out
+
+
+def unknown_offers(my_offers: list[dict], live: Path) -> list[dict]:
+    """Our open market offers that none of our processes posted (someone else using our key?)."""
+    ours = set()
+    for r in read_jsonl(Path(live) / "outcomes.jsonl", 8_000_000):
+        resp = r.get("response") or {}
+        if isinstance(resp, dict) and resp.get("id") is not None:
+            ours.add(resp.get("id"))
+        off = (r.get("realised") or {}).get("offer") if isinstance(r.get("realised"), dict) else None
+        if off:
+            ours.add(off)
+    out = []
+    for o in my_offers:
+        if o.get("maker") == US and o.get("thread") is None and o.get("status", "open") == "open" and o.get("id") not in ours:
+            g, w = o.get("give") or {}, o.get("want") or {}
+            out.append({"offer": o.get("id"), "venue": o.get("venue"), "created_tick": o.get("created_tick"),
+                        "give": [a.get("ref") for a in g.get("assets") or []] + ([f"{g['cash']} P"] if g.get("cash") else []),
+                        "want": (w.get("types") or []) + ([f"{w['cash']} P"] if w.get("cash") else [])})
+    return out
+
+
+def _allies() -> dict:
+    try:
+        from bazaar.market.protocol import ALLIED_VENUES
+        return dict(ALLIED_VENUES)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: dict, venue_list: list[dict],
+              my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict], status: dict,
+              spend: dict, now: float | None = None, hours: float = 2.0) -> dict[str, Any]:
+    now = now or time.time()
+    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    feed = read_jsonl(Path(record).parent / "feed" / f"{day}.jsonl")
+    our_venue = (me.get("venue") or {}).get("venue") if isinstance(me.get("venue"), dict) else me.get("venue")
+    out: dict[str, Any] = {}
+    for name, fn in (("gap", lambda: gap(leaderboard)),
+                     ("rivals_last_2h", lambda: rivals(feed, leaderboard, catalog, now - hours * 3600)),
+                     ("our_bot", lambda: idle(live, me, my_offers, goals, decisions, outcomes, status)),
+                     ("llm_health", lambda: llm_health(live, spend, now)),
+                     ("venues", lambda: venues(venue_list, our_venue)),
+                     ("our_offer_outliers", lambda: offer_outliers(my_offers, me, record)),
+                     ("offers_to_us", lambda: offers_to_us(my_offers, me, _allies())),
+                     ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live))):
+        try:
+            out[name] = fn()
+        except Exception as e:  # noqa: BLE001 - one broken analysis must not stop the plan
+            out[name] = {"error": f"{type(e).__name__}: {e}"[:160]}
+    return out

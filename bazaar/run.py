@@ -279,7 +279,12 @@ class Runner:
             self._err("ledger", e)
 
     def control(self) -> dict:
-        return load_control(self.live, self.control_defaults)
+        ctl = load_control(self.live, self.control_defaults)
+        try:                                    # the strategist's cash policy/pauses sit under the operator's
+            from bazaar.brain.strategy import overlay
+            return overlay(ctl, self.live)
+        except Exception:  # noqa: BLE001
+            return ctl
 
     def can_write(self, control: dict) -> bool:
         if config.STOP_FILE.exists() or not control.get("armed") or self.executor is None:

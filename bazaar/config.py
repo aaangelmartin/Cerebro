@@ -88,7 +88,7 @@ RACE_DAYS = {"sun"}             # days when Opus races Sonnet (decision: only Su
 CASH_RESERVE = int(ENV.get("BAZAAR_CASH_RESERVE", "15"))   # round-4 strategy: after the venue only ~66 P remain
 MAX_SPEND_PER_DEAL = int(ENV.get("BAZAAR_MAX_SPEND_PER_DEAL", "120"))
 MAX_SPEND_PER_HOUR = int(ENV.get("BAZAAR_MAX_SPEND_PER_HOUR", "250"))
-BIG_DEAL_P = 60                 # buys above this go to the council
+BIG_DEAL_P = int(ENV.get("BAZAAR_BIG_DEAL_P", "25"))   # buys at or above this (and every goal buy) go to the council
 
 # --- ports --------------------------------------------------------------------
 API_PORT = int(ENV.get("BAZAAR_API_PORT", "8791"))   # control + telemetry for the new dashboard

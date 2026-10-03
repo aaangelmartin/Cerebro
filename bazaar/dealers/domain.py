@@ -34,6 +34,7 @@ from .haggle import Move
 from .profiles import FRIDAY_QUOTAS, ProfileStore, capture, ladder_gain
 from .threads import ThreadView, parse_thread
 from .values import Values, pack_value
+from bazaar.core.goal import avoided as _avoided   # sets we decided not to buy
 
 log = logging.getLogger("bazaar.dealers")
 
@@ -402,6 +403,7 @@ class DealersDomain:
         committed = 0
         from bazaar.core.goal import pending as _goal_pending
         goal_now = _goal_pending(sit, _g(ctx, "control") or {}, values)
+        self._goal_now = set(goal_now)
         for v in views:
             if v.dealer not in self.store.data["menus"] and v.dealer not in dealers:
                 continue
@@ -431,6 +433,9 @@ class DealersDomain:
             if move.kind == "close" and budget_bound and not v.final and not cautious:
                 move = Move("wait", None, "cash committed to our other buy bids: hold this one")
             force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
+            if v.buying and _avoided(v.item, _g(ctx, "control") or {}):
+                ok, why = False, "we no longer buy this set"
+                force = "we no longer buy this set: close the thread"
             if force:
                 move = Move("close", None, force)
             pts = 0.0
@@ -509,7 +514,8 @@ class DealersDomain:
                         return
                     exp = max(exp, lim)
                     gain = exp - value
-                if small_only and (exp > GOAL_SMALL_DEAL_P or gain < GOAL_SMALL_GAIN_P):
+                if small_only and (exp > int(control.get("goal_small_deal_p", GOAL_SMALL_DEAL_P))
+                                   or gain < GOAL_SMALL_GAIN_P):
                     return                                   # saving for a goal: only small deals with a clear gain
                 cap = capture(int(round(o)), int(round(exp)), f, buying)
                 pts = haggle.expected_points(gain, level, ladder_gain(ladder_now, cap))
@@ -538,6 +544,8 @@ class DealersDomain:
                     sets = entry.get("sets")
                     for ref in values.released_refs(r):
                         if isinstance(sets, list) and values.set_of(ref) not in sets:
+                            continue
+                        if _avoided(ref, control):
                             continue
                         add({"buy": {"card": ref}}, f"buy:{r}", ref, (values.cards.get(ref) or {}).get("name", ref),
                             values.next_copy(ref), entry.get("list_price"),
@@ -612,7 +620,7 @@ class DealersDomain:
                    domain=self.name, reason=reason, source=source,
                    expected={"value": info.value, "limit": info.limit, "dealer_limit_est": info.limit_est,
                              **({"value_get": info.value} if v.buying else {}), **spend},
-                   big=bool(v.buying and price > config.BIG_DEAL_P), priority=0.0)
+                   big=bool(v.buying and (price >= config.BIG_DEAL_P or str(v.item).upper() in getattr(self, "_goal_now", ()))), priority=0.0)
         self._sent[a.id] = {"kind": "thread_message", "thread": v.id, "dealer": v.dealer, "price": price, "item": v.item}
         return a
 
@@ -627,7 +635,7 @@ class DealersDomain:
                    expected={"points": info.accept_points, "value_gain": round(gain, 2), "capture": cap,
                              "price": price, "dealer": v.dealer, "level": info.level,
                              **({"value_get": info.value, "spend": price} if v.buying else {})},
-                   big=bool(v.buying and price > config.BIG_DEAL_P),
+                   big=bool(v.buying and (price >= config.BIG_DEAL_P or str(v.item).upper() in getattr(self, "_goal_now", ()))),
                    priority=FINAL_ACCEPT_PRIORITY if v.final else min(99.0, info.accept_points))
         self._sent[a.id] = {"kind": "accept_offer", "thread": v.id, "dealer": v.dealer, "price": price, "item": v.item}
         return a
@@ -738,8 +746,13 @@ class DealersDomain:
                                  "our_value": c.value, "our_limit": c.limit, "dealer_opening_est": c.est_open,
                                  "dealer_limit_est": c.est_limit, "expected_price": c.exp_price,
                                  "expected_capture": c.exp_capture, "expected_points": c.points} for c in plan.candidates]}
+        try:
+            from bazaar.brain.strategy import prompt_block
+            strat = prompt_block("dealers")
+        except Exception:  # noqa: BLE001
+            strat = ""
         messages = [{"role": "user", "content": "STATE (JSON):\n" + json.dumps(state, ensure_ascii=False, default=str)
-                     + "\n\nCall dealer_moves once with your decision."}]
+                     + (("\n\n" + strat) if strat else "") + "\n\nCall dealer_moves once with your decision."}]
         return system, messages
 
     def _ask(self, plan: Plan, ctx) -> dict | None:
@@ -829,7 +842,7 @@ How dealers behave
 Tactics that worked
 - Anchor beyond the dealer's estimated limit, concede a share of the gap per step, drop to 1 P steps when the dealer stalls, and take its final offer if it is within our limit. Do not race to its price: patience is what brings its final near its limit. A far anchor costs nothing with these dealers.
 - code_suggests is the schedule that captured ~0.8 of the range against Friday-calibrated dealers. Follow it unless the dealer's behaviour or the lessons give you a concrete reason to deviate; bigger steps than it suggests usually give away ladder share.
-- Prefer candidates with high expected_points; buys of cards in our high-affinity sets (LAV, MAL, RET) bring both ladder share and value.
+- Prefer candidates with high expected_points; buys of cards in our high-affinity sets (LAV, MAL) bring both ladder share and value.
 
 Hard rules (the code enforces them; moves that break them are replaced)
 - Prices must lie in allowed_range (never repeat, never go backwards, never past the dealer's price, never past our limit).

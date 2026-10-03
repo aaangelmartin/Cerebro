@@ -42,5 +42,26 @@ class AutoGoalTest(unittest.TestCase):
         self.assertEqual(pending({"me": {"assets": []}}, {}, FakeValues(held, {"MAL-10": 12.0})), {})
 
 
+class AvoidSetsTest(unittest.TestCase):
+    def test_goals_and_rail_skip_avoided_sets(self):
+        from bazaar.core import rails
+        from bazaar.core.context import TickContext
+        from bazaar.core.types import Action
+        control = {"avoid_buy_sets": ["ret"], "goal_buys": {"RET-07": 24, "MAL-09": 88}}
+        self.assertEqual(pending({"me": {"assets": []}}, control), {"MAL-09": 88})
+        ctx = TickContext(tick=1, day="sat", deadline=0.0, control=control)
+        sit = {"me": {"id": "t10", "assets": []}}
+        bid = Action(kind="post_offer", params={"venue": "rastro", "give": {"cash": 9}, "want": {"cards": ["RET-03"]}},
+                     domain="market")
+        ok = Action(kind="post_offer", params={"venue": "rastro", "give": {"cash": 9}, "want": {"cards": ["MAL-03"]}},
+                    domain="market")
+        acc = Action(kind="accept_offer", params={"offer": 1, "expect": {"give": {"assets": [{"id": 5, "ref": "RET-07"}]},
+                                                                        "want": {"cash": 23}}}, domain="market")
+        self.assertEqual(rails.rail_avoid_sets(bid, sit, ctx).rail, "avoid_sets")
+        self.assertFalse(rails.rail_avoid_sets(acc, sit, ctx).ok)
+        self.assertTrue(rails.rail_avoid_sets(ok, sit, ctx).ok)
+        self.assertTrue(rails.rail_avoid_sets(bid, sit, TickContext(tick=1, day="sat", deadline=0.0, control={})).ok)
+
+
 if __name__ == "__main__":
     unittest.main()

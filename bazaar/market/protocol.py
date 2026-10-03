@@ -22,7 +22,7 @@ from ..dealers.values import Values
 MIN_GAIN_P, MIN_GAIN_FRAC = 3.0, 0.25
 PAGE_RARITIES = {"common", "uncommon", "rare"}
 PAGE_BONUS = 0.25                 # catalog values.page_bonus (share of the page's value), used if missing
-CORE_SETS = ("LAV", "MAL", "RET")  # the pages we most want to complete (our highest affinities)
+CORE_SETS = ("LAV", "MAL")  # the pages we most want to complete (RET: buying it does not move our score)
 BID_EXPIRES = 120                  # ticks
 SWAP_EXPIRES = 120
 MAX_OWN_BIDS = 2                   # open bids at once (round-4 strategy: standing bids rarely fill and lock cash)

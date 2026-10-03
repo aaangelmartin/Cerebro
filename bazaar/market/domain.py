@@ -107,6 +107,15 @@ def _aid(a: Any) -> Any:
     return a.get("id") if isinstance(a, dict) else a
 
 
+def _strategy_text(domain: str) -> str:
+    try:
+        from bazaar.brain.strategy import prompt_block
+        b = prompt_block(domain)
+    except Exception:  # noqa: BLE001
+        return ""
+    return ("\n\n" + b) if b else ""
+
+
 class MarketDomain:
     name = "market"
 
@@ -132,14 +141,31 @@ class MarketDomain:
         self._posted: dict[str, dict] = {}            # our live offer id -> action id, lessons, expectation
         self._cancelled: set[str] = set()             # offer ids we cancelled ourselves
         self._ctx: Any = None
+        self._last_state: dict | None = None
 
     # ================================================================== protocol
     def fallback(self, sit, ctx) -> list[Action]:
         acc, posts, state = self._prepare(sit, ctx)
-        return self._code_plan(acc, posts, state)
+        return self._brain_first(self._code_plan(acc, posts, state), state)
+
+    def _brain_first(self, actions: list[Action], state: dict) -> list[Action]:
+        """Offers addressed to us that the brain + council approved go first (at most one per tick)."""
+        for c in state.get("_brain_accepts") or []:
+            oid = c.offer.get("id")
+            if any(a.kind == "accept_offer" and (a.params or {}).get("offer") == oid for a in actions):
+                return actions
+            actions = [a for a in actions if a.kind != "accept_offer"]   # one accept per tick: the brain's
+            a = self._act_accept(c, "council", f"the brain and the council approved accepting #{oid} "
+                                              f"(gain {c.gain} P at our values)")
+            return [a] + actions
+        return actions
 
     def decide(self, sit, ctx) -> list[Action]:
+        return self._brain_first(self._decide(sit, ctx), self._last_state or {})
+
+    def _decide(self, sit, ctx) -> list[Action]:
         acc, posts, state = self._prepare(sit, ctx)
+        self._last_state = state
         base = self._code_plan(acc, posts, state)
         tick = int(_g(sit, "tick", 0) or 0)
         anything = posts or state["_bids"] or state["_swaps"]
@@ -329,7 +355,29 @@ class MarketDomain:
             vid = o.get("venue") or "rastro"
             sources.append((by_vid.get(vid) or {"venue": vid}, [o], True))
         accepts: list[AcceptCand] = []
-        seen: set = set()
+        brain_accepts: list[AcceptCand] = []
+        try:
+            from bazaar.brain.strategy import accept_offers as _brain_ok, keep_one_exception as _exc, \
+                KEEP_ONE_MIN_GAIN as _min_gain
+            brain_ok = _brain_ok()
+        except Exception:  # noqa: BLE001
+            brain_ok, _exc, _min_gain = set(), None, 5.0
+        for o in addressed:
+            if o.get("id") not in brain_ok or o.get("status", "open") != "open":
+                continue
+
+            def can_give_exc(a: dict, left: dict, _o=o) -> bool:
+                if can_give(a, left):
+                    return True
+                ref = a.get("ref")
+                return (a.get("id") not in reserved and str(a.get("id")) not in protected and str(ref) not in protected
+                        and _exc is not None and _exc(sit, ref, _o.get("id")))
+            vid = o.get("venue") or "rastro"
+            c = self._evaluate(o, by_vid.get(vid) or {"venue": vid}, values, counts, can_give_exc)
+            if c is not None and c.gain >= _min_gain and c.cash_out + c.fee - c.cash_in <= spend_cap:
+                c.addressed = True
+                brain_accepts.append(c)
+        seen: set = {c.offer.get("id") for c in brain_accepts}
         for venue, offers, is_addr in sources:
             for o in offers:
                 if o.get("id") in seen:
@@ -431,8 +479,25 @@ class MarketDomain:
             pool.append(a)
         fans_of = (lambda s: [t for t, _ in self.rivals.fans(s) if fair_ok(t)])
         swaps = proto.swap_candidates(values, counts, pool, venues, wanted, fans_of, swap_room) if swap_room else []
+        from bazaar.core.goal import avoided as _avoided   # sets we decided not to buy (control / the brain)
+        bids = [b for b in bids if not _avoided(b.ref, control)]
+        swaps = [x for x in swaps if not _avoided(x.want, control)]
+        accepts = [c for c in accepts if not any(_avoided(r, control) for r in c.in_refs)]
+        brain_accepts = [c for c in brain_accepts if not any(_avoided(r, control) for r in c.in_refs)]
 
         stale = proto.stale_offers(own_market, values, counts, CANCELS_PER_TICK)
+        try:                                        # the brain flagged these offers (outliers or outbid)
+            from bazaar.brain.strategy import cancel_offers as _brain_cancels
+            flagged = _brain_cancels()
+        except Exception:  # noqa: BLE001
+            flagged = set()
+        if flagged:
+            seen = {o.get("id") for o, _ in stale}
+            stale += [(o, "the brain flagged it (far from value/market or outbid)") for o in own_market
+                      if o.get("id") in flagged and o.get("id") not in seen]
+        seen = {o.get("id") for o, _ in stale}
+        stale += [(o, "we no longer buy this set") for o in own_market if o.get("id") not in seen
+                  and offer_kind(o) in ("bid", "swap") and any(_avoided(r, control) for r in want_cards(o))]
         if goal:                                    # free the cash locked in bids for other cards
             seen = {o.get("id") for o, _ in stale}
             for o in own_market:
@@ -454,7 +519,7 @@ class MarketDomain:
                                       "venue": s.venue, "teams_that_bid_on_given_set": s.fans} for s in swaps],
                  "cancelling": [{"offer": o.get("id"), "why": why} for o, why in stale],
                  "rival_fans_by_set": self.rivals.summary(sorted(values.affinity or ["LAV", "MAL", "SAL", "LAT"])),
-                 "_bids": bids, "_swaps": swaps, "_stale": stale,
+                 "_bids": bids, "_swaps": swaps, "_stale": stale, "_brain_accepts": brain_accepts,
                  "_avail": {r: n - reserved_n.get(r, 0) for r, n in counts.items()}}
         return accepts, posts, state
 
@@ -605,7 +670,7 @@ class MarketDomain:
                    domain=self.name, reason=reason or f"gain {c.gain} P at private values", source=source,
                    expected={"points": c.gain, "value_gain": c.gain, "value_get": c.value_in, "spend": c.cash_out + c.fee,
                              "counterparty": c.team, "kind": c.kind, "addressed": c.addressed},
-                   big=(c.cash_out + c.fee) > config.BIG_DEAL_P, priority=min(float(c.gain), 99.0))
+                   big=(c.cash_out + c.fee) >= config.BIG_DEAL_P, priority=min(float(c.gain), 99.0))
         self._sent[a.id] = {"kind": "accept_offer", "team": c.team or o.get("maker")}
         return a
 
@@ -649,7 +714,7 @@ class MarketDomain:
         system = llm.cached_system(stable) if hasattr(llm, "cached_system") else stable
         public = {k: v for k, v in state.items() if not k.startswith("_")}
         messages = [{"role": "user", "content": "STATE (JSON):\n" + json.dumps(public, ensure_ascii=False, default=str)
-                     + "\n\nCall market_moves once."}]
+                     + _strategy_text("market") + "\n\nCall market_moves once."}]
         self.last_prompt = {"system": system, "messages": messages}
         dl = getattr(ctx, "deadline", None)
         self.calls += 1
@@ -716,7 +781,7 @@ What scores: value gained at our PRIVATE values (overpaying subtracts; the numbe
 Many teams follow a public board protocol: want-to-buy bids (give cash, want a card) and card-for-card swaps, long expiry; the accepting side pays the venue fee.
 - accept_candidates were already checked by code: each gains at least max(3 P, 25 %) after fees and page bonus at our values (kind: bid = we hand over a card for cash, swap = card for card, ask = we buy; addressed_to_us = only we can see it). Pick at most one (the team has one accept per tick, shared with duels and dealers), or none.
 - post_candidates: our cards worth little to us (spares, low-affinity sets). Choose which to list, at what price (inside [min_ask, max_ask]) and optionally a team ("to") from teams_that_bid_on_this_set.
-- bid_candidates: cards we lack that complete our LAV/MAL/RET pages or are worth most to us. Choose which to bid on and the price (inside [min_price, max_price]); lower keeps more value, too low never fills.
+- bid_candidates: cards we lack that complete our LAV/MAL pages or are worth most to us. Choose which to bid on and the price (inside [min_price, max_price]); lower keeps more value, too low never fills.
 - swap_candidates: one of our duplicates or low-affinity cards for a card we lack. Choose which to post and optionally a team ("to") from teams_that_bid_on_given_set.
 - posts_left_this_tick caps sells + bids + swaps together. cancelling lists our stale offers the code already cancels.
 - Fair play: at most 4 deals per team per hour; never feed another team value on purpose.

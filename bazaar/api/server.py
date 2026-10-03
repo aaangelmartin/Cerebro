@@ -4,12 +4,13 @@
 
 GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
 GET  /overview?since=  (everything the dashboard shows, in one read)
+GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -89,6 +90,11 @@ def apply_control(live: Path, body: dict) -> dict:
             if body[key] not in options:
                 raise ValueError(f"{key} must be one of {sorted(options)}")
             change[key] = body[key]
+    if "avoid_buy_sets" in body:
+        a = body["avoid_buy_sets"]
+        if not isinstance(a, list) or not all(isinstance(x, str) and len(x.strip()) == 3 for x in a):
+            raise ValueError("avoid_buy_sets must be a list of set ids like \"RET\"")
+        change["avoid_buy_sets"] = sorted({x.strip().upper() for x in a})
     if "goal_buys" in body:
         g = body["goal_buys"]
         if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
@@ -226,6 +232,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"tick": t.get("tick"), "duels": t.get("duels", [])})
         if path == "/broker":
             return self._send(200, _read_json(live / "broker_status.json", {}) or {})
+        if path == "/strategy":
+            return self._send(200, {"current": _read_json(live / "strategy.json", {}) or None,
+                                    "status": _read_json(live / "strategist_status.json", {}) or {},
+                                    "history": _tail(live / "strategy.jsonl", None, min(limit, 30)),
+                                    "findings": _tail(live / "strategist_findings.jsonl", None, limit)})
         if path == "/spend":
             try:
                 from ..llm import client

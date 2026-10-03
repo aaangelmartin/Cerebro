@@ -57,9 +57,39 @@ def auto_goals(values) -> dict[str, int]:
         return {}
 
 
+def avoid_sets(control) -> set[str]:
+    """Sets we do not buy (control.avoid_buy_sets; the brain's choice is merged in by brain.strategy.overlay)."""
+    return {str(x).upper()[:3] for x in (control or {}).get("avoid_buy_sets") or [] if str(x).strip()}
+
+
+def avoided(ref, control) -> bool:
+    sets = avoid_sets(control)
+    return bool(sets) and str(ref or "").upper()[:3] in sets
+
+
+def strategy_goals(values=None) -> dict[str, int]:
+    """The strategist's goal cards, each capped one point below its value to us (never pay above value)."""
+    try:
+        from bazaar.brain.strategy import goal_buys as _sg
+        goals = _sg()
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for ref, p in goals.items():
+        if values is not None and p > 0:
+            try:
+                p = min(p, int(values.next_copy(ref)) - 1)
+            except Exception:  # noqa: BLE001
+                pass
+        out[ref] = p
+    return out
+
+
 def pending(sit, control, values=None) -> dict[str, int]:
-    """Goal cards we do not hold yet, with their max price (automatic goals, then the manual ones on top)."""
-    goals = {**auto_goals(values), **goal_buys(control)}
+    """Goal cards we do not hold yet, with their max price: automatic goals < the strategist's < the
+    operator's (control.goal_buys). A price of 0 or less drops the goal."""
+    goals = {**auto_goals(values), **strategy_goals(values), **goal_buys(control)}
+    goals = {r: p for r, p in goals.items() if p > 0 and not avoided(r, control)}
     if not goals:
         return {}
     held = {str(a.get("ref")).upper() for a in (_g(sit, "me") or {}).get("assets") or []

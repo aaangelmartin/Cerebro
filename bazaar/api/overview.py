@@ -220,9 +220,11 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
     open_ = status.get("doors") == "open" and not status.get("paused")
     lab_st = _read_json(lab / "lab_status.json", {}) or {}
     rec_st = _read_json(live / "recorder_status.json", {}) or {}
+    str_st = _read_json(live / "strategist_status.json", {}) or {}
     out = []
     for name, upd, ticks in (("Bot", status.get("updated"), 3), ("Broker", broker.get("updated"), 2),
-                             ("Laboratorio", lab_st.get("updated"), None), ("Grabadora", rec_st.get("updated"), 3)):
+                             ("Laboratorio", lab_st.get("updated"), None), ("Grabadora", rec_st.get("updated"), 3),
+                             ("Cerebro", str_st.get("updated"), 3)):
         age = _age(upd, now)
         limit = max(ticks * tick_s, 0 if open_ else 60.0) if ticks else 600.0
         out.append({"name": name, "age_s": age, "ok": age is not None and age <= limit,
@@ -234,6 +236,21 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
                 "recorder_rps": {k: (v or {}).get("rps_60s") for k, v in lanes.items()},
                 "keyed_down_since": keyed.get("down_since")})
     return out
+
+
+def strategy_view(live: Path, now: float) -> dict:
+    """The strategist's current plan, compact (full plan and history at GET /strategy)."""
+    cur = _read_json(live / "strategy.json", {}) or {}
+    st = _read_json(live / "strategist_status.json", {}) or {}
+    plan = cur.get("plan") or {}
+    return {"age_s": _age(cur.get("updated"), now), "tick": cur.get("tick"), "reason": cur.get("reason"),
+            "situation": plan.get("situation"), "priorities": plan.get("priorities") or [],
+            "goal_buys": plan.get("goal_buys") or {}, "cash_policy": plan.get("cash_policy") or {},
+            "guidance": plan.get("guidance") or {}, "risks": plan.get("risks") or [],
+            "council": cur.get("council"), "heartbeat_age_s": _age(st.get("updated"), now),
+            "spent_today": st.get("spent_today"), "errors": st.get("errors") or [],
+            "findings": plan.get("findings") or [], "events": cur.get("events") or [],
+            "duel_claude_mode": plan.get("duel_claude_mode")}
 
 
 def recorder_view(live: Path, now: float) -> dict:
@@ -303,6 +320,7 @@ def build(live: Path, lab: Path, stop_file: Path, since: int | None = None, now:
         "alerts": alerts(live, status, broker, lab_v),
         "processes": processes(live, lab, status, broker, now, gw),
         "recorder": recorder_view(live, now),
+        "strategy": strategy_view(live, now),
         "threads": threads,
         "activity": rows,
         "last_id": last_id,

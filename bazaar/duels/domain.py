@@ -72,6 +72,15 @@ def _lazy_llm():
         return None
 
 
+def _strategy_text() -> str:
+    try:
+        from bazaar.brain.strategy import prompt_block
+        b = prompt_block("duels")
+    except Exception:  # noqa: BLE001
+        return ""
+    return ("\n\n" + b) if b else ""
+
+
 class DuelsDomain:
     name = "duels"
 
@@ -202,7 +211,7 @@ class DuelsDomain:
         econ = economics(v, opp, (base.price, base.days) if base.action == "offer" else None)
         deadline = getattr(ctx, "deadline", None)
         kw = dict(purpose="duels", system=system_blocks(ctx),
-                  messages=[{"role": "user", "content": user_message(v, opp, econ, base)}],
+                  messages=[{"role": "user", "content": user_message(v, opp, econ, base) + _strategy_text()}],
                   tools=[DUEL_MOVE_TOOL], tool_choice={"type": "auto"},
                   max_tokens=2000, deadline=(deadline - SAFETY_S) if deadline else None)
         tick_s = getattr(ctx, "tick_seconds", None) if ctx is not None else None

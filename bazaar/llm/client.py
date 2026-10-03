@@ -158,7 +158,7 @@ def _summary(messages: list) -> str:
 def ask(*, purpose: str, system: str | list, messages: list, tools: list | None = None,
         tool_choice: dict | None = None, model: str | None = None, max_tokens: int = 1200,
         deadline: float | None = None, temperature: float | None = None,
-        _abandoned: threading.Event | None = None) -> LLMResult:
+        _abandoned: threading.Event | None = None, effort: str | None = None) -> LLMResult:
     r = router()
     used = r.resolve(model)
     if model and used != model:
@@ -192,7 +192,7 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
         if temperature is not None:
             kwargs["temperature"] = temperature
         if used in EFFORT:
-            kwargs["output_config"] = {"effort": EFFORT[used]}
+            kwargs["output_config"] = {"effort": effort or EFFORT[used]}
         t0 = time.time()
         try:
             resp = _client(label, key).messages.create(**kwargs)

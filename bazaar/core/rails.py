@@ -211,8 +211,41 @@ def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
         promised = _promised_refs(sit, held, exclude=set(give["assets"]))
         for ref, n in out.items():
             if str(ref)[:3] in SCARCE_SETS and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
+                if action.kind == "accept_offer" and _brain_exception(sit, ref, (action.params or {}).get("offer")):
+                    continue                     # the brain + council granted a one-off exception for this offer
                 return Verdict(False, "cards", f"last copy of {ref} (counting copies already promised)")
     return OK
+
+
+def rail_avoid_sets(action: Action, sit=None, ctx=None) -> Verdict:
+    """2b. Never bring in a card (or lot) from a set we decided not to buy (control.avoid_buy_sets)."""
+    avoid = {str(x).upper()[:3] for x in _control(ctx).get("avoid_buy_sets") or []}
+    if not avoid or action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread", "broker_match"):
+        return OK
+    _, get = flows(action, sit)
+    refs = set(get.get("asset_refs", {}).values())
+    for t in get.get("types") or []:
+        kind, _, rest = str(t).partition(":")
+        if kind == "card":
+            refs.add(rest)
+        elif kind == "lot":
+            refs.add(rest.split(":")[0] + "-")
+    p = action.params or {}
+    for a in ((p.get("expect") or {}).get("give") or {}).get("assets") or []:
+        if isinstance(a, dict):
+            refs.add(a.get("ref"))
+    bad = sorted(r for r in refs if r and str(r).upper()[:3] in avoid)
+    if bad:
+        return Verdict(False, "avoid_sets", f"we do not buy {sorted(avoid)} cards: {bad}")
+    return OK
+
+
+def _brain_exception(sit, ref, offer_id) -> bool:
+    try:
+        from bazaar.brain.strategy import keep_one_exception
+        return keep_one_exception(sit, ref, offer_id)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _promised_refs(sit, held: dict, exclude: set) -> dict:
@@ -457,7 +490,7 @@ def rail_pack(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
-RAILS = [rail_armed, rail_pack, rail_known, rail_accept_shape, rail_cards, rail_duel, rail_value, rail_cash, rail_pace,
+RAILS = [rail_armed, rail_pack, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
          rail_fair]
 
 

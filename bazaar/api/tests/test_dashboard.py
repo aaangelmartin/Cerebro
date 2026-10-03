@@ -117,7 +117,7 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((duel["margin"], duel["rival_price"]), (30, 128))
         self.assertEqual(d["alerts"][0]["kind"], "breaker")
         self.assertEqual(d["lab"]["notices"][0]["text"], "La lección L1 sube.")
-        self.assertEqual([p["name"] for p in d["processes"]], ["Bot", "Broker", "Laboratorio", "Grabadora", "Pasarela"])
+        self.assertEqual([p["name"] for p in d["processes"]], ["Bot", "Broker", "Laboratorio", "Grabadora", "Cerebro", "Pasarela"])
         self.assertTrue(d["processes"][0]["ok"])
         self.assertFalse(d["status"]["stop_file"])
         d2 = json.loads(self.raw("/overview?since=2")[2])
