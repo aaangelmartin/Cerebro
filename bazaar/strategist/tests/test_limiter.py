@@ -50,8 +50,10 @@ class GapTest(unittest.TestCase):
         self.assertFalse(g["ok"])
         self.assertIn("keeping the last plan", g["why"])
         self.assertTrue(L.gate(now=5000, level=40, last_plan_ts=0, has_chat=True, strategy_bucket=b)["ok"])
-        self.assertFalse(L.gate(now=5000, level=40, last_plan_ts=0, has_chat=True, strategy_bucket=b,
-                                chat_bucket_ok=False)["ok"])
+        self.assertFalse(L.gate(now=5000, level=40, last_plan_ts=4800, has_chat=True, strategy_bucket=b,
+                                chat_bucket_ok=False)["ok"])              # far above the pace: one chat plan per 300 s
+        self.assertTrue(L.gate(now=5000, level=40, last_plan_ts=4600, has_chat=True, last_chat_plan_ts=4600,
+                               strategy_bucket=b, chat_bucket_ok=False)["ok"])
 
 
 class BucketTest(unittest.TestCase):

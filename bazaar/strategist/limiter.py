@@ -22,6 +22,7 @@ WINDOW_S = 1800.0                   # the rolling window of the spend buckets
 SLACK = 1.25                        # a purpose may run this far above its hourly target inside the window
 CHAT_SLACK = 2.0                    # a team chat message may still get a plan up to this multiple
 CHAT_COALESCE_S = 120.0             # at most one chat-triggered plan this often
+CHAT_OVER_S = 300.0                 # ...and this often while the brain's spend is far above its pace (never mute)
 EMERGENCY_GAP_S = 60.0              # a true emergency may plan this soon after the last plan...
 EMERGENCY_EVERY_S = 600.0           # ...but only once in this long
 EMERGENCY_GAIN_P = 25               # a bargain worth this much that still needs cash
@@ -145,8 +146,9 @@ def gate(*, now: float, level: float, last_plan_ts: float, has_chat: bool, last_
     if has_chat:
         if now - float(last_chat_plan_ts or 0.0) < CHAT_COALESCE_S or since < 10.0:
             return {"ok": False, "why": "team messages wait to be answered together", "kind": "chat"}
-        if not chat_bucket_ok:
-            return {"ok": False, "why": "brain spend far above its pace: the team message waits", "kind": "chat"}
+        if not chat_bucket_ok and min(since, now - float(last_chat_plan_ts or 0.0)) < CHAT_OVER_S:
+            return {"ok": False, "why": "brain spend far above its pace: team messages are answered every %d s"
+                    % CHAT_OVER_S, "kind": "chat"}
         return {"ok": True, "why": "", "kind": "chat"}
     if not b.get("ok", True):
         return {"ok": False, "why": "brain spend above its pace (%.2f of %.2f $ in 30 min): keeping the last plan"
