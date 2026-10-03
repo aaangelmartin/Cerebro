@@ -401,10 +401,14 @@ class BenchEngine:
         if kind in ("limit", "probe") and (self.rule == "probe" or (self.learn_rule and self.rule == "quotes")):
             self.rule = "limits"                       # a non-crossing pair went through: limits rule
 
-    def note_refused(self, m: "Match", code: str = "") -> None:
+    def note_refused(self, m: "Match", code: str = "", message: str = "") -> None:
         """A planned match was refused. Gone offers are dropped; a refused non-crossing pair is blocked, both
-        traders' limit estimates are pulled toward their quotes, and enough probe refusals settle the rule."""
+        traders' limit estimates are pulled toward their quotes, and enough probe refusals settle the rule.
+        When the server states the rule outright ("price must sit between the ask and the bid"), it is settled
+        at once as "quotes" and no more probes are sent."""
         c = (code or "").lower()
+        if m.kind in ("limit", "probe") and "between the ask" in (message or "").lower():
+            self.rule, self.learn_rule = "quotes", False
         gone = any(w in c for w in GONE_CODES)
         if gone:
             for oid in (m.sell, m.buy):

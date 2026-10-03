@@ -362,7 +362,7 @@ class BrokerLoop:
             except GameError as e:
                 rec.update(status="refused", error=e.code, message=e.message[:200])
                 if bench:
-                    self.engine.note_refused(m, e.code)
+                    self.engine.note_refused(m, e.code, getattr(e, "message", "") or "")
                     st = self.stats.get(run_of(m.sell))
                     if st:
                         st["refused"] += 1
