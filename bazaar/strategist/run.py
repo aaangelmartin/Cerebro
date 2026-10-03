@@ -925,6 +925,8 @@ class Strategist:
         tg = self._targets(clock)
         sb = L.bucket("strategy", tg["strategy"], self.live, now, rows=rows)
         chat_ok = L.bucket("strategy", tg["strategy"], self.live, now, slack=L.CHAT_SLACK, rows=rows)["ok"]
+        if self._mac_free():                       # plans on the Mac's subscription cost no API dollars: only the
+            sb, chat_ok = {**sb, "ok": True, "mac": True}, True     # minimum gaps apply, not the spend bucket
         g = L.gate(now=now, level=cfg["level"], last_plan_ts=self.last_call, has_chat=has_chat,
                    last_chat_plan_ts=self.last_chat_plan,
                    emergency=(not stopped) and L.is_emergency(self.pending_events, session_start),
@@ -1030,6 +1032,18 @@ class Strategist:
         return BG.settings(level)
 
     # ------------------------------------------------------------------ plan
+    def _mac_free(self) -> bool:
+        """Is the Mac backend (Claude Code CLI on the subscription) taking the brain's calls right now?"""
+        if self._llm is not None:                  # an injected llm (tests, the eval harness) never uses the Mac
+            from bazaar.llm import client as _real
+            if self._llm is not _real:
+                return False
+        try:
+            from bazaar.llm import cli_backend
+            return cli_backend.available()
+        except Exception:  # noqa: BLE001
+            return False
+
     def llm(self):
         if self._llm is None:
             from bazaar.llm import client
@@ -1284,7 +1298,7 @@ class Strategist:
             council = self.votes.get(changes, clock.get("tick"))        # one vote per distinct proposal
             if council is None:
                 cb = L.bucket("council", self._targets(clock)["council"], self.live, self.now())
-                if not cb["ok"]:
+                if not cb["ok"] and not self._mac_free():
                     council = L.offline_vote(changes, "council budget spent for now (%.2f of %.2f $ in 30 min)"
                                              % (cb["spent"], cb["allowed"]))
                     self._finding("budget", council["why"], {"changes": changes})

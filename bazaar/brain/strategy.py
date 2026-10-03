@@ -592,6 +592,42 @@ STRATEGY_COUNCIL_NOTE = (
     "Reject it if the numbers in the picture contradict it. params may stay empty.")
 
 
+MAC_COUNCIL_TOOL_NAME = "council_votes"
+
+
+def _mac_council(council, brief: str, llm) -> list[dict] | None:
+    """The three council votes in ONE call to the Mac backend (it runs one call at a time and is capped per
+    hour, so three parallel votes would not fit). None = not on the Mac: ask the API, one call per voter."""
+    try:
+        from ..llm import cli_backend, client as real
+        if llm is not real or cli_backend.mode() == "api" or not cli_backend.available():
+            return None
+        vote_schema = dict(council.VOTE_TOOL["input_schema"])
+        props = {"role": {"type": "string", "enum": list(COUNCIL_ROLES)}, **vote_schema.get("properties", {})}
+        tool = {"name": MAC_COUNCIL_TOOL_NAME, "input_schema": {
+            "type": "object", "required": ["votes"],
+            "properties": {"votes": {"type": "array", "minItems": len(COUNCIL_ROLES), "items": {
+                "type": "object", "properties": props, "required": ["role", "verdict", "reason"]}}}}}
+        system = ("You are the three members of Team 10's council in The Bazaar. Judge the proposal three times, "
+                  "independently, once from each role below, and give one vote per role (do not let one vote "
+                  "copy another: each role reads the numbers from its own angle).\n\n"
+                  + "\n\n".join(f"ROLE {r}:\n{council.ROLES[r]}" for r in COUNCIL_ROLES)
+                  + STRATEGY_COUNCIL_NOTE + council.COMMON)
+        res = cli_backend.ask_cli(system, [{"role": "user", "content": brief}], tool, purpose="council",
+                                  effort="medium", wait_s=60.0)
+    except Exception:  # noqa: BLE001 - any failure means the API votes
+        return None
+    out = []
+    for raw in ((res.tool_calls or [{}])[0].get("input") or {}).get("votes") or []:
+        if not isinstance(raw, dict) or raw.get("role") not in COUNCIL_ROLES:
+            continue
+        v = council.parse_vote(type("R", (), {"tool_calls": [{"input": raw}], "text": ""})())
+        if v is not None and raw["role"] not in {x["role"] for x in out}:
+            v.update(role=raw["role"], model=res.model)
+            out.append(v)
+    return out if len(out) >= 2 else None
+
+
 def council_vote(old: dict | None, new: dict, picture: dict, changes: list[str], llm=None,
                  timeout_s: float = 90.0) -> dict:
     """Three parallel opinions on a strategy change; majority of valid votes approves (ties reject)."""
@@ -615,16 +651,21 @@ def council_vote(old: dict | None, new: dict, picture: dict, changes: list[str],
         return v
 
     votes, errors = [], []
-    with cf.ThreadPoolExecutor(max_workers=3) as pool:
-        futs = {pool.submit(one, r): r for r in COUNCIL_ROLES}
-        done, _ = cf.wait(futs, timeout=timeout_s + 5)
-        for f in done:
-            try:
-                v = f.result()
-            except Exception as e:  # noqa: BLE001
-                errors.append({"role": futs[f], "error": type(e).__name__})
-                continue
-            (votes.append(v) if v else errors.append({"role": futs[f], "error": "unparsable"}))
+    mac_votes = _mac_council(council, brief, llm)        # one call on the Mac's subscription for the three votes
+    if mac_votes is not None:
+        votes = mac_votes
+        errors = [{"role": r, "error": "no vote"} for r in COUNCIL_ROLES if r not in {v["role"] for v in votes}]
+    else:
+        with cf.ThreadPoolExecutor(max_workers=3) as pool:
+            futs = {pool.submit(one, r): r for r in COUNCIL_ROLES}
+            done, _ = cf.wait(futs, timeout=timeout_s + 5)
+            for f in done:
+                try:
+                    v = f.result()
+                except Exception as e:  # noqa: BLE001
+                    errors.append({"role": futs[f], "error": type(e).__name__})
+                    continue
+                (votes.append(v) if v else errors.append({"role": futs[f], "error": "unparsable"}))
     yes = sum(1 for v in votes if v["verdict"] in ("approve", "modify") and not v.get("rail_risk"))
     ok = bool(votes) and yes * 2 > len(COUNCIL_ROLES) - len(errors) and yes >= 2
     row = {"tick": picture.get("clock", {}).get("tick"), "kind": "strategy", "domain": "strategist",

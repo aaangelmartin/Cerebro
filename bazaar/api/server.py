@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "brain_backend", "mac_calls_per_hour"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -203,6 +203,8 @@ def apply_control(live: Path, body: dict) -> dict:
             change[key] = body[key]
     from ..strategist import budget as _budget          # brain intensity, caps and the event budget
     change.update(_budget.validate_control(body))
+    from ..llm import cli_backend as _mac
+    change.update(_mac.validate_control(body))
     if not change:
         raise ValueError("nothing to change")
     with _control_lock:
@@ -421,7 +423,15 @@ class Handler(BaseHTTPRequestHandler):
                 clock = json.loads((config.DATA / "record" / "latest" / "clock.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
-            return self._send(200, BG.report(live, clock=clock, spend=spend))
+            rep = BG.report(live, clock=clock, spend=spend)
+            try:                                   # the Mac backend (Claude Code CLI on the subscription)
+                from ..llm import cli_backend as _mac
+                ms = _mac.status(live)
+                rep.update(mac_backend=ms, mac_backend_state=ms["state"], mac_calls_last_hour=ms["calls_last_hour"],
+                           mac_calls_per_hour=ms["calls_per_hour"], brain_backend=ms["mode"])
+            except Exception:  # noqa: BLE001
+                pass
+            return self._send(200, rep)
         if path == "/brain/memory":
             return self._send(200, B.memory(live))
         if path == "/brain/findings":

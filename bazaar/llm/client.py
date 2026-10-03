@@ -32,6 +32,7 @@ PURPOSE_TIMEOUT_S = {"strategy": 150.0, "brain_eval": 150.0}
 def call_timeout(purpose: str) -> float:
     """Per-attempt HTTP timeout for a purpose (the deadline still caps it)."""
     return PURPOSE_TIMEOUT_S.get(purpose, DEFAULT_TIMEOUT_S)
+_MAC_PURPOSES = {"strategy", "brain_eval"}      # see cli_backend.MAC_PURPOSES
 MIN_CALL_S = 0.5                   # don't start an attempt with less time than this
 MAX_ATTEMPTS = 6
 COOLDOWN_S = {"rate": 15.0, "overloaded": 5.0, "server": 3.0, "network": 2.0, "timeout": 2.0}
@@ -169,7 +170,15 @@ def _summary(messages: list) -> str:
 def ask(*, purpose: str, system: str | list, messages: list, tools: list | None = None,
         tool_choice: dict | None = None, model: str | None = None, max_tokens: int = 1200,
         deadline: float | None = None, temperature: float | None = None,
-        _abandoned: threading.Event | None = None, effort: str | None = None) -> LLMResult:
+        _abandoned: threading.Event | None = None, effort: str | None = None, mac: bool = False) -> LLMResult:
+    # el cerebro's plans and its council votes go first to the Mac's Claude Code CLI (the subscription login)
+    # when control.brain_backend is "mac" or "auto"; per-tick decisions never do (cli_backend.route)
+    if mac or purpose in _MAC_PURPOSES:
+        from . import cli_backend
+        via_mac = cli_backend.route(purpose=purpose, system=system, messages=messages, tools=tools,
+                                    deadline=deadline, effort=effort, mac=mac)
+        if via_mac is not None:
+            return via_mac
     r = router()
     _check_purpose_cap(r, purpose)
     used = r.resolve(model)
