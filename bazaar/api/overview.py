@@ -249,6 +249,7 @@ def strategy_view(live: Path, now: float) -> dict:
             "guidance": plan.get("guidance") or {}, "risks": plan.get("risks") or [],
             "council": cur.get("council"), "heartbeat_age_s": _age(st.get("updated"), now),
             "spent_today": st.get("spent_today"), "errors": st.get("errors") or [],
+            "thinking_since": st.get("thinking_since"), "thinking_reason": st.get("thinking_reason"),
             "findings": plan.get("findings") or [], "events": cur.get("events") or [],
             "duel_claude_mode": plan.get("duel_claude_mode")}
 

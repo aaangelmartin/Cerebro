@@ -20,8 +20,10 @@ operator's control.json always win. Heartbeat: data/live/strategist_status.json.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import signal
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -349,6 +351,9 @@ class Strategist:
         self.last_review_row: dict | None = None
         self.calls = 0
         self.last_reason = ""
+        self.thinking_since: float | None = None   # set while waiting on Opus (plan, re-ask, council)
+        self.thinking_reason: str | None = None
+        self._hb_lock = threading.Lock()
         prev = _read(S.path(self.live), {}) or {}            # keep the last plan across restarts
         self.plan: dict = prev.get("plan") or {}
 
@@ -834,9 +839,10 @@ class Strategist:
         content = ("Why now: " + reason + events + retry + needs_block + outbox_block + extra + "\n\nPICTURE (JSON):\n"
                    + json.dumps(slim, ensure_ascii=False, default=str) + "\n\nCall team_strategy once.")
         self.calls += 1
-        res = llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": content}],
-                      tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS, max_tokens=MAX_TOKENS,
-                      deadline=self.now() + 200, effort="medium")
+        with self.thinking(self._thinking_label(reason) + (" (re-ask)" if fix else "")):
+            res = llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": content}],
+                          tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS,
+                          max_tokens=MAX_TOKENS, deadline=self.now() + 200, effort="medium")
         if getattr(res, "stop", None) == "max_tokens" or getattr(res, "stop_reason", None) == "max_tokens":
             self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens: not published"})
             return None
@@ -952,7 +958,8 @@ class Strategist:
         council = None
         ok = True
         if changes:
-            council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
+            with self.thinking("council vote: " + ", ".join(changes)[:60]):
+                council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
             ok = council["ok"]
         plan = S.merge_accepted(self.plan, new, ok)
         events, self.pending_events = self.pending_events, []
@@ -981,15 +988,52 @@ class Strategist:
                         now=self.now())
         return doc
 
+    @contextlib.contextmanager
+    def thinking(self, reason: str, every_s: float = 10.0):
+        """Mark the brain as thinking while an Opus call runs: thinking_since/thinking_reason go into the
+        heartbeat (refreshed every `every_s` so long calls still look alive) and are cleared afterwards."""
+        self.thinking_since, self.thinking_reason = self.now(), (reason or "")[:80]
+        stop = threading.Event()
+
+        def beat():
+            while not stop.wait(every_s):
+                try:
+                    self.heartbeat()
+                except Exception:  # noqa: BLE001 - the heartbeat must never break a plan
+                    pass
+
+        t = threading.Thread(target=beat, name="brain-thinking-heartbeat", daemon=True)
+        try:
+            self.heartbeat()
+            t.start()
+            yield
+        finally:
+            stop.set()
+            self.thinking_since = self.thinking_reason = None
+            try:
+                self.heartbeat()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _thinking_label(self, reason: str) -> str:
+        kinds = [e.get("kind") for e in self.pending_events or []]
+        if "chat" in kinds:
+            return "chat"
+        if kinds:
+            return "event: " + ", ".join(sorted({str(k) for k in kinds}))[:60]
+        return (reason or "scheduled")[:80]
+
     def heartbeat(self, extra: dict | None = None):
         st = {"updated": self.now(), "calls": self.calls, "last_call": self.last_call,
               "last_plan_tick": self.last_plan_tick, "last_reason": self.last_reason,
               "spent_today": round(self.spent_today(), 4), "day_cap": DAY_CAP_USD,
+              "thinking_since": self.thinking_since, "thinking_reason": self.thinking_reason,
               "errors": self.errors[-5:], **(extra or {})}
         p = self.live / "strategist_status.json"
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(st, ensure_ascii=False, default=str))
-        tmp.replace(p)
+        with self._hb_lock:
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(st, ensure_ascii=False, default=str))
+            tmp.replace(p)
 
 
 def main() -> None:
