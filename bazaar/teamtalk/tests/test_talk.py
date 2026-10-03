@@ -57,6 +57,19 @@ class TeamTalkTest(unittest.TestCase):
         self.assertEqual(self.tt.actions(sit(101, [thread(msgs=[ASK])], [SAL10]), None,
                                          values=FakeValues({797: 63.0}), check=lambda a: OK), [])
 
+    def test_offers_the_copy_control_does_not_protect(self):
+        two = [{"id": 627, "kind": "card", "ref": "RET-03"}, {"id": 1062, "kind": "card", "ref": "RET-03"}]
+        vals = FakeValues({627: 2.8, 1062: 2.8})
+        s = sit(assets=two)
+        for kept, free in ((627, 1062), (1062, 627)):
+            c = self.tt._cards(["RET-03"], s, {"protected": [str(kept)]}, vals)["RET-03"]
+            self.assertEqual((c["asset"], c["committed"]), (free, False))
+        # protected by name: no copy may go
+        self.assertTrue(self.tt._cards(["RET-03"], s, {"protected": ["RET-03"]}, vals)["RET-03"]["committed"])
+        # no protection: as before
+        c = self.tt._cards(["RET-03"], s, {}, vals)["RET-03"]
+        self.assertEqual((c["asset"], c["committed"]), (1062, False))
+
     def test_committed_card_is_not_offered_again(self):
         mine = {"id": 12189, "maker": "t10", "status": "open", "to": "t08", "venue": "v10",
                 "give": {"assets": [SAL10]}, "want": {"cash": 160}}

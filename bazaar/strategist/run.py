@@ -646,11 +646,16 @@ class Strategist:
             sets[st["id"]] = {"affinity": (me.get("affinity") or {}).get(st["id"]),
                               "page_held": len(page) - len(missing), "page_size": len(page),
                               "missing": sorted(missing, key=lambda m: -(m["value_to_us"] or 0))[:10]}
+        # the spare listed is a copy the rails let go: never one in control.protected (by ref or by asset id)
+        from bazaar.core.spares import free_copies, protected_set
+        prot = protected_set(_read(self.live / "control.json", {}) or {})
         spares = []
         for ref, cs in held.items():
-            for a in sorted(cs, key=lambda x: x.get("your_value") or 0)[: max(0, len(cs) - 1)] if len(cs) > 1 else []:
+            by_value = sorted(cs, key=lambda x: x.get("your_value") or 0, reverse=True)   # cheapest copies go first
+            for a in reversed(free_copies(by_value, prot, ref)) if len(cs) > 1 else []:
                 spares.append({"ref": ref, "id": a.get("id"), "rarity": a.get("rarity"), "value": a.get("your_value")})
-            if len(cs) == 1 and str(ref).split("-")[0] not in ("LAV", "MAL"):
+            if (len(cs) == 1 and str(ref).split("-")[0] not in ("LAV", "MAL")
+                    and free_copies(cs, prot, ref, keep=0)):
                 spares.append({"ref": ref, "id": cs[0].get("id"), "rarity": cs[0].get("rarity"),
                                "value": cs[0].get("your_value"), "single_low_affinity": True})
 

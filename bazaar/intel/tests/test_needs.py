@@ -71,6 +71,25 @@ class NeedsTest(unittest.TestCase):
         m10 = next(m for m in mal["missing"] if m["ref"] == "MAL-10")
         self.assertEqual(m10["best_price"], 60)                   # the 0 % ask beats Chato's 77
 
+    def _report(self, protected):
+        live = Path(self.tmp.name) / "live"
+        live.mkdir(exist_ok=True)
+        (live / "control.json").write_text(json.dumps({"protected": protected}))
+        rec = Path(self.tmp.name) / "record"
+        me = json.loads((rec / "latest" / "me.json").read_text())
+        catalog = json.loads((rec / "latest" / "catalog.json").read_text())
+        return needs_report(rec, live, values=_CatalogValues(me, catalog))
+
+    def test_spare_is_the_unprotected_copy(self):
+        # MAL-02: assets 2 and 20. Unprotected: a spare is listed, as today
+        self.assertIn(next(s for s in self.rep["ours"]["spares"] if s["ref"] == "MAL-02")["asset"], (2, 20))
+        # either copy protected by id: the spare shown is the other one
+        for kept, free in ((20, 2), (2, 20)):
+            sp = next(s for s in self._report([kept])["ours"]["spares"] if s["ref"] == "MAL-02")
+            self.assertEqual((sp["asset"], sp["copies"]), (free, 2))
+        # protected by name: no sellable spare
+        self.assertNotIn("MAL-02", {s["ref"] for s in self._report(["MAL-02"])["ours"]["spares"]})
+
     def test_makers_resolved_through_feed(self):
         self.assertEqual(self.rep["rivals"]["t17"]["hunting"]["MAL-09"]["bid"], 70)
         self.assertIn("RET-07", self.rep["rivals"]["t17"]["hunting"])

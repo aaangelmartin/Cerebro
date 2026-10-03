@@ -300,12 +300,22 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
             missing_all[r] = row
         ours_sets[sid] = {"name": s["name"], "affinity": affinity.get(sid, 1.0), "held": len(have),
                           "page": len(s["page"]), "missing": miss_rows, "completes_page": len(miss) <= 2 and bool(miss)}
+    # control.protected: a ref keeps every copy, an asset id keeps that copy. The spare we show is always a copy
+    # the rails let go (never the protected one), so sell orders built on it are not vetoed.
+    from bazaar.core.spares import free_copies, protected_set
+    control = _load(Path(live_dir) / "control.json", {}) or {}
+    protected = protected_set(control if isinstance(control, dict) else {})
     for ref, lst in held.items():
         if len(lst) > 1:
+            free = free_copies(lst, protected, ref)
+            if not free:
+                continue                                  # every spare copy is protected: nothing to sell
             spares.append({"ref": ref, "copies": len(lst), "spare_value": round(_spare_value(vals, ref, lst), 1),
-                           "asset": lst[-1].get("id")})
+                           "asset": free[-1].get("id")})
         elif _avoid(ours_sets.get(vals.set_of(ref))):
             # a set we don't build (low affinity, far from a page): our single copy is tradeable too
+            if not free_copies(lst, protected, ref, keep=0):
+                continue
             spares.append({"ref": ref, "copies": 1, "spare_value": round(_spare_value(vals, ref, lst), 1),
                            "asset": lst[-1].get("id"), "low_affinity": True})
 

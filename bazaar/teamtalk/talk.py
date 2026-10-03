@@ -208,8 +208,11 @@ class TeamTalk:
             if not copies:
                 out[ref] = {"held": 0}
                 continue
-            free = [a for a in copies if a.get("id") not in tied]
-            pick = (free or copies)[-1]
+            # never offer a copy control.protected keeps (by ref or by asset id): the rails would veto the trade
+            prot = {str(x) for x in (control or {}).get("protected") or []}
+            open_ = [a for a in copies if str(ref) not in prot and str(a.get("id")) not in prot]
+            free = [a for a in open_ if a.get("id") not in tied]
+            pick = (free or open_ or copies)[-1]
             free = free[:max(0, len(free) - holds.get(ref, 0))]     # copies the plan needs are not free to offer
             value = None
             try:
