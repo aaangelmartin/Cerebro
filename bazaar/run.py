@@ -392,8 +392,18 @@ class Runner:
                     except Exception as e:  # noqa: BLE001
                         v = Verdict(False, "rails_error", str(e)[:200])
                     if not v.ok:
-                        self._ledger("decision", a, v, source=a.source, tick=sit.tick, dry_run=False)
-                        self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"rail": v.rail, "detail": v.detail}))
+                        dry = not self.can_write(ctx.control or {})
+                        self._ledger("decision", a, v, source=a.source, tick=sit.tick, dry_run=dry)
+                        if not dry:
+                            self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"rail": v.rail, "detail": v.detail}))
+                        alt = None
+                        if self.arbiter is not None and hasattr(self.arbiter, "alternative"):
+                            try:
+                                alt = self.arbiter.alternative(a)   # a vetoed duel accept still answers the rival
+                            except Exception:  # noqa: BLE001
+                                alt = None
+                        if alt is not None:
+                            kept.append(alt)
                         continue
                 kept.append(a)
             actions = kept

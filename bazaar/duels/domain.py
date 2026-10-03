@@ -52,6 +52,15 @@ def accept_priority(pts: float, ticks_left: int, n_accepting: int = 1) -> float:
 
 SAFETY_S = 0.25              # stop waiting for Claude this long before the tick deadline
 SHORT_TICK_S = 20.0          # Sunday's 15 s ticks: race Opus against Sonnet
+
+
+def _opus_rung(llm) -> bool:
+    """True while the router still serves Opus today; once it has stepped down, a race would pay twice for Sonnet."""
+    try:
+        s = llm.spend_today()
+        return float(s.get("usd") or 0) < float(s.get("degrade_at") or float("inf"))
+    except Exception:  # noqa: BLE001
+        return True
 SONNET_ONLY_S = 5.0          # less time than this left: Sonnet alone
 
 
@@ -202,7 +211,7 @@ class DuelsDomain:
             left = (deadline - SAFETY_S - time.time()) if deadline else None
             if left is not None and left < SONNET_ONLY_S:
                 res = llm.ask(model=config.SONNET, **kw)
-            elif hasattr(llm, "race"):
+            elif hasattr(llm, "race") and _opus_rung(llm):
                 res = llm.race(models=[config.OPUS, config.SONNET], **kw)
             else:
                 res = llm.ask(model=self.model, **kw)

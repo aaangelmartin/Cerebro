@@ -184,7 +184,7 @@ def _execute(action: Action, gw, sit, ctx, tick: int) -> Outcome:
             try:
                 resp = _post_with_timeout(gw, path, body, VENUE_OPEN_TIMEOUT_S)
             except GameError as e:
-                if e.code in ("timeout", "network"):
+                if e.code in ("timeout", "network", "upstream", "server_error") or e.status >= 500:
                     _venue_key_maybe_lost(gw, e)
                 raise
         else:

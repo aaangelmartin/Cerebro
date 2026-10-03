@@ -135,7 +135,9 @@ def fetch(path_qs, method="GET", body=None, keyed=True, extra_headers=None):
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(BASE + path_qs, data=body, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        # Opening a venue returns the broker key only once: give it longer than the bot's 30 s wait.
+        slow = method == "POST" and path_qs.split("?")[0] == "/api/venues"
+        with urllib.request.urlopen(req, timeout=40 if slow else 20) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
