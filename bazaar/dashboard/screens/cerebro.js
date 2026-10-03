@@ -950,6 +950,7 @@
     [/^quiet.*$/i, () => "sin novedades"],
     [/^cap reached.*$/i, () => "tope de gasto alcanzado"],
     [/^manual.*$/i, () => "puesto a mano"],
+    [/^set by the team.*$/i, () => "puesto por el equipo"],
     [/^keys? .*down.*$/i, () => "claves caídas"],
   ];
   const es = (x) => String(x).replace(".", ",");
@@ -983,7 +984,23 @@
     n.wake = el("div", { class: "cb-i-wake" });
     n.hist = el("div", { class: "cb-i-hist" });
     n.sub = el("span", { class: "panel-sub" }, "");
+    // where the brain reasons: on the Mac (Claude Code subscription, no API cost), on the API, or automatic
+    n.be = {};
+    for (const [id, label] of [["mac", "Mac"], ["api", "API"], ["auto", "Auto"]])
+      n.be[id] = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_backend: id }, "El cerebro razona con: " + label) }, label);
+    n.beState = el("span", { class: "cb-i-bestate" });
+    n.macCap = el("input", { type: "number", min: "0", step: "1", inputmode: "numeric", class: "cb-q cb-i-cap-in", "aria-label": "Llamadas por hora en el Mac" });
+    const saveCap = el("button", { type: "button", class: "cb-seg", onclick: async () => {
+      const v = Number(n.macCap.value);
+      if (!isFinite(v) || v < 0 || n.macCap.value === "") { U().toast({ type: "error", title: "Número no válido" }); return; }
+      if (await U().confirm({ title: `¿Dejar ${v} llamadas por hora en el Mac?`, text: "Es el máximo de planes por hora que el cerebro hace con la suscripción del Mac; por encima usa la API.", confirmLabel: "Sí, cambiar" }))
+        setIntensity({ mac_calls_per_hour: v }, "Tope del Mac: " + v + " llamadas/h");
+    } }, "Guardar");
+    n.backend = el("div", { class: "cb-i-backend", hidden: true }, el("span", { class: "cb-cap cb-i-cap" }, "Razona con"),
+      el("div", { class: "cb-i-mode" }, n.be.mac, n.be.api, n.be.auto), n.beState, el("span", { class: "cb-sp" }),
+      el("label", { class: "cb-i-caplab" }, el("span", { class: "cb-muted" }, "tope por hora en el Mac"), n.macCap, saveCap));
     n.body = el("div", { class: "cb-i-body" },
+      n.backend,
       el("div", { class: "cb-i-top" }, el("div", { class: "cb-i-mode" }, n.auto, n.manual),
         el("div", { class: "cb-i-slide" }, el("span", { class: "cb-muted num" }, "0"), n.slider, el("span", { class: "cb-muted num" }, "100"), n.level),
         el("div", { class: "cb-i-est" }, el("span", { class: "cb-muted" }, "≈"), n.rate, n.every)),
@@ -1006,7 +1023,7 @@
     n.off.hidden = !(I.state === "off" || I.state === "error");
     n.off.textContent = I.state === "error" ? "No se pudo leer la intensidad: " + ((I.err && I.err.message) || "") : "El control de intensidad aún no está activo.";
     n.body.classList.toggle("is-off", off);
-    for (const x of [n.slider, n.auto, n.manual]) x.disabled = off || I.busy;
+    for (const x of [n.slider, n.auto, n.manual, n.be.mac, n.be.api, n.be.auto, n.macCap]) x.disabled = off || I.busy;
     if (!d) { n.sub.textContent = I.state === "idle" ? "cargando…" : ""; return; }
     const auto = d.mode !== "manual";
     n.auto.classList.toggle("on", auto); n.manual.classList.toggle("on", !auto);
@@ -1016,6 +1033,24 @@
       if (num(d.usd_per_hour_now) != null) n.rate.textContent = fmtNum(d.usd_per_hour_now, 2) + " $/h";
       const st = d.settings || {};
       if (st.interval_ticks) n.every.textContent = `planifica cada ${st.interval_ticks} ticks`;
+    }
+    // backend line (only when the API reports it)
+    const mb = d.mac_backend || {};
+    const be = d.brain_backend || mb.mode;
+    n.backend.hidden = !be;
+    if (be) {
+      for (const k of ["mac", "api", "auto"]) n.be[k].classList.toggle("on", be === k);
+      const stt = d.mac_backend_state || mb.state || "";
+      const calls = num(d.mac_calls_last_hour) ?? num(mb.calls_last_hour), cap = num(d.mac_calls_per_hour) ?? num(mb.calls_per_hour);
+      const ST_ES = { ok: ["OK", "ok"], cooling: ["en espera", "warn"], backoff: ["en espera", "warn"], off: ["apagado", "mute"], error: ["con errores", "bad"], unavailable: ["no disponible", "bad"] };
+      const [stl, stt2] = ST_ES[stt] || [stt || "—", "mute"];
+      const now = be === "api" ? "API (de pago)" : be === "mac" ? "Mac (suscripción)" : (stt === "ok" && (cap == null || calls < cap) ? "Mac (suscripción) · API si el Mac no puede" : "API ahora · Mac cuando vuelva");
+      replace(n.beState, el("b", {}, now), calls != null ? el("span", { class: "num cb-muted" }, ` · ${calls}${cap != null ? "/" + cap : ""} llamadas esta hora`) : null,
+        el("span", { class: "cb-muted" }, " · estado "), el("span", { class: "tag res tone-" + stt2 }, stl),
+        mb.backoff_until ? el("span", { class: "cb-muted num" }, " · vuelve " + when(mb.backoff_until)) : null,
+        mb.last_error ? el("span", { class: "cb-muted", title: mb.last_error }, " · último error " + when(mb.last_error_ts)) : null,
+        num(mb.last_latency_s) != null ? el("span", { class: "cb-muted num" }, ` · ${fmtNum(mb.last_latency_s, 0)} s el último plan`) : null);
+      if (document.activeElement !== n.macCap) n.macCap.value = cap == null ? "" : String(cap);
     }
     const hist = (Array.isArray(d.history) ? d.history : []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const prev = hist.length > 1 ? hist[hist.length - 2] : null;

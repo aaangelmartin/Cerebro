@@ -223,7 +223,7 @@
       tile("wallet", "Gasto hoy", usd(sp.usd), `tope efectivo ${usd(sp.cap)} · ${modelName(sp.model_now)}`, spLevel, spLevel === "ok" ? "OK" : spLevel === "bad" ? "TOPE" : "DEGRADA"),
       tile("warn", "Errores 1 h", String(errs.length), `${nb} disyuntor${nb === 1 ? "" : "es"} · ${ne} error${ne === 1 ? "" : "es"} · ${errs.length - nb - ne} avisos`, errLevel, errLevel === "ok" ? "OK" : "REVISAR"));
   }
-  function modelName(m) { return !m ? "—" : /opus/i.test(m) ? "Opus" : /sonnet/i.test(m) ? "Sonnet" : /haiku/i.test(m) ? "Haiku" : m; }
+  function modelName(m) { return !m ? "—" : /opus/i.test(m) ? "Opus" : /sonnet/i.test(m) ? "Sonnet" : /haiku/i.test(m) ? "Haiku" : /cli|mac/i.test(m) ? "Mac (suscripción) · 0 $ (Mac)" : m; }
 
   function barList(title, obj, total, extra) {
     const entries = Object.entries(obj || {}).map(([k, v]) => [k, typeof v === "object" && v ? (v.usd_today ?? v.usd ?? 0) : v]).filter(([, v]) => num(v) != null).sort((a, b) => b[1] - a[1]);
@@ -266,6 +266,18 @@
         : kh.bad.map((k) => `Clave ${k.label} ${k.chip.toLowerCase()}`).join(" · ") + ": el bot sigue con " + (okL.length ? okL.join(", ") : "ninguna") + "."),
         ...kh.bad.map((k) => el("div", { class: "bot-small" }, `Clave ${k.label}: ${k.text}` + (k.since ? ` (desde ${window.ui.fmtTime(k.since)})` : "")))));
   }
+  // one line: where the brain reasons (Mac subscription = 0 $, or the API)
+  function macLine(bd) {
+    const mb = bd.mac_backend || {}, be = bd.brain_backend || mb.mode;
+    if (!be) return null;
+    const calls = num(bd.mac_calls_last_hour) ?? num(mb.calls_last_hour), cap = num(bd.mac_calls_per_hour) ?? num(mb.calls_per_hour);
+    const st = bd.mac_backend_state || mb.state || "";
+    return el("a", { class: "bot-brain-line", href: "#cerebro" }, el("span", { class: "bot-muted" }, "El cerebro razona con: "),
+      el("b", {}, be === "api" ? "API" : be === "mac" ? "Mac (suscripción)" : "Auto · Mac primero"),
+      el("span", { class: "bot-muted bot-mono" }, (calls != null ? ` · ${calls}${cap != null ? "/" + cap : ""} llamadas esta hora` : "") + (st ? " · estado " + (st === "ok" ? "OK" : st) : "")),
+      num(mb.calls_today) ? el("span", { class: "bot-muted" }, ` · hoy ${mb.calls_today} planes a 0 $`) : null,
+      el("span", { class: "bot-brain-go" }, " → cambiar en Cerebro"));
+  }
   // "Por propósito": spent today against that purpose's budget for today (GET brain/budget -> plan.purpose_caps);
   // the caps the team set by hand win for Cerebro (cap_today) and for the whole day (day_cap)
   function purposeList(sp) {
@@ -283,7 +295,8 @@
       const tone = pct == null ? "" : pct >= 100 ? "bad" : pct >= 80 ? "warn" : "ok";
       return el("div", { class: "bot-brow" },
         el("div", { class: "bot-brow-h" }, el("span", {}, PURPOSE[k] || k),
-          k === "strategy" && num(team.brain_day_cap) != null ? el("span", { class: "bot-mono bot-muted bot-small" }, "tope del equipo") : el("span", {}),
+          k === "strategy" ? el("span", { class: "bot-mono bot-muted bot-small" }, [num(team.brain_day_cap) != null ? "tope del equipo" : null,
+            num((bd.mac_backend || {}).calls_today) ? `${bd.mac_backend.calls_today} planes en el Mac: 0 $ (Mac)` : null].filter(Boolean).join(" · ")) : el("span", {}),
           el("span", { class: "bot-mono" }, usd(v), cap != null ? el("span", { class: "bot-muted" }, " / " + usd(cap)) : null,
             pct != null ? el("span", { class: "bot-small bot-pp bot-pp-" + tone }, " " + Math.round(pct) + " %") : null)),
         el("div", { class: "bot-bar" + (tone ? " bot-bar-" + tone : " bot-bar-plain") }, el("span", { style: `width:${Math.max(1, Math.min(100, Math.round(pct != null ? pct : (v / max) * 100)))}%` })));
@@ -330,7 +343,8 @@
         el("div", { class: "bot-spend-side" }, keyList(sp), barList("Por modelo", sp.by_model, null, { label: modelName }),
           el("div", { class: "bot-muted bot-small bot-mono" }, `${calls ?? "—"} llamadas hoy · ahora ${modelName(sp.model_now)}` + (num(sp.degrade_at) != null ? ` · Sonnet desde ${fmt(sp.degrade_at, 0)} $` : "")),
           el("a", { class: "bot-brain-line", href: "#cerebro" }, el("span", { class: "bot-muted" }, "Intensidad del cerebro: "), el("b", { class: "bot-mono" }, String(bd.level ?? "—")),
-            el("span", { class: "bot-muted" }, bd.mode ? " · " + (bd.mode === "manual" ? "manual" : "auto") : ""), el("span", { class: "bot-brain-go" }, " → ver en Cerebro")))),
+            el("span", { class: "bot-muted" }, bd.mode ? " · " + (bd.mode === "manual" ? "manual" : "auto") : ""), el("span", { class: "bot-brain-go" }, " → ver en Cerebro")),
+          macLine(bd))),
       lim);
     limitsSync();
     // ladder

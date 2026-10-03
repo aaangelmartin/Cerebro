@@ -288,3 +288,8 @@
 .scr-cerebro .cb-i-hwhy { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scr-cerebro .cb-i-up { color: var(--ok); } .scr-cerebro .cb-i-down { color: var(--warn); }
 .scr-cerebro .cb-link { background: none; border: 0; color: var(--ink-3); text-decoration: underline; font-size: 12px; }
+.scr-cerebro .cb-i-backend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.scr-cerebro .cb-i-backend[hidden] { display: none; }
+.scr-cerebro .cb-i-bestate { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0; }
+.scr-cerebro .cb-i-caplab { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.scr-cerebro .cb-i-cap-in { width: 70px; margin-left: 0; min-width: 0; text-align: right; }
