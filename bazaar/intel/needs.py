@@ -19,7 +19,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-FEED_TYPES = ('"offer.listed"', '"offer.cancelled"', '"settlement"', '"thread.opened"')
+FEED_TYPES = ('"offer.listed"', '"offer.cancelled"', '"settlement"', '"thread.opened"', '"pack.opened"')
+HIGH_RARITIES = ("epic", "legendary")   # not page cards, but worth a lot to us: never ignore them
+EXTRA_MIN_VALUE = 40.0              # a non-page card worth at least this to us is an opportunity when sold below it
 RASTRO_FEE = (500, 1)               # bps, P per card, if venues.json lacks it
 MIN_GAIN_P = 1.0                    # opportunities below this are noise
 AVOID_HELD_FRAC = 0.5               # a set with less than half its page held...
@@ -191,14 +193,38 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
     bought: dict[str, list] = defaultdict(list)       # team -> [{ref, price, frm, venue, tick}]
     sold: dict[str, list] = defaultdict(list)
     dealer_hunts: dict[str, Counter] = defaultdict(Counter)
+    watch: dict[str, dict] = {}                       # epics / legendaries seen in the feed
+    moved_assets: set = set()                         # asset ids that changed hands (their old listings are dead)
+
+    def _watch(ref, rarity=None):
+        return watch.setdefault(ref, {"ref": ref, "rarity": rarity, "holder": None, "asks": [], "bids": [],
+                                      "last_sale": None})
+
     for r in _feed_rows(record):
         t, p = r.get("type"), r.get("payload") or {}
-        if t == "offer.listed":
+        if t == "pack.opened":
+            b = p.get("best") or {}
+            if b.get("rarity") in HIGH_RARITIES and b.get("ref"):
+                w = _watch(b["ref"], b.get("rarity"))
+                w["holder"], w["source"] = p.get("team"), f"pack {p.get('pack')}"
+        elif t == "offer.listed":
             o = p.get("offer") or {}
             if o.get("id") is not None:
                 team = o.get("maker") or r.get("actor")
                 offer_team[o["id"]] = team
-                feed_offers[o["id"]] = {**o, "team": team}
+                feed_offers[o["id"]] = {**o, "team": team, "venue": o.get("venue") or p.get("venue")}
+                for a in (o.get("give") or {}).get("assets") or []:
+                    if isinstance(a, dict) and a.get("rarity") in HIGH_RARITIES and a.get("ref"):
+                        w = _watch(a["ref"], a.get("rarity"))
+                        w["holder"] = team
+                        w["asks"] = (w["asks"] + [{"price": _cash(o.get("want")), "tick": r.get("tick"), "to": o.get("to"),
+                                                   "venue": o.get("venue") or p.get("venue"), "offer": o["id"]}])[-5:]
+                for ty in (o.get("want") or {}).get("types") or []:
+                    ref = str(ty)[5:] if str(ty).startswith("card:") else None
+                    if ref and ref[-3:] in ("-11", "-12"):
+                        w = _watch(ref)
+                        w["bids"] = (w["bids"] + [{"team": team, "cash": _cash(o.get("give")), "tick": r.get("tick"),
+                                                   "gives": _refs(o.get("give"))}])[-6:]
         elif t == "offer.cancelled":
             oid = (p.get("offer") or {}).get("id") if isinstance(p.get("offer"), dict) else p.get("offer")
             if oid in feed_offers:
@@ -207,6 +233,11 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
             price = p.get("price") or 0
             cards = [i for i in p.get("items") or [] if i.get("kind") == "card"]
             for i in cards:
+                moved_assets.add(i.get("id"))
+                if i.get("rarity") in HIGH_RARITIES and i.get("ref"):
+                    w = _watch(i["ref"], i.get("rarity"))
+                    w["holder"] = i.get("to")
+                    w["last_sale"] = {"price": price, "frm": i.get("frm"), "to": i.get("to"), "tick": p.get("tick")}
                 row = {"ref": i.get("ref"), "price": round(price / max(1, len(cards)), 1), "frm": i.get("frm"),
                        "to": i.get("to"), "venue": p.get("venue"), "dealer": p.get("persona"), "tick": p.get("tick")}
                 if i.get("to"):
@@ -228,6 +259,21 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
                 continue
             team = offer_team.get(o.get("id")) or o.get("maker")
             book_offers.append({**o, "team": team, "venue": o.get("venue") or b.get("venue"), "kind": _kind(o)})
+    # listings only the feed shows yet (books are snapshots): still open, not expired, the card has not moved since
+    clock = _load(latest / "clock.json", {}) or {}
+    clock = clock.get("data", clock) if isinstance(clock, dict) else {}
+    now_tick = clock.get("tick") or lb.get("tick") or 0
+    in_books = {o.get("id") for o in book_offers}
+    for oid, o in feed_offers.items():
+        if oid in in_books or (o.get("status") or "open") != "open" or o.get("thread") is not None:
+            continue
+        if o.get("expires_tick") is None or int(o["expires_tick"]) <= int(now_tick or 0):
+            continue
+        if any(isinstance(a, dict) and a.get("id") in moved_assets for a in (o.get("give") or {}).get("assets") or []):
+            continue
+        if o.get("to") not in (None, us):
+            continue
+        book_offers.append({**o, "kind": _kind(o)})
     # addressed offers to us (not always in books)
     mo = _load(latest / "my_offers.json", {}) or {}
     mo = mo.get("data", mo) if isinstance(mo, dict) else {}
@@ -365,6 +411,28 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
                              "venue": a.get("venue"), "price": a["price"], "cost": a["cost"], "our_value": row["value"],
                              "gain": round(row["value"] - a["cost"], 1),
                              "why": f"{ref} asked at {a['price']} P (+fee = {a['cost']}) on {a.get('venue')}; worth {row['value']} P to us"})
+    # (b2) cards outside the pages (epics, legendaries) or extra copies worth a lot to us, asked below that value
+    cash_now = float(me.get("cash") or 0)
+    for o in book_offers:
+        if is_us(o.get("team")) or o["kind"] != "ask":
+            continue
+        price = _cash(o.get("want"))
+        cost = round(price + _fee(venues.get(o.get("venue")), price), 1)
+        for ref in _refs(o.get("give")):
+            if ref in missing_all:
+                continue
+            try:
+                v = round(float(vals.next_copy(ref)), 1)
+            except Exception:  # noqa: BLE001
+                continue
+            if v >= EXTRA_MIN_VALUE and v - cost >= MIN_GAIN_P:
+                gap = round(max(0.0, cost - cash_now), 1)
+                opps.append({"kind": "buy_below_value", "ref": ref, "team": o.get("team"), "offer": o.get("id"),
+                             "venue": o.get("venue"), "price": price, "cost": cost, "our_value": v,
+                             "gain": round(v - cost, 1), "non_page": True, "cash_gap": gap,
+                             "why": f"{ref} ({rarity_of.get(ref) or 'card'}, not a page card) asked at {price} P "
+                                    f"(+fee = {cost}) on {o.get('venue')}; worth {v} P to us"
+                                    + (f"; we are {gap} P short: fund it" if gap else "")})
     # (c) swaps both sides gain: rival hunts our spare AND sells a card we're missing
     for team, r in rivals.items():
         want_ours = [ref for ref in r["hunting"] if ref in spare_by_ref]
@@ -406,7 +474,9 @@ def needs_report(record_dir: Path | str | None = None, live_dir: Path | str | No
     return {"us": us, "tick": lb.get("tick") or me.get("tick"), "cash": me.get("cash"), "affinity": affinity,
             "ours": {"sets": ours_sets, "spares": sorted(spares, key=lambda s: s["spare_value"]),
                      "page_completers": [m for s in ours_sets.values() if s["completes_page"] for m in s["missing"]]},
-            "rivals": rivals, "opportunities": opps}
+            "rivals": rivals, "opportunities": opps,
+            "watch": sorted(({**w, "our_value": round(float(vals.next_copy(w["ref"])), 1)} for w in watch.values()),
+                            key=lambda w: -w["our_value"])}
 
 
 # ----------------------------------------------------------------------------- summary
@@ -423,6 +493,13 @@ def summary_text(report: dict, max_chars: int = 4000) -> str:
     L.append("OPPORTUNITIES (gain P, cited):")
     for o in (report.get("opportunities") or [])[:15]:
         L.append(f"- [{o['kind']}] gain {o.get('gain')}: {o['why']}" + (f" (offer #{o['offer']})" if o.get("offer") else ""))
+    if report.get("watch"):
+        L.append("WATCH (epics / legendaries seen): " + "; ".join(
+            f"{w['ref']} worth {w['our_value']}P to us, holder {w.get('holder') or '?'}"
+            + (f", last ask {w['asks'][-1]['price']}P" if w.get("asks") else "")
+            + (f", sold at {w['last_sale']['price']}P to {w['last_sale']['to']}" if w.get("last_sale") else "")
+            + (f", bids {[(b['team'], b['cash']) for b in w['bids'][-3:]]}" if w.get("bids") else "")
+            for w in report["watch"][:6]))
     L.append("RIVALS:")
     riv = sorted((report.get("rivals") or {}).values(), key=lambda r: -(r.get("score") or 0))
     for r in riv[:10]:

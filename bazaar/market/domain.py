@@ -31,6 +31,7 @@ from ..core.types import Action, Outcome
 from ..dealers.compat import clean, lessons_block, llm_module, time_left
 from ..lab import feedback
 from ..dealers.values import Values
+from . import bargain
 from . import protocol as proto
 from .protocol import (BID_EXPIRES, MAX_OWN_BIDS, MAX_OWN_OPEN, MAX_OWN_SWAPS, SWAP_EXPIRES, BidCand, SwapCand,
                        choose_venue, offer_kind, page_delta, taker_fee, tradable_venues, venue_id, want_cards)
@@ -77,6 +78,7 @@ class AcceptCand:
     page: float = 0.0
     kind: str = "other"
     addressed: bool = False
+    fast: bool = False               # a big bargain: accept this tick, no Claude call, no council
 
 
 @dataclass
@@ -175,6 +177,11 @@ class MarketDomain:
         self._last_state: dict | None = None
         self._brain_posted: set = set()              # brain offers in flight this process (strategy.post_key)
         self._targeted: dict | None = None           # "ref|team" -> tick of our last ask addressed to that team
+        self._feed = bargain.FeedOffers()            # every listing the feed shows, until it expires or settles
+        self._bargain_logged: dict = {}              # offer id -> status already written to bargains.jsonl
+        self._counter_tick: dict = {}                # "seller|refs" -> tick of our last counter-offer
+        self._bargain_actions: list[Action] = []     # counter-offers built by _prepare for this tick
+        self._funding: dict | None = None            # the bargain we are raising cash for (also in bargain_goal.json)
 
     # ================================================================== protocol
     def fallback(self, sit, ctx) -> list[Action]:
@@ -250,6 +257,8 @@ class MarketDomain:
         state["_brain_posts"] = []                      # once per tick
         if posts:
             actions = actions + posts
+        if any(a.kind == "accept_offer" and (a.expected or {}).get("bargain") for a in actions):
+            return actions                              # a big bargain keeps this tick's accept slot
         for c in state.get("_brain_accepts") or []:
             oid = c.offer.get("id")
             if any(a.kind == "accept_offer" and (a.params or {}).get("offer") == oid for a in actions):
@@ -270,7 +279,11 @@ class MarketDomain:
         acc, posts, state = self._prepare(sit, ctx)
         self._last_state = state
         base = self._code_plan(acc, posts, state)
+        base = self._bargain_actions + base           # counter-offers for bargains we cannot pay yet
         tick = int(_g(sit, "tick", 0) or 0)
+        if acc and acc[0].fast:                       # a big bargain: take it now, the model call would cost the tick
+            self.last_notes = [f"bargain fast path: offer {acc[0].offer.get('id')} gain {acc[0].gain}"]
+            return base
         anything = posts or state["_bids"] or state["_swaps"]
         worth = bool(acc) or (anything and tick - self._last_ask_tick >= LLM_EVERY)
         if not worth or not self.use_llm or not bool(_g(ctx, "llm_ok", True)) or time_left(ctx) < MIN_LLM_S \
@@ -285,7 +298,7 @@ class MarketDomain:
         if moves is None:
             return base
         self._ctx = ctx
-        return self._cancels(state) + self._apply(moves, acc, posts, state)
+        return self._bargain_actions + self._cancels(state) + self._apply(moves, acc, posts, state)
 
     def remember(self, actions: list[Action]) -> None:
         for a in actions:
@@ -504,8 +517,30 @@ class MarketDomain:
         for o in addressed:
             vid = o.get("venue") or "rastro"
             sources.append((by_vid.get(vid) or {"venue": vid}, [o], True))
+        # listings seen in the feed this tick or still alive: El Rastro's book is only re-read every few ticks
+        self._feed.ingest(_g(sit, "feed_new") or [], tick)
+        in_books = {o.get("id") for _v, offers in books for o in offers or []}
+        for o in self._feed.open():
+            vid = o.get("venue") or "rastro"
+            if o.get("id") in in_books or vid in skip_venues or vid not in by_vid:
+                continue
+            sources.append((by_vid[vid], [o], False))
         accepts: list[AcceptCand] = []
         brain_accepts: list[AcceptCand] = []
+        self._bargain_actions = []
+        avoid_sets = {str(x).upper()[:3] for x in control.get("avoid_buy_sets") or []}
+        hour_left = budget.get("spend_hour_left")
+        from bazaar.core.context import dealer_committed as _dc, market_committed as _mc
+        try:
+            promised = int(_mc(sit) + _dc(sit))
+        except Exception:  # noqa: BLE001
+            promised = 0
+        # what the cash rail lets one deal spend now (reserve, promised cash, per-deal and per-hour caps)
+        fast_cap = 0 if cautious else max(0, min(cash - reserve - promised, per_deal,
+                                                 int(hour_left) if hour_left is not None else cash))
+        exact_reads = 0
+        shorts: list[AcceptCand] = []
+        live_bargains: set = set()
         try:
             from bazaar.brain.strategy import accept_offers as _brain_ok, keep_one_exception as _exc, \
                 KEEP_ONE_MIN_GAIN as _min_gain
@@ -568,14 +603,43 @@ class MarketDomain:
                 if c is None:
                     continue
                 c.addressed = is_addr or o.get("to") == my_id
+                # a possible bargain: price it with the exact /api/me/value before deciding
+                if c.gain >= bargain.EXACT_TRIGGER_P and exact_reads < bargain.EXACT_READS_PER_TICK:
+                    gw = self._reader(ctx)
+                    for ref in dict.fromkeys(c.in_refs):
+                        if gw is None or values.is_exact(ref) or exact_reads >= bargain.EXACT_READS_PER_TICK:
+                            continue
+                        try:
+                            exact_reads += 1
+                            self.reads += 1
+                            values.remember_exact(ref, gw.get("/api/me/value", card=ref))
+                        except Exception:  # noqa: BLE001
+                            pass
+                    c2 = self._evaluate(o, venue, values, counts, can_give)
+                    if c2 is None:
+                        continue
+                    c2.addressed, c = c.addressed, c2
                 if not fair_ok(c.team):
                     continue
                 spend = c.cash_out + c.fee - c.cash_in
+                big = (c.gain >= bargain.BIG_BARGAIN_P and c.in_refs
+                       and not any(values.set_of(r) in avoid_sets for r in c.in_refs))
+                if big:
+                    live_bargains.add(o.get("id"))
+                    if spend <= fast_cap:
+                        c.fast = True
+                        accepts.append(c)
+                        self._log_bargain(c, "accepting", cash, 0, tick)
+                    elif spend > 0:
+                        shorts.append(c)
+                    continue
                 if spend > spend_cap:
                     continue
                 if c.gain >= min_gain(c.cost):
                     accepts.append(c)
-        accepts.sort(key=lambda c: -c.gain)
+        accepts.sort(key=lambda c: (not c.fast, -c.gain))
+        self._bargains_short(shorts, live_bargains, values, counts, can_give, kept, venues, own_market,
+                             cash, fast_cap, tick)
         accepts = accepts[:8]
         for i, c in enumerate(accepts):
             c.id = f"a{i + 1}"
@@ -644,6 +708,8 @@ class MarketDomain:
         bids = [b for b in bids if b.max_price <= per_deal]
         from bazaar.core.goal import pending as _goal_pending
         goal = _goal_pending(sit, control, values)  # cash is saved for these: bid only on them
+        if self._funding:                           # raising cash for a bargain: no cash parked in bids either
+            bids = []
         if goal:                                    # goal cards come from the dealers: no cash parked in bids
             bids = []
 
@@ -894,9 +960,83 @@ class MarketDomain:
                    domain=self.name, reason=reason or f"gain {c.gain} P at private values", source=source,
                    expected={"points": c.gain, "value_gain": c.gain, "value_get": c.value_in, "spend": c.cash_out + c.fee,
                              "counterparty": c.team, "kind": c.kind, "addressed": c.addressed},
-                   big=(c.cash_out + c.fee) >= config.BIG_DEAL_P, priority=min(float(c.gain), 99.0))
+                   big=(c.cash_out + c.fee) >= config.BIG_DEAL_P and not c.fast, priority=min(float(c.gain), 99.0))
+        if c.fast:
+            a.source = "code"
+            a.priority = 99.5
+            a.expected["bargain"] = True
+            a.reason = (f"BARGAIN fast path: {', '.join(c.in_refs)} for {c.cash_out} P (+{c.fee} fee), worth "
+                        f"{c.value_in} P to us: gain {c.gain} P. Accepted in the same tick, no council.")
         self._sent[a.id] = {"kind": "accept_offer", "team": c.team or o.get("maker")}
         return a
+
+    # ------------------------------------------------------------------ bargains we cannot pay yet
+    def _log_bargain(self, c: AcceptCand, status: str, cash: int, gap: int, tick: int, counter: Any = None,
+                     can_spend: int | None = None) -> None:
+        oid = c.offer.get("id")
+        if self._bargain_logged.get(oid) == status:
+            return
+        self._bargain_logged[oid] = status
+        bargain.log({"tick": tick, "kind": "bargain", "status": status, "offer": oid, "refs": list(c.in_refs),
+                     "seller": c.team or c.offer.get("maker"), "venue": c.venue, "price": c.cash_out,
+                     "cost": c.cash_out + c.fee, "value": c.value_in, "gain": c.gain, "cash": cash, "gap": gap,
+                     "can_spend": can_spend, "counter": counter})
+
+    def _bargains_short(self, shorts: list[AcceptCand], live: set, values: Values, counts: dict, can_give, kept,
+                        venues: list[dict], own_market: list[dict], cash: int, fast_cap: int, tick: int) -> None:
+        """Bargains we cannot pay this tick: counter-offer with cash + cards we do not collect, tell the brain
+        (bargains.jsonl) and keep a funding goal until the offer disappears."""
+        goal = self._funding
+        if not shorts:
+            if goal and goal.get("offer") not in live and tick - int(goal.get("last_seen_tick") or 0) > 3:
+                bargain.log({"tick": tick, "kind": "bargain", "status": "gone", "offer": goal.get("offer"),
+                             "refs": goal.get("refs")})
+                self._funding = None
+                bargain.set_funding(None)
+            return
+        best = max(shorts, key=lambda c: c.gain)
+        spend = best.cash_out + best.fee - best.cash_in
+        gap = int(spend - fast_cap)
+        seller = best.team or best.offer.get("maker")
+        key = f"{seller}|{','.join(sorted(best.in_refs))}"
+        counter = None
+        wanted_already = any(set(want_cards(o)) & set(best.in_refs) and o.get("to") == seller for o in own_market)
+        last = self._counter_tick.get(key)
+        if seller and not wanted_already and (last is None or tick - last >= bargain.COUNTER_EXPIRES):
+            pool = []
+            for a in values.assets.values():
+                ref = a.get("ref")
+                if (a.get("kind", "card") != "card" or not ref or values.set_of(ref) in kept
+                        or not can_give(a, counts)):
+                    continue                              # never a card of a set we collect (LAV/MAL pages)
+                pool.append((a, float(values.asset_value(a["id"])), float(values.book(ref))))
+            give = bargain.counter_give(fast_cap, best.cash_out, best.value_in, pool)
+            if give is not None:
+                vid = choose_venue(venues, int(give["cash"]), len(give["assets"]) + len(best.in_refs))
+                params = {"venue": vid, "give": {"assets": [a["id"] for a in give["assets"]]},
+                          "want": {"cards": list(best.in_refs)}, "to": seller,
+                          "expires_in_ticks": bargain.COUNTER_EXPIRES}
+                if give["cash"]:
+                    params["give"]["cash"] = int(give["cash"])
+                counter = {"cash": give["cash"], "cards": [a.get("ref") for a in give["assets"]], "venue": vid}
+                act = Action(kind="post_offer", params=params, domain=self.name, source="code",
+                             reason=(f"BARGAIN counter-offer to {seller}: {', '.join(best.in_refs)} asked at "
+                                     f"{best.cash_out} P is worth {best.value_in} P to us and cash is short by {gap} P; "
+                                     f"we offer {give['cash']} P + {counter['cards']} (we give {give['value_given']} P "
+                                     "of value)."),
+                             expected={"value_gain": round(best.value_in - give["value_given"], 2), "points": 0.0,
+                                       "value_get": best.value_in, "kind": "swap" if give["assets"] else "bid",
+                                       "spend": int(give["cash"])}, priority=90.0)
+                self._sent[act.id] = {"kind": "post_offer", "team": seller}
+                self._bargain_actions.append(act)
+                self._counter_tick[key] = tick
+        self._log_bargain(best, "short", cash, gap, tick, counter, can_spend=fast_cap)
+        self._funding = {"offer": best.offer.get("id"), "refs": list(best.in_refs), "seller": seller,
+                         "venue": best.venue, "price": best.cash_out, "cost": best.cash_out + best.fee,
+                         "value": best.value_in, "gain": best.gain, "gap": gap, "last_seen_tick": tick,
+                         "since_tick": (goal or {}).get("since_tick", tick)
+                         if (goal or {}).get("refs") == list(best.in_refs) else tick}
+        bargain.set_funding(self._funding)
 
     def _act_post(self, p: PostCand, price: int, to: str | None, source: str, reason: str) -> Action:
         params = {"venue": p.venue, "give": {"assets": [p.asset["id"]]}, "want": {"cash": int(price)},

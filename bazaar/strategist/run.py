@@ -392,6 +392,7 @@ class Strategist:
         self.last_review = self.now()           # first hourly review one hour after start
         self.ext_seen_ts: float | None = self.now()
         self.official_seen_ts: float | None = self.now()
+        self.bargain_seen_ts: float = self.now()
         self.last_review_row: dict | None = None
         self.calls = 0
         self.last_reason = ""
@@ -761,6 +762,15 @@ class Strategist:
                                   {"source": r.get("source")}))
         except Exception:  # noqa: BLE001
             pass
+        try:                                        # big bargains the bot saw this tick (bazaar.market.bargain)
+            from bazaar.market import bargain
+            for r in bargain.recent(self.live, since=self.bargain_seen_ts):
+                self.bargain_seen_ts = max(self.bargain_seen_ts, float(r.get("ts") or 0))
+                new.append(_e("bargain", bargain.event_text(r), {k: r.get(k) for k in
+                                                                 ("offer", "refs", "seller", "price", "cost", "value",
+                                                                  "gain", "cash", "gap", "status", "counter")}))
+        except Exception:  # noqa: BLE001
+            pass
         for m in B.chat_since(self.live, self.chat_seen_ts, 50):
             if m.get("role") == "user":
                 new.append(_e("chat", f"{m.get('by') or 'equipo'}: " + _wrap(m.get("text"), "team-chat"),
@@ -777,11 +787,12 @@ class Strategist:
         clock = pic.get("clock") or {}
         tick = clock.get("tick")
         self.poll_inputs(tick)
-        chat = any(e.get("kind") in ("chat", "external", "official") for e in self.pending_events)
+        chat = any(e.get("kind") in ("chat", "external", "official", "bargain") for e in self.pending_events)
         now = self.now()
         since = now - self.last_call
         if chat and since >= CHAT_GAP_S:
-            kinds = sorted({e.get("kind") for e in self.pending_events if e.get("kind") in ("chat", "external", "official")})
+            kinds = sorted({e.get("kind") for e in self.pending_events
+                            if e.get("kind") in ("chat", "external", "official", "bargain")})
             return "message in the team chat" if kinds == ["chat"] else f"new input: {', '.join(kinds)}"
         if clock.get("paused") or clock.get("doors") not in (None, "open"):
             return ""
@@ -828,8 +839,16 @@ class Strategist:
         llm = self.llm()
         system = llm.cached_system(SYSTEM) if hasattr(llm, "cached_system") else SYSTEM
         events = ""
+        first = [e for e in self.pending_events if e.get("kind") == "bargain"]
+        if first:
+            events = ("\n\nOPPORTUNITIES FIRST (the bot found these this tick; they outrank every other priority):\n- "
+                      + "\n- ".join(str(e.get("text")) for e in first[-4:])
+                      + "\nMake the top one priority 1: free the cash it needs now (cancel_offers on cash bids, "
+                      "post_offers of spares above their value, lower cash_policy.reserve, raise budgets.per_deal if "
+                      "the per-deal cap is the blocker), and do not spend cash on anything else until it is bought "
+                      "or gone. The bot accepts it by itself as soon as the rails allow.")
         if self.pending_events:
-            events = ("\n\nEVENTS since the last plan (kind: text):\n- " +
+            events += ("\n\nEVENTS since the last plan (kind: text):\n- " +
                       "\n- ".join(f"{e.get('kind')}: {e.get('text')}" for e in self.pending_events) +
                       "\nFor each event, decide explicitly whether it requires changing the plan: e.g. reaching a "
                       "level or making N negotiated deals with a dealer to unlock another dealer early (see each "
