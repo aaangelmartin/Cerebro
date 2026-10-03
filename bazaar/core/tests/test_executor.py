@@ -141,6 +141,42 @@ class ExecutorTest(unittest.TestCase):
             self.assertEqual(out.status, "sent")
             self.assertEqual(gw.calls[-1], ("POST", "/api/broker/matches", {"sell": 1, "buy": 2, "price": 5}, "bk-1"))
 
+    def test_venue_open_timeout_alerts_and_recovers_key(self):
+        class SlowGW(FakeGW):
+            def post(self, path, body=None, broker_key=None, timeout=None):
+                self.calls.append(("POST", path, body, timeout))
+                raise GameError("timeout", f"POST {path} took over {timeout}s")
+
+        live = Path(self.dir.name) / "live"
+        bfile = live / "broker.json"
+        gw = SlowGW({"/api/me": {"id": "t10", "venue": "v9", "broker_key": "bk-secret", "cash": 100},
+                     "/api/venues": {"venues": [{"id": "v9", "name": "board"}]}})
+        notices = []
+        from bazaar.broker import venue
+        with mock.patch.object(executor.config, "LIVE", live), mock.patch.object(venue, "BROKER_FILE", bfile), \
+                mock.patch("bazaar.lab.store.write_notice", lambda kind, text, **kw: notices.append((kind, text))):
+            out = self.run_(Action("venue_open", {"name": "board"}, "broker"), gw)
+        self.assertEqual((out.status, out.response["error"]), ("error", "timeout"))
+        self.assertEqual(gw.calls[0][3], executor.VENUE_OPEN_TIMEOUT_S)          # 30 s for this call only
+        self.assertEqual([c[1] for c in gw.calls[1:]], ["/api/me", "/api/venues"])
+        rows = [json.loads(x) for x in (live / "alerts.jsonl").read_text().splitlines()]
+        self.assertEqual((rows[0]["kind"], rows[0]["venue"], rows[0]["recovered"]), ("venue_key_maybe_lost", "v9", True))
+        self.assertNotIn("bk-secret", (live / "alerts.jsonl").read_text())
+        self.assertEqual(json.loads(bfile.read_text())["broker_key"], "bk-secret")
+        self.assertEqual(len(notices), 1)
+
+    def test_venue_open_network_error_without_venue_alerts(self):
+        gw = FakeGW({"/api/me": {"id": "t10"}, "/api/venues": []}, fail=GameError("network", "reset"))
+        live = Path(self.dir.name) / "live2"
+        from bazaar.broker import venue
+        with mock.patch.object(executor.config, "LIVE", live), \
+                mock.patch.object(venue, "BROKER_FILE", live / "broker.json"):
+            out = self.run_(Action("venue_open", {"name": "board"}, "broker"), gw)
+        self.assertEqual(out.status, "error")
+        row = json.loads((live / "alerts.jsonl").read_text().splitlines()[0])
+        self.assertEqual((row["venue"], row["has_key"]), (None, False))
+        self.assertIn("ALERTA", row["text"])
+
     def test_noop(self):
         gw = FakeGW()
         self.assertEqual(self.run_(Action("noop", {}, "lab"), gw).status, "sent")

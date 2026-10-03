@@ -62,7 +62,12 @@ class SuperviseTest(unittest.TestCase):
         sup.check()
         self.assertEqual(br.proc.pid, pid)          # 50 s < 2 ticks of 30 s
         self.clock[0] = 1000.0 + 61
-        sup.check()                                  # stale: stopped and started again
+        sup.check()                                  # stale: stopped, restart after the backoff
+        self.assertIsNone(br.proc)
+        self.assertEqual(br.failures, 1)
+        self.assertGreater(br.next_try, self.clock[0])
+        self.clock[0] = br.next_try
+        sup.check()
         self.assertNotEqual(br.proc.pid, pid)
 
     def test_broker_not_judged_while_closed(self):

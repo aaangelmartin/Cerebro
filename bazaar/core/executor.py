@@ -5,6 +5,7 @@ re-checked here; the full rails.check runs before (run.py), since that needs the
 """
 from __future__ import annotations
 
+import inspect
 import json
 import time
 
@@ -15,6 +16,7 @@ from .types import Action, Outcome
 
 BROKER_FILE = config.LIVE / "broker.json"
 SERVER_CODES = {"network", "timeout", "upstream", "server_error", "bad_json"}
+VENUE_OPEN_TIMEOUT_S = 30.0      # the opening response carries the broker key ONCE: give it time to arrive
 
 
 def _tick(sit, ctx) -> int:
@@ -178,6 +180,13 @@ def _execute(action: Action, gw, sit, ctx, tick: int) -> Outcome:
             resp = gw.delete(path)
         elif method == "patch":
             resp = gw.patch(path, body)
+        elif action.kind == "venue_open":
+            try:
+                resp = _post_with_timeout(gw, path, body, VENUE_OPEN_TIMEOUT_S)
+            except GameError as e:
+                if e.code in ("timeout", "network"):
+                    _venue_key_maybe_lost(gw, e)
+                raise
         else:
             resp = gw.post(path, body, broker_key=bk) if bk else gw.post(path, body)
         if action.kind == "venue_open" and isinstance(resp, dict):
@@ -194,3 +203,64 @@ def _execute(action: Action, gw, sit, ctx, tick: int) -> Outcome:
         return Outcome(action.id, tick, "error", {"error": "bad_action", "message": f"{type(e).__name__}: {e}"})
     except Exception as e:  # noqa: BLE001 - never raise into the tick loop
         return Outcome(action.id, tick, "error", {"error": "internal", "message": f"{type(e).__name__}: {e}"[:300]})
+
+
+def _post_with_timeout(gw, path: str, body: dict, timeout: float):
+    """gw.post with a per-call timeout when the gateway supports it (test doubles may not)."""
+    try:
+        takes = "timeout" in inspect.signature(gw.post).parameters
+    except (TypeError, ValueError):
+        takes = False
+    return gw.post(path, body, timeout=timeout) if takes else gw.post(path, body)
+
+
+def _venue_key_maybe_lost(gw, err: GameError, alerts: "Path | None" = None) -> dict:
+    """venue_open timed out or lost the connection: the venue may exist and its broker key (sent only once) may be
+    lost. Re-read /api/me and /api/venues at once, keep the key if /api/me still shows it, and raise an alert for
+    the team (data/live/alerts.jsonl + a lab notice). Never raises."""
+    from bazaar.broker import venue as _venue
+    me, venues, read_errors = {}, None, []
+    try:
+        me = gw.get("/api/me") or {}
+    except Exception as e:  # noqa: BLE001
+        read_errors.append(f"/api/me: {e}"[:200])
+    try:
+        venues = gw.get("/api/venues")
+    except Exception as e:  # noqa: BLE001
+        read_errors.append(f"/api/venues: {e}"[:200])
+    vid = None
+    recovered = False
+    try:
+        vid = _venue.own_venue_id(me if isinstance(me, dict) else {}, venues)
+        key = _venue._find_key(me) if isinstance(me, dict) else None
+        if vid and key and not _venue.load_key():
+            _venue.save_from_response({"venue": vid, "broker_key": key})
+            recovered = True
+    except Exception as e:  # noqa: BLE001
+        read_errors.append(f"venue: {e}"[:200])
+    has_key = bool(_venue.load_key())
+    if vid and has_key:
+        text = (f"La apertura de la tienda dio {err.code}, pero la tienda {vid} existe y tenemos la clave de broker"
+                f"{' (recuperada de /api/me)' if recovered else ''}.")
+    elif vid:
+        text = (f"ALERTA: la apertura de la tienda dio {err.code} y la tienda {vid} SÍ existe, pero no tenemos la "
+                f"clave de broker: puede haberse perdido. Hay que recuperarla a mano (el broker no puede emparejar).")
+    else:
+        text = (f"ALERTA: la apertura de la tienda dio {err.code}; /api/me no muestra tienda propia todavía. "
+                f"Si aparece más tarde, la clave de broker puede haberse perdido: revisad /api/me y /api/venues.")
+    row = {"ts": time.time(), "kind": "venue_key_maybe_lost", "error": err.code, "message": str(err.message)[:200],
+           "venue": vid, "has_key": has_key, "recovered": recovered, "read_errors": read_errors, "text": text,
+           "me": _venue.redact({k: me.get(k) for k in ("venue", "level", "cash")}) if isinstance(me, dict) else None}
+    path = alerts or (config.LIVE / "alerts.jsonl")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        pass
+    try:
+        from bazaar.lab.store import write_notice
+        write_notice("alert", text, venue=vid, has_key=has_key)
+    except Exception:  # noqa: BLE001 - the lab may be missing or mid-edit
+        pass
+    return row

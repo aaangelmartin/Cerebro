@@ -39,6 +39,25 @@ END_AFTER_ABSENT = 2           # ticks a run must be missing from the book befor
 STALL_SWITCH_SESSIONS = 2      # sessions in a row below the stall before switching to mode "stall"
 STALL_MARGIN = 0.005           # server numbers are exact
 REPLAY_MARGIN = 0.02           # the replay compares estimates: demand a clearer gap
+WAKE_EARLY_S = 0.3             # wake this long before the next tick
+MIN_SLEEP_S = 0.5
+CLOSED_SLEEP_S = 15.0          # doors closed or paused: read the clock this often (10-30 s)
+ERROR_SLEEP_S = 2.0
+MAX_SLEEP_S = 30.0
+
+
+def next_sleep(clock: dict | None, clock_at: float | None = None, now: float | None = None) -> float:
+    """Seconds until the next clock read: just before the next tick, 15 s while closed/paused, 2 s after an error.
+    Replaces polling /api/clock every second."""
+    if not isinstance(clock, dict):
+        return ERROR_SLEEP_S
+    if clock.get("paused") or clock.get("doors") not in ("open", None):
+        return CLOSED_SLEEP_S
+    nti = clock.get("next_tick_in")
+    if isinstance(nti, bool) or not isinstance(nti, (int, float)) or nti != nti:
+        return 1.0
+    spent = max(0.0, (now if now is not None else time.time()) - clock_at) if clock_at else 0.0
+    return min(MAX_SLEEP_S, max(MIN_SLEEP_S, float(nti) - WAKE_EARLY_S - spent))
 
 
 # --------------------------------------------------------------------------- clients
@@ -142,6 +161,8 @@ class BrokerLoop:
         self.t_hours: float = 0.0
         self.absent: dict[str, int] = {}                # run -> consecutive ticks missing from the book
         self.hb_at = 0.0
+        self.last_clock: dict | None = None             # the last /api/clock read (None after an error)
+        self.last_clock_at: float | None = None
         self.auto_mode: str | None = None               # "stall" after an automatic switch when there is no control file
         self.state_file = state_file or (self.out.parent / "broker_state.json")
         self.notices_file = notices_file or (self.out.parent / "notices.jsonl")
@@ -213,8 +234,12 @@ class BrokerLoop:
         try:
             clock = self.client.clock()
         except Exception as e:  # noqa: BLE001
+            self.last_clock = None
             self._err(None, "clock", e)
             self.heartbeat(None)
+            return
+        self.last_clock, self.last_clock_at = (clock if isinstance(clock, dict) else None), time.time()
+        if not isinstance(clock, dict):
             return
         tick = clock.get("tick")
         self.t_hours = float(clock.get("t_hours") or 0.0)
@@ -541,7 +566,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--url", help="gateway or fake_bazaar URL (default config.GATEWAY_URL)")
     ap.add_argument("--token", help="gateway token (default config.GATEWAY_TOKEN)")
     ap.add_argument("--key", help="broker key (default: data/live/broker.json); never printed")
-    ap.add_argument("--poll", type=float, default=1.0, help="seconds between clock reads")
+    ap.add_argument("--poll", type=float, default=1.0, help="seconds between key checks while there is no key")
     a = ap.parse_args(argv)
 
     if a.sim:
@@ -549,6 +574,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     against_sim = bool(a.url) and ("127.0.0.1" in a.url or "localhost" in a.url) and a.url != config.GATEWAY_URL
+    if not against_sim:
+        from ..supervise import singleton
+        singleton("broker")                        # a second live broker exits here with a clear message
     gw = Gateway(url=a.url or config.GATEWAY_URL, token=a.token or config.GATEWAY_TOKEN,
                  real=True if against_sim else config.ALLOW_REAL)
     key = a.key or venue.load_key()
@@ -570,14 +598,19 @@ def main(argv: list[str] | None = None) -> None:
         except Exception as e:  # noqa: BLE001
             loop._err(loop.last_tick, "key", e)
         started = time.time()
+        polled = False
         try:
             if client.has_key:
+                polled = True
                 loop.poll()
             else:
                 loop.heartbeat(loop.last_tick)
         except Exception as e:  # noqa: BLE001 - the process must not die
             loop._err(loop.last_tick, "loop", e)
-        time.sleep(max(0.05, a.poll - (time.time() - started)))
+        if polled:
+            time.sleep(next_sleep(loop.last_clock, loop.last_clock_at))
+        else:
+            time.sleep(max(0.05, a.poll - (time.time() - started)))
 
 
 if __name__ == "__main__":

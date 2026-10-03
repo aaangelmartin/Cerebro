@@ -106,6 +106,20 @@ class PerceiveTest(unittest.TestCase):
         sit = state.perceive(gw, None, live=self.live, now=500.0)
         self.assertAlmostEqual(sit.deadline, 500.0 + config.DECISION_DEADLINE * 30)
 
+    def test_bad_countdown_starts_the_tick_now(self):
+        # None, 0, negative, non-numeric, NaN or longer than the tick: never an already-passed deadline.
+        for nti in (None, 0, -3, "soon", float("nan"), 45.0, True):
+            gw = FakeGateway({"/api/clock": clock(next_tick_in=nti)})
+            sit = state.perceive(gw, None, live=self.live, now=500.0)
+            self.assertAlmostEqual(sit.tick_start, 500.0, msg=repr(nti))
+            self.assertAlmostEqual(sit.deadline, 500.0 + config.DECISION_DEADLINE * 30, msg=repr(nti))
+        gw = FakeGateway({"/api/clock": clock(next_tick_in=30.0)})      # exactly at the start: still valid
+        self.assertAlmostEqual(state.perceive(gw, None, live=self.live, now=500.0).tick_start, 500.0)
+        gw = FakeGateway({"/api/clock": {**clock(), "next_tick_in": "20", "tick_seconds": "bad"}})  # -> 30 s
+        sit = state.perceive(gw, None, live=self.live, now=500.0)
+        self.assertEqual(sit.tick_seconds, 30.0)
+        self.assertAlmostEqual(sit.tick_start, 490.0)
+
 
 class BudgetTest(unittest.TestCase):
     def test_counts_reset_per_tick_and_spend_rolls(self):

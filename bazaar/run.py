@@ -29,6 +29,8 @@ import importlib
 import inspect
 import json
 import logging
+import math
+import os
 import sys
 import time
 import traceback
@@ -64,6 +66,9 @@ PAUSE_TICKS = 10
 INJECTION_FLOOD = 4              # flagged texts from others in one tick -> code-only for FLOOD_TICKS
 FLOOD_TICKS = 5
 ATTRIBUTE_TICKS = 3              # score deltas go to actions sent in the last N ticks
+STUCK_TICKS = 3                  # a domain's decide() still busy after this many ticks -> exit, supervisor restarts
+STUCK_EXIT_CODE = 3
+GATEWAY_RETRY_S = 3.0            # clock read failed: write a gateway_down heartbeat and retry this often
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -237,6 +242,8 @@ class Runner:
         self.errors: deque = deque(maxlen=20)
         self.dom_status: dict[str, dict] = {d.name: {"state": "idle"} for d in domains}
         self.last_report: dict = {}
+        self.submitted_tick: dict[str, int] = {}               # domain -> tick its running decide() was submitted
+        self.exit_fn: Callable[[int], Any] = os._exit           # stuck threads would block a normal exit
 
     # ----- plumbing -----
     def _err(self, where: str, e: BaseException | str):
@@ -298,9 +305,15 @@ class Runner:
         for d in domains:
             st = self.dom_status.setdefault(d.name, {})
             busy = self.running.get(d.name)
-            if not ctx.llm_ok or (busy is not None and not busy.done()):
-                continue                                      # code only, or still thinking last tick
+            if busy is not None and not busy.done():
+                since = self.submitted_tick.get(d.name, sit.tick)
+                if sit.tick - since >= STUCK_TICKS:
+                    self.stuck(d.name, since, sit, ctx)
+                continue                                      # still thinking since an earlier tick
+            if not ctx.llm_ok:
+                continue                                      # code only
             futs[d.name] = self.running[d.name] = self.pools[d.name].submit(d.decide, sit, ctx)
+            self.submitted_tick[d.name] = sit.tick
         if futs:
             cf.wait(list(futs.values()), timeout=max(0.0, ctx.deadline - self.now()))
         actions: list[Action] = []
@@ -328,6 +341,22 @@ class Runner:
             st.update(state="ok", last_source=src, actions=len(got), tick=sit.tick)
             actions.extend(got)
         return actions
+
+    def stuck(self, name: str, since: int, sit: Situation, ctx: TickContext):
+        """decide() has been busy for STUCK_TICKS ticks: its thread cannot be killed, so mark the domain stuck,
+        write status.json and exit non-zero; the supervisor starts a fresh process."""
+        st = self.dom_status.setdefault(name, {})
+        st.update(state="stuck", since_tick=since, tick=sit.tick)
+        msg = f"{name}.decide busy since tick {since} ({sit.tick - since} ticks): exiting so the supervisor restarts us"
+        self._err("stuck", msg)
+        log.error(msg)
+        try:
+            self.write_status(sit, ctx.control, False, ctx, state="stuck")
+        except Exception:  # noqa: BLE001
+            pass
+        sys.stdout.flush()
+        sys.stderr.flush()
+        self.exit_fn(STUCK_EXIT_CODE)
 
     def review_big(self, actions: list[Action], sit: Situation, ctx: TickContext) -> list[Action]:
         council = self.council
@@ -626,15 +655,27 @@ class Runner:
         while True:
             try:
                 clock = self.gw.get("/api/clock")
+                if not isinstance(clock, dict):
+                    raise ValueError(f"clock is {type(clock).__name__}")
             except Exception as e:  # noqa: BLE001
                 self._err("clock", e)
-                time.sleep(3)
+                try:                                          # keep the heartbeat fresh: waiting, not hung
+                    c = self.control()
+                    self.write_status(self.prev, c, self.can_write(c), state="gateway_down")
+                except Exception as e2:  # noqa: BLE001
+                    self._err("status", e2)
+                time.sleep(GATEWAY_RETRY_S)
                 continue
             if clock.get("paused") or clock.get("doors") != "open":
                 return clock, False
             if clock.get("tick") != self.last_tick:
                 return clock, True
-            nti = float(clock.get("next_tick_in") or 1.0)
+            try:
+                nti = float(clock.get("next_tick_in"))
+                if not math.isfinite(nti):
+                    raise ValueError
+            except (TypeError, ValueError):
+                nti = 1.0
             time.sleep(min(5.0, max(0.2, nti + 0.15)))
 
     def loop(self, once: bool = False):
@@ -725,6 +766,13 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--only", default="", help="comma-separated domains (duels,dealers,market)")
     ap.add_argument("--once", action="store_true", help="one tick, then exit")
     args = ap.parse_args(argv)
+    if args.live:
+        from .supervise import AlreadyRunning, singleton
+        try:
+            singleton("run-live")                   # one live bot at a time (a second would double every write)
+        except AlreadyRunning as e:
+            print(f"bazaar.run: {e}", file=sys.stderr, flush=True)
+            sys.exit(2)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     runner = build("sim" if args.sim else "live", [s for s in args.only.split(",") if s] or None)
     c = runner.control()

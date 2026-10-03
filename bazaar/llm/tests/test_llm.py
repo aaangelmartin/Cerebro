@@ -61,7 +61,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.path = Path(self.dir.name) / "llm_spend.json"
-        self.router = KeyRouter(keys=self.keys, path=self.path, key_cap=100, day_cap=100)
+        self.router = KeyRouter(keys=self.keys, path=self.path, key_cap=100, day_cap=100, shares={"*": 1.0})
         client.set_router(self.router)
         self.lg = Ledger(self.dir.name)
         client.set_ledger(self.lg)
@@ -220,6 +220,7 @@ class BudgetTest(Base):
         f = self.sdk(A=[], B=[resp()])
         self.assertEqual(self.ask().key, "B")
         self.router.state["keys"]["B"] = 100.0
+        self.router._save()                      # the router re-reads the shared file before deciding
         with self.assertRaises(LLMUnavailable):
             self.ask()
         self.assertEqual(len(f.calls), 1)
@@ -235,6 +236,65 @@ class BudgetTest(Base):
         self.assertAlmostEqual(day["usd"], 3.0)
         self.assertAlmostEqual(day["by_purpose"]["broker_policy"], 1.0)
         self.assertAlmostEqual(saved["keys"]["A"], 2.0)
+
+
+class EffectiveCapTest(unittest.TestCase):
+    """Day cap = min(DAY_CAP_USD, (left on keys + spent today) x share), ladder Opus/Sonnet/Haiku/none."""
+
+    SAT = 1791021600.0     # 2026-10-03 12:00 Madrid (Saturday)
+    SUN = SAT + 86400
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.dir.name) / "llm_spend.json"
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def router(self, clock, keys=(("A", "ka"),), **kw):
+        return KeyRouter(keys=list(keys), path=self.path, key_cap=100, day_cap=100, clock=lambda: clock, **kw)
+
+    def test_saturday_keeps_money_for_sunday(self):
+        r = self.router(self.SAT)
+        self.assertEqual(r.day(), "sat")
+        self.assertAlmostEqual(r.effective_day_cap(), 55.0)
+        # Spending today does not shrink today's cap (it is a share of what was left at the start of the day).
+        r.record("A", config.HAIKU, {"input_tokens": 20_000_000}, "duels")       # 20 $
+        self.assertAlmostEqual(r.effective_day_cap(), 55.0)
+        sun = self.router(self.SUN)
+        self.assertEqual(sun.day(), "sun")
+        self.assertAlmostEqual(sun.effective_day_cap(), 80.0)
+        self.assertAlmostEqual(self.router(self.SAT - 86400).effective_day_cap(), 8.0)    # Friday: 10 % of 80 left
+        # With three keys the configured 100 $ day cap still applies.
+        three = self.router(self.SUN, keys=(("A", "a"), ("B", "b"), ("C", "c")))
+        self.assertAlmostEqual(three.effective_day_cap(), 100.0)
+
+    def test_ladder_reaches_haiku_then_code_only(self):
+        r = self.router(self.SAT)                 # cap 55
+        cases = [(0.0, config.OPUS), (0.79 * 55, config.OPUS), (0.80 * 55, config.SONNET),
+                 (0.91 * 55, config.SONNET), (0.92 * 55, config.HAIKU), (0.999 * 55, config.HAIKU)]
+        for usd, want in cases:
+            r.state = {"keys": {"A": usd}, "days": {"sat": {"usd": usd}}}
+            r._save()
+            self.assertEqual(r.resolve(None), want, usd)
+            self.assertEqual(r.resolve(config.OPUS), want, usd)
+        self.assertEqual(r.resolve(config.HAIKU), config.HAIKU)
+        r.state = {"keys": {"A": 55.0}, "days": {"sat": {"usd": 55.0}}}
+        r._save()
+        with self.assertRaises(LLMUnavailable):
+            r.resolve(None)
+        self.assertEqual(r.model_now(), "none")
+
+    def test_summary_and_day_spent_see_other_processes(self):
+        api = self.router(self.SAT)
+        bot = self.router(self.SAT)
+        self.assertEqual(api.summary()["usd"], 0)
+        bot.record("A", config.HAIKU, {"input_tokens": 3_000_000}, "duels")
+        self.assertAlmostEqual(api.day_spent(), 3.0)
+        s = api.summary()
+        self.assertAlmostEqual(s["usd"], 3.0)
+        self.assertAlmostEqual(s["cap"], 55.0)
+        self.assertAlmostEqual(s["by_key"]["A"]["usd_total"], 3.0)
 
 
 class RaceTest(Base):

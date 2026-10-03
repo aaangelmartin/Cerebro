@@ -3,7 +3,11 @@
 - Picks the live key with the most budget left (KEY_CAP_USD each, whole weekend).
 - 401/403/credit errors kill a key; 429/529/timeouts put it on cooldown.
 - Spend per key and per Madrid day (fri/sat/sun) lives in data/live/llm_spend.json (atomic writes).
-- At DEGRADE_AT of DAY_CAP_USD, model=None and explicit Opus step one rung down DEGRADE_LADDER.
+- Effective day cap = min(DAY_CAP_USD, (budget left on live keys + spent today) x DAY_SHARE[day]):
+  sat 55 %, sun 100 %, fri/other 10 % of what was left when the day began (so Saturday cannot eat Sunday).
+- Ladder over the effective cap: Opus below DEGRADE_AT (80 %), Sonnet below DEGRADE_HAIKU_AT (92 %), Haiku
+  below 100 %, then LLMUnavailable (code-only). Explicit models are stepped down to the current rung, never up.
+- summary()/day_spent() re-read the shared spend file so the API/dashboard see other processes' spend.
 """
 from __future__ import annotations
 
@@ -52,12 +56,14 @@ def _family(model: str) -> str:
 
 class KeyRouter:
     def __init__(self, keys: list[tuple[str, str]] | None = None, path: Path | str | None = None,
-                 key_cap: float | None = None, day_cap: float | None = None, clock=time.time):
+                 key_cap: float | None = None, day_cap: float | None = None, clock=time.time,
+                 shares: dict | None = None):
         self.keys = list(config.anthropic_keys() if keys is None else keys)
         self.path = Path(path or config.SPEND_FILE)
         self.key_cap = config.KEY_CAP_USD if key_cap is None else key_cap
         self.day_cap = config.DAY_CAP_USD if day_cap is None else day_cap
         self.clock = clock
+        self.shares = dict(config.DAY_SHARE if shares is None else shares)
         self.lock = threading.RLock()
         self.dead: dict[str, str] = {}          # label -> why
         self.cool: dict[str, float] = {}        # label -> epoch when usable again
@@ -111,22 +117,56 @@ class KeyRouter:
     def day(self) -> str:
         return madrid_day(self.clock())
 
-    def day_spent(self, day: str | None = None) -> float:
-        return float(self.state["days"].get(day or self.day(), {}).get("usd", 0.0))
+    def day_spent(self, day: str | None = None, reload: bool = True) -> float:
+        if reload:
+            with self.lock:
+                self._reload()                   # other processes (broker, lab) add to the same file
+        try:
+            return float(self.state["days"].get(day or self.day(), {}).get("usd", 0.0))
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
+
+    def share(self, day: str | None = None) -> float:
+        d = day or self.day()
+        return float(self.shares.get(d, self.shares.get("*", 1.0)))
+
+    def effective_day_cap(self, reload: bool = True) -> float:
+        """min(day_cap, (left on live keys + spent today) x share of today)."""
+        with self.lock:
+            spent = self.day_spent(reload=reload)
+            left = sum(max(0.0, self.key_cap - self.key_spent(lb)) for lb, _ in self.keys if lb not in self.dead)
+            return round(min(self.day_cap, (left + spent) * self.share()), 6)
+
+    def rung(self) -> int | None:
+        """0 Opus, 1 Sonnet, 2 Haiku, None = effective day cap spent (code only)."""
+        with self.lock:
+            cap = self.effective_day_cap()
+            spent = self.day_spent(reload=False)
+        if cap <= 0 or spent >= cap:
+            return None
+        if spent >= config.DEGRADE_HAIKU_AT * cap:
+            return 2
+        if spent >= config.DEGRADE_AT * cap:
+            return 1
+        return 0
 
     def degraded(self) -> bool:
-        return self.day_spent() >= config.DEGRADE_AT * self.day_cap
+        r = self.rung()
+        return r is None or r > 0
 
     def resolve(self, model: str | None) -> str:
-        """The model this call will really use; raises LLMUnavailable when the day cap is spent."""
-        if self.day_spent() >= self.day_cap:
-            raise LLMUnavailable(f"day cap {self.day_cap}$ spent")
+        """The model this call will really use; raises LLMUnavailable when the effective day cap is spent."""
+        r = self.rung()
+        if r is None:
+            raise LLMUnavailable(f"day cap {self.effective_day_cap(reload=False):.2f}$ spent")
         ladder = config.DEGRADE_LADDER
         if model is None:
-            return ladder[1] if self.degraded() else ladder[0]
-        if self.degraded() and model == ladder[0]:
-            log.warning("llm degraded: %s -> %s (day spend %.2f$)", model, ladder[1], self.day_spent())
-            return ladder[1]
+            return ladder[r]
+        fam = model if model in ladder else _family(model)
+        have = ladder.index(fam) if fam in ladder else None
+        if have is not None and have < r:
+            log.warning("llm degraded: %s -> %s (day spend %.2f$)", model, ladder[r], self.day_spent(reload=False))
+            return ladder[r]
         return model
 
     def model_now(self) -> str:
@@ -153,14 +193,18 @@ class KeyRouter:
 
     def summary(self) -> dict:
         with self.lock:
+            self._reload()
             day = self.day()
+            cap = self.effective_day_cap(reload=False)
             d = self.state["days"].get(day, {})
             now = self.clock()
             by_key = {lb: {"usd_total": round(self.key_spent(lb), 4), "usd_today": round(d.get("by_key", {}).get(lb, 0), 4),
                            "cap": self.key_cap, "dead": self.dead.get(lb),
                            "cooldown_s": round(max(0.0, self.cool.get(lb, 0) - now), 1)} for lb, _ in self.keys}
-            return {"day": day, "usd": round(d.get("usd", 0.0), 4), "cap": self.day_cap,
-                    "degrade_at": round(config.DEGRADE_AT * self.day_cap, 2), "by_key": by_key,
+            return {"day": day, "usd": round(d.get("usd", 0.0), 4), "cap": round(cap, 2),
+                    "cap_config": self.day_cap, "share": self.share(day),
+                    "degrade_at": round(config.DEGRADE_AT * cap, 2),
+                    "haiku_at": round(config.DEGRADE_HAIKU_AT * cap, 2), "by_key": by_key,
                     "by_purpose": d.get("by_purpose", {}), "by_model": d.get("by_model", {}),
                     "calls": d.get("calls", 0), "model_now": self.model_now()}
 

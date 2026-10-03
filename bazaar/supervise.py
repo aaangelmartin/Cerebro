@@ -12,9 +12,17 @@ Services (each logs to data/live/<name>.out):
 A crashed service restarts after a short backoff (doubling up to 5 min). Heartbeats only count while
 the doors are open. The legacy gateway on :8787 is not managed here. Set BAZAAR_SUPERVISE_SKIP=lab,broker
 to leave services alone. Log: data/live/supervise.log.
+
+SIGTERM/SIGHUP/Ctrl-C stop every child (they run in their own sessions, so nobody else would). A service that
+stays alive and fresh for HEALTHY_RESET_S has its failure count reset. A bot reporting state="gateway_down"
+is waiting on the gateway, not hung, and is not restarted for it while that heartbeat stays fresh.
+
+Only one supervisor, one `run --live` and one live broker may run at a time: each holds an flock'd pidfile
+in data/live (see `singleton`), and a second copy exits with a clear message.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import signal
@@ -30,6 +38,48 @@ PY = sys.executable
 CHECK_EVERY_S = 10.0
 GRACE_S = 90.0                  # after a (re)start, heartbeats are not judged for this long
 MAX_BACKOFF_S = 300.0
+HEALTHY_RESET_S = 600.0         # alive and fresh this long -> failure count back to 0
+GATEWAY_DOWN_MAX_S = 300.0      # a gateway_down heartbeat is trusted while younger than this
+
+_LOCKS: dict[str, object] = {}  # name -> open pidfile (keeps the flock for the life of the process)
+
+
+class AlreadyRunning(SystemExit):
+    pass
+
+
+def singleton(name: str, live: Path | None = None) -> Path:
+    """Take data/live/<name>.pid with an exclusive non-blocking flock, or exit if another process holds it."""
+    path = Path(live or config.LIVE) / f"{name}.pid"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.seek(0)
+        other = f.read().strip() or "?"
+        f.close()
+        raise AlreadyRunning(f"{name} is already running (pid {other}, lock {path}); refusing to start a second one")
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+    _LOCKS[name] = f
+    return path
+
+
+def release(name: str):
+    f = _LOCKS.pop(name, None)
+    if f is not None:
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+            f.close()
+        except OSError:
+            pass
+
+
+class _Stop(BaseException):
+    """Raised by the signal handlers; BaseException so check()'s `except Exception` cannot swallow it."""
 
 
 def log(msg: str, path: Path | None = None):
@@ -126,6 +176,11 @@ class Supervisor:
             return None
         hb = _read_json(self.live / s.heartbeat)
         updated = hb.get("updated")
+        if hb.get("state") == "gateway_down" and updated is not None:
+            age = self.now() - float(updated)
+            if age <= GATEWAY_DOWN_MAX_S:
+                return None                  # waiting on the gateway, still writing its heartbeat: not hung
+            return f"gateway_down heartbeat is {age:.0f}s old (> {GATEWAY_DOWN_MAX_S:.0f}s)"
         if updated is None:
             try:
                 updated = (self.live / s.heartbeat).stat().st_mtime
@@ -152,23 +207,61 @@ class Supervisor:
                     if why:
                         self.stop(s, why)
                         s.failures += 1
+                        s.next_try = self.now() + self.backoff(s)
                         alive = False
+                    elif s.failures and self.now() - s.started >= HEALTHY_RESET_S:
+                        self._log(f"{s.name} healthy for {HEALTHY_RESET_S:.0f}s: failure count reset")
+                        s.failures = 0
                 elif s.proc is not None:
                     self._log(f"{s.name} exited with code {s.proc.returncode}")
                     s.failures += 1 if self.now() - s.started < 120 else 0
                     s.proc = None
-                    s.next_try = self.now() + min(MAX_BACKOFF_S, 2.0 * (2 ** min(s.failures, 8)))
+                    s.next_try = self.now() + self.backoff(s)
                 if not alive and self.now() >= s.next_try:
                     self.start(s)
             except Exception as e:  # noqa: BLE001 - the supervisor itself must never die
                 self._log(f"{s.name}: check failed: {e}")
+
+    @staticmethod
+    def backoff(s: Service) -> float:
+        return min(MAX_BACKOFF_S, 2.0 * (2 ** min(s.failures, 8)))
 
     def shutdown(self):
         for s in self.services:
             self.stop(s, "supervisor exiting")
 
 
+def install_signals():
+    """SIGTERM/SIGHUP end the loop like Ctrl-C, so serve() stops every child before exiting."""
+    def _handler(signum, _frame):
+        raise _Stop(signum)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _handler)
+
+
+def serve(sup: Supervisor, every: float = CHECK_EVERY_S, on_exit=None):
+    """check() forever; on Ctrl-C/SIGTERM/SIGHUP stop every child, then return."""
+    install_signals()
+    try:
+        while True:
+            sup.check()
+            time.sleep(every)
+    except (KeyboardInterrupt, _Stop) as e:
+        sup._log(f"supervisor stopping ({'signal ' + str(e.args[0]) if isinstance(e, _Stop) else 'Ctrl-C'})")
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)       # a second signal must not interrupt the cleanup
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        sup.shutdown()
+        if on_exit:
+            on_exit()
+
+
 def main():
+    try:
+        singleton("supervise")
+    except AlreadyRunning as e:
+        log(str(e))
+        raise
     skip = {x.strip() for x in os.environ.get("BAZAAR_SUPERVISE_SKIP", "").split(",") if x.strip()}
     sup = Supervisor([s for s in default_services() if s.name not in skip])
     awake = None
@@ -177,14 +270,7 @@ def main():
     except OSError:
         pass
     log(f"supervisor up (pid {os.getpid()}); services {[s.name for s in sup.services]}; skipping {sorted(skip)}")
-    try:
-        while True:
-            sup.check()
-            time.sleep(CHECK_EVERY_S)
-    except KeyboardInterrupt:
-        sup.shutdown()
-        if awake:
-            awake.terminate()
+    serve(sup, on_exit=(awake.terminate if awake else None))
 
 
 if __name__ == "__main__":

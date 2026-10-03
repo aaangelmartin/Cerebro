@@ -2,6 +2,7 @@
 
 Reads may retry once; writes never retry. A refused request raises GameError with the game's code
 (`wait_for_tick`, `insufficient_cash`, ...). Writes need `real=True` (only run.py sets it).
+Every verb takes an optional `timeout=` (seconds) for that single call; the default is the instance's timeout.
 """
 from __future__ import annotations
 
@@ -54,28 +55,30 @@ class Gateway:
         self.url, self.token, self.real, self.timeout = url.rstrip("/"), token, real, timeout
 
     # --- verbs ------------------------------------------------------------------
-    def get(self, path: str, **params) -> dict:
+    def get(self, path: str, timeout: float | None = None, **params) -> dict:
         q = {k: v for k, v in params.items() if v is not None}
         full = path + ("?" + urllib.parse.urlencode(q) if q else "")
         try:
-            return self._request("GET", full)
+            return self._request("GET", full, timeout=timeout)
         except GameError as e:
             if e.code not in RETRY_READ_CODES:
                 raise
             time.sleep(0.5)
-            return self._request("GET", full)
+            return self._request("GET", full, timeout=timeout)
 
-    def post(self, path: str, body: dict | None = None, broker_key: str | None = None) -> dict:
+    def post(self, path: str, body: dict | None = None, broker_key: str | None = None,
+             timeout: float | None = None) -> dict:
         self._guard(path)
-        return self._request("POST", path, {} if body is None else body, broker_key)
+        return self._request("POST", path, {} if body is None else body, broker_key, timeout=timeout)
 
-    def patch(self, path: str, body: dict | None = None, broker_key: str | None = None) -> dict:
+    def patch(self, path: str, body: dict | None = None, broker_key: str | None = None,
+              timeout: float | None = None) -> dict:
         self._guard(path)
-        return self._request("PATCH", path, body or {}, broker_key)
+        return self._request("PATCH", path, body or {}, broker_key, timeout=timeout)
 
-    def delete(self, path: str) -> dict:
+    def delete(self, path: str, timeout: float | None = None) -> dict:
         self._guard(path)
-        return self._request("DELETE", path)
+        return self._request("DELETE", path, timeout=timeout)
 
     # --- helpers ----------------------------------------------------------------
     def me(self) -> dict:
@@ -97,7 +100,9 @@ class Gateway:
         if not self.real:
             raise GameError("not_real", f"write to {path} blocked: gateway is not real")
 
-    def _request(self, method: str, path: str, body: dict | None = None, broker_key: str | None = None) -> dict:
+    def _request(self, method: str, path: str, body: dict | None = None, broker_key: str | None = None,
+                 timeout: float | None = None) -> dict:
+        timeout = self.timeout if timeout is None else float(timeout)
         headers = {"Accept": "application/json", "X-Team-Key": self.token}
         if broker_key:
             headers["X-Broker-Key"] = broker_key
@@ -108,12 +113,12 @@ class Gateway:
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=headers)
         _LIMITER.wait()
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 raw = r.read()
         except urllib.error.HTTPError as e:
             raise _from_http(e) from None
         except TimeoutError:
-            raise GameError("timeout", f"{method} {path} took over {self.timeout}s") from None
+            raise GameError("timeout", f"{method} {path} took over {timeout}s") from None
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             reason = getattr(e, "reason", e)
             code = "timeout" if "timed out" in str(reason) else "network"

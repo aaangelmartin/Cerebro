@@ -70,7 +70,12 @@ def anthropic_keys() -> list[tuple[str, str]]:
 
 KEY_CAP_USD = float(ENV.get("BAZAAR_KEY_CAP_USD", "100"))     # hard cap per key, whole weekend
 DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "100"))     # all keys together, per Madrid day
-DEGRADE_AT = 0.8                                               # share of the day cap that steps the model down
+DEGRADE_AT = 0.8                                               # share of the day cap that steps Opus -> Sonnet
+DEGRADE_HAIKU_AT = 0.92                                        # share of the day cap that steps Sonnet -> Haiku
+# Effective day cap = min(DAY_CAP_USD, budget left at the start of the day across live keys x share of the day).
+# Saturday may use 55 % of what is left, Sunday everything, Friday/other days 10 %. With one $100 key this keeps
+# about $45 for Sunday instead of letting Saturday burn it all. Past 100 % of the effective cap: code only.
+DAY_SHARE = {"sat": 0.55, "sun": 1.0, "*": 0.1}
 
 # --- timing -----------------------------------------------------------------
 DECISION_DEADLINE = 0.55        # share of the tick after which the fallback is sent

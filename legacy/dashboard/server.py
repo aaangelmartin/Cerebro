@@ -206,12 +206,34 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
         return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(e.reason)}).encode()
 
 
+SECRET_FIELDS = {"broker_key", "key", "x-broker-key"}
+_SECRET_RE = re.compile(r'("(?:broker_key|key|X-Broker-Key)"\s*:\s*)"[^"]*"', re.IGNORECASE)
+
+
+def redact(obj):
+    """A copy with every broker_key/key field replaced, at any depth (the venue response carries the key once)."""
+    if isinstance(obj, dict):
+        return {k: ("<redacted>" if str(k).lower() in SECRET_FIELDS else redact(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact(v) for v in obj]
+    return obj
+
+
+def _redact_text(raw):
+    """Logged text with secrets removed: parsed as JSON when possible, else a regex over the raw text."""
+    text = (raw or b"").decode(errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+    try:
+        return json.dumps(redact(json.loads(text)), ensure_ascii=False)
+    except ValueError:
+        return _SECRET_RE.sub(r'\1"<redacted>"', text)
+
+
 def log_action(client, method, path, body, status, resp):
     with ACTIONS_LOG.open("a") as f:
         f.write(json.dumps({
             "at": time.strftime("%Y-%m-%d %H:%M:%S"), "client": client, "method": method, "path": path,
-            "body": (body or b"").decode(errors="replace"), "status": status,
-            "response": resp[:2000].decode(errors="replace"),
+            "body": _redact_text(body), "status": status,
+            "response": _redact_text(resp)[:2000],
         }) + "\n")
 
 

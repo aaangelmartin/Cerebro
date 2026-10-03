@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -284,6 +285,17 @@ def _error_codes(row: Any, depth: int = 0) -> list[str]:
 
 # --------------------------------------------------------------------------- perceive
 
+def _num(v: Any) -> float | None:
+    """A finite float, or None for missing/non-numeric/NaN values (bools are not numbers here)."""
+    if isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def _team_rows(teams) -> list[dict]:
     """Leaderboard teams as a list of dicts (the API sends a list; tolerate a {team: row} map too)."""
     if isinstance(teams, dict):
@@ -303,15 +315,18 @@ def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every
         clock = gw.get("/api/clock")          # without the clock there is no tick: let it raise
         r.n += 1
     tick = int(clock.get("tick") or 0)
-    tick_seconds = float(clock.get("tick_seconds") or 30.0)
+    tick_seconds = _num(clock.get("tick_seconds"))
+    if tick_seconds is None or tick_seconds <= 0:
+        tick_seconds = 30.0
     paused = bool(clock.get("paused"))
     doors = str(clock.get("doors") or "open")
-    nti = clock.get("next_tick_in")
-    if paused or doors != "open" or nti is None:
+    nti = _num(clock.get("next_tick_in"))
+    # A missing, non-numeric, <= 0 or > tick_seconds countdown says nothing about where in the tick we are:
+    # assume the tick starts now rather than producing a deadline that has already passed.
+    if paused or doors != "open" or nti is None or nti <= 0 or nti > tick_seconds:
         tick_start = t0
     else:
-        elapsed = min(tick_seconds, max(0.0, tick_seconds - float(nti)))
-        tick_start = t0 - elapsed
+        tick_start = t0 - (tick_seconds - nti)
     if prev is not None and prev.tick == tick and prev.tick_start:
         tick_start = prev.tick_start           # same tick seen twice: keep the first estimate
     deadline = tick_start + config.DECISION_DEADLINE * tick_seconds

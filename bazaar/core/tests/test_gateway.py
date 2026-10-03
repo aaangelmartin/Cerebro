@@ -30,6 +30,10 @@ class _Fake(BaseHTTPRequestHandler):
             return self._send(200, {"card": "LAV-03", "your_value": 4.0})
         if self.path == "/api/me":
             return self._send(200, {"id": "t10", "cash": 400})
+        if self.path == "/api/slow":
+            import time as _t
+            _t.sleep(1.0)
+            return self._send(200, {"ok": True})
         if self.path == "/api/flaky":
             return self._send(502, {"error": "upstream"}) if n == 1 else self._send(200, {"ok": True})
         if self.path == "/api/busy":
@@ -105,6 +109,14 @@ class GatewayTest(unittest.TestCase):
             Gateway(self.url, "bad").get("/api/me")
         self.assertEqual((cm.exception.code, cm.exception.status), ("unauthorized", 401))
         self.assertEqual(gw.get("/api/list"), {"items": [1, 2]})
+
+    def test_per_call_timeout(self):
+        gw = Gateway(self.url, "tok", real=True, timeout=10)
+        with self.assertRaises(GameError) as cm:
+            gw.post("/api/slow", {}, timeout=0.3)
+        self.assertEqual(cm.exception.code, "timeout")
+        self.assertEqual(gw.post("/api/slow", {}, timeout=5), {"ok": True})     # longer per-call timeout is fine
+        self.assertEqual(gw.timeout, 10)                                          # the instance default is untouched
 
     def test_network_error(self):
         with self.assertRaises(GameError) as cm:
