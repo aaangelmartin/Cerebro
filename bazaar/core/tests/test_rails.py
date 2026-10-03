@@ -213,7 +213,7 @@ class PaceRail(unittest.TestCase):
     def test_one_message_per_conversation(self):
         s = sit(duels=[{"duel": 9, "status": "live", "role": "seller", "your_limit": 10}])
         c = ctx()
-        c.budget["messages"] = {"9": 1}
+        c.budget["messages"] = {"duel:9": 1}
         self.assertEqual(rails.check(Action("duel_message", {"duel": 9, "price": 50}, "duels"), s, c).rail, "pace")
 
     def test_thread_limits(self):

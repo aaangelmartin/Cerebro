@@ -40,7 +40,7 @@ class ArbiterTest(unittest.TestCase):
         m3 = Action("thread_message", {"thread": 4, "price": 6}, "dealers")
         chosen, dropped = select([m1, m2, m3], sit(), budget())
         self.assertEqual(chosen, [m2, m3])
-        chosen, _ = select([m1, m3], sit(), budget(messages={"9": 1}))
+        chosen, _ = select([m1, m3], sit(), budget(messages={"duel:9": 1}))
         self.assertEqual(chosen, [m3])
 
     def test_listing_caps(self):

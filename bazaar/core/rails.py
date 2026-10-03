@@ -394,8 +394,8 @@ RAILS = [rail_armed, rail_known, rail_accept_shape, rail_cards, rail_duel, rail_
 
 def conv_key(action: Action) -> str:
     """Budget key of the conversation an action speaks in (same as core.context.Budget)."""
-    p = action.params or {}
-    return str(p.get("thread") or p.get("duel"))
+    from .context import conv_key as _ck
+    return _ck(action)
 
 
 def check(action: Action, sit, ctx) -> Verdict:
