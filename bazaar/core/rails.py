@@ -371,9 +371,77 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
     fee = _taker_fee(action, sit, give, get)
     surplus = v_get + get["cash"] - v_give - give["cash"] - fee
     if surplus < margin:
+        arb = _arbitrage_buy(action, sit, ctx, give, get)      # the one approved exception: a secured resale
+        if arb is not None:
+            return arb
         return Verdict(False, "value", f"surplus {surplus:.1f} < margin {margin} "
                                        f"(get {v_get:.1f}+{get['cash']}P, give {v_give:.1f}+{give['cash']}P"
                                        + (f", fee {fee:.1f}P" if fee else "") + ")")
+    return OK
+
+
+def _arbitrage_buy(action: Action, sit, ctx, give: dict, get: dict) -> Verdict | None:
+    """Dealer -> team arbitrage (approved by the team): a dealer BUY of the card of the arbitrage job in force
+    (bazaar.market.arbitrage) may cost more than the extra copy is worth to us, because another team has an open
+    cash bid for it. None when the action is not that buy (the normal veto stands); otherwise OK or the reason.
+    Every condition must hold: the job is still buying, this dealer, only that card for cash, the bid was seen
+    open this tick or the last one (or is in El Rastro's book), it is not ours, it lives 3+ ticks more, the
+    price leaves the approved margin after the fee we pay to accept the bid, we hold no arbitrage card yet,
+    and the cash stays above the reserve."""
+    if action.kind not in ("thread_message", "open_thread", "accept_offer"):
+        return None
+    job = _get(ctx, "arbitrage")
+    if job is None:
+        try:
+            from bazaar.market import arbitrage as _arb
+            job = _arb.load(_get(ctx, "live"))
+        except Exception:  # noqa: BLE001
+            job = None
+    if not isinstance(job, dict) or not job.get("ref"):
+        return None
+    who = counterparty(action, sit)
+    if is_team(who) or who != job.get("dealer"):
+        return None
+    ref = str(job["ref"])
+    goods = [str(t) for t in get["types"]] + [f"card:{get['asset_refs'].get(a)}" for a in get["assets"]]
+    if goods != [f"card:{ref}"] or give["assets"] or give["types"] or get["cash"]:
+        return None
+
+    def no(why: str) -> Verdict:
+        return Verdict(False, "value", f"arbitrage {ref}: {why}")
+
+    try:
+        from bazaar.market.arbitrage import MIN_BID_LIFE_TICKS, MIN_MARGIN_P
+    except Exception:  # noqa: BLE001
+        MIN_BID_LIFE_TICKS, MIN_MARGIN_P = 3, 15
+    if job.get("stage") != "buying":
+        return no("the job is not buying any more")
+    bid = job.get("bid") or {}
+    tick = int(_num(_get(sit, "tick"), 0))
+    my_id = (_get(sit, "me") or {}).get("id")
+    mine = {o.get("id") for o in _get(sit, "my_offers") or [] if isinstance(o, dict)}
+    if bid.get("id") is None or bid.get("maker") == my_id or bid.get("id") in mine:
+        return no("the resale bid is ours or missing")
+    in_book = any(isinstance(o, dict) and o.get("id") == bid["id"] for o in _get(sit, "rastro_book") or [])
+    if not in_book and tick - int(_num(job.get("seen_tick"), -99)) > 1:
+        return no(f"bid #{bid['id']} was not seen open this tick")
+    if bid.get("expires_tick") is None or int(bid["expires_tick"]) - tick < MIN_BID_LIFE_TICKS:
+        return no(f"bid #{bid['id']} expires in under {MIN_BID_LIFE_TICKS} ticks")
+    try:
+        from bazaar.market.arbitrage import rastro_fee
+        net = int(_num(bid.get("cash"))) - int(rastro_fee(int(_num(bid.get("cash"))), 1))
+    except Exception:  # noqa: BLE001
+        return no("cannot price the resale")
+    cap = min(int(_num(job.get("cap"), 0)), net - MIN_MARGIN_P)
+    if give["cash"] > cap:
+        return no(f"price {give['cash']} > cap {cap} (bid {bid.get('cash')} nets {net}, margin {MIN_MARGIN_P})")
+    held = [a for a in ((_get(sit, "me") or {}).get("assets") or []) if a.get("ref") == ref]
+    if {a.get("id") for a in held} - set(job.get("held_before") or []):
+        return no("the card is already in transit")
+    cash = _num((_get(sit, "me") or {}).get("cash"))
+    reserve = _cap(ctx, "cash_reserve", config.CASH_RESERVE)
+    if cash - give["cash"] < reserve:
+        return no(f"cash {cash:.0f} - {give['cash']} < reserve {reserve}")
     return OK
 
 

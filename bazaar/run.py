@@ -654,6 +654,15 @@ class Runner:
                 out.extend(_ws.plan_actions(sit, control, _st.workshop_orders(self.live)))
             except Exception as e:  # noqa: BLE001
                 self._err("workshop.plan", e)
+        try:                        # dealer -> team arbitrage: one card at a time, only with an open team bid
+            from bazaar.brain import strategy as _st
+            from bazaar.market import arbitrage as _arbm
+            if getattr(self, "_arbitrage", None) is None:
+                self._arbitrage = _arbm.Arbitrage()
+            control = ctx.control if ctx is not None else self.control()
+            out.extend(self._arbitrage.step(sit, control, self.live, _st.arbitrage_mode(self.live)))
+        except Exception as e:  # noqa: BLE001
+            self._err("arbitrage", e)
         if sit.tick % 5 == 0:
             duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)
             if duels is not None and hasattr(duels, "observe_closed"):

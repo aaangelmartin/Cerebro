@@ -166,6 +166,7 @@ def sanitize(raw: Any) -> dict:
         "dealer_orders": _dealer_orders(raw.get("dealer_orders")),
         "team_messages": _team_messages(raw.get("team_messages")),
         "workshop_orders": _workshop_orders(raw.get("workshop_orders")),
+        "arbitrage": "off" if str(raw.get("arbitrage") or "").strip().lower() == "off" else "on",
         "whatsapp_replies": [{"reply_to": _clean(x.get("reply_to"), 60), "text": _clean(x.get("text"), 1500),
                               "why": _clean(x.get("why"), 400), "conclusion": _clean(x.get("conclusion"), 600)}
                              for x in (raw.get("whatsapp_replies") or [])[:6]
@@ -341,6 +342,11 @@ def _workshop_orders(raw):
 
 def workshop_orders(live: Path | None = None):
     return _plan(live).get("workshop_orders") or "auto"
+
+
+def arbitrage_mode(live: Path | None = None) -> str:
+    """"on" (default) or "off": whether the bot may start a dealer -> team arbitrage job (market.arbitrage)."""
+    return "off" if _plan(live).get("arbitrage") == "off" else "on"
 
 
 def dealer_orders(live: Path | None = None) -> list[dict]:

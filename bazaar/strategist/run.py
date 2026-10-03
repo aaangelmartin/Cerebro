@@ -238,6 +238,11 @@ STRATEGY_TOOL = {
                             "that want our spares, mutual swaps: {give: ref, want_card: ref | want_cash: P, to: team?, "
                             "venue, why}; never below value + margin (rails check it); at most 5",
                             "items": {"type": "object"}},
+            "arbitrage": {"type": "string", "enum": ["on", "off"],
+                          "description": "Dealer -> team arbitrage (research.arbitrage): \"on\" (default) lets the bot "
+                                         "buy ONE rare/epic we already hold from a dealer only while another team has "
+                                         "an open cash bid for it on El Rastro that nets 15 P or more over the dealer "
+                                         "price, and accept that bid when the card arrives. \"off\" stops new jobs."},
             "workshop_orders": {"description": "The Workshop (research.workshop): \"auto\" (default: the bot crafts 3 "
                                 "usable spares of one rarity into one card of the next rarity whenever the expected "
                                 "value gain is 3 P or more), \"off\", or up to 3 triples of our asset ids to craft. "

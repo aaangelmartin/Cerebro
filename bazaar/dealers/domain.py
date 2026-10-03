@@ -181,9 +181,17 @@ class DealersDomain:
         """dealer_orders of the plan in force: [{dealer, action, ref, open, bound, max_messages, why}]."""
         try:
             from bazaar.brain.strategy import dealer_orders
-            return dealer_orders()
+            orders = dealer_orders()
         except Exception:  # noqa: BLE001 - no plan, no orders
-            return []
+            orders = []
+        try:        # the arbitrage job in force is one more buy order: its cap is the secured resale, not our value
+            from bazaar.market.arbitrage import dealer_order
+            arb = dealer_order()
+            if arb and not any(o["dealer"] == arb["dealer"] and o["ref"] == arb["ref"] for o in orders):
+                orders = [arb, *orders]
+        except Exception:  # noqa: BLE001
+            pass
+        return orders
 
     def _note_order(self, o: dict, status: str, detail: str = "", tick: int | None = None, **extra) -> None:
         """Tell the brain what happened to one of its dealer orders (brain_posts.jsonl), once per change."""
@@ -292,6 +300,8 @@ class DealersDomain:
                     continue
                 value = values.next_copy(ref)
                 cap = min(goal[ref], int(value) - 1) if ref in goal else haggle.buy_max(value)
+                if o.get("arbitrage"):                           # a secured resale: the rail checks every condition
+                    cap = int(o["bound"])
                 limit = min(int(o["bound"]), cap, budget)
                 if limit < 1:
                     self._note_order(o, "skipped", f"cap {o['bound']} leaves nothing: our max is "
@@ -647,7 +657,11 @@ class DealersDomain:
                 limit = value_limit = haggle.sell_min(value)
             order = self._order_for(plan, v)
             if order is not None:           # the brain's bounds, never looser than our value-based limit
-                if v.buying:
+                if v.buying and order.get("arbitrage"):          # the cap is the resale net minus the margin
+                    value_limit = int(order["bound"])
+                    limit = 0 if cautious else min(value_limit, own_cap)
+                    budget_bound = own_cap < value_limit
+                elif v.buying:
                     value_limit = min(value_limit, int(order["bound"]))
                     limit = min(limit, value_limit)
                 else:

@@ -788,6 +788,12 @@ def dealer_ladder(record: Path, live: Path, me: dict, feed: list[dict], now: flo
     return report(live, me, personas, feed)
 
 
+def arbitrage(live: Path) -> dict:
+    """Dealer -> team arbitrage: the job in force and its last steps (bazaar.market.arbitrage)."""
+    from bazaar.market import arbitrage as A
+    return A.picture(live)
+
+
 def workshop(record: Path, live: Path, me: dict, my_offers: list[dict]) -> dict:
     """The Workshop (taller): our usable spares, what a pull is worth to us, and whether buying duplicates of cards
     we already hold to craft them pays (cheapest El Rastro ask per rarity, fee included)."""
@@ -841,6 +847,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venue_listing_mix_today", lambda: venue_mix(feed, venue_list, our_venue)),
                      ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
                      ("workshop", lambda: workshop(record, live, me, my_offers)),
+                     ("arbitrage", lambda: arbitrage(live)),
                      ("news", lambda: news(live, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:

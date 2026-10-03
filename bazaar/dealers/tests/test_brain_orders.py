@@ -175,6 +175,21 @@ class OrderOpensTest(unittest.TestCase):
         self.assertFalse([a for a in acts if a.kind == "open_thread" and "brain order" in a.reason])
         self.assertIn("a set we avoid buying", notes[0][2])
 
+    def test_arbitrage_order_is_capped_by_the_resale_not_our_value(self):
+        # a second MAL-10 is worth little to us, but another team bids for it: the job's cap is the limit
+        chato = next(p for p in FRIDAY_PERSONAS if p["id"] == "chato")
+        mal10 = {"id": 5, "kind": "card", "ref": "MAL-10", "rarity": "rare", "set": "MAL", "your_value": 91.0}
+        o = {"dealer": "chato", "action": "buy", "ref": "MAL-10", "open": 44, "bound": 69, "max_messages": 5}
+        dom, _ = domain([o])
+        plain = [a for a in dom.fallback(sit([dict(mal10)], dealers=[chato], cash=400), make_ctx(5))
+                 if a.kind == "open_thread" and a.params["topic"] == {"buy": {"card": "MAL-10"}}]
+        self.assertTrue(not plain or plain[0].expected["limit"] < 69)                # value-bound without the tag
+        dom, _ = domain([dict(o, arbitrage=True)])
+        opens = [a for a in dom.fallback(sit([dict(mal10)], dealers=[chato], cash=400), make_ctx(5))
+                 if a.kind == "open_thread"]
+        self.assertEqual(opens[0].params["topic"], {"buy": {"card": "MAL-10"}})
+        self.assertEqual(opens[0].expected["limit"], 69)
+
     def test_an_order_that_ended_is_not_reopened_with_the_same_bound(self):
         dom, _ = domain([order()])
         dom._order_done[("pilar", "sell", "SAL-08")] = 25
