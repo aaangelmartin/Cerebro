@@ -73,7 +73,15 @@ SATURDAY_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
         "sell:uncommon:loved": {"open": [22], "limit_ratio": [1.18], "mirror": [0.15], "patience": [8]},
     },
 }
-SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED}
+# Los Pícaros, Saturday afternoon (Team 5's threads): rares list 63, open 73, close at 53-56 after a haggle.
+# Our own four threads stalled at the opening (ratio 1.0), which hid the dealer as a source for a rare.
+PICAROS_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
+    "picaros": {
+        "buy:rare": {"open": [73, 73, 73], "limit_ratio": [0.74, 0.74, 0.75, 0.76, 0.77], "mirror": [0.5, 0.5],
+                     "patience": [6, 7]},
+    },
+}
+SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED, "sat-picaros-1": PICAROS_SEED}
 
 # Hourly quotas measured Friday (the menu says it too).
 FRIDAY_QUOTAS = {"abuela": {"deals": 8, "packs": 3}, "chato": {"deals": 6, "packs": 2}}
