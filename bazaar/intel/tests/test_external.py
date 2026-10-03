@@ -85,6 +85,14 @@ class IngestTest(unittest.TestCase):
         self.assertIn("<untrusted>", d)
         self.assertLessEqual(len(ex.recent_digest(max_chars=300, live_dir=live, now=ts + 60)), 300)
 
+    def test_digest_lines_carry_the_record_id(self):
+        live, rec = _dirs()
+        ex.ingest(TEAM5, by="angel", live_dir=live, record_dir=rec)
+        recs = ex.load(live)
+        d = ex.recent_digest(live_dir=live, now=recs[0]["ts"] + 60)
+        for r in recs:
+            self.assertIn(f"- [{r['id']}] ", d)
+
 
 if __name__ == "__main__":
     unittest.main()
