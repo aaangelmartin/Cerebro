@@ -5,7 +5,7 @@
   const SET_COLORS = { LAV: "#E4572E", MAL: "#E83F8C", LAT: "#F2A541", SAL: "#2EC4B6", RET: "#7B8CDE", CHA: "#9BC53D" };
   const RAR_COLORS = { common: "#9AA4B8", uncommon: "#3DDC97", rare: "#4C8DFF", epic: "#B061FF", legendary: "#FFC44D" };
   const RAR_LABEL = { common: "común", uncommon: "infrecuente", rare: "rara", epic: "épica", legendary: "legendaria" };
-  const TARGET_SETS = ["LAV", "MAL", "RET"];
+  const TARGET_SETS = ["LAV", "MAL"];        // RET dropped: buying El Retiro does not add to our score
   const STATES = [
     { id: "dup", label: "Duplicado" },
     { id: "venta", label: "En venta" },
@@ -17,6 +17,8 @@
     { id: "protegida", label: "Protegida" },
   ];
   const ICONS = {
+    tenemos: '<path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+    faltan: '<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/>',
     dup: '<path d="M4 4h7v7H4z M6 2h7v7" fill="none" stroke="currentColor" stroke-width="1.4"/>',
     venta: '<path d="M4 12L12 4M6 4h6v6" fill="none" stroke="currentColor" stroke-width="1.6"/>',
     compra: '<path d="M12 4L4 12M4 6v6h6" fill="none" stroke="currentColor" stroke-width="1.6"/>',
@@ -194,7 +196,7 @@
         if (x.puja != null) states.puja = x.puja;
         if (x.cambio) states.cambio = true;
         if (x.threads.length || x.dealerOffer) states.dealer = x.dealer || (x.dealerOffer && x.dealerOffer.to) || true;
-        if (!own.length && c.page && TARGET_SETS.includes(s.id) && s.released) states.objetivo = true;
+        if (!own.length && (d.goals ? !!d.goals[c.id] : (c.page && TARGET_SETS.includes(s.id) && s.released))) states.objetivo = true;
         if (prot.has(c.id)) states.protegida = true;
         cards[c.id] = {
           info: { ...c, set: s.id, setName: s.name },
@@ -204,7 +206,7 @@
         };
       }
     }
-    return { cat, me, sets, values, cards, album, decisions: d.decisions || [], cardsRec: d.cards || {}, feed: d.feed || [], prot };
+    return { cat, me, sets, values, cards, album, decisions: d.decisions || [], cardsRec: d.cards || {}, feed: d.feed || [], prot, goals: d.goals || null };
   }
 
   // ---------- rendering ----------
@@ -317,11 +319,21 @@
     return el;
   }
 
+  // derived states used only by the filter bar (not drawn on the cards)
+  function hasState(c, id) {
+    if (id === "tenemos") return c.own.length > 0;
+    if (id === "faltan") return !c.own.length && !!c.info.page;
+    return c.states[id] != null && c.states[id] !== false;
+  }
   function matchFilter(c, f) {
-    if (f.set !== "todos" && c.info.set !== f.set) return false;
-    if (f.rarity !== "todas" && c.info.rarity !== f.rarity) return false;
+    if (f.sets.size && !f.sets.has(c.info.set)) return false;
+    if (f.rar.size && !f.rar.has(c.info.rarity)) return false;
+    if (f.q) {
+      const q = f.q.toLowerCase();
+      if (!String(c.info.id || "").toLowerCase().includes(q) && !String(c.info.name || "").toLowerCase().includes(q)) return false;
+    }
     if (f.states.size) {
-      for (const s of f.states) if (c.states[s] != null && c.states[s] !== false) return true;
+      for (const s of f.states) if (hasState(c, s)) return true;
       return false;
     }
     return true;
@@ -330,7 +342,7 @@
   function renderAlbum(m, f, onOpen) {
     const wrap = h("div", { class: "cc-album" });
     for (const s of m.sets) {
-      if (f.set !== "todos" && s.id !== f.set) continue;
+      if (f.sets.size && !f.sets.has(s.id)) continue;
       const color = SET_COLORS[s.id] || s.color;
       const page = m.album[s.id] || {};
       const pageCards = (s.cards || []).filter((c) => c.page);
@@ -370,7 +382,7 @@
           return n;
         })));
       const row = h("section", { class: "cc-set" + (grid.classList.contains("has-art") ? " has-art" : ""), style: `--set:${color}` }, side, grid, ex);
-      if (f.states.size && !shown) row.classList.add("is-hidden");
+      if ((f.states.size || f.rar.size || f.q) && !shown) row.classList.add("is-hidden");
       wrap.appendChild(row);
     }
     if (!wrap.children.length) wrap.appendChild(stateBox("empty", "Ningún set coincide con los filtros."));
@@ -402,24 +414,59 @@
       kpi("DUPLICADAS", String(dups), `${dupSale} en venta`));
   }
 
-  function renderFilters(f, counts, onChange) {
-    const bar = h("div", { class: "cc-filters" });
-    for (const s of STATES) {
-      const on = f.states.has(s.id);
-      bar.appendChild(h("button", {
-        class: "cc-fbtn cc-chip-" + s.id + (on ? " on" : ""),
-        onclick: () => { on ? f.states.delete(s.id) : f.states.add(s.id); onChange(); },
-      }, icon(s.id), s.label, h("span", { class: "cc-fcount" }, String(counts[s.id] || 0))));
+  // Filters: the shared Home filter bar (ui.filterBar), built once and kept across refreshes.
+  const ESTADOS = [
+    { id: "tenemos", label: "Tenemos" }, { id: "faltan", label: "Faltan" }, { id: "dup", label: "Duplicadas" },
+    { id: "objetivo", label: "Objetivo" }, { id: "venta", label: "En venta" }, { id: "compra", label: "Comprando" },
+    { id: "puja", label: "Puja" }, { id: "cambio", label: "Cambio" }, { id: "dealer", label: "Conversación" },
+    { id: "protegida", label: "Protegida" },
+  ];
+  function filterCounts(m) {
+    const out = {};
+    for (const s of m.sets) {
+      const page = (s.cards || []).filter((c) => c.page);
+      out["set/" + s.id] = `${page.filter((c) => m.cards[c.id].own.length).length}/${page.length}`;
     }
-    const sel = (val, opts, onSel) => {
-      const n = h("select", { class: "cc-select", onchange: (e) => onSel(e.target.value) },
-        opts.map(([v, l]) => h("option", { value: v, selected: v === val ? "selected" : null }, l)));
-      return n;
+    for (const id in m.cards) {
+      const c = m.cards[id];
+      for (const e of ESTADOS) if (hasState(c, e.id)) out["estado/" + e.id] = (out["estado/" + e.id] || 0) + 1;
+      out["rareza/" + c.info.rarity] = (out["rareza/" + c.info.rarity] || 0) + 1;
+    }
+    for (const e of ESTADOS) out["estado/" + e.id] = out["estado/" + e.id] || 0;
+    return out;
+  }
+  function filterBar(m, onChange) {
+    const u = window.ui;
+    const counts = filterCounts(m);
+    if (!u || !u.filterBar) return h("div", { class: "cc-muted" }, "Filtros no disponibles (ui.js no cargado).");
+    const bar = u.filterBar({
+      types: [], search: true, placeholder: "Carta o nombre (MAL-09)…",
+      extraRows: [
+        { key: "set", label: "Set", options: m.sets.map((s) => ({ id: s.id, label: s.id + " · " + (s.name || ""), count: counts["set/" + s.id] })) },
+        { key: "estado", label: "Estado", options: ESTADOS.map((e) => ({ id: e.id, label: e.id === "objetivo" && m.goals ? "Objetivo del cerebro" : e.label, count: counts["estado/" + e.id] })) },
+        { key: "rareza", label: "Rareza", options: Object.keys(RAR_LABEL).map((r) => ({ id: r, label: RAR_LABEL[r], count: counts["rareza/" + r] || 0 })) },
+      ],
+      onChange,
+    });
+    bar.classList.add("cc-fb");
+    // tint each option like the chips elsewhere: set colour / state badge colour / rarity colour
+    const tint = (row, colors) => bar.querySelectorAll(".fb-extra")[row].querySelectorAll(".fb-opt")
+      .forEach((b, i) => b.style.setProperty("--tint", colors[i] || "var(--line-2)"));
+    tint(0, m.sets.map((s) => SET_COLORS[s.id] || s.color));
+    tint(1, ESTADOS.map((e) => BADGE_COLORS[e.id] || (e.id === "tenemos" ? "#3DDC97" : e.id === "faltan" ? "#6A727B" : "#9AA4B8")));
+    tint(2, Object.keys(RAR_LABEL).map((r) => RAR_COLORS[r]));
+    bar.querySelectorAll(".fb-extra")[1].querySelectorAll(".fb-opt").forEach((b, i) => b.prepend(icon(ESTADOS[i].id)));
+    bar.refreshCounts = (mm) => {
+      const c = filterCounts(mm), extra = {};
+      for (const k in c) extra[k] = c[k];
+      bar.setCounts({}, extra);
     };
-    bar.appendChild(h("span", { class: "cc-grow" }));
-    bar.appendChild(sel(f.set, [["todos", "Set: todos"]].concat(Object.keys(SET_COLORS).map((k) => [k, "Set: " + k])), (v) => { f.set = v; onChange(); }));
-    bar.appendChild(sel(f.rarity, [["todas", "Rareza: todas"]].concat(Object.keys(RAR_LABEL).map((k) => [k, "Rareza: " + RAR_LABEL[k]])), (v) => { f.rarity = v; onChange(); }));
     return bar;
+  }
+  function filterState(bar) {
+    const st = (bar && bar.state) || { extra: {}, q: "" };
+    const ex = st.extra || {};
+    return { sets: ex.set || new Set(), states: ex.estado || new Set(), rar: ex.rareza || new Set(), q: st.q || "" };
   }
 
   // ---------- drawer ----------
@@ -516,7 +563,7 @@
   }
 
   // ---------- data ----------
-  const S = { filters: { states: new Set(), set: "todos", rarity: "todas" }, model: null, slow: {}, slowAt: 0, opened: null };
+  const S = { fb: null, model: null, slow: {}, slowAt: 0, opened: null };
 
   async function load(data) {
     const api = window.api;
@@ -525,6 +572,9 @@
       safe(() => api.rec("catalog")), safe(() => api.rec("me")), safe(() => api.rec("my_offers")),
       safe(() => api.status()), safe(() => api.decisions()), loadArt(), loadCromo(),
     ]);
+    const strat = api.strategy ? await safe(() => api.strategy(1)) : { ok: false };
+    const plan = strat.ok && strat.v && strat.v.current ? strat.v.current.plan || {} : {};
+    const goals = plan.goal_buys && Object.keys(plan.goal_buys).length ? plan.goal_buys : null;
     if (!catalog.ok) throw catalog.err;
     const now = Date.now();
     if (now - S.slowAt > 15000) {
@@ -546,6 +596,7 @@
       catalog: catalog.v, me: me.ok ? me.v : {}, myOffers: myOffers.ok ? myOffers.v : [],
       status: status.ok ? status.v : (data && data.status) || {},
       decisions: decisions.ok ? arr(decisions.v) : [],
+      goals,
       ...S.slow,
     };
   }
@@ -555,15 +606,38 @@
     const host = root.querySelector(".cc-body");
     if (!m || !host) return;
     const scroll = root.scrollTop;
-    const counts = {};
-    for (const id in m.cards) for (const s in m.cards[id].states) counts[s] = (counts[s] || 0) + 1;
-    const frag = document.createDocumentFragment();
-    frag.appendChild(renderTotals(m));
-    frag.appendChild(renderFilters(S.filters, counts, () => paint(root)));
-    if (!(m.me.assets || []).length) frag.appendChild(stateBox("empty", "Aún no tenemos cartas grabadas (o la grabadora no ha leído /api/me)."));
-    frag.appendChild(renderAlbum(m, S.filters, (ref) => { S.opened = ref; openDrawer(m, ref); }));
-    host.replaceChildren(frag);
+    if (!host.querySelector(".cc-fbwrap")) {
+      host.replaceChildren(h("div", { class: "cc-totals-wrap" }), h("div", { class: "cc-fbwrap" }), h("div", { class: "cc-album-wrap" }));
+    }
+    const goalsKey = m.goals ? Object.keys(m.goals).sort().join(",") : "";
+    if (!S.fb || S.fbSets !== m.sets.map((x) => x.id).join(",") || S.fbGoals !== goalsKey) {
+      const prev = S.fb && S.fb.state;
+      S.fb = filterBar(m, () => paintAlbum(root));
+      S.fbSets = m.sets.map((x) => x.id).join(","); S.fbGoals = goalsKey;
+      if (prev) {           // keep what the user had picked when the bar is rebuilt
+        S.fb.querySelectorAll(".fb-extra").forEach((row, i) => {
+          const key = ["set", "estado", "rareza"][i]; const was = prev.extra[key] || new Set();
+          row.querySelectorAll(".fb-opt").forEach((b, j) => {
+            const ids = key === "set" ? m.sets.map((x) => x.id) : key === "estado" ? ESTADOS.map((e) => e.id) : Object.keys(RAR_LABEL);
+            if (was.has(ids[j])) b.click();
+          });
+        });
+      }
+      host.querySelector(".cc-fbwrap").replaceChildren(S.fb);
+    } else if (S.fb.refreshCounts) S.fb.refreshCounts(m);
+    host.querySelector(".cc-totals-wrap").replaceChildren(renderTotals(m));
+    paintAlbum(root);
     root.scrollTop = scroll;
+  }
+  function paintAlbum(root) {
+    const m = S.model;
+    const host = root.querySelector(".cc-album-wrap");
+    if (!m || !host) return;
+    const f = filterState(S.fb);
+    const kids = [];
+    if (!(m.me.assets || []).length) kids.push(stateBox("empty", "Aún no tenemos cartas grabadas (o la grabadora no ha leído /api/me)."));
+    kids.push(renderAlbum(m, f, (ref) => { S.opened = ref; openDrawer(m, ref); }));
+    host.replaceChildren(...kids);
   }
 
   window.Screens = window.Screens || {};
@@ -573,7 +647,7 @@
       root.replaceChildren(h("div", { class: "scr-coleccion" },
         h("div", { class: "cc-title" }, h("h1", null, "Colección"), h("span", { class: "cc-muted" }, "álbum por set · estados de cada carta")),
         h("div", { class: "cc-body" }, stateBox("loading"))));
-      S.slowAt = 0;
+      S.slowAt = 0; S.fb = null;
       S.pendingOpen = params || null;
     },
     async refresh(root, data, params) {

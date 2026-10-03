@@ -22,12 +22,18 @@
 .scr-coleccion .cc-kpi-v b { font: 500 20px var(--c-mono); font-variant-numeric: tabular-nums; }
 .scr-coleccion .cc-kpi-v span { font: 11px var(--c-mono); color: var(--c-muted); }
 
-.scr-coleccion .cc-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.scr-coleccion .cc-grow { flex: 1; }
-.scr-coleccion .cc-fbtn { display: inline-flex; gap: 6px; align-items: center; background: var(--c-s1); color: var(--c-ink); border: 1px solid var(--c-line); border-left: 3px solid var(--tint, #888); padding: 5px 10px; font-size: 12px; cursor: pointer; }
-.scr-coleccion .cc-fbtn.on { background: color-mix(in srgb, var(--tint) 22%, var(--c-s1)); border-color: var(--tint); }
-.scr-coleccion .cc-fcount { font: 10px var(--c-mono); color: var(--c-muted); }
-.scr-coleccion .cc-select { background: var(--c-s1); color: var(--c-ink); border: 1px solid var(--c-line); padding: 5px 8px; font-size: 12px; }
+/* filters: the shared Home filter bar (ui.filterBar); options tinted like the type chips (left colour bar) */
+.scr-coleccion .cc-fbwrap { margin: 4px 0 2px; }
+/* like Home's type chips: every option is lit while nothing in its row is picked (= all);
+   once some are picked, those stay lit and the rest go grey */
+.scr-coleccion .cc-fb .fb-opt { border: 0; border-left: 2px solid var(--line-2); padding: 3px 8px; font-weight: 500; color: var(--ink-3); background: transparent; }
+.scr-coleccion .cc-fb .fb-opt .chip-count { color: var(--ink-3); }
+.scr-coleccion .cc-fb .fb-extra:not(:has(.fb-opt.on)) .fb-opt,
+.scr-coleccion .cc-fb .fb-opt.on { background: color-mix(in srgb, var(--tint, #888) 13%, transparent); border-left-color: var(--tint, var(--ink-3)); color: var(--ink); }
+.scr-coleccion .cc-fb .fb-extra:not(:has(.fb-opt.on)) .fb-opt .chip-count,
+.scr-coleccion .cc-fb .fb-opt.on .chip-count { color: var(--tint, var(--ink-2)); }
+.scr-coleccion .cc-fb .fb-opt .cc-ico { color: var(--tint, var(--ink-3)); display: inline-flex; }
+.scr-coleccion .cc-fb .fb-search { width: 200px; }
 
 /* chip tints */
 .scr-coleccion .cc-chip-dup { --tint: #9AA4B8; }
