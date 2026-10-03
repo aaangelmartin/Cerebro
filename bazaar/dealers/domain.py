@@ -50,6 +50,8 @@ GOAL_SMALL_GAIN_P = 3.0                     # ...and create at least this much v
 CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
 VENUE_RESERVE_P = 270                        # bond 250 + 20, kept while we have no venue (rails do the same)
 STALE_TICKS = 3                              # close a thread the dealer left unanswered this long
+HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
+HOLD_GAP_SHARE = 0.05                        # "near our limit": within 1 P, or this share of it for larger prices
 PACK_EDGE = 1.25                             # until packs can be opened, buy one only if value >= 1.25 x price
 PACK_EDGE_P = 5.0                            # ... and at least this many P above it
 
@@ -599,6 +601,14 @@ class DealersDomain:
         return max(0, min(avail - max(0, int(committed)), per_deal))
 
     @staticmethod
+    def _near_limit(v: ThreadView, limit: int) -> bool:
+        """The dealer's last price is just outside our limit: 1 P, or 5 % of the limit on larger prices."""
+        if v.final or v.last_theirs is None or limit <= 0:
+            return False
+        gap = (v.last_theirs - limit) if v.buying else (limit - v.last_theirs)
+        return 0 < gap <= max(1, int(HOLD_GAP_SHARE * limit))
+
+    @staticmethod
     def _stale_or_hopeless(v: ThreadView, limit: int, limit_est: float, tick: int) -> str:
         """Why this thread should be closed now ("" to keep it). A dealer has one slot per team: a dead
         thread blocks every other deal with it."""
@@ -686,6 +696,13 @@ class DealersDomain:
             if move.kind == "close" and budget_bound and not v.final and not cautious:
                 move = Move("wait", None, "cash committed to our other buy bids: hold this one")
             force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
+            max_msgs = int((order or {}).get("max_messages") or (4 if order is not None else HOLD_MESSAGES))
+            # The dealer stands 1 P (5 % on larger prices) outside our limit, we still have messages and its level
+            # has an empty ladder slot: hold our price instead of closing (tick 872: closed at 4 against our 5).
+            hold = (not ok and not cautious and self._near_limit(v, limit) and len(v.our_ticks) < max_msgs
+                    and 0.0 in self.store.ladder(level))
+            if hold and not force.startswith(("dealer silent", "dealer never")):
+                force = ""
             if v.buying and _avoided(v.item, _g(ctx, "control") or {}):
                 ok, why = False, "we no longer buy this set"
                 force = "we no longer buy this set: close the thread"
@@ -693,6 +710,8 @@ class DealersDomain:
                 up = self._higher_slot_wants(plan, level, values.rarity(v.item) or "", values.set_of(v.item))
                 if up:
                     force = f"keep this spare for {up}: its ladder slots are empty and weigh more"
+            if order is not None and ok and not v.final and move.kind == "price" and len(v.our_ticks) >= max_msgs:
+                move = Move("accept", v.last_theirs, "brain order: messages used, its offer is inside our bound")
             if order is not None and not ok and not v.final and not force:
                 if len(v.our_ticks) >= int(order.get("max_messages") or 4):
                     force = f"brain order: {order['max_messages']} messages used without a deal inside the bound"
@@ -702,6 +721,14 @@ class DealersDomain:
                         move = Move("price", p0, f"brain order: open at {order['open']}")
             if force:
                 move = Move("close", None, force)
+            elif hold and move.kind == "close":
+                if v.last_sender == "dealer":
+                    p_hold = haggle.plan_next(v, limit, limit_est, patience) or limit
+                    move = Move("hold", p_hold, f"dealer at {v.last_theirs}, {abs(v.last_theirs - limit)} P from our "
+                                                f"limit {limit}: hold our price, {max_msgs - len(v.our_ticks)} "
+                                                f"messages left")
+                else:
+                    move = Move("wait", None, "holding our price near our limit: waiting for the dealer's answer")
             pts = 0.0
             if ok and v.standing_price is not None:
                 cap = capture(v.opening, v.standing_price, limit_est, v.buying)
@@ -943,6 +970,11 @@ class DealersDomain:
                 return None
             p = haggle.guard_price(info.view, move.price, info.limit)
             return None if p is None else self._act_price(plan, info, p, text, source, reason)
+        if move.kind == "hold":       # restate our price (the range forbids repeats): never beyond our limit
+            v, p = info.view, move.price
+            if info.msg_used or p is None or info.limit <= 0 or (p > info.limit if v.buying else p < info.limit):
+                return None
+            return self._act_price(plan, info, int(p), None, source, reason)
         return None
 
     def _fallback_actions(self, plan: Plan, ctx) -> list[Action]:
@@ -1068,6 +1100,9 @@ class DealersDomain:
                 a = self._act_close(info, "fallback", info.force_close)
             elif kind == "accept" and not info.can_accept:
                 notes.append(f"{tid}: accept refused by code ({info.accept_why})")
+                a = self._move_action(plan, info, info.move, "fallback")
+            elif info.move.kind == "hold" and kind != "price":
+                notes.append(f"{tid}: near our limit with messages left; code holds our price")
                 a = self._move_action(plan, info, info.move, "fallback")
             elif kind == "price":
                 p = haggle.guard_price(info.view, m.get("price"), info.limit)
