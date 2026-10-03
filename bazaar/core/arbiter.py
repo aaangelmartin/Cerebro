@@ -1,6 +1,7 @@
 """Arbiter: from every domain's proposals, pick what this tick may really send.
 
-- At most `accepts_per_team_per_tick` accepts (left in budget): duel_accept first, then by priority.
+- At most `accepts_per_team_per_tick` offer accepts (left in budget), by priority. Duel accepts have their
+  own budget (the game limits them separately), so a duel accept never costs a trade its slot.
 - One message per conversation per tick, and none where we already spoke this tick.
 - Listing cap per tick and open offers/threads caps; one open thread per dealer.
 - The same card is never promised twice in one tick.
@@ -12,6 +13,7 @@
 from __future__ import annotations
 
 from .rails import conv_key, flows
+from .context import duel_accept_cap
 from .types import ACCEPT_KINDS, MESSAGE_KINDS, Action
 
 DOMAIN_RANK = {"duels": 0, "market": 1, "broker": 1, "dealers": 2, "lab": 3}
@@ -63,6 +65,9 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
     accepts_left = budget.get("accepts_left")
     if accepts_left is None:
         accepts_left = int(lim.get("accepts_per_team_per_tick", 1)) - int(budget.get("accepts_used", 0))
+    duel_accepts_left = budget.get("duel_accepts_left")
+    if duel_accepts_left is None:
+        duel_accepts_left = duel_accept_cap(lim) - int(budget.get("duel_accepts_used", 0))
     offers_left = budget.get("offers_left", int(lim.get("offers_per_team_per_tick", 12)))
     open_offers = len(_get(sit, "my_offers") or [])
     max_offers = int(lim.get("max_open_offers_per_team", 30))
@@ -89,7 +94,9 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
             why = "noop"
         elif sig in seen_sigs:
             why = "duplicate"
-        elif a.kind in ACCEPT_KINDS and accepts_left <= 0:
+        elif a.kind == "duel_accept" and duel_accepts_left <= 0:
+            why = "duel accepts already used this tick"
+        elif a.kind in ACCEPT_KINDS and a.kind != "duel_accept" and accepts_left <= 0:
             why = "accept already used this tick"
         elif a.kind in MESSAGE_KINDS and (conv_key(a) in spoken or per_side <= 0):
             why = f"already spoke in {conv_key(a)} this tick"
@@ -109,13 +116,15 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
                 promised |= cards
         if why:
             dropped.append((a, why))
-            alt = alternative(a) if a.kind in ACCEPT_KINDS and why == "accept already used this tick" else None
+            alt = alternative(a) if a.kind in ACCEPT_KINDS and why.endswith("already used this tick") else None
             if alt is not None:                    # accepts sort first, so the rest of the queue is all non-accepts
                 rest = sorted(queue[i:] + [alt], key=_order)
                 queue[i:] = rest
             continue
         seen_sigs.add(sig)
-        if a.kind in ACCEPT_KINDS:
+        if a.kind == "duel_accept":
+            duel_accepts_left -= 1
+        elif a.kind in ACCEPT_KINDS:
             accepts_left -= 1
         if a.kind in MESSAGE_KINDS:
             spoken.add(conv_key(a))

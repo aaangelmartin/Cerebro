@@ -492,7 +492,14 @@ def rail_pace(action: Action, sit=None, ctx=None) -> Verdict:
     b = _get(ctx, "budget") or {}
     lim = {**(b.get("limits") or {}), **(_get(sit, "limits") or {})}
     p = action.params or {}
-    if action.kind in ACCEPT_KINDS:
+    if action.kind == "duel_accept":                      # duels have their own limit: independent of trades
+        from .context import duel_accept_cap
+        left = b.get("duel_accepts_left")
+        if left is None:
+            left = duel_accept_cap(lim) - int(b.get("duel_accepts_used", 0))
+        if left <= 0:
+            return Verdict(False, "pace", "no duel accept left this tick")
+    elif action.kind in ACCEPT_KINDS:
         left = b.get("accepts_left")
         if left is None:
             left = int(lim.get("accepts_per_team_per_tick", 1)) - int(b.get("accepts_used", 0))

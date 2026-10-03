@@ -157,11 +157,14 @@ class RunTest(unittest.TestCase):
         self.assertEqual([x["params"]["offer"] for x in rep["actions"]], [4])
 
     def test_fallback_select_one_accept(self):
+        # one offer accept per tick; a duel accept has its own limit and does not take that slot
         acts = [Action("accept_offer", {"offer": 1}, "dealers", priority=5),
+                Action("accept_offer", {"offer": 2}, "dealers", priority=3),
                 Action("duel_accept", {"duel": 1}, "duels", priority=1)]
         r = self.runner([Dom("x", acts)])
         rep = r.step(sit_at())
-        self.assertEqual([a["kind"] for a in rep["actions"]], ["duel_accept"])
+        self.assertEqual([(a["kind"], (a["params"] or {}).get("offer")) for a in rep["actions"]],
+                         [("duel_accept", None), ("accept_offer", 1)])
 
     def test_arbiter_used_with_flexible_signature(self):
         acts = [Action("noop", {}, "duels"), Action("noop", {}, "dealers")]

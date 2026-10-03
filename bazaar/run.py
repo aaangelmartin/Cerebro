@@ -209,7 +209,7 @@ def _fallback_select(actions: list[Action]) -> list[Action]:
     rank = {"duels": 0, "market": 1, "broker": 1, "dealers": 2, "lab": 3}
     out, accepted = [], False
     for a in sorted(actions, key=lambda a: (rank.get(a.domain, 9), -a.priority)):
-        if a.kind in ACCEPT_KINDS:
+        if a.kind in ACCEPT_KINDS and a.kind != "duel_accept":   # duel accepts have their own limit
             if accepted:
                 continue
             accepted = True
