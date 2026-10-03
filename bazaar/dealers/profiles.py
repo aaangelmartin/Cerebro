@@ -81,7 +81,23 @@ PICAROS_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
                      "patience": [6, 7]},
     },
 }
-SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED, "sat-picaros-1": PICAROS_SEED}
+# Saturday evening, our own hand-run threads (1600-1703) and Team 14's: where each ladder ended.
+STEPS_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
+    "pilar": {
+        # buys a rare she loves (SAL, RET): opens 70; finals 84 (asks 105..90), 77 (asks from 108), 80, t14 87.
+        "sell:rare:loved": {"open": [70, 70, 70, 70], "limit_ratio": [1.2, 1.1, 1.14, 1.24], "mirror": [0.9, 0.7, 0.9],
+                            "patience": [6, 5, 6]},
+    },
+    "picaros": {
+        # sells a rare: opens 73; finals 54, 55, 55 after five or six bids from 32 in steps of 4.
+        "buy:rare": {"open": [73, 73, 73], "limit_ratio": [0.74, 0.75, 0.75], "mirror": [1.0, 1.0], "patience": [5, 6, 2]},
+    },
+    "abuela": {
+        # buys an uncommon since tick 979: opens 18, stops at 19-20.
+        "sell:uncommon": {"open": [18, 18, 18], "limit_ratio": [1.06, 1.06, 1.11], "mirror": [0.3], "patience": [3]},
+    },
+}
+SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED, "sat-picaros-1": PICAROS_SEED, "sat-steps-1": STEPS_SEED}
 
 # Hourly quotas measured Friday (the menu says it too).
 FRIDAY_QUOTAS = {"abuela": {"deals": 8, "packs": 3}, "chato": {"deals": 6, "packs": 2}}
@@ -319,6 +335,21 @@ class ProfileStore:
 
     def quota_blocked(self, dealer: str) -> bool:
         return time.time() - self.data["quota_hit"].get(dealer, 0) < 900
+
+    def set_budget_hit(self, dealer: str, until_tick: int) -> None:
+        """The dealer closed with `persona_budget`: it has no cash left for us until `until_tick`."""
+        with self.lock:
+            self.data.setdefault("budget_hit", {})[dealer] = int(until_tick)
+            self.save()
+
+    def budget_blocked(self, dealer: str, tick: int) -> bool:
+        return int(tick) < int((self.data.get("budget_hit") or {}).get(dealer, 0))
+
+    def recent_sales(self, dealer: str, kind_prefix: str, within_s: float, now: float | None = None) -> list[int]:
+        """Prices this dealer paid us for this kind of card lately, oldest first (the resale proof of a loop)."""
+        now = now or time.time()
+        return [int(d["price"]) for d in self.data["deals"] if d.get("dealer") == dealer and d.get("side") == "sell"
+                and str(d.get("kind") or "").startswith(kind_prefix) and now - d.get("at", 0) < within_s]
 
     def ladder(self, level: int) -> list[float]:
         """Our best three negotiated captures at this level, best first (missing ones are 0)."""

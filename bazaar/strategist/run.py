@@ -259,7 +259,10 @@ STRATEGY_TOOL = {
             "dealer_orders": {"type": "array", "description": "dealer threads to open NOW (prose in guidance is "
                               "not executed; this is): {dealer: abuela|chato|pilar|..., action: sell|buy, ref: card, "
                               "open: our first price, floor_or_cap: lowest sell price or highest buy price, "
-                              "max_messages, why}. The bot opens it before its own candidates, haggles inside the "
+                              "max_messages (1-2 = close fast; more = the dealer's measured step ladder runs in "
+                              "full and ends at its final offer), why, resell_to (buy orders only: another dealer "
+                              "id; the bot buys only while that dealer has paid us at least 15 P more for this "
+                              "rarity in the last 3 hours, and sells the card there as soon as it arrives)}. The bot opens it before its own candidates, haggles inside the "
                               "bound (never looser than value +/- margin; rails apply) and reports the result or the "
                               "skip reason in YOUR LAST TARGETED POSTS; at most 4, repeat an order until it is done",
                               "items": {"type": "object"}},
@@ -614,6 +617,18 @@ class Strategist:
                         v = None
                 missing.append({"ref": c["id"], "rarity": c.get("rarity"), "value_to_us": v, "minted": c.get("minted"),
                                 "print_run": c.get("print_run")})
+            if len(missing) == 1 and values is not None:   # the card that completes the page: count its bonus
+                try:
+                    from bazaar.core.goal import last_card_value, team_only
+                    m = missing[0]
+                    m["completes_page"] = True
+                    m["value_with_page_bonus"] = round(last_card_value(values, m["ref"]), 1)
+                    if team_only(values, _read(self.live / "control.json", {}) or {}, m["ref"]):
+                        m["buy_from"] = ("a TEAM only: the code keeps dealers off it and bids for it on El Rastro up "
+                                         "to your goal price; a team sale of the last card scores neg_points, a "
+                                         "dealer sale scores nothing")
+                except Exception:  # noqa: BLE001
+                    pass
             sets[st["id"]] = {"affinity": (me.get("affinity") or {}).get(st["id"]),
                               "page_held": len(page) - len(missing), "page_size": len(page),
                               "missing": sorted(missing, key=lambda m: -(m["value_to_us"] or 0))[:10]}
@@ -712,7 +727,7 @@ class Strategist:
             sp, spend = {}, {}
         try:
             from bazaar.core.goal import pending
-            goals_now = pending({"me": me}, _read(self.live / "control.json", {}) or {}, values)
+            goals_now = pending({"me": me}, _read(self.live / "control.json", {}) or {}, values, team=True)
         except Exception:  # noqa: BLE001
             goals_now = autos
         from bazaar.strategist import analysis

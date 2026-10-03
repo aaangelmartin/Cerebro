@@ -303,7 +303,7 @@ _DEALER_RX = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
 
 
 def _dealer_orders(raw) -> list[dict]:
-    """Dealer threads the brain orders: {dealer, action: sell|buy, ref, open, bound, max_messages, why}.
+    """Dealer threads the brain orders: {dealer, action: sell|buy, ref, open, bound, max_messages, why, resell_to}.
     `bound` is the floor for a sell and the cap for a buy (the model may call it floor_or_cap, floor or cap).
     The dealers domain opens the thread and haggles inside these bounds; the rails still decide."""
     out, seen = [], set()
@@ -323,9 +323,12 @@ def _dealer_orders(raw) -> list[dict]:
         if (dealer, ref) in seen:
             continue
         seen.add((dealer, ref))
+        resell = str(x.get("resell_to") or "").strip().lower()      # buy orders: a dealer -> dealer loop
         out.append({"dealer": dealer, "action": action, "ref": ref, "open": _int(x.get("open"), 1, 500),
                     "bound": bound, "max_messages": _int(x.get("max_messages"), 1, 8) or 4,
-                    "why": _clean(x.get("why"), 200)})
+                    "why": _clean(x.get("why"), 200),
+                    **({"resell_to": resell} if action == "buy" and _DEALER_RX.match(resell) and resell != dealer
+                       else {})})
     return out
 
 

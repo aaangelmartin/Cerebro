@@ -1,6 +1,6 @@
 """Outbox request code-87136b11: a trickster dealer (Los Pícaros) slips another card into some of its offers.
 We never accept such an offer and never walk at the first switch: we repeat our bid naming the card we asked
-for, and close only after two switches in a row or once our messages are used."""
+for, and close only after three switches in a row or once our messages are used."""
 from __future__ import annotations
 
 import unittest
@@ -93,10 +93,14 @@ class SwitchedCard(unittest.TestCase):
         acts = acts_for(dom, thread([("d", 2, 27, CARD), ("u", 3, 12), ("d", 4, 13, OTHER)], final=True), 5)
         self.assertNotIn("accept_offer", [a.kind for a in acts])
 
-    def test_two_switches_in_a_row_close(self):
+    def test_three_switches_in_a_row_close(self):
+        # thread 1693 (Los Pícaros): two switches in a row, then back to our card; the third one is the end
         dom = domain()
-        th = thread([("d", 2, 27, CARD), ("u", 3, 12), ("d", 4, 20, OTHER), ("u", 5, 12), ("d", 6, 18, OTHER)])
-        acts = acts_for(dom, th, 7)
+        rows = [("d", 2, 27, CARD), ("u", 3, 12), ("d", 4, 20, OTHER), ("u", 5, 12), ("d", 6, 18, OTHER)]
+        acts = acts_for(dom, thread(rows), 7)
+        self.assertEqual([a.kind for a in acts], ["thread_message"])
+        self.assertIn(CARD, acts[0].params["text"])
+        acts = acts_for(dom, thread(rows + [("u", 7, 12), ("d", 8, 17, OTHER)]), 9)
         self.assertEqual([a.kind for a in acts], ["close_thread"])
         self.assertIn("in a row", acts[0].reason)
 

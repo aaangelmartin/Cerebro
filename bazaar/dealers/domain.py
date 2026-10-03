@@ -28,7 +28,7 @@ from .. import config
 from ..core.context import conv_key
 from ..core.types import Action, Outcome
 from ..lab import feedback
-from . import gifts, haggle
+from . import gifts, haggle, steps
 from .compat import clean, lessons_block_for, llm_module, safe_our_text, scan, time_left, wrap
 from .haggle import Move
 from .profiles import FRIDAY_QUOTAS, ProfileStore, capture, ladder_gain
@@ -51,7 +51,11 @@ GOAL_SMALL_GAIN_P = 3.0                     # ...and create at least this much v
 CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
 VENUE_RESERVE_P = 270                        # bond 250 + 20, kept while we have no venue (rails do the same)
 STALE_TICKS = 3                              # close a thread the dealer left unanswered this long
-SWITCH_CLOSE = 2                             # close after this many dealer offers in a row for another card
+SWITCH_CLOSE = 3                             # close after this many dealer offers in a row for another card
+#                                              (thread 1693: two switches in a row, then back to our card)
+BUDGET_BLOCK_TICKS = 120                     # a dealer out of budget (persona_budget) buys again next game hour
+LOOP_MARGIN_P = 15                           # dealer -> dealer loop: the proven resale must beat the buy by this
+LOOP_RECENT_S = 3 * 3600                     # ...and "proven" means our own sales to that dealer this recent
 HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
 HOLD_GAP_SHARE = 0.05                        # "near our limit": within 1 P, or this share of it for larger prices
 PACK_EDGE = 1.25                             # until packs can be opened, buy one only if value >= 1.25 x price
@@ -83,6 +87,7 @@ class ThreadInfo:
     switch_hold: bool = False    # the dealer offered another card: the code repeats our bid or waits, Claude does not decide
     rebid_text: str = ""         # the words of that repeated bid: they name the card we asked for
     gift_bid: bool = False       # gift window open and no priced message of ours yet: the code sends that bid
+    step_policy: bool = False    # a step ladder (steps.py) runs this thread: the code decides, Claude does not
 
 
 @dataclass
@@ -165,6 +170,7 @@ class DealersDomain:
         self._order_done: dict[tuple, int] = {}     # (dealer, action, ref) -> bound of the order that already ended
         self._order_bound: dict[tuple, int] = {}    # (dealer, action, ref) -> bound of the order we opened
         self._order_bounds_now: dict[tuple, int] = {}
+        self._orders_last: list[dict] = []          # last tick's orders: which finished buy belongs to a loop
 
     # ================================================================== Domain protocol
     def fallback(self, sit, ctx) -> list[Action]:
@@ -201,6 +207,14 @@ class DealersDomain:
                 orders = [arb, *orders]
         except Exception:  # noqa: BLE001
             pass
+        # dealer -> dealer loop: a card bought under a `resell_to` order is sold to that dealer as soon as it is in
+        for j in self.store.data.get("loop") or []:
+            if time.time() - float(j.get("at") or 0) > LOOP_RECENT_S:
+                continue                                         # a stale job: the brain decides what to do with the card
+            if not any(o["dealer"] == j.get("to") and o["ref"] == j.get("ref") for o in orders):
+                orders = [*orders, {"dealer": j["to"], "action": "sell", "ref": j["ref"], "open": None,
+                                    "bound": int(j["floor"]), "max_messages": 8, "loop": True,
+                                    "why": f"loop: bought at {j.get('paid')} P from {j.get('from')}, resell"}]
         return orders
 
     def _note_order(self, o: dict, status: str, detail: str = "", tick: int | None = None, **extra) -> None:
@@ -325,6 +339,28 @@ class DealersDomain:
                 cap = _buy_cap(ref, control, rarity, value, cap)   # an excepted avoided-set card must leave its gain
                 if o.get("arbitrage"):                           # a secured resale: the rail checks every condition
                     cap = int(o["bound"])
+                resell = o.get("resell_to")
+                if resell:                                       # a loop: buy only against a proven resale
+                    sold = self.store.recent_sales(resell, f"sell:{rarity}", LOOP_RECENT_S)[-3:]
+                    if not sold:
+                        self._note_order(o, "skipped", f"loop: no sale of a {rarity or 'card'} to {resell} in the "
+                                                       "last 3 hours, the resale is not proven", plan.tick)
+                        continue
+                    if (self.store.budget_blocked(resell, plan.tick) or self.store.in_cooloff(resell, plan.tick)
+                            or self.store.quota_blocked(resell) or resell not in plan.dealers):
+                        self._note_order(o, "skipped", f"loop: {resell} cannot buy from us now (budget, quota or "
+                                                       "cooloff)", plan.tick)
+                        continue
+                    closes = self.store.expect_limit(d, f"buy:{rarity}", self.store.expect_opening(
+                        d, f"buy:{rarity}", entry.get("list_price")) or 0)
+                    if cap < closes - 1:
+                        # the value rail caps every buy at our value for ONE MORE copy; a spare is worth less
+                        self._note_order(o, "skipped", f"loop: another {ref} is worth {round(value, 1)} to us (max "
+                                                       f"{cap}) and {d} closes near {round(closes)}; a loop above "
+                                                       "our value needs the value rail to accept the proven resale "
+                                                       f"({min(sold)} P at {resell})", plan.tick)
+                        continue
+                    cap = min(cap, min(sold) - LOOP_MARGIN_P)
                 limit = min(int(o["bound"]), cap, budget)
                 if limit < 1:
                     self._note_order(o, "skipped", f"cap {o['bound']} leaves nothing: our max is "
@@ -433,6 +469,9 @@ class DealersDomain:
             self.store.set_cooloff(dealer, until)
         elif code in ("persona_quota", "quota", "hourly_quota"):
             self.store.set_quota_hit(dealer)
+        elif "budget" in code:
+            self.store.set_budget_hit(dealer, int(getattr(outcome, "tick", None) or getattr(self, "_tick", 0) or 0)
+                                      + BUDGET_BLOCK_TICKS)
         elif code == "sold_out":
             self._sold_out[(dealer, meta.get("item", ""))] = time.time()
         if meta["kind"] == "accept_offer" and outcome.status in ("sent", "deal"):
@@ -534,6 +573,8 @@ class DealersDomain:
             self.store.set_cooloff(dealer, (detail or {}).get("until_tick"))
         if "quota" in reason:
             self.store.set_quota_hit(dealer)
+        if "budget" in reason:                              # it has no cash left to buy from us this hour
+            self.store.set_budget_hit(dealer, tick + BUDGET_BLOCK_TICKS)
         if "sold_out" in reason:
             self._sold_out[(dealer, t.get("item", ""))] = time.time()
         price = settlements.get(dealer)
@@ -551,6 +592,15 @@ class DealersDomain:
             self.store.record_deal(dealer, level, kind, t.get("item", "?"), t.get("opening"), int(price),
                                    t.get("limit_est"), buying, t.get("value"), thread=tid, tick=tick)
         okey = (dealer, t.get("side"), str(t.get("item") or "").upper())
+        jobs = self.store.data.setdefault("loop", [])
+        if buying and deal:                                 # bought under a loop order: resell it at once
+            src = next((o for o in self._orders_last if o.get("resell_to") and o["dealer"] == dealer
+                        and o["ref"] == okey[2] and o["action"] == "buy"), None)
+            if src is not None:
+                jobs.append({"ref": okey[2], "from": dealer, "to": src["resell_to"], "paid": int(price),
+                             "floor": int(price) + LOOP_MARGIN_P, "tick": tick, "at": time.time()})
+        elif not buying:                                    # its resale thread ended, deal or not: the job is over
+            jobs[:] = [j for j in jobs if not (j.get("to") == dealer and j.get("ref") == okey[2])]
         if okey in self._order_bound:                       # this thread came from a brain order: tell it the end
             self._order_done[okey] = self._order_bound.pop(okey)
             self._note_order({"dealer": dealer, "action": t.get("side"), "ref": okey[2]},
@@ -694,6 +744,10 @@ class DealersDomain:
             p = int(v.last_ours)
         elif order is not None and order.get("open"):
             p = int(order["open"])
+        elif steps.profile_for(v.dealer, v.side) is not None and (v.opening or limit_est):
+            prof = steps.profile_for(v.dealer, v.side)      # it opened with another card: our ladder's first bid
+            p = steps.first_price(prof, True, v.opening or self.store.expect_opening(v.dealer, "buy:rare", None)
+                                  or limit_est / 0.75, limit)
         else:
             p = haggle.plan_next(v, limit, limit_est, patience) or int((limit_est or limit) * 0.85)
         p = min(p, limit)
@@ -773,14 +827,22 @@ class DealersDomain:
             patience = self.store.stat(v.dealer, kind, "patience")
             move = haggle.fallback_move(v, limit, limit_est, tick, patience)
             ok, why = haggle.acceptable(v, limit)
-            if move.kind == "close" and budget_bound and not v.final and not cautious:
+            # a dealer with a measured step ladder (steps.py): the code walks it, one message per answer,
+            # and after the dealer's final offer it only accepts or closes
+            small = v.opening is not None and v.opening < steps.MIN_OPENING    # 5 P commons keep the quick rule
+            prof = None if cautious or v.is_pack or small else steps.profile_for(v.dealer, v.side)
+            if move.kind == "close" and budget_bound and not v.final and not cautious and prof is None:
                 move = Move("wait", None, "cash committed to our other buy bids: hold this one")
             force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
             max_msgs = int((order or {}).get("max_messages") or (4 if order is not None else HOLD_MESSAGES))
+            if prof is not None:
+                max_msgs = steps.messages_for(prof, order)
+                move = steps.next_move(v, limit, tick, prof, ok, why, open_hint=(order or {}).get("open"),
+                                       max_messages=max_msgs, budget_bound=budget_bound)
             # The dealer stands 1 P (5 % on larger prices) outside our limit, we still have messages and its level
             # has an empty ladder slot: hold our price instead of closing (tick 872: closed at 4 against our 5).
             hold = (not ok and not cautious and self._near_limit(v, limit) and len(v.our_ticks) < max_msgs
-                    and 0.0 in self.store.ladder(level))
+                    and 0.0 in self.store.ladder(level) and prof is None)      # a ladder never repeats a price
             if hold and not force.startswith(("dealer silent", "dealer never")):
                 force = ""
             if v.buying and _avoided(v.item, _g(ctx, "control") or {}, values.rarity(v.item)):
@@ -793,8 +855,8 @@ class DealersDomain:
             if order is not None and ok and not v.final and move.kind == "price" and len(v.our_ticks) >= max_msgs:
                 move = Move("accept", v.last_theirs, "brain order: messages used, its offer is inside our bound")
             if order is not None and not ok and not v.final and not force:
-                if len(v.our_ticks) >= int(order.get("max_messages") or 4):
-                    force = f"brain order: {order['max_messages']} messages used without a deal inside the bound"
+                if len(v.our_ticks) >= max_msgs and v.last_sender == "dealer":
+                    force = f"brain order: {max_msgs} messages used without a deal inside the bound"
                 elif v.last_ours is None and v.last_theirs is not None and order.get("open"):
                     p0 = haggle.guard_price(v, order["open"], limit)
                     if p0 is not None:
@@ -838,7 +900,8 @@ class DealersDomain:
                               msg_used=bool(used.get(conv_key(Action(kind="thread_message", params={"thread": v.id},
                                                                      domain=self.name)))),
                               range=haggle.allowed_range(v, limit), force_close=force,
-                              switch_hold=switch_hold, rebid_text=rebid_text, gift_bid=gift_bid)
+                              switch_hold=switch_hold, rebid_text=rebid_text, gift_bid=gift_bid,
+                              step_policy=prof is not None)
             plan.infos.append(info)
             if v.buying:
                 committed += max(0, min(limit, v.last_theirs or limit))
@@ -852,6 +915,8 @@ class DealersDomain:
         plan.slots = max(0, int(limits.get("max_open_threads_per_team", 6)) - open_threads - 1)  # keep one for teammates/market
         for d in dealers:
             if d in busy or self.store.in_cooloff(d, tick) or self.store.quota_blocked(d):
+                continue
+            if self.store.budget_blocked(d, tick):
                 continue
             quota = int(((dealers[d].get("menu") or {}).get("deals_per_team_per_hour"))
                         or FRIDAY_QUOTAS.get(d, {}).get("deals", 6))
@@ -874,6 +939,7 @@ class DealersDomain:
                 self._gift_candidates(plan, sit, ctx, budget, waiting)
             self._refresh_exact(values, [c.item for c in plan.candidates if c.kind.startswith("buy:")
                                          and not c.kind.endswith("pack")][:3])
+        self._orders_last = list(plan.orders)
         return plan
 
     def _gift_candidates(self, plan: Plan, sit, ctx, budget: int, waiting: dict[str, int]) -> None:
@@ -1146,7 +1212,7 @@ class DealersDomain:
             return False
         if time_left(ctx) < MIN_LLM_S:
             return False
-        our_turn = any(i.move.kind != "wait" or i.can_accept for i in plan.infos)
+        our_turn = any((i.move.kind != "wait" or i.can_accept) and not i.step_policy for i in plan.infos)
         return our_turn or bool(plan.candidates and plan.free and plan.slots > 0)
 
     def system_text(self) -> str:
@@ -1244,6 +1310,10 @@ class DealersDomain:
                 a = self._move_action(plan, info, info.move, "fallback")
             elif info.gift_bid and kind not in ("price", "accept"):
                 notes.append(f"{tid}: gift window open; code names our price first")
+                a = self._move_action(plan, info, info.move, "fallback")
+            elif info.step_policy or (info.view.final and kind == "price"):
+                # a step ladder, or a counter-offer after the dealer's final (it walks): the code decides
+                notes.append(f"{tid}: {'step ladder' if info.step_policy else 'final offer'}; code decides")
                 a = self._move_action(plan, info, info.move, "fallback")
             elif kind == "accept" and not info.can_accept:
                 notes.append(f"{tid}: accept refused by code ({info.accept_why})")

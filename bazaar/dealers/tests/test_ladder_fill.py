@@ -29,7 +29,7 @@ class SaturdaySeedTest(unittest.TestCase):
             self.assertEqual(o, 22)
             self.assertGreater(s.expect_limit("pilar", "sell:uncommon:loved", o), 25)
             # a loved kind with no samples falls back to the plain kind
-            self.assertEqual(s.expect_opening("pilar", "sell:rare:loved", None), s.expect_opening("pilar", "sell:rare", None))
+            self.assertEqual(s.expect_opening("pilar", "sell:epic:loved", None), s.expect_opening("pilar", "sell:epic", None))
 
 
 class CollectorIsADealerTest(unittest.TestCase):
