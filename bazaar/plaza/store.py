@@ -209,7 +209,6 @@ class Store:
                 "hidden_msgs": [m for m in a.get("hidden_msgs") or [] if isinstance(m, str)],
                 "enabled": a.get("enabled", True) is not False,
                 "mm_paused": bool(a.get("mm_paused")),
-                "excluded_teams": [t for t in a.get("excluded_teams") or [] if isinstance(t, str)],
                 "excluded_matches": [m for m in a.get("excluded_matches") or [] if isinstance(m, str)]}
 
     def admin_do(self, action: str, team: str | None = None, message: int | None = None,
@@ -259,14 +258,12 @@ class Store:
         return self.admin()
 
     def _exclude(self, action: str, team, match) -> dict:
-        """Keeps a team, or one match, out of the matchmaker."""
-        if team is not None and not (isinstance(team, str) and TEAM_RX.fullmatch(team)):
-            raise PlazaError(400, "bad_request", "team ids look like t04")
-        if match is not None and not (isinstance(match, str) and re.fullmatch(r"m-[0-9a-f]{10}", match)):
+        """Keeps one match out of the matchmaker. Never a team: nobody is left out of the matching."""
+        if team is not None:
+            raise PlazaError(400, "bad_request", "no team is excluded from the matching; name a match")
+        if not (isinstance(match, str) and re.fullmatch(r"m-[0-9a-f]{10}", match)):
             raise PlazaError(400, "bad_request", "match ids look like m-0123456789")
-        if (team is None) == (match is None):
-            raise PlazaError(400, "bad_request", "name a team or a match")
-        key, value = ("excluded_teams", team) if team else ("excluded_matches", match)
+        key, value = "excluded_matches", match
         with self.lock:
             data = self._load()
             a = data.setdefault("admin", {})

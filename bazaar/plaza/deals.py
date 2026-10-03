@@ -150,13 +150,13 @@ class Deals:
                         break
 
     def sync(self, cands: list[dict], tick: int | None, log: list[dict], paused: bool = False,
-             excluded_teams=frozenset(), excluded_matches=frozenset()) -> list[dict]:
+             excluded_matches=frozenset()) -> list[dict]:
         """Brings the threads up to date with the candidates and the game. Returns the floor items for what changed."""
         events: list[dict] = []
         tick = int(tick or 0)
         with self.lock:
             self.tick = tick
-            before = json.dumps([(r["id"], r["state"], r.get("alternatives")) for r in self.matches.values()])
+            before = json.dumps([(r["id"], r["state"], r.get("price"), r.get("alternatives")) for r in self.matches.values()])
             self._game(log, events)
             for r in self.matches.values():                                    # nobody followed it
                 if r["state"] == "proposed" and tick - r["state_tick"] > PROPOSAL_TICKS and not r.get("forced") \
@@ -166,7 +166,7 @@ class Deals:
                     self._move(r, "expired", tick, events)
             self.cool = {k: v for k, v in self.cool.items() if v > tick}
             fresh = {c["id"]: c for c in cands}
-            blocked = lambda m: m["id"] in excluded_matches or any(t in excluded_teams for t in parties(m))  # noqa: E731
+            blocked = lambda m: m["id"] in excluded_matches       # noqa: E731 - a match, never a team
             for mid in [k for k, r in self.matches.items() if r["state"] == "proposed" and not r.get("messages")
                         and not r.get("forced") and (k not in fresh or blocked(r))]:
                 self.matches.pop(mid)                                          # the sheets changed: withdrawn
@@ -195,6 +195,8 @@ class Deals:
                     c = fresh.get(m["id"])
                     if c:
                         r.update({k: c[k] for k in ("why", "last_of_page", "priority", "confidence", "score") if k in c})
+                        if r["state"] == "proposed" and not r.get("price_by") and not r.get("forced"):
+                            r.update({k: c[k] for k in ("price", "saves", "basis") if k in c}, suggested=c["price"])
                 r["alternatives"] = m["alternatives"]
             keep = {m["id"] for m in active}
             for mid in [k for k, r in self.matches.items() if r["state"] in LIVE_STATES and k not in keep]:
@@ -202,7 +204,8 @@ class Deals:
             done = sorted((r for r in self.matches.values() if r["state"] in DONE_STATES), key=lambda r: r["updated"])
             for r in done[:max(0, len(done) - MAX_DONE)]:
                 self.matches.pop(r["id"], None)
-            if events or before != json.dumps([(r["id"], r["state"], r.get("alternatives")) for r in self.matches.values()]):
+            if events or before != json.dumps([(r["id"], r["state"], r.get("price"), r.get("alternatives"))
+                                               for r in self.matches.values()]):
                 self._save()
         return events
 

@@ -132,7 +132,7 @@ def swap_recipe(a: str, b: str, x: str, y: str, venue: str = VENUE) -> dict:
     }
 
 
-def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue: str = VENUE) -> list[dict]:
+def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue: str = VENUE, gate=None) -> list[dict]:
     """Every candidate among the teams' sheets, by priority. `assign` then keeps one per card and team."""
     teams = {t: s for t, s in sheets.items() if t != host and not s.get("host")}
     have = {t: _have(s) for t, s in teams.items()}
@@ -149,6 +149,12 @@ def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue:
                 price, basis = price_for(h, w, rarity, card.get("book"))
                 if price is None:
                     continue
+                if gate is not None:                           # private limits, asked blindly: pass, move or drop
+                    gated, overlap = gate(a, b, ref, price, FLOOR.get(rarity or "", 1))
+                    if gated is None:
+                        continue
+                    if overlap and gated != price:
+                        price, basis = gated, "limits"
                 last = last_of_page(teams[b], ref)
                 declared = h.get("source") == "agent" and w.get("source") == "agent"
                 score = 1.0 + RARITY_SCORE.get(rarity or "", 0.0) + (3.0 if last else 0.0) \
