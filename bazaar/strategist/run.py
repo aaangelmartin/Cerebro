@@ -992,6 +992,8 @@ class Strategist:
                 council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
             ok = council["ok"]
         plan = S.merge_accepted(self.plan, new, ok)
+        if "min_asks" not in plan and (self.plan or {}).get("min_asks"):
+            plan["min_asks"] = dict(self.plan["min_asks"])     # price floors stay until the brain changes them ({} clears)
         events, self.pending_events = self.pending_events, []
         us_now = ((pic.get("research") or {}).get("scoreboard") or {}).get("us_now") or {}
         meta = {"reason": reason, "events": events, "model": got.get("model"),
