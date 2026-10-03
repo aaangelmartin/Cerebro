@@ -35,11 +35,14 @@ NORMAL = {
 }
 HARD = {**NORMAL, "traders": 12, "firm_p": 0.35, "shade": (0.10, 0.45), "patience": (0, 2),
         "geo_rate": (0.25, 0.60), "leave_p": 0.55, "leave_at": (2, 8), "late_at": (1, 4)}
-# Fitted to the real Saturday sessions (b7): ~20 traders arriving one by one over the session, most of them
-# visible for only 1-4 ticks unless matched, quotes relaxing a few primas per tick.
+# Fitted to the real Saturday sessions b7 and b25 (stall 0.892 and 0.931 there; this profile gives 0.915):
+# 20 traders arriving one by one over the session, quotes close to the limits that relax a few primas per tick,
+# traders with a chance at the going price (about 68) stay 8-14 ticks, the others give up after 1-5. Checked
+# against the recordings: ~9.5 traders matched (real 8-10), 38 % seen for a single tick (real 45 %), unmatched
+# traders visible 3.2 ticks (real 3.2).
 REAL = {**NORMAL, "traders": 20, "ticks": 14, "buyer_value": (20, 110), "seller_cost": (20, 130),
-        "shade": (0.05, 0.45), "firm_p": 0.15, "patience": (0, 1), "late_p": 1.0, "late_at": (0, 11),
-        "life": (1, 5), "life_short_p": 0.4}
+        "shade": (0.0, 0.20), "firm_p": 0.15, "patience": (0, 1), "linear_steps": (2, 5),
+        "late_p": 1.0, "late_at": (0, 11), "life": (8, 14), "life_short_p": 0.0, "life_out": (1, 5), "mid": 68}
 
 
 @dataclass
@@ -99,6 +102,10 @@ class SimSession:
             leave = rng.randint(*p["leave_at"]) if rng.random() < p["leave_p"] else p["ticks"]
             if "life" in p:                                     # real sessions: short stays after arriving
                 life = 1 if rng.random() < p.get("life_short_p", 0.0) else rng.randint(*p["life"])
+                # traders with no chance at the going price (cheap buyers, dear sellers) give up sooner
+                out_of_market = (lim < p["mid"]) if side == "buy" else (lim > p["mid"])
+                if "life_out" in p and "mid" in p and out_of_market:
+                    life = min(life, rng.randint(*p["life_out"]))
                 leave = min(p["ticks"], arrive + life)
             leave = max(leave, arrive + 1)
             out.append(SimTrader(

@@ -181,6 +181,27 @@ class Lab:
                          path=self.lab / "notices.jsonl", ids=changed)
         return changed
 
+    # --- the broker's Market Test sessions -------------------------------------------
+    BROKER_LEARN_EVERY_S = 120.0
+
+    def learn_broker(self) -> dict | None:
+        """After a Market Test session ends, let broker_learn try policy overlays in the simulator and propose
+        the best as a `broker` lesson. Never while a session is running (the broker is busy then), at most every
+        two minutes, and only when a new session has finished. Costs no API calls."""
+        now = time.time()
+        if now - getattr(self, "_broker_learn_at", 0.0) < self.BROKER_LEARN_EVERY_S:
+            return None
+        st = read_json(self.live / "broker_status.json", {}) or {}
+        if st.get("active_runs") or st.get("session"):
+            return None
+        self._broker_learn_at = now
+        from bazaar.lab import broker_learn
+        out = broker_learn.learn(self.store, self.live, self.lab)
+        if out.get("lesson"):
+            write_notice("broker_lesson", "El Laboratorio propone un ajuste del broker tras el último Market Test.",
+                         path=self.lab / "notices.jsonl", ids=[out["lesson"]])
+        return out
+
     def _can_spend(self) -> bool:
         if time.strftime("%Y-%m-%d") != self.day:
             self.day, self.spent_today = time.strftime("%Y-%m-%d"), 0.0
@@ -236,6 +257,7 @@ class Lab:
             out["record_use"] = self.apply_closings()
             out["novelty"] = [n["key"] for n in self.handle_novelty()]
             out["brain"] = self.ingest_brain()
+            out["broker"] = self.learn_broker()
             due = time.time() - self.last_hyp >= HYPOTHESIS_EVERY_S and self.corpus.version != self.last_hyp_version
             if (force_hypothesis or due) and self._can_spend():
                 out["hypothesis"] = self._hypothesize()
