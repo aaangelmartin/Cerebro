@@ -163,3 +163,8 @@
 .scr-bot .bot-brain-caps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 24px; border-top: 1px solid var(--bx-line); padding-top: 10px; }
 .scr-bot .bot-brain-cap { width: 80px; }
 .scr-bot .bot-brain-bar { display: flex; flex-direction: column; min-width: 0; } .scr-bot .bot-brain-bar .bot-bar { display: block; width: 100%; }
+.scr-bot .bot-brain-total { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--bx-line); }
+.scr-bot .bot-brain-total[hidden] { display: none; }
+.scr-bot .bot-bar-lg { height: 8px; }
+.scr-bot .bot-brain-caps-1 { grid-template-columns: minmax(0, 1fr); border-top: 0; padding-top: 0; max-width: 420px; }
+.scr-bot .bot-okc { color: var(--bx-ok); } .scr-bot .bot-warnc { color: var(--warn); }

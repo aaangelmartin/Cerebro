@@ -490,13 +490,21 @@
       const btn = el("button", { type: "button", class: "bot-b bot-b-sm", onclick: async () => {
         const v = Number(inp.value);
         if (!isFinite(v) || v < 0 || inp.value === "") { toast("error", "Número no válido", label); return; }
-        const ok = await confirmBox({ title: `¿Cambiar ${label.toLowerCase()} a ${fmt(v, 0)} $?`, text: "Es el máximo que puede gastar hoy en la API de Claude. Se aplica en la siguiente revisión.", confirmLabel: "Sí, cambiar" });
+        const ok = await confirmBox({ title: `¿Cambiar ${label.toLowerCase()} a ${fmt(v, 0)} $?`, text: name === "budget_total_usd" ? "Es todo lo que puede gastar el bot en la API de Claude en lo que queda de evento (hoy y mañana). El reparto por día se recalcula."
+          : "Es el máximo que puede gastar hoy en la API de Claude. Se aplica en la siguiente revisión.", confirmLabel: "Sí, cambiar" });
         if (ok) setBrain({ [name]: v }, `${label}: ${fmt(v, 0)} $`);
       } }, "Guardar");
       n[name] = inp;
       return el("label", { class: "bot-cap-row" }, el("span", {}, label), el("span", { class: "bot-cap-in" }, inp, el("span", { class: "bot-muted bot-small" }, "$"), btn));
     };
+    // total budget of the whole event (today + tomorrow)
+    n.total = el("div", { class: "bot-brain-total", hidden: true });
+    n.totalBar = el("div", { class: "bot-brain-bar" });
+    n.totalPlan = el("div", { class: "bot-brain-kv" });
+    n.total.append(el("div", { class: "bot-cap" }, "Presupuesto total del evento"), n.totalBar, n.totalPlan,
+      el("div", { class: "bot-brain-caps bot-brain-caps-1" }, capIn("budget_total_usd", "Presupuesto total del evento")));
     n.body = el("div", { class: "bot-pb bot-brain-body" },
+      n.total,
       el("div", { class: "bot-brain-top" },
         el("div", { class: "bot-seg bot-brain-mode" }, n.auto, n.manual),
         el("div", { class: "bot-brain-slide" }, el("span", { class: "bot-muted bot-small" }, "0"), n.slider, el("span", { class: "bot-muted bot-small" }, "100"), n.level),
@@ -534,7 +542,7 @@
     n.off.hidden = !(B.state === "off" || B.state === "error");
     n.off.textContent = B.state === "error" ? "No se pudo leer el presupuesto del cerebro: " + ((B.err && B.err.message) || "") : "El presupuesto del cerebro aún no está activo.";
     n.body.classList.toggle("is-off", off);
-    for (const x of [n.slider, n.auto, n.manual, n.brain_day_cap, n.day_cap]) x.disabled = off || B.busy;
+    for (const x of [n.slider, n.auto, n.manual, n.brain_day_cap, n.day_cap, n.budget_total_usd]) x.disabled = off || B.busy;
     if (!d) { n.sub.textContent = B.state === "idle" ? "cargando…" : ""; return; }
     const auto = d.mode !== "manual";
     n.auto.classList.toggle("is-on", auto); n.manual.classList.toggle("is-on", !auto);
@@ -544,6 +552,27 @@
     n.why.replaceChildren(...(lc && lc.reason ? [el("span", { class: "bot-muted" }, auto ? "Último cambio automático: " : "Último cambio: "),
       el("b", {}, (lc.to > lc.from ? "sube" : lc.to < lc.from ? "baja" : "se mantiene") + ": " + lc.reason), el("span", { class: "bot-muted bot-mono" }, ` · ${lc.from} → ${lc.to} · ${window.ui.fmtTime(lc.ts)}`)]
       : [el("span", { class: "bot-muted" }, auto ? "En automático el cerebro sube cuando hay eventos (duelos, Market Test) y baja cuando el juego está parado." : "En manual el nivel se queda donde lo pongas.")]));
+    // event total: shown only when the backend sends it
+    const bt = num(d.budget_total), st = num(d.spent_total);
+    n.total.hidden = bt == null && st == null;
+    if (!n.total.hidden) {
+      const rem = num(d.remaining_total) != null ? d.remaining_total : (bt != null && st != null ? bt - st : null);
+      const pct = bt > 0 && st != null ? Math.min(100, (st / bt) * 100) : 0;
+      const tone = bt > 0 && st >= bt ? "bad" : pct >= 85 ? "warn" : "ok";
+      n.totalBar.replaceChildren(el("div", { class: "bot-brow-h" },
+        el("span", {}, "gastado ", el("b", { class: "bot-mono" }, st != null ? usd(st) : "—"), bt != null ? " de " + fmt(bt, 0) + " $" : ""),
+        el("span", { class: "bot-mono" + (rem != null && rem <= 0 ? " bot-bad" : "") }, rem != null ? "quedan " + usd(Math.max(0, rem)) : "")),
+        el("div", { class: "bot-bar bot-bar-lg bot-bar-" + tone }, el("span", { style: `width:${Math.max(1, Math.round(pct))}%` })));
+      const target = num(d.usd_per_hour_target), nowRate = num(d.usd_per_hour_now);
+      const over = target != null && nowRate != null ? nowRate - target : null;
+      const rateTone = over == null ? "" : over <= 0 ? "bot-okc" : over <= target * 0.25 ? "bot-warnc" : "bot-bad";
+      n.totalPlan.replaceChildren(...[
+        num(d.plan_today) != null || num(d.plan_tomorrow) != null ? el("span", {}, el("span", { class: "bot-muted" }, "Reparto previsto "),
+          el("b", { class: "bot-mono" }, `Hoy ≈ ${num(d.plan_today) != null ? fmt(d.plan_today, 0) + " $" : "—"} · Mañana ≈ ${num(d.plan_tomorrow) != null ? fmt(d.plan_tomorrow, 0) + " $" : "—"}`)) : null,
+        target != null ? el("span", {}, el("span", { class: "bot-muted" }, "Ritmo objetivo "), el("b", { class: "bot-mono" }, "≈ " + fmt(target, 2) + " $/h")) : null,
+        target != null && nowRate != null ? el("span", { class: rateTone }, el("span", { class: "bot-muted" }, "Ahora "), el("b", { class: "bot-mono" }, "≈ " + fmt(nowRate, 2) + " $/h"),
+          " " + (over <= 0 ? "(dentro del ritmo)" : `(${fmt(over, 2)} $/h por encima)`)) : null].filter(Boolean));
+    }
     bar(n.barBrain, num(d.spent_today) || 0, num(d.cap_today) || 0);
     bar(n.barDay, num(d.day_total_spent) || 0, num(d.day_cap) || 0);
     n.proj.textContent = num(d.projected_spend_by_close) != null ? usd(d.projected_spend_by_close) : "—";
@@ -551,7 +580,7 @@
     n.hours.textContent = num(d.hours_left) != null ? fmt(d.hours_left, 1) + " h" : "—";
     const kh = d.keys_headroom;
     n.head.textContent = kh == null ? "—" : typeof kh === "number" ? usd(kh) : Object.entries(kh).map(([k, v]) => `${k} ${fmt(v, 0)} $`).join(" · ");
-    for (const k of ["brain_day_cap", "day_cap"]) if (document.activeElement !== n[k]) n[k].value = String((k === "brain_day_cap" ? d.cap_today : d.day_cap) ?? "");
+    for (const k of ["brain_day_cap", "day_cap", "budget_total_usd"]) if (document.activeElement !== n[k]) n[k].value = String((k === "brain_day_cap" ? d.cap_today : k === "day_cap" ? d.day_cap : d.budget_total) ?? "");
   }
   async function brainPull(force) {
     if (!B.host || B.busy || (!force && Date.now() - B.at < 4000)) return;
