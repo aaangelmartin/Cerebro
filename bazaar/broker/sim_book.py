@@ -35,6 +35,11 @@ NORMAL = {
 }
 HARD = {**NORMAL, "traders": 12, "firm_p": 0.35, "shade": (0.10, 0.45), "patience": (0, 2),
         "geo_rate": (0.25, 0.60), "leave_p": 0.55, "leave_at": (2, 8), "late_at": (1, 4)}
+# Fitted to the real Saturday sessions (b7): ~20 traders arriving one by one over the session, most of them
+# visible for only 1-4 ticks unless matched, quotes relaxing a few primas per tick.
+REAL = {**NORMAL, "traders": 20, "ticks": 14, "buyer_value": (20, 110), "seller_cost": (20, 130),
+        "shade": (0.05, 0.45), "firm_p": 0.15, "patience": (0, 1), "late_p": 1.0, "late_at": (0, 11),
+        "life": (1, 5), "life_short_p": 0.4}
 
 
 @dataclass
@@ -92,6 +97,9 @@ class SimSession:
             mode = "lin" if rng.random() < p["linear_p"] else "geo"
             arrive = rng.randint(*p["late_at"]) if rng.random() < p["late_p"] else 0
             leave = rng.randint(*p["leave_at"]) if rng.random() < p["leave_p"] else p["ticks"]
+            if "life" in p:                                     # real sessions: short stays after arriving
+                life = 1 if rng.random() < p.get("life_short_p", 0.0) else rng.randint(*p["life"])
+                leave = min(p["ticks"], arrive + life)
             leave = max(leave, arrive + 1)
             out.append(SimTrader(
                 id=f"{run}-{i}", side=side, limit=lim, q0=q0, firm=rng.random() < p["firm_p"],

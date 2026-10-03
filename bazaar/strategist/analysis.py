@@ -499,6 +499,16 @@ def broker(live: Path, now: float | None = None) -> dict:
                     refused.append({"tick": r.get("tick"), "kind": res.get("kind"), "error": res.get("error"),
                                     "message": str(res.get("message") or "")[:120], "price": res.get("price")})
     out.update(bench_runs=[p.stem for p in runs[-2:]], matches_ok=ok, refused=refused[-8:], refused_count=len(refused))
+    # official result of each Market Test session vs the free stall (half the bench points = stall level,
+    # full points = the mean of the top three venues)
+    sessions = []
+    for r in read_jsonl(Path(live) / "bench" / "results.jsonl", 200_000):
+        sc = r.get("score") or {}
+        sessions.append({"run": r.get("run"), "tick": r.get("tick"), "efficiency": sc.get("bench_efficiency"),
+                         "bench_points": sc.get("bench_points"), "stall_efficiency": r.get("stall_efficiency"),
+                         "vs_stall": round(float(sc["bench_efficiency"]) - float(r["stall_efficiency"]), 4)
+                         if sc.get("bench_efficiency") is not None and r.get("stall_efficiency") is not None else None})
+    out["sessions_vs_stall"] = sessions[-6:]
     return out
 
 

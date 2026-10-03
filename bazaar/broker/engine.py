@@ -32,7 +32,8 @@ DEFAULT_POLICY: dict[str, Any] = {
     "max_bench_matches_per_tick": 10,
     "max_public_matches_per_tick": 10,
     "hard_traders": 12,           # a session with at least this many traders uses the hard profile
-    "cross_rule": "probe",        # quotes | limits | probe (learn it: try a few non-crossing pairs per session)
+    "cross_rule": "quotes",       # quotes | limits | probe. The server said it on Saturday ("price must sit between
+                                  # the ask and the bid"): quotes. Probing cost a little in every sim profile.
     "max_probes": 2,              # non-crossing tries per session while the rule is unknown
     "probe_after": 2,             # ticks into a session before the first probe (estimates need a few quotes)
     "probe_refusals": 3,          # refused probes that settle the rule as "quotes" ...
