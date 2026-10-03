@@ -8,6 +8,8 @@ Services (each logs to data/live/<name>.out):
                                           restarted when status.json is older than 3 ticks
   broker  python -m bazaar.broker.run     restarted when broker_status.json `updated` is older than 2 ticks
   lab     python -m bazaar.lab.run
+  recorder python -m bazaar.recorder.run  read-only data recorder (data/record/); runs even with bazaar/STOP;
+                                          restarted when recorder_status.json `updated` is older than 3 ticks
 
 A crashed service restarts after a short backoff (doubling up to 5 min). Heartbeats only count while
 the doors are open. The legacy gateway on :8787 is not managed here. Set BAZAAR_SUPERVISE_SKIP=lab,broker
@@ -17,7 +19,7 @@ SIGTERM/SIGHUP/Ctrl-C stop every child (they run in their own sessions, so nobod
 stays alive and fresh for HEALTHY_RESET_S has its failure count reset. A bot reporting state="gateway_down"
 is waiting on the gateway, not hung, and is not restarted for it while that heartbeat stays fresh.
 
-Only one supervisor, one `run --live` and one live broker may run at a time: each holds an flock'd pidfile
+Only one supervisor, one `run --live`, one live broker and one live recorder may run at a time: each holds an flock'd pidfile
 in data/live (see `singleton`), and a second copy exits with a clear message.
 """
 from __future__ import annotations
@@ -121,6 +123,8 @@ def default_services() -> list[Service]:
                 obeys_stop=True),
         Service("broker", [PY, "-u", "-m", "bazaar.broker.run"], heartbeat="broker_status.json", stale_ticks=2),
         Service("lab", [PY, "-u", "-m", "bazaar.lab.run"]),
+        Service("recorder", [PY, "-u", "-m", "bazaar.recorder.run"], heartbeat="recorder_status.json",
+                stale_ticks=3),
     ]
 
 

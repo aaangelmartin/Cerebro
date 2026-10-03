@@ -44,6 +44,7 @@ DASHBOARD_ENV_FILE=.env nohup .venv/bin/python -u legacy/dashboard/server.py > b
 | `bazaar.run --live` | Un ciclo por tick: percibe, decide con Claude, raíles, envía y registra | `data/live/status.json` |
 | `bazaar.broker.run` | Tienda propia y broker del Market Test | `data/live/broker_status.json` |
 | `bazaar.lab.run` | Laboratorio: ingiere, propone lecciones, las prueba y las promueve | `data/lab/lab_status.json` |
+| `bazaar.recorder.run` | Grabadora de solo lectura: feed, libros de todas las tiendas, clasificación, duelos y conversaciones completas en `data/record/` ([README](recorder/README.md)) | `data/live/recorder_status.json` |
 | `bazaar.api.server` | API del dashboard en `127.0.0.1:8791` | `/health` |
 | `bazaar.supervise` | Reinicia lo que se cae o se queda colgado | `data/live/supervise.log` |
 
