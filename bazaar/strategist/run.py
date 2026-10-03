@@ -243,6 +243,11 @@ STRATEGY_TOOL = {
                                 "value gain is 3 P or more), \"off\", or up to 3 triples of our asset ids to craft. "
                                 "The pull is luck and never scored; buy duplicates to craft only if research.workshop."
                                 "buy_to_craft says it is worth it"},
+            "team_messages": {"type": "array", "description": "a thread to open with ANOTHER TEAM's agent, only for "
+                              "what an addressed offer cannot say (a swap proposal with terms, a question about a "
+                              "card they hold, alliance terms); one opens every 10 ticks, the bot answers their "
+                              "replies and EVENTS kind team_thread shows what they said: {to: 't05', text: English, "
+                              "short, concrete, venue: 'rastro', why}; at most 2", "items": {"type": "object"}},
             "dealer_orders": {"type": "array", "description": "dealer threads to open NOW (prose in guidance is "
                               "not executed; this is): {dealer: abuela|chato|pilar|..., action: sell|buy, ref: card, "
                               "open: our first price, floor_or_cap: lowest sell price or highest buy price, "
@@ -920,6 +925,17 @@ class Strategist:
                 new.append(_e("bargain", bargain.event_text(r), {k: r.get(k) for k in
                                                                  ("offer", "refs", "seller", "price", "cost", "value",
                                                                   "gain", "cash", "gap", "status", "counter")}))
+        except Exception:  # noqa: BLE001
+            pass
+        try:                                        # what other teams' agents wrote to us (bazaar.teamtalk)
+            from bazaar.teamtalk import talk as _tt
+            seen = getattr(self, "team_thread_seen_ts", None)
+            seen = now - 600 if seen is None else seen
+            for r in _tt.recent(self.live, since=seen):
+                seen = max(seen, float(r.get("ts") or 0))
+                new.append(_e("team_thread", _tt.event_text(r)[:700],
+                              {k: r.get(k) for k in ("thread", "team", "venue", "refs", "action", "offered")}))
+            self.team_thread_seen_ts = seen
         except Exception:  # noqa: BLE001
             pass
         for m in B.chat_since(self.live, self.chat_seen_ts, 50):
