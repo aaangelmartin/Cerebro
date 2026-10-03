@@ -48,6 +48,7 @@ CANCELS_PER_TICK = 2
 LIST_EXPIRES = 60               # ticks
 BRAIN_REPOST_TICKS = 120        # an identical successful brain post is not repeated within this many ticks
 ASK_MARKUP_MAX = 1.6            # never ask more than this x book
+REPOST_COOLDOWN_TICKS = 60      # the same card is not offered to the same team again within this many ticks
 LLM_EVERY = 6                   # ticks between Claude calls when only listings are on the table
 MIN_LLM_S = 3.0
 SAFETY_S = 0.4
@@ -172,6 +173,7 @@ class MarketDomain:
         self._ctx: Any = None
         self._last_state: dict | None = None
         self._brain_posted: set = set()              # brain offers in flight this process (strategy.post_key)
+        self._targeted: dict | None = None           # "ref|team" -> tick of our last ask addressed to that team
 
     # ================================================================== protocol
     def fallback(self, sit, ctx) -> list[Action]:
@@ -643,7 +645,8 @@ class MarketDomain:
                                       "venue": s.venue, "teams_that_bid_on_given_set": s.fans} for s in swaps],
                  "cancelling": [{"offer": o.get("id"), "why": why} for o, why in stale],
                  "rival_fans_by_set": self.rivals.summary(sorted(values.affinity or ["LAV", "MAL", "SAL", "LAT"])),
-                 "_bids": bids, "_swaps": swaps, "_stale": stale, "_brain_accepts": brain_accepts,
+                 "_bids": bids, "_swaps": swaps, "_stale": stale,
+                 "_min_asks": dict(control.get("min_asks") or {}), "_brain_accepts": brain_accepts,
                  "_brain_posts": brain_posts,
                  "_avail": {r: n - reserved_n.get(r, 0) for r, n in counts.items()}}
         return accepts, posts, state
@@ -752,8 +755,21 @@ class MarketDomain:
             if kind == "sell":
                 price = _int(choice.get("price"), c.ask)
                 price = max(c.min_ask, min(c.max_ask, price))
+                floor = _int((state.get("_min_asks") or {}).get(ref), 0)
+                if floor > price:                     # the brain's minimum ask for this card
+                    if floor > max(c.max_ask, c.ask):
+                        continue                      # the market will not pay it: do not list below the minimum
+                    price = floor
                 to = choice.get("to") if "to" in choice else c.target
                 to = to if to in c.fans else None
+                tick_now = _int(state.get("tick"), 0)
+                if to and self._targeted_recently(ref, to, tick_now):
+                    # never the same card to the same team again within REPOST_COOLDOWN_TICKS: try another fan
+                    to = next((t for t in c.fans if not self._targeted_recently(ref, t, tick_now)), None)
+                    if to is None:
+                        continue
+                if to:
+                    self._note_targeted(ref, to, tick_now)
                 assets.add(c.asset["id"])
                 given[ref] = given.get(ref, 0) + 1
                 out.append(self._act_post(c, price, to, source, clean(choice.get("reason") or "", 200)
@@ -775,6 +791,30 @@ class MarketDomain:
                 refs.add(c.want)
                 out.append(self._act_swap(c, to, source, clean(choice.get("reason") or "", 200)))
         return out
+
+    # --- reposts of the same card to the same team (brain policy: not within REPOST_COOLDOWN_TICKS) ---
+    def _targeted_load(self) -> dict:
+        if self._targeted is None:
+            try:
+                self._targeted = {k: int(v) for k, v in
+                                  json.loads((config.LIVE / "market_targeted.json").read_text()).items()}
+            except (OSError, ValueError, TypeError, AttributeError):
+                self._targeted = {}
+        return self._targeted
+
+    def _targeted_recently(self, ref: str, team: str, tick: int) -> bool:
+        last = self._targeted_load().get(f"{ref}|{team}")
+        return last is not None and 0 <= tick - last < REPOST_COOLDOWN_TICKS
+
+    def _note_targeted(self, ref: str, team: str, tick: int) -> None:
+        d = self._targeted_load()
+        d[f"{ref}|{team}"] = tick
+        for k in [k for k, v in d.items() if tick - v > 4 * REPOST_COOLDOWN_TICKS]:
+            d.pop(k, None)
+        try:
+            (config.LIVE / "market_targeted.json").write_text(json.dumps(d))
+        except OSError:
+            pass
 
     def _cancels(self, state: dict) -> list[Action]:
         out = [Action(kind="cancel_offer", params={"offer": o.get("id")}, domain=self.name, source="code",

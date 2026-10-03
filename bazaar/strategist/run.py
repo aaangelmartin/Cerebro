@@ -142,6 +142,10 @@ STRATEGY_TOOL = {
             "budgets": {"type": "object", "description": "max_spend_per_deal (10-120 P), max_spend_per_hour (20-300 P), "
                         "llm_usd_per_day: {council, duels, dealers, market, lab, strategy, external_intel: 0.5-40 $}; "
                         "omit to keep; any change goes to the council"},
+            "min_asks": {"type": "object", "description": "per-card minimum ask in P our posts must respect, e.g. "
+                         "{\"SAL-08\": 27}: the code poster (fallback) raises its price to it or does not list; "
+                         "use it instead of a text policy when you set a price floor. {} clears them. The code also "
+                         "never offers the same card to the same team twice within 60 ticks."},
             "avoid_post_venues": {"type": "array", "items": {"type": "string"},
                                   "description": "venues where we stop posting and accepting (e.g. an ally that does "
                                                  "not reciprocate: research.alliances_today); [] to allow all"},

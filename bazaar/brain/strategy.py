@@ -125,7 +125,14 @@ def sanitize(raw: Any) -> dict:
         v = _int(x, 1, 10**9)
         if v is not None:
             cancels.append(v)
+    min_asks = {}
+    for ref, price in list((raw.get("min_asks") or {}).items())[:40] if isinstance(raw.get("min_asks"), dict) else []:
+        ref = str(ref).upper().strip()
+        p = _int(price, 1, 500)
+        if REF_RX.match(ref) and p is not None:
+            min_asks[ref] = p
     return {
+        **({"min_asks": min_asks} if isinstance(raw.get("min_asks"), dict) else {}),
         "situation": _clean(raw.get("situation"), 900),
         "priorities": [_clean(x, 220) for x in (raw.get("priorities") or [])[:6] if _clean(x, 220)]
         if isinstance(raw.get("priorities"), list) else [],
@@ -459,6 +466,8 @@ def overlay(control: dict, live: Path | None = None) -> dict:
     for k, v in (plan.get("budgets") or {}).items():
         if k in BUDGET_BOUNDS and k not in out:
             out[k] = v
+    if plan.get("min_asks"):                    # per-card minimum asks (a higher floor is always safe)
+        out["min_asks"] = {**plan["min_asks"], **(out.get("min_asks") or {})}
     if plan.get("avoid_post_venues"):
         out["avoid_post_venues"] = sorted(set(out.get("avoid_post_venues") or []) | set(plan["avoid_post_venues"]))
     if plan.get("avoid_buy_sets"):                   # union: the operator's list always stays
