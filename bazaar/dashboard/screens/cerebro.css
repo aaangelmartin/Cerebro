@@ -206,3 +206,47 @@
 .scr-cerebro .cb-m-det[open] > summary .ic-wrap { transform: none; }
 .scr-cerebro .cb-m-pad { padding: 0 16px 12px; }
 .scr-cerebro .cb-msgs .panel-head { border-bottom: 1px solid var(--line-2); }
+
+/* Mensajes: two columns, each scrolls on its own */
+.scr-cerebro .cb-m-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.scr-cerebro .cb-m-col { min-width: 0; max-height: 860px; overflow: auto; display: flex; flex-direction: column; }
+.scr-cerebro .cb-m-col + .cb-m-col { border-left: 1px solid var(--line-2); }
+.scr-cerebro .cb-m-col > * { flex: none; }
+.scr-cerebro .cb-m-col > .cb-m-h { position: sticky; top: 0; z-index: 2; }
+.scr-cerebro .cb-m-hint { margin-left: auto; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.scr-cerebro .cb-m-col .cb-x-list { max-height: none; overflow: visible; }
+.scr-cerebro .cb-m-col .cb-x-form { flex-direction: column; }
+.scr-cerebro .cb-m-col .cb-x-side { flex-direction: row; width: auto; }
+.scr-cerebro .cb-m-col .cb-x-side .cb-x-team { flex: 1; width: auto; }
+.scr-cerebro .cb-m-col .cb-x-side .cb-chat-send { flex: none; }
+.scr-cerebro .cb-m-hist .cb-m-det:first-child { border-top: 1px solid var(--line); }
+@media (max-width: 1300px) {
+  .scr-cerebro .cb-m-cols { grid-template-columns: minmax(0, 1fr); }
+  .scr-cerebro .cb-m-col { max-height: 640px; }
+  .scr-cerebro .cb-m-col + .cb-m-col { border-left: 0; border-top: 1px solid var(--line-2); }
+}
+/* polish */
+.scr-cerebro .cb-ev-h > * { flex: none; }
+.scr-cerebro .cb-ev-h > .cb-m-to { flex: 0 1 auto; min-width: 0; }
+.scr-cerebro .chip.cb-chip { padding: 1px 7px; }
+.scr-cerebro .panel-head { flex-wrap: wrap; row-gap: 4px; }
+.scr-cerebro .cb-goal { grid-template-columns: 16px 64px minmax(0, 1fr) auto auto; }
+.scr-cerebro .cb-vote-h { flex-wrap: wrap; }
+.scr-cerebro .cb-tl-h { flex-wrap: nowrap; }
+.scr-cerebro .cb-tl-h > * { flex: none; }
+.scr-cerebro .cb-tl-h > .cb-tl-why { flex: 1 1 auto; }
+/* who sent / who receives: on top of every message card */
+.scr-cerebro .cb-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.scr-cerebro .cb-who .tag.team { font-size: 13px; padding: 3px 9px 3px 3px; font-weight: 600; }
+.scr-cerebro .cb-who .tag.team .team-sq { width: 20px; height: 20px; }
+.scr-cerebro .cb-who-pre { font-family: var(--font-num); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.scr-cerebro .cb-who-person { font-size: 13px; color: var(--ink-2); }
+.scr-cerebro .cb-org, .scr-cerebro .cb-group { background: var(--s3); color: var(--ink); padding: 3px 9px !important; gap: 6px; }
+.scr-cerebro .cb-unk { background: transparent; border: 1px dashed var(--line-2); color: var(--ink-3); padding: 3px 9px !important; }
+/* paste box: team first, required-looking */
+.scr-cerebro .cb-x-who { display: flex; align-items: center; gap: 10px; }
+.scr-cerebro .cb-x-who .cb-cap { margin: 0; flex: none; }
+.scr-cerebro .cb-x-team { flex: 1; height: 34px; font-size: 13px; border: 1px solid var(--ink-3); background: var(--s2); color: var(--ink); }
+.scr-cerebro .cb-x-team.is-empty { border-color: var(--warn); color: var(--warn); }
+.scr-cerebro .cb-x-team.is-missing { outline: 2px solid var(--bad); outline-offset: 1px; }
+.scr-cerebro .cb-m-col .cb-x-side { justify-content: space-between; align-items: center; }

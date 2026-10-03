@@ -598,31 +598,62 @@
   // received = POST/GET brain/external records {id, ts, received_at, by, author, team, text, types, entities, actionable, brain_conclusion, reply_outbox_id}
   const X = { items: [], state: "idle", err: null, host: null, busy: false, at: 0, sig: "", sending: false, hist: { sent: false, discarded: false } };
   const XT = { request: ["Petición", "puja", "var(--t-puja)"], offer: ["Oferta", "venta", "var(--t-compra)"], tip: ["Pista", "target", "var(--t-cambio)"],
-    complaint: ["Queja", "alert", "var(--t-venta)"], promo: ["Promo", "anuncio", "var(--t-anuncio)"], news: ["Noticia", "bell", "var(--t-dealer)"] };
+    complaint: ["Queja", "alert", "var(--t-venta)"], promo: ["Promo", "anuncio", "var(--t-anuncio)"], news: ["Noticia", "bell", "var(--t-dealer)"],
+    offer_ref: ["Oferta", "venta", "var(--t-compra)"], organiser: ["Organización", "bell", "var(--t-dealer)"], alliance: ["Alianza", "rivales", "var(--t-cambio)"],
+    question: ["Pregunta", "search", "var(--t-puja)"], other: ["Otro", "anuncio", "var(--t-anuncio)"] };
   function xChip(t) { const [l, ic, c] = XT[t] || [t, "anuncio", "var(--t-anuncio)"]; const n = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, l)); n.style.setProperty("--tc", c); return n; }
-  const isReply = (o) => !!(o && o.kind === "promo" && o.reply_to && o.reply_to.external_id != null);
+  const replyKey = (o) => (o && o.reply_to ? (o.reply_to.external_id ?? o.reply_to.record ?? null) : null);
+  const isReply = (o) => !!(o && o.kind === "promo" && o.reply_to);
   const promos = () => O.items.filter((o) => o.kind === "promo");
   function replyFor(x) {
     if (!x) return null;
     if (x.reply_outbox_id != null) { const o = O.items.find((y) => String(y.id) === String(x.reply_outbox_id)); if (o) return o; }
-    return O.items.find((o) => isReply(o) && String(o.reply_to.external_id) === String(x.id)) || null;
+    return O.items.find((o) => isReply(o) && (String(replyKey(o)) === String(x.id) || extById(replyKey(o)) === x)) || null;
   }
-  const extById = (id) => X.items.find((x) => String(x.id) === String(id)) || null;
+  // reply_to.record is normally the message id; sometimes the brain writes its time ("11:06") or "11:02 Team 5"
+  const extById = (id) => {
+    if (id == null) return null;
+    const hit = X.items.find((x) => String(x.id) === String(id));
+    if (hit) return hit;
+    const m = String(id).match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    const hm = m[1].padStart(2, "0") + ":" + m[2];
+    const team = teamFromText(id);
+    return X.items.find((x) => when(+x.received_at || +x.ts).startsWith(hm) && (!team || x.team === team)) || null;
+  };
   const tTeam = (id) => (id ? U().teamTag(id, { us: id === "t10" }) : null);
+  const TEAM_KEY = "bazaar.dash.waTeam";
+  // prominent "who" line on top of every message card: team tag (us white) + person
+  function whoLine(team, person, prefix) {
+    const tag = team === "org" ? el("span", { class: "tag team cb-org" }, U().icon("bell", 12), "Organización")
+      : team ? tTeam(team) : el("span", { class: "tag team cb-unk" }, "Equipo sin identificar");
+    return el("div", { class: "cb-who" }, prefix ? el("span", { class: "cb-who-pre" }, prefix) : null, tag,
+      person ? el("span", { class: "cb-who-person" }, person) : null);
+  }
+  const teamFromText = (t) => { const m = String(t || "").match(/team\s*(\d{1,2})/i); return m ? "t" + m[1].padStart(2, "0") : null; };
 
   function externalMount() {
-    const ta = el("textarea", { class: "cb-chat-in cb-x-in", rows: 3, placeholder: "Pega aquí mensajes del grupo de WhatsApp (uno o varios)…" });
-    const sel = el("select", { class: "fb-select cb-x-team", "aria-label": "Equipo" }, el("option", { value: "" }, "Equipo: detectar"));
+    const ta = el("textarea", { class: "cb-chat-in cb-x-in", rows: 3, placeholder: "Pega aquí sus mensajes del grupo de WhatsApp (uno o varios)…" });
+    // who sent the pasted messages: required choice, remembered for the next paste
+    const sel = el("select", { class: "fb-select cb-x-team", "aria-label": "Equipo que lo envía", required: "required" },
+      el("option", { value: "", disabled: "disabled" }, "Elige quién lo envía…"));
     for (let i = 1; i <= 18; i++) { const id = "t" + String(i).padStart(2, "0"); sel.append(el("option", { value: id }, (U().teamName ? U().teamName(id) : id) + (id === "t10" ? " · Nosotros" : ""))); }
+    sel.append(el("option", { value: "org" }, "Organización"), el("option", { value: "auto" }, "No lo sé (que lo detecte el cerebro)"));
+    let saved = ""; try { saved = localStorage.getItem(TEAM_KEY) || ""; } catch (e) { saved = ""; }
+    sel.value = saved; if (sel.value !== saved) sel.value = "";
+    const markSel = () => sel.classList.toggle("is-empty", !sel.value);
+    sel.addEventListener("change", () => { try { localStorage.setItem(TEAM_KEY, sel.value); } catch (e) { /* private mode */ } markSel(); });
+    markSel();
     const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar al cerebro");
     const go = async () => {
       const text = ta.value.trim(); if (!text || X.sending) return;
+      if (!sel.value) { sel.classList.add("is-missing"); sel.focus(); setTimeout(() => sel.classList.remove("is-missing"), 1500); return; }
       X.sending = true; send.disabled = true;
       try {
-        const r = await A().externalAdd(text, getName() || "equipo", sel.value || undefined);
+        const r = await A().externalAdd(text, getName() || "equipo", sel.value === "auto" ? undefined : sel.value);
         const n = ((r && r.added) || []).length, dup = (r && r.duplicates) || 0;
         U().toast({ type: "dealer", title: "Mensajes enviados al cerebro", text: `${n} nuevos${dup ? " · " + dup + " repetidos" : ""}` });
-        ta.value = ""; sel.value = ""; X.at = 0; extPull(true);
+        ta.value = ""; X.at = 0; extPull(true);
       } catch (e) {
         U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "La entrada de mensajes aún no está activa." : (e && e.message) || "Error" });
       } finally { X.sending = false; send.disabled = false; }
@@ -630,13 +661,17 @@
     send.addEventListener("click", go);
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); go(); } });
     X.head = el("header", { class: "panel-head" });
-    X.toSend = el("div", { class: "cb-m-sec" });
+    X.sendHead = el("div", { class: "cb-m-h" });
+    X.toSend = el("div", { class: "cb-m-body" });
     X.recvHead = el("div", { class: "cb-m-h" });
     X.recvList = el("div", { class: "cb-m-body" });
     X.histBox = el("div", { class: "cb-m-hist" });
-    const host = el("section", { class: "panel cb-msgs" }, X.head, X.toSend,
-      el("div", { class: "cb-m-sec" }, X.recvHead, el("div", { class: "cb-x-form" }, ta, el("div", { class: "cb-x-side" }, sel, send)), X.recvList),
-      X.histBox);
+    // two columns, each scrolls on its own: received (with the paste box) | to send (+ history)
+    X.colL = el("div", { class: "cb-m-col" }, X.recvHead,
+      el("div", { class: "cb-x-form" }, el("label", { class: "cb-x-who" }, el("span", { class: "cb-cap" }, "Lo envía"), sel), ta,
+        el("div", { class: "cb-x-side" }, el("span", { class: "cb-muted" }, "⌘/Ctrl + Enter para enviar"), send)), X.recvList);
+    X.colR = el("div", { class: "cb-m-col" }, X.sendHead, X.toSend, X.histBox);
+    const host = el("section", { class: "panel cb-msgs" }, X.head, el("div", { class: "cb-m-cols" }, X.colL, X.colR));
     X.host = host; X.sig = "";
     xRender();
     return host;
@@ -659,9 +694,26 @@
     for (const t of en.ticks || []) out.push(el("span", { class: "tag res tone-mute num" }, "tick " + t));
     return out;
   }
+  function recipientWho(o) {
+    const rt = o.reply_to || {};
+    const ctxRec = extById(replyKey(o));
+    if (isReply(o)) {
+      const team = rt.team || (ctxRec && ctxRec.team) || teamFromText(rt.record) || teamFromText(ctxRec && ctxRec.text);
+      const person = rt.author && rt.author !== "equipo" && rt.author !== (ctxRec && ctxRec.by) ? rt.author : null;
+      return whoLine(team, person, "Respuesta para");
+    }
+    const who = o.to || o.recipient;
+    if (who && /^t\d+$/.test(who)) return whoLine(who, null, "Para");
+    if (who) return whoLine(null, who, "Para");
+    return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, "Para"), el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? "Todos (en el juego)" : "Todo el grupo de WhatsApp"));
+  }
   function recipient(o) {
     const rt = o.reply_to || {};
-    if (isReply(o)) return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Respuesta a"), el("b", {}, rt.author || "—"), tTeam(rt.team),
+    const ctxRec = extById(replyKey(o));
+    const team = rt.team || (ctxRec && ctxRec.team);
+    const author = rt.author && rt.author !== "equipo" && rt.author !== (ctxRec && ctxRec.by) ? rt.author : null;
+    if (isReply(o)) return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Respuesta a"), author ? el("b", {}, author) : null,
+      team ? tTeam(team) : (author ? null : el("b", {}, "su mensaje")),
       el("span", { class: "cb-muted" }, o.channel === "in_game" ? "en el juego" : "en el grupo de WhatsApp"));
     const who = o.to || o.recipient;
     if (o.channel === "in_game") return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Para"), who ? (/^t\d+$/.test(who) ? tTeam(who) : el("b", {}, who)) : el("b", {}, "todos (en el juego)"));
@@ -669,12 +721,14 @@
   }
   function channelChip(o) { return o.channel === "in_game" ? obChip("En el juego", "var(--t-cambio)", "mercado") : obChip("WhatsApp", "var(--t-compra)", "anuncio"); }
   function sendCard(o, compact) {
-    const ctx = isReply(o) ? extById(o.reply_to.external_id) : null;
+    const ctx = isReply(o) ? extById(replyKey(o)) : null;
     const cp = el("button", { type: "button", class: "cb-ob-btn cb-m-copy" }, U().icon("copy", 13), "Copiar");
     cp.addEventListener("click", async () => { const ok = await copyText(o.text || ""); cp.lastChild.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { cp.lastChild.textContent = "Copiar"; }, 1500); });
     const act = (label, status, tone) => { const b = el("button", { type: "button", class: "cb-ob-btn tone-" + tone }, label); b.addEventListener("click", () => obSet(o, status, "")); return b; };
     const n = el("div", { class: "cb-m-card" + (compact ? " is-compact" : "") },
-      el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+o.updated || +o.ts)), channelChip(o), recipient(o), el("span", { class: "cb-sp" }), obStatus(o.status)),
+      recipientWho(o),
+      el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+o.updated || +o.ts)), channelChip(o),
+        el("span", { class: "cb-muted" }, isReply(o) ? "respuesta en el grupo" : o.channel === "in_game" ? "mensaje en el juego" : "mensaje al grupo"), el("span", { class: "cb-sp" }), obStatus(o.status)),
       ctx ? el("div", { class: "cb-m-ctx" }, el("div", { class: "cb-cap" }, "Su mensaje · " + when(+ctx.received_at || +ctx.ts)), el("div", {}, short(ctx.text, 400))) : null,
       el("pre", { class: "cb-m-text" }, o.text || ""),
       o.why && !compact ? el("div", { class: "cb-rows" }, "Por qué: " + o.why) : null,
@@ -686,12 +740,12 @@
   function recvCard(x) {
     const llm = x.llm || {};
     const concl = x.brain_conclusion || llm.conclusion || llm.summary || llm.action || x.action_hint || "";
-    const team = x.team ? tTeam(x.team) : el("span", { class: "cb-muted" }, x.author || "¿equipo?");
+    const person = x.author && x.author !== x.by && x.author !== "equipo" && x.author !== (U().teamName ? U().teamName(x.team) : x.team) ? x.author : null;
     const r = replyFor(x);
     const n = el("div", { class: "cb-x-item" + (x.actionable ? " is-act" : "") },
+      whoLine(x.team || teamFromText(x.text), person, "De"),
       el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+x.received_at || +x.ts)),
         x.actionable ? el("span", { class: "tag cb-x-act" }, U().icon("bell", 12), "Hay que actuar") : null,
-        team, x.author && x.team && x.author !== (U().teamName ? U().teamName(x.team) : x.team) ? el("span", { class: "cb-muted" }, x.author) : null,
         (x.types || []).map(xChip), x.about_us ? el("span", { class: "tag res tone-warn" }, "Sobre nosotros") : null,
         el("span", { class: "cb-sp" }), el("span", { class: "cb-muted" }, "pegado por " + (x.by || "equipo"))),
       el("div", { class: "cb-x-text" }, x.text || ""),
@@ -713,22 +767,24 @@
     const sent = P.filter((o) => o.status === "sent").sort((a, b) => (+b.updated || 0) - (+a.updated || 0));
     const disc = P.filter((o) => o.status === "discarded").sort((a, b) => (+b.updated || 0) - (+a.updated || 0));
     const recv = X.items.slice().sort((a, b) => (!!b.actionable - !!a.actionable) || ((+b.received_at || +b.ts || 0) - (+a.received_at || +a.ts || 0)));
-    U().keepScroll(X.host, () => {
+    const keepCols = (fn) => U().keepScroll(X.colL, () => U().keepScroll(X.colR, fn));
+    keepCols(() => {
       X.head.replaceChildren(el("h2", { class: "panel-title" }, "Mensajes"),
         el("span", { class: "panel-sub" }, `${drafts.length} por enviar · ${recv.length} recibidos · ${sent.length} enviados`));
       // 1) Por enviar
-      const sendList = el("div", { class: "cb-m-list" });
+      const sendList = X.toSend.querySelector(":scope > .cb-m-list") || el("div", { class: "cb-m-list" });
       let sendBody;
       if (O.state === "off") sendBody = U().empty("La bandeja del cerebro aún no está activa.");
       else if (O.state === "idle") sendBody = U().loading();
       else if (!drafts.length) sendBody = U().empty("Nada por enviar ahora.");
-      else { U().keyedList(sendList, drafts, { key: (o) => String(o.id), sig: (o) => [o.status, o.updated, o.text, isReply(o) && !!extById(o.reply_to.external_id)].join("|"), render: (o) => sendCard(o) }); sendBody = sendList; }
-      X.toSend.replaceChildren(el("div", { class: "cb-m-h" }, U().icon("arrow", 14), el("b", {}, "Por enviar"),
+      else { U().keyedList(sendList, drafts, { key: (o) => String(o.id), sig: (o) => [o.status, o.updated, o.text, isReply(o) && !!extById(replyKey(o))].join("|"), render: (o) => sendCard(o) }); sendBody = sendList; }
+      X.sendHead.replaceChildren(U().icon("arrow", 14), el("b", {}, "Por enviar"),
         el("span", { class: "num cb-ob-n" + (drafts.length ? " has" : "") }, String(drafts.length)),
-        el("span", { class: "cb-muted" }, "copiad el texto, enviadlo y marcadlo como enviado")), sendBody);
+        el("span", { class: "cb-muted cb-m-hint" }, "copiad, enviad y marcad como enviado"));
+      if (sendBody !== sendList || !sendList.isConnected) X.toSend.replaceChildren(sendBody);
       // 2) Mensajes recibidos
       X.recvHead.replaceChildren(U().icon("anuncio", 14), el("b", {}, "Mensajes recibidos"), el("span", { class: "num cb-ob-n" }, String(recv.length)),
-        el("span", { class: "cb-muted" }, "lo que dicen otros equipos en WhatsApp; el cerebro lo lee y saca conclusiones"));
+        el("span", { class: "cb-muted cb-m-hint" }, "otros equipos en WhatsApp; el cerebro saca conclusiones"));
       if (X.state === "idle") X.recvList.replaceChildren(U().loading());
       else if (X.state === "off") X.recvList.replaceChildren(U().empty("La entrada de mensajes aún no está activa."));
       else if (X.state === "error") X.recvList.replaceChildren(U().error(X.err));
