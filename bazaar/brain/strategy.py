@@ -353,6 +353,19 @@ def dealer_orders(live: Path | None = None) -> list[dict]:
     return list(_plan(live).get("dealer_orders") or [])
 
 
+def ordered_sell_refs(live: Path | None = None) -> set[str]:
+    """Card refs the plan in force orders SOLD to a dealer and whose order has not ended yet (no deal/no_deal
+    recorded for that dealer, ref and bound). The market must not list these cards meanwhile: a re-listed spare
+    makes the dealers domain withdraw it again and costs the order ticks and dealer quota."""
+    orders = [o for o in dealer_orders(live) if o.get("action") == "sell"]
+    if not orders:
+        return set()
+    ended = {(r.get("dealer"), r.get("ref"), r.get("bound")) for r in post_history(live, 300)
+             if r.get("kind") == "dealer_order" and r.get("action") == "sell"
+             and r.get("status") in ("deal", "no_deal")}
+    return {o["ref"] for o in orders if (o["dealer"], o["ref"], o.get("bound")) not in ended}
+
+
 # --------------------------------------------------------------------------- outcomes of the brain's posts
 def posts_path(live: Path | None = None) -> Path:
     return Path(live or config.LIVE) / "brain_posts.jsonl"

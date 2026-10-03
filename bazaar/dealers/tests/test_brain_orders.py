@@ -119,6 +119,16 @@ class OrderOpensTest(unittest.TestCase):
         self.assertFalse([a for a in acts if a.kind == "open_thread"])
         self.assertIn("tied to one of our open offers", notes[0][2])
 
+    def test_card_in_a_bot_posted_offer_is_withdrawn_for_the_order(self):
+        # outbox request code-578abca3: the order outranks a plain listing of the same card
+        dom, notes = domain([order()])
+        offers = [{"id": 99, "maker": "t10", "give": {"assets": [dict(SAL08)]}, "want": {"cash": 30}}]
+        with mock.patch.object(DealersDomain, "_may_withdraw", staticmethod(lambda offer, control: True)):
+            acts = dom.fallback(sit([dict(SAL08)], offers=offers), make_ctx(5))
+        self.assertFalse([a for a in acts if a.kind == "open_thread"])
+        self.assertEqual([a.params for a in acts if a.kind == "cancel_offer"], [{"offer": 99}])
+        self.assertEqual(notes[0][1], "waiting")
+
     # --- the spare copy of a set we collect (outbox request code-b424c250) ----------------------------
     LAV07 = [{"id": 3, "kind": "card", "ref": "LAV-07", "rarity": "uncommon", "set": "LAV", "your_value": 40},
              {"id": 4, "kind": "card", "ref": "LAV-07", "rarity": "uncommon", "set": "LAV", "your_value": 6}]

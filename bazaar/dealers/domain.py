@@ -263,8 +263,20 @@ class DealersDomain:
                 free = [a for a in mine if a.get("id") not in listed and a.get("id") not in in_threads
                         and str(a.get("id")) not in protected and str(ref) not in protected]
                 if not free:
-                    self._note_order(o, "skipped", f"{ref} is tied to one of our open offers or threads: "
-                                                   "cancel that offer first", plan.tick)
+                    # the order outranks a plain listing: withdraw our own offer on it (never a protected or
+                    # hand-posted one); the market stops re-listing ordered cards, so the thread opens next tick
+                    tied = [x for x in self._offers_holding(sit, ref, None) if self._may_withdraw(x, control)]
+                    if tied and not any(a.get("id") in in_threads for a in mine):
+                        oid = tied[0].get("id")
+                        plan.frees.append(Action(
+                            kind="cancel_offer", params={"offer": oid}, domain=self.name, source="code",
+                            reason=f"the brain's order: free {ref} from our offer #{oid} to sell it to {d}",
+                            priority=0.0))
+                        self._note_order(o, "waiting", f"{ref} is in our offer #{oid}: withdrawing it, the thread "
+                                                       "opens next tick", plan.tick)
+                    else:
+                        self._note_order(o, "skipped", f"{ref} is tied to one of our open offers or threads: "
+                                                       "cancel that offer first", plan.tick)
                     continue
                 if set_id in _rails.kept_sets(control):
                     held = {x.get("id"): x for x in me.get("assets") or []}

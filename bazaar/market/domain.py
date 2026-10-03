@@ -624,10 +624,18 @@ class MarketDomain:
         kept = kept_sets(control)                  # sets we collect: an avoided set's last copy may be sold
         self._kept = kept
 
+        try:                                       # cards the brain ordered sold to a dealer: not ours to list
+            from bazaar.brain.strategy import ordered_sell_refs
+            ordered = ordered_sell_refs()
+        except Exception:  # noqa: BLE001 - no plan, nothing ordered
+            ordered = set()
+
         def can_give(a: dict, left: dict) -> bool:
             ref = a.get("ref")
             if a.get("id") in reserved or str(a.get("id")) in protected or str(ref) in protected:
                 return False
+            if str(ref) in ordered:
+                return False                               # an active dealer order holds this card
             if values.set_of(ref) in kept and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
                 return False                               # if every promise fills, one copy must remain
             return True

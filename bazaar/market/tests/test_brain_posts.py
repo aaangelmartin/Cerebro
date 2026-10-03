@@ -201,3 +201,47 @@ class BrainAcceptReasonTest(unittest.TestCase):
         text = S.post_outcomes_text()
         self.assertIn("accept #8169 -> vetoed by council: auditor: pays 83 vs ask 78", text)
         self.assertIn("vetoed by cash: spend 83 > per-deal cap 50", text)
+
+
+class OrderedCardsTest(unittest.TestCase):
+    """Cards the brain ordered sold to a dealer are not listed by the market (outbox request code-578abca3)."""
+
+    def setUp(self):
+        self.live = Path(tempfile.mkdtemp())
+        self.p = mock.patch.object(config, "LIVE", self.live)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+
+    ORDER = {"dealer": "picaros", "action": "sell", "ref": "LAV-04", "open": 8, "bound": 5, "max_messages": 3}
+
+    def test_active_sell_order_holds_the_card_until_it_ends(self):
+        with mock.patch.object(S, "dealer_orders", return_value=[self.ORDER, {**self.ORDER, "action": "buy",
+                                                                               "ref": "SAL-05"}]):
+            self.assertEqual(S.ordered_sell_refs(), {"LAV-04"})          # buys hold nothing
+            S.record_post({"kind": "dealer_order", "dealer": "picaros", "action": "sell", "ref": "LAV-04",
+                           "bound": 5, "status": "waiting"})
+            self.assertEqual(S.ordered_sell_refs(), {"LAV-04"})
+            S.record_post({"kind": "dealer_order", "dealer": "picaros", "action": "sell", "ref": "LAV-04",
+                           "bound": 5, "status": "no_deal"})
+            self.assertEqual(S.ordered_sell_refs(), set())               # ended: the market may list it again
+        with mock.patch.object(S, "dealer_orders", return_value=[{**self.ORDER, "bound": 6}]):
+            self.assertEqual(S.ordered_sell_refs(), {"LAV-04"})          # a new bound is a new order
+
+    def test_the_market_does_not_post_an_ordered_card(self):
+        from types import SimpleNamespace
+        me = {"id": "t10", "cash": 30, "affinity": {"LAV": 1.6}, "assets": [
+            {"id": 1, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 16},
+            {"id": 2, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 4}]}
+        sit = SimpleNamespace(tick=10, me=me, my_offers=[], threads=[], venues=[], feed_new=[], limits={}, books={})
+        ctx = SimpleNamespace(control={}, budget={}, cautious=False, llm_ok=False)
+
+        def given(orders):
+            with mock.patch.object(S, "dealer_orders", return_value=orders), \
+                    mock.patch.object(S, "post_offers", return_value=[]):
+                _, posts, state = domain()._prepare(sit, ctx)
+            return {p.asset.get("ref") for p in posts} | {s.asset.get("ref") for s in state.get("_swaps") or []}
+
+        self.assertIn("LAV-04", given([]))
+        self.assertNotIn("LAV-04", given([self.ORDER]))
