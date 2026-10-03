@@ -82,7 +82,7 @@ class ResearchCommandTest(unittest.TestCase):
             self.assertEqual(e.exception.kind, "limit")
             self.assertEqual(C.status(live)["state"], "backoff")
 
-    def test_control_switch_and_two_slots(self):
+    def test_control_switch_and_slots(self):
         self.assertEqual(C.validate_control({"brain_deep_research": "off"}), {"brain_deep_research": False})
         self.assertEqual(C.validate_control({"brain_deep_research": True}), {"brain_deep_research": True})
         with self.assertRaises(ValueError):
@@ -90,10 +90,15 @@ class ResearchCommandTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             live = Path(d)
             self.assertTrue(C.deep_research_on(live))
-            a, b = C._acquire(live, 0.0), C._acquire(live, 0.0)        # two calls at a time...
+            r1 = C._acquire(live, 0.0, first=C.MAX_CONCURRENT - C.RESEARCH_SLOTS)
+            r2 = C._acquire(live, 0.0, first=C.MAX_CONCURRENT - C.RESEARCH_SLOTS)      # two research sessions...
             with self.assertRaises(C.CLIError):
-                C._acquire(live, 0.0)                                  # ...and no third
-            a.close(); b.close()
+                C._acquire(live, 0.0, first=C.MAX_CONCURRENT - C.RESEARCH_SLOTS)      # ...and no third
+            plan = C._acquire(live, 0.0)                               # a plan still finds its own slot
+            with self.assertRaises(C.CLIError):
+                C._acquire(live, 0.0)
+            for x in (r1, r2, plan):
+                x.close()
             self.assertEqual(C.DEFAULT_CALLS_PER_HOUR, 60)
 
     def test_plans_think_harder_than_votes(self):

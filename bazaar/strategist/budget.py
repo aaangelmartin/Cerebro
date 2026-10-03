@@ -193,7 +193,7 @@ def manual_level(ctl: dict | None = None, live: Path | None = None) -> int:
         return DEFAULT_LEVEL
 
 
-MAC_LEVEL_DEFAULT = 70           # the Mac backend healthy: plan every ~3-4 ticks, counted in calls not dollars
+MAC_LEVEL_DEFAULT = 75           # the Mac backend healthy: plan every ~3-4 ticks, counted in calls not dollars
 MAC_PLAN_CALLS = 1               # a plan is one CLI call...
 MAC_VOTE_CALLS = 3               # ...and a council vote up to three (independent voters)
 MAC_RESEARCH_EVERY_S = 1200.0    # one read-only deep-research session about every 20 minutes

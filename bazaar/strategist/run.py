@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import signal
 import threading
 import time
@@ -34,6 +35,7 @@ from bazaar.brain import strategy as S
 from bazaar.strategist import brainio as B
 from bazaar.strategist import budget as BG
 from bazaar.strategist import limiter as L
+from bazaar.strategist import rivals as RV
 
 MIN_GAP_S = float(config.ENV.get("BAZAAR_STRATEGY_MIN_GAP_S", "150"))     # at most one plan this often
 TRIGGER_GAP_S = 45.0                                                      # ...or this often on a big change
@@ -49,6 +51,9 @@ CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing wa
              "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
 SCORE_DROP = 0.5
 MAC_RESERVE_CALLS = 6           # Mac calls kept back each hour for council votes and team messages
+MAC_RESEARCH_RESERVE = 14       # ...and a scheduled research session leaves this many for plans and votes
+RESEARCH_Q_EVERY_S = 1800.0     # the brain's own research question
+RESEARCH_RIVALS_EVERY_S = 900.0  # rival dossiers: 3 teams per session, all 17 in about 90 minutes
 DEFAULT_RESEARCH = (            # deep-research questions used when the brain has not asked one
     "Which teams hold the page cards we are missing, what do those teams hunt or bid for, and which swap or "
     "addressed offer would each most likely accept? Use record/latest (me, books, leaderboard) and record/feed.",
@@ -516,13 +521,15 @@ class Strategist:
         self.on_mac: bool = False                  # the plans run on the Mac backend right now (counted, not paid)
         self.research_brief: str = ""              # the brain's question for the next deep-research session
         self.research_last: float = 0.0
-        self.research_thread: threading.Thread | None = None
+        self.rivals_last: float = 0.0
+        self.research_threads: dict[str, threading.Thread] = {}
         self.research_state: dict = {}
         self.research_chat_ts: float = self.now()
         self.research_n = 0
         try:
             from bazaar.llm import cli_backend as _mac
             self.research_last = float(_mac._read_state(self.live).get("research_last") or 0.0)
+            self.rivals_last = max([float(v.get("updated") or 0) for v in RV.read_index(self.live).values()] or [0.0])
         except Exception:  # noqa: BLE001
             pass
         self.thinking_since: float | None = None   # set while waiting on Opus (plan, re-ask, council)
@@ -741,6 +748,7 @@ class Strategist:
             "plan_history": [{"tick": d.get("tick"), "priorities": ((d.get("plan") or {}).get("priorities") or [])[:3],
                               "expected_next_hour": (d.get("plan") or {}).get("expected_next_hour")}
                              for d in _tail(S.history_path(self.live), 4)[:-1]],
+            "rivals": self._rivals_picture(),
             "recent_findings": [{k: x.get(k) for k in ("tick", "topic", "finding")}
                                 for x in _tail(self.live / "strategist_findings.jsonl", 10)],
             "last_hour_review": self.last_review_row,
@@ -1403,11 +1411,43 @@ class Strategist:
                 ask = text.split(":", 1)[1].strip()
         return ask
 
+    def _rivals_picture(self) -> dict:
+        try:
+            lb, allies, mentioned = self._rival_context()
+            return RV.for_picture(self.live, lb, allies, mentioned)
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _rival_context(self) -> tuple[dict, set[str], set[str]]:
+        """(leaderboard, allies, teams named in our current opportunities) for the rival dossiers."""
+        lb = _read(self.record / "leaderboard.json", {}) or {}
+        try:
+            from bazaar.market.protocol import ALLIED_VENUES
+            allies = set(ALLIED_VENUES.values())
+        except Exception:  # noqa: BLE001
+            allies = set()
+        mentioned: set[str] = set()
+        try:
+            plan = json.dumps([(self.plan or {}).get(k) for k in ("priorities", "post_offers", "dealer_orders")],
+                              default=str)
+            mentioned = set(re.findall(r"\bt\d{2}\b", plan)) - {"t10"}
+        except Exception:  # noqa: BLE001
+            pass
+        return lb, allies, mentioned
+
+    def _start_research(self, lane: str, brief: str, asked: bool, work) -> dict:
+        state = {"running": True, "since": self.now(), "brief": brief[:300], "asked_by_team": asked, "lane": lane}
+        self.research_state[lane] = state
+        t = threading.Thread(target=work, name="deep-research-" + lane, daemon=True)
+        self.research_threads[lane] = t
+        t.start()
+        return state
+
     def maybe_research(self) -> dict | None:
-        """Start ONE bounded read-only research session on the Mac when it is due (every ~20 min while the game
-        runs, or on a team request). Runs in a thread: planning goes on meanwhile."""
-        if self.research_thread is not None and self.research_thread.is_alive():
-            return None
+        """Start bounded read-only research sessions on the Mac when they are due. Two lanes, so two sessions
+        may run at once while the hourly cap has room: "q" (the brain's own question, or a team request that
+        starts with 'investiga:') about every 30 min, and "rivals" (dossiers of a few teams per session, all 17
+        over time) about every 15 min. Each runs in a thread: planning goes on meanwhile."""
         try:
             from bazaar.llm import cli_backend as mac
         except Exception:  # noqa: BLE001
@@ -1417,37 +1457,71 @@ class Strategist:
             return None
         clock = _read(self.record / "clock.json", {}) or {}
         running = not clock.get("paused") and clock.get("doors") in (None, "open")
-        due = running and self.now() - self.research_last >= BG.MAC_RESEARCH_EVERY_S
-        if not asked and not due:
-            return None
-        if not self._mac_bucket(weight=mac.RESEARCH_WEIGHT, reserve=0 if asked else MAC_RESERVE_CALLS)["ok"]:
-            return None
-        brief = asked or self.research_brief or DEFAULT_RESEARCH[self.research_n % len(DEFAULT_RESEARCH)]
-        self.research_n += 1
-        self.research_brief = ""
-        self.research_last = self.now()
-        self.research_state = {"running": True, "since": self.now(), "brief": brief, "asked_by_team": bool(asked)}
+        busy = {k for k, t in self.research_threads.items() if t.is_alive()}
+        started = None
 
-        def work():
-            try:
-                out = mac.run_research(brief, live=self.live)
-                self._finding("investigacion", out["text"], {"brief": brief, "latency_s": out.get("latency_s"),
-                                                             "turns": out.get("turns"), "backend": "mac"})
-                self.pending_events.append(B.log_event(self.live, "review", "deep research finished: " + brief[:120],
-                                                       self.last_plan_tick, {"brief": brief}, self.now()))
-                if asked:
-                    B.chat_post(self.live, "Investigación (" + brief[:80] + "):\n" + out["text"][:1100],
-                                by="cerebro", role="brain", refs={"research": True}, now=self.now())
-                self.research_state = {"running": False, "last": self.now(), "brief": brief, "ok": True,
-                                       "latency_s": out.get("latency_s"), "turns": out.get("turns")}
-            except Exception as e:  # noqa: BLE001 - research is optional: never break the brain
-                self.research_state = {"running": False, "last": self.now(), "brief": brief, "ok": False,
-                                       "error": f"{type(e).__name__}: {e}"[:200]}
-                self.errors.append({"ts": self.now(), "error": "deep research: " + self.research_state["error"]})
+        def room(on_request: bool) -> bool:
+            return self._mac_bucket(weight=mac.RESEARCH_WEIGHT,
+                                    reserve=0 if on_request else MAC_RESEARCH_RESERVE)["ok"]
 
-        self.research_thread = threading.Thread(target=work, name="deep-research", daemon=True)
-        self.research_thread.start()
-        return self.research_state
+        # lane "q": the brain's question, or the team's
+        if "q" not in busy and (asked or (running and self.now() - self.research_last >= RESEARCH_Q_EVERY_S)) \
+                and room(bool(asked)):
+            brief = asked or self.research_brief or DEFAULT_RESEARCH[self.research_n % len(DEFAULT_RESEARCH)]
+            self.research_n += 1
+            self.research_brief = ""
+            self.research_last = self.now()
+
+            def work_q(brief=brief, asked=asked):
+                try:
+                    out = mac.run_research(brief, live=self.live)
+                    self._finding("investigacion", out["text"], {"brief": brief, "latency_s": out.get("latency_s"),
+                                                                 "turns": out.get("turns"), "backend": "mac"})
+                    self.pending_events.append(B.log_event(self.live, "review", "deep research finished: "
+                                                           + brief[:120], self.last_plan_tick, {"brief": brief},
+                                                           self.now()))
+                    if asked:
+                        B.chat_post(self.live, "Investigación (" + brief[:80] + "):\n" + out["text"][:1100],
+                                    by="cerebro", role="brain", refs={"research": True}, now=self.now())
+                    self.research_state["q"] = {"running": False, "last": self.now(), "brief": brief[:300], "ok": True,
+                                                "latency_s": out.get("latency_s"), "turns": out.get("turns")}
+                except Exception as e:  # noqa: BLE001 - research is optional: never break the brain
+                    self.research_state["q"] = {"running": False, "last": self.now(), "brief": brief[:300],
+                                                "ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
+                    self.errors.append({"ts": self.now(), "error": "deep research: " + self.research_state["q"]["error"]})
+
+            started = self._start_research("q", brief, bool(asked), work_q)
+            busy.add("q")
+
+        # lane "rivals": the standing brief, a few teams per session until all 17 have a dossier, then the stalest
+        if "rivals" not in busy and running and self.now() - self.rivals_last >= RESEARCH_RIVALS_EVERY_S and room(False):
+            lb, allies, mentioned = self._rival_context()
+            teams = RV.next_teams(self.live, lb, allies, mentioned, now=self.now())
+            if teams:
+                self.rivals_last = self.now()
+                brief = RV.brief(teams, lb)
+                tick = clock.get("tick")
+
+                def work_r(teams=teams, brief=brief, tick=tick):
+                    try:
+                        out = mac.run_research(brief, live=self.live, system=RV.SYSTEM, max_chars=mac.DOSSIER_MAX_CHARS)
+                        done = RV.save(self.live, out["text"], teams, now=self.now(), tick=tick)
+                        self._finding("rivales", "dossiers updated: " + ", ".join(done) + ". "
+                                      + " | ".join(f"{t}: {(RV.read_index(self.live).get(t) or {}).get('summary', '')}"
+                                                   for t in done)[:900],
+                                      {"teams": teams, "latency_s": out.get("latency_s"), "turns": out.get("turns")})
+                        self.research_state["rivals"] = {"running": False, "last": self.now(), "teams": teams,
+                                                         "written": done, "ok": bool(done),
+                                                         "latency_s": out.get("latency_s"), "turns": out.get("turns"),
+                                                         "covered": len(RV.read_index(self.live))}
+                    except Exception as e:  # noqa: BLE001
+                        self.research_state["rivals"] = {"running": False, "last": self.now(), "teams": teams,
+                                                         "ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
+                        self.errors.append({"ts": self.now(),
+                                            "error": "rivals research: " + self.research_state["rivals"]["error"]})
+
+                started = self._start_research("rivals", "rival dossiers: " + ", ".join(teams), False, work_r) or started
+        return started
 
     def _broker_overlay(self, plan: dict) -> None:
         """Write the accepted broker_policy to data/live/broker_policy.json (the broker reads it at the next session

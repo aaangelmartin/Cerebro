@@ -11,15 +11,16 @@ OPEN = {"paused": False, "doors": "open", "t_hours": 7.0, "tick_seconds": 30.0}
 
 
 class MacGovernorTest(unittest.TestCase):
-    def test_default_level_is_70_and_counts_calls(self):
+    def test_default_level_is_75_and_counts_calls(self):
         level, why = BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60)
-        self.assertEqual(level, 70)
+        self.assertEqual(level, BG.MAC_LEVEL_DEFAULT)
+        self.assertGreaterEqual(level, 70)
         self.assertIn("5/60", why)
 
     def test_boosts_and_cuts(self):
         self.assertEqual(BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60, signals={"bargain": True})[0], 95)
         self.assertEqual(BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60, signals={"duels_live": True})[0], 85)
-        self.assertEqual(BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60, signals={"unchanged": True})[0], 50)
+        self.assertEqual(BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60, signals={"unchanged": True})[0], 55)
         soon = [{"at_hours": 7.1, "action": "bench"}]
         self.assertEqual(BG.govern_mac(clock=OPEN, calls_last_hour=5, cap=60, upcoming=soon)[0], 85)
 
