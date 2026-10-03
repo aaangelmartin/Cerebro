@@ -66,6 +66,7 @@
     shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z"/>',
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
     chevron: '<path d="m6 9 6 6 6-6"/>',
+    broker: '<path d="M4 7h14l-3-3"/><path d="M20 17H6l3 3"/>',
     cerebro: '<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3h1V4H9Z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3h-1V4h1Z"/><path d="M7 10h3M14 14h3"/>',
   };
   ICONS.inicio = ICONS.home;

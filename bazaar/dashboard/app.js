@@ -6,7 +6,7 @@
   window.Screens = window.Screens || {};
 
   const NAV = [
-    ["home", "Home", "home"], ["cerebro", "Cerebro", "cerebro"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"],
+    ["home", "Home", "home"], ["cerebro", "Cerebro", "cerebro"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"], ["broker", "Broker", "broker"],
     ["duelos", "Duelos", "duelo"], ["competicion", "Competición", "competicion"], ["rivales", "Rivales", "rivales"],
     ["supervision", "Supervisión", "supervision"], ["laboratorio", "Laboratorio", "laboratorio"], ["bot", "Bot", "bot"],
   ];
