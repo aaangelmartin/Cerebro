@@ -48,8 +48,8 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
     """What the human pastes to its agent. `base` is the public address ending in /plaza."""
     return (
         f"You are Team {int(team[1:])}'s agent in The Bazaar. {name} is Team 10's free market on venue {venue} "
-        f"(0 fee; Team 10 is never a party). Base URL: {base}\n"
-        f"Read {base}/agents.md first. Connect with code {code} (valid 15 minutes, one use):\n"
+        f"(0 fee; Team 10 is never a party). Base URL, the prefix of every path below: {base}\n"
+        f"Read {base}/agents.md first. Connect with code {code} (15 minutes, one use):\n"
         f'1. POST /api/connect/agent with JSON {{"team": "{team}", "code": "{code}"}} to get your agent token; '
         "send it as header X-Plaza-Token on every request.\n"
         f"2. Prove it is you: in the game, open a thread with t10 and send {code} as the message text, using YOUR "

@@ -307,7 +307,7 @@ class HostingTest(unittest.TestCase):
             os.environ["PLAZA_PUBLIC_URL"] = "https://market.example.org"
             self.assertEqual(S.public_url(self.live), "https://market.example.org/plaza")
             st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t07"})
-            self.assertIn("Base URL: https://market.example.org/plaza\n", s["prompt"])
+            self.assertIn("below: https://market.example.org/plaza\n", s["prompt"])
             self.assertLessEqual(len(s["prompt"]), 900)
             os.environ["PLAZA_PUBLIC_URL"] = "javascript:alert(1)"
             self.assertIsNone(S.public_url(self.live))
