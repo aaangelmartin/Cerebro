@@ -6,7 +6,7 @@
   window.Screens = window.Screens || {};
 
   const NAV = [
-    ["home", "Home", "home"], ["cerebro", "Cerebro", "cerebro"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"], ["broker", "Broker", "broker"],
+    ["home", "Home", "home"], ["cerebro", "Cerebro", "cerebro"], ["noticias", "Noticias", "bell"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"], ["broker", "Broker", "broker"],
     ["duelos", "Duelos", "duelo"], ["competicion", "Competición", "competicion"], ["rivales", "Rivales", "rivales"],
     ["supervision", "Supervisión", "supervision"], ["laboratorio", "Laboratorio", "laboratorio"], ["bot", "Bot", "bot"],
   ];
@@ -135,6 +135,15 @@
     pollNotifications();
     pollOutbox();
     pollKeys();
+    pollNews();
+  }
+  // Radio Rastro: toast when a piece of news asks for action
+  async function pollNews() {
+    if (!window.RadioNews) return;
+    try {
+      await window.RadioNews.pull();
+      for (const x of window.RadioNews.fresh().slice(0, 3)) window.ui.toast({ type: "aprobar", title: "Noticia que pide actuar", text: (x.head || x.body || "").slice(0, 140), href: "#noticias", ttl: 12000 });
+    } catch (e) { /* optional */ }
   }
   // Anthropic keys: one model for the sidebar, the banner, the toasts and the Bot screen (window.__keyHealth)
   let keysAt = 0, keysPrev = null, healthMissing = false;

@@ -331,9 +331,14 @@
           el("div", { class: "t10-head" }, el("h2", {}, "Todo lo que pasa"), el("span", { class: "t10-sub h-feed-sub" }, "nosotros y los rivales · en directo"), el("span", { class: "t10-sub t10-right h-feed-count" }, "")),
           el("div", { class: "h-filter" }),
           el("div", { class: "h-list" }, D.state("loading"))),
-        el("section", { class: "t10-panel h-board" },
-          el("div", { class: "t10-head" }, el("h2", {}, "Clasificación"), el("span", { class: "t10-sub t10-right h-board-sub" }, "")),
-          el("div", { class: "h-board-list" }, D.state("loading"))))));
+        el("div", { class: "h-side" },
+          el("section", { class: "t10-panel h-board" },
+            el("div", { class: "t10-head" }, el("h2", {}, "Clasificación"), el("span", { class: "t10-sub t10-right h-board-sub" }, "")),
+            el("div", { class: "h-board-list" }, D.state("loading"))),
+          el("section", { class: "t10-panel rd-home" },
+            el("div", { class: "t10-head" }, el("h2", {}, "Noticias"), el("a", { class: "t10-right", href: "#noticias" }, "ver todas")),
+            el("div", { class: "t10-sub rd-home-sub" }, ""),
+            el("div", { class: "rd-home-list" }, D.state("loading")))))));
   }
 
   // ---------------------------------------------------------------- score
@@ -519,6 +524,7 @@
     safe(() => renderMarket(root, day));
     safe(() => renderFeed(root, day));
     safe(() => renderBoard(root, teams));
+    if (window.RadioNews) window.RadioNews.pull().then(() => { if (root.isConnected) window.RadioNews.homePanel(root.querySelector(".rd-home")); }).catch(() => {});
   }
 
   window.Screens = window.Screens || {};
