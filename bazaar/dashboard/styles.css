@@ -255,7 +255,9 @@ select {
 .refresh.spin svg { animation: refresh-spin .7s linear infinite; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .refresh.spin svg { animation: none; } }
-.tb-wall { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px;
+/* the Madrid clock sits centred in the free space between the stats and the tick group */
+.tb-wall { margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; flex: none;
   border: 1px solid var(--line-2); background: var(--s2); white-space: nowrap; }
 .tb-wall .num { font-size: 15px; font-weight: 600; color: var(--ink); }
-.tb-stats { max-width: calc(50vw - var(--nav-w) - 70px); }
+.topbar .tb-stats { flex: 0 1 auto; }
+.topbar .tb-clock { margin-left: 0; }
