@@ -437,6 +437,25 @@ class Runner:
             "actions": [{"id": a.id, "tick": t, "domain": a.domain, "kind": a.kind, "status": s,
                          "expected": a.expected} for t, a, s in recent]})
 
+    def scheduled_actions(self, sit: Situation, ctx: TickContext) -> list[Action]:
+        """Code-driven actions outside the domains: open our venue at hour 4.05; feed finished duels to memory."""
+        out: list[Action] = []
+        try:
+            from bazaar.broker import venue
+            if venue.should_open(sit):
+                out.append(venue.open_action(sit))
+        except Exception as e:  # noqa: BLE001
+            self._err("venue.should_open", e)
+        if sit.tick % 5 == 0:
+            duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)
+            if duels is not None and hasattr(duels, "observe_closed"):
+                try:
+                    done = self.gw.get("/api/duels", done="true")
+                    duels.observe_closed((done or {}).get("duels") or [])
+                except Exception as e:  # noqa: BLE001
+                    self._err("duels.observe_closed", e)
+        return out
+
     def step(self, sit: Situation) -> dict:
         """One full tick on an already perceived situation."""
         control = self.control()
@@ -446,6 +465,7 @@ class Runner:
         ctx = self.build_ctx(sit, control)
         domains = self.active_domains(sit, control)
         actions = self.collect(sit, ctx, domains)
+        actions.extend(self.scheduled_actions(sit, ctx))
         if ctx.cautious:
             dropped = [a for a in actions if _is_buy(a)]
             actions = [a for a in actions if not _is_buy(a)]
@@ -456,6 +476,12 @@ class Runner:
             actions = []
         actions = self.review_big(actions, sit, ctx)
         selected = self.select(actions, sit, ctx)
+        for d in domains:
+            if hasattr(d, "remember"):
+                try:
+                    d.remember(selected)
+                except Exception as e:  # noqa: BLE001
+                    self._err(f"{d.name}.remember", e)
         report = self.act(selected, sit, ctx, write)
         try:
             self.budget.save()

@@ -17,7 +17,7 @@ def card(i, ref, value):
 
 def sit(**kw):
     base = dict(tick=10, limits=dict(LIMITS), threads=[], my_offers=[], duels=[], values={"LAV-09": 150.0},
-                me={"cash": 300, "assets": [card(1, "LAV-03", 120.0), card(2, "SAL-01", 9.0), card(3, "SAL-01", 2.0),
+                me={"cash": 300, "venue": "v99", "assets": [card(1, "LAV-03", 120.0), card(2, "SAL-01", 9.0), card(3, "SAL-01", 2.0),
                                             card(4, "MAL-02", 13.0), card(5, "LAT-04", 5.0)]})
     base.update(kw)
     return NS(**base)
@@ -246,3 +246,13 @@ class FairRail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VenueReserve(unittest.TestCase):
+    def test_buys_keep_the_bond_until_the_venue_is_open(self):
+        s = sit()
+        s.me = {**s.me, "venue": None, "cash": 336}
+        buy = Action("accept_offer", {"offer": 1, "expect": offer({"types": ["card:LAV-04"]}, {"cash": 30})}, "dealers")
+        self.assertEqual(rails.rail_cash(buy, s, ctx()).rail, "cash")          # 336 - 30 < 40 + 270
+        opening = Action("venue_open", {"name": "x"}, "broker")
+        self.assertTrue(rails.rail_cash(opening, s, ctx()).ok)                 # 336 - 270 >= 40

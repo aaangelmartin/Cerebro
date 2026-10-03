@@ -305,6 +305,15 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
+def _venue_pending(sit, ctx) -> bool:
+    """True while we still mean to open our own venue (decision: board venue at hour 4.05)."""
+    control = _get(ctx, "control") or {}
+    if control.get("venue_reserve") is False:
+        return False
+    me = _get(sit, "me") or {}
+    return not me.get("venue")
+
+
 def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
     """5. Keep CASH_RESERVE; per-deal and per-hour spending caps."""
     give, _ = flows(action, sit)
@@ -315,6 +324,8 @@ def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
         return OK
     cash = _num((_get(sit, "me") or {}).get("cash"))
     reserve = _cap(ctx, "cash_reserve", config.CASH_RESERVE)
+    if action.kind != "venue_open" and _venue_pending(sit, ctx):
+        reserve += VENUE_COST                                  # keep the bond for our venue until it is open
     if cash - spend < reserve:
         return Verdict(False, "cash", f"cash {cash:.0f} - {spend} < reserve {reserve}")
     if action.kind == "venue_open":
