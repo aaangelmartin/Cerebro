@@ -44,6 +44,7 @@ FAIR_MAX_PER_HOUR = proto.FAIR_MAX_PER_HOUR
 RASTRO_FEE_BPS, RASTRO_FEE_PER_CARD = 500, 1
 SCARCE_SETS = {"LAV", "MAL", "RET"}
 MAX_OWN_LISTINGS = 8            # our sell listings at once (team cap 30; leave room)
+BRAIN_POST_PRIORITY = 50.0     # the brain's posts (and the cancels that free their card) outrank fallback posts
 POSTS_PER_TICK = 3              # new sells + bids + swaps per tick (team cap 12, shared)
 CANCELS_PER_TICK = 2
 LIST_EXPIRES = 60               # ticks
@@ -311,7 +312,7 @@ class MarketDomain:
                     elif stale is not None:
                         cancelling.add(stale.get("id"))
                         c = Action(kind="cancel_offer", params={"offer": stale.get("id")}, domain=self.name,
-                                   source="council", priority=0.0,
+                                   source="council", priority=BRAIN_POST_PRIORITY,
                                    reason=f"the brain: free {p['give']} from our offer #{stale.get('id')} "
                                           "for its new post")
                         self._sent[c.id] = {"kind": "cancel_offer", "offer": stale.get("id")}
@@ -352,13 +353,36 @@ class MarketDomain:
                 params["to"] = p["to"]
             act = Action(kind="post_offer", params=params, domain=self.name, source="council",
                          reason="the brain: " + (p.get("why") or f"targeted offer for {p['give']}"),
-                         expected={"kind": "swap" if p.get("want_card") else "ask", "points": 0.0}, priority=0.0)
+                         expected={"kind": "swap" if p.get("want_card") else "ask", "points": 0.0},
+                         priority=BRAIN_POST_PRIORITY)
             self._sent[act.id] = {"kind": "post_offer", "team": p.get("to"),
                                   "brain": {**p, "venue": venue, "note": note},
                                   "params": {"expires_in_ticks": params["expires_in_ticks"]}}
             self._brain_posted.add(key)
             out.append(act)
         return out
+
+    def _brain_reserved(self, own_market: list[dict], control: dict) -> set[str]:
+        """Card refs the plan in force gives in a post that is not on the board yet: the fallback must not list
+        or swap them meanwhile, or the spare is always inside a fresh offer of ours and the brain's post never
+        goes out. A post that was vetoed/refused, or that wants a set we avoid, holds nothing."""
+        try:
+            from bazaar.brain.strategy import post_history, post_key, post_offers
+            from bazaar.core.goal import avoided as _avoided
+            wanted = post_offers()
+            if not wanted:
+                return set()
+            live = {(tuple(a.get("ref") for a in (o.get("give") or {}).get("assets") or []),
+                     tuple(want_cards(o)), int((o.get("want") or {}).get("cash") or 0)) for o in own_market}
+            refused = {post_key(r) for r in post_history()
+                       if r.get("kind") != "accept" and r.get("status") in ("vetoed", "refused")}
+            return {str(x["give"]) for x in wanted
+                    if x.get("give") and post_key(x) not in refused
+                    and not (x.get("want_card") and _avoided(x["want_card"], control))
+                    and ((x["give"],), (x["want_card"],) if x.get("want_card") else (),
+                         int(x.get("want_cash") or 0)) not in live}
+        except Exception:  # noqa: BLE001 - no plan, nothing reserved
+            return set()
 
     def _skip_brain_post(self, p: dict, key: tuple, tick: int, why: str, once: bool = True) -> None:
         """A brain post that did not go out this tick: say why in brain_posts.jsonl (the brain reads it).
@@ -380,7 +404,7 @@ class MarketDomain:
         posts = list(state.get("_brain_posts") or [])
         state["_brain_posts"] = []                      # once per tick
         if posts:
-            actions = actions + posts
+            actions = posts + actions                   # the brain's posts take the tick's post slots first
         if any(a.kind == "accept_offer" and (a.expected or {}).get("bargain") for a in actions):
             return actions                              # a big bargain keeps this tick's accept slot
         for c in state.get("_brain_accepts") or []:
@@ -630,6 +654,8 @@ class MarketDomain:
         except Exception:  # noqa: BLE001 - no plan, nothing ordered
             ordered = set()
 
+        brain_hold = self._brain_reserved(own_market, control)   # spares the brain's planned posts give
+
         def can_give(a: dict, left: dict) -> bool:
             ref = a.get("ref")
             if a.get("id") in reserved or str(a.get("id")) in protected or str(ref) in protected:
@@ -799,6 +825,8 @@ class MarketDomain:
                 ref = a.get("ref")
                 if a.get("kind", "card") != "card" or not ref or ref in seen_refs or not can_give(a, counts):
                     continue
+                if ref in brain_hold:
+                    continue                               # the brain's own post takes this spare
                 s = values.set_of(ref)
                 value = values.asset_value(a.get("id")) - min(0.0, page_delta(values, counts, [], [ref]))
                 book = values.book(ref)
@@ -858,7 +886,7 @@ class MarketDomain:
         pool, taken = [], {}
         for a in me.get("assets") or []:
             ref = a.get("ref")
-            if a.get("kind", "card") != "card" or not ref or not can_give(a, counts):
+            if a.get("kind", "card") != "card" or not ref or not can_give(a, counts) or ref in brain_hold:
                 continue
             if values.set_of(ref) in kept and taken.get(ref, 0) >= counts[ref] - reserved_n.get(ref, 0) - 1:
                 continue

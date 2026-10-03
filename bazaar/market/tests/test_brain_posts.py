@@ -245,3 +245,62 @@ class OrderedCardsTest(unittest.TestCase):
 
         self.assertIn("LAV-04", given([]))
         self.assertNotIn("LAV-04", given([self.ORDER]))
+
+
+class BrainReservedSpareTest(unittest.TestCase):
+    """The fallback does not relist a spare the brain's plan gives in a post (outbox request code-4136c8c6)."""
+
+    def setUp(self):
+        self.live = Path(tempfile.mkdtemp())
+        self.p = mock.patch.object(config, "LIVE", self.live)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+
+    SWAP = {"give": "LAV-05", "want_card": "LAT-08", "want_cash": None, "to": "t17", "venue": "rastro",
+            "why": "swap the spare for a card we lack"}
+    ME = {"id": "t10", "cash": 30, "affinity": {"LAV": 1.6}, "assets": [
+        {"id": 367, "kind": "card", "ref": "LAV-05", "rarity": "common", "set": "LAV", "your_value": 16},
+        {"id": 368, "kind": "card", "ref": "LAV-05", "rarity": "common", "set": "LAV", "your_value": 4}]}
+
+    def tick(self, d, plan, my_offers=(), tick=894):
+        from types import SimpleNamespace
+        sit = SimpleNamespace(tick=tick, me=self.ME, my_offers=list(my_offers), threads=[], venues=[], feed_new=[],
+                              limits={}, books={})
+        ctx = SimpleNamespace(control={}, budget={}, cautious=False, llm_ok=False)
+        with mock.patch.object(S, "post_offers", return_value=plan), \
+                mock.patch.object(S, "dealer_orders", return_value=[]):
+            return d.fallback(sit, ctx)
+
+    @staticmethod
+    def gives(acts):
+        return [(a.source, (a.params.get("give") or {}).get("assets"), a.params.get("want"))
+                for a in acts if a.kind == "post_offer"]
+
+    def test_fallback_lists_the_spare_when_the_brain_does_not_plan_it(self):
+        self.assertIn([368], [g for _, g, _ in self.gives(self.tick(domain(), []))])
+
+    def test_brain_swap_goes_out_first_and_the_fallback_leaves_the_spare(self):
+        acts = self.tick(domain(), [self.SWAP])
+        posts = self.gives(acts)
+        self.assertEqual(posts[0], ("council", [368], {"cards": ["LAT-08"]}))
+        self.assertEqual([p for p in posts if p[0] != "council" and set(p[1] or []) & {367, 368}], [])
+        self.assertEqual(acts[0].kind, "post_offer")                     # ahead of every fallback action
+
+    def test_spare_tied_in_a_fallback_offer_is_freed_then_swapped_without_a_relist(self):
+        d = domain()
+        old = {"id": 13793, "maker": "t10", "status": "open", "thread": None, "venue": "rastro",
+               "give": {"cash": 0, "assets": [{"id": 368, "ref": "LAV-05"}]}, "want": {"cash": 6}}
+        with mock.patch.object(d, "_hands_off", return_value=None):      # a bot-posted, unprotected offer
+            acts = self.tick(d, [self.SWAP], [old])
+        self.assertIn(("cancel_offer", {"offer": 13793}), [(a.kind, a.params) for a in acts])
+        self.assertEqual([p for p in self.gives(acts) if set(p[1] or []) & {367, 368}], [])
+        self.assertIn("cancelling it now", S.post_history()[-1]["detail"])
+        posts = self.gives(self.tick(d, [self.SWAP], tick=895))           # freed: the swap, not a new 6 P ask
+        self.assertEqual([p for p in posts if set(p[1] or []) & {367, 368}],
+                         [("council", [368], {"cards": ["LAT-08"]})])
+
+    def test_a_refused_brain_post_does_not_hold_the_spare(self):
+        S.record_post({**self.SWAP, "tick": 890, "status": "refused"})
+        self.assertIn([368], [g for _, g, _ in self.gives(self.tick(domain(), [self.SWAP]))])
