@@ -49,13 +49,17 @@ DOMAINS = [("duels", "bazaar.duels.domain", "DuelsDomain"),
            ("market", "bazaar.market.domain", "MarketDomain")]
 DEFAULT_CONTROL = {"armed": False, "mode": "auto", "caps": {}, "protected": [], "paused_domains": []}
 WAIT_POLL_S = 30.0               # doors closed / paused: record the feed this often
-COUNCIL_SHARE = 0.80             # the council may run until this share of the tick
+COUNCIL_SHARE = 0.70             # the council may run until this share of the tick
+SEND_CUTOFF = 0.90               # no non-accept writes after this share of the tick
 COUNCIL_MIN_S = 4.0              # ...and only if at least this many seconds remain
 DROP_PCT = 0.05                  # breaker: score or portfolio down 5 % ...
 DROP_WINDOW = 10                 # ...within 10 ticks -> cautious (no buys) for CAUTIOUS_TICKS
 VENUE_BOND = 250
 CAUTIOUS_TICKS = 10
 REFUSALS_TO_PAUSE = 3            # consecutive refusals of one domain -> pause it PAUSE_TICKS
+NEVER_PAUSE = {"duels"}          # a 10-tick pause is most of a 16-tick duel: duels are never paused
+TRANSIENT_CODES = {"wait_for_tick", "rate_limited", "too_early", "duel_closed", "not_live", "closed",
+                   "expired", "offer_gone", "thread_closed", "too_many_requests"}
 PAUSE_TICKS = 10
 INJECTION_FLOOD = 4              # flagged texts from others in one tick -> code-only for FLOOD_TICKS
 FLOOD_TICKS = 5
@@ -78,6 +82,11 @@ def load_control(live: Path, defaults: dict | None = None) -> dict:
             base.update(data)
     except (OSError, ValueError):
         pass
+    caps = base.get("caps")
+    if isinstance(caps, dict):                                 # the dashboard stores caps nested; rails read them flat
+        for k, v in caps.items():
+            if k != "caps":
+                base[k] = v
     return base
 
 
@@ -116,7 +125,7 @@ def _import(name: str):
         return None
 
 
-def load_domains(only: list[str] | None = None) -> list:
+def load_domains(only: list[str] | None = None, gw=None) -> list:
     out = []
     for name, mod, cls in DOMAINS:
         if only and name not in only:
@@ -124,10 +133,22 @@ def load_domains(only: list[str] | None = None) -> list:
         m = _import(mod)
         if m is not None and hasattr(m, cls):
             try:
-                out.append(getattr(m, cls)())
+                try:
+                    out.append(getattr(m, cls)(gw=gw))           # read-only gateway: catalog, values, books
+                except TypeError:
+                    out.append(getattr(m, cls)())
             except Exception as e:  # noqa: BLE001
                 log.error("domain %s failed to start: %s", name, e)
     return out
+
+
+def _urgent_duel_accept(a: Action, sit: Situation) -> bool:
+    """A duel accept with <= 3 ticks left skips the council: a veto there means the duel scores 0."""
+    if a.kind != "duel_accept":
+        return False
+    d = next((d for d in (sit.duels or []) if str(d.get("duel")) == str((a.params or {}).get("duel"))), None)
+    dl = (d or {}).get("deadline_tick")
+    return dl is not None and dl - sit.tick <= 3
 
 
 def _is_buy(a: Action) -> bool:
@@ -302,7 +323,7 @@ class Runner:
         cdead = sit.tick_start + COUNCIL_SHARE * sit.tick_seconds
         out = []
         for a in actions:
-            if not a.big or cdead - self.now() < COUNCIL_MIN_S:
+            if not a.big or cdead - self.now() < COUNCIL_MIN_S or _urgent_duel_accept(a, sit):
                 out.append(a)
                 continue
             try:
@@ -345,8 +366,20 @@ class Runner:
 
     def act(self, actions: list[Action], sit: Situation, ctx: TickContext, write: bool) -> list[dict]:
         report = []
+        # Accepts first (one per tick, the most valuable), then the rest; nothing but accepts after 90 % of the tick,
+        # so writes never spill into the next tick (wait_for_tick).
+        actions = sorted(actions, key=lambda a: a.kind not in ("accept_offer", "duel_accept"))
+        cutoff = (sit.tick_start + SEND_CUTOFF * sit.tick_seconds) if sit.tick_start and sit.tick_seconds else None
         for a in actions:
             t0 = self.now()
+            if (write and cutoff and t0 > cutoff and a.kind not in ("accept_offer", "duel_accept")
+                    and a.kind != "noop"):
+                self._ledger("decision", a, Verdict(False, "late", "past the send cutoff of this tick"),
+                             source=a.source, tick=sit.tick, dry_run=False)
+                report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
+                               "reason": a.reason, "verdict": {"ok": False, "rail": "late", "detail": "send cutoff"},
+                               "status": "skipped_late"})
+                continue
             if self.rails is not None:
                 try:
                     verdict = self.rails.check(a, sit, ctx)
@@ -355,6 +388,7 @@ class Runner:
                     verdict = Verdict(False, "rails_error", str(e)[:200])
             else:
                 verdict = Verdict(False, "rails_missing", "core/rails.py not importable")
+            from_executor = False                              # the executor logs the outcomes of what it runs
             if not verdict.ok:
                 outcome = Outcome(a.id, sit.tick, "vetoed", {"rail": verdict.rail, "detail": verdict.detail})
             elif not write:
@@ -365,6 +399,8 @@ class Runner:
                                         ledger=self.ledger)
                     if not isinstance(outcome, Outcome):
                         outcome = Outcome(a.id, sit.tick, "sent", outcome if isinstance(outcome, dict) else {})
+                    else:
+                        from_executor = True
                 except Exception as e:  # noqa: BLE001
                     self._err("executor", e)
                     outcome = Outcome(a.id, sit.tick, "error", {"error": getattr(e, "code", type(e).__name__),
@@ -373,11 +409,12 @@ class Runner:
                          tick=sit.tick, dry_run=not write)
             status = outcome.status if outcome else "dry_run"
             if outcome is not None:
-                self._ledger("outcome", outcome, a)
+                if not from_executor:
+                    self._ledger("outcome", outcome, a)
                 self._observe(a, outcome)
                 self.budget.record(a, outcome.status, self.now())
                 ctx.budget = self.budget.for_tick(sit.tick, sit.limits, self.now())   # rails see it at once
-                self._count_refusal(a.domain, outcome.status, sit.tick)
+                self._count_refusal(a.domain, outcome.status, sit.tick, (outcome.response or {}).get("error"))
                 if outcome.status in ("sent", "deal"):
                     self.recent.append((sit.tick, a, outcome.status))
             report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
@@ -385,7 +422,9 @@ class Runner:
                                                            "detail": verdict.detail}, "status": status})
         return report
 
-    def _count_refusal(self, domain: str, status: str, tick: int):
+    def _count_refusal(self, domain: str, status: str, tick: int, code: str | None = None):
+        if status == "refused" and (domain in NEVER_PAUSE or code in TRANSIENT_CODES):
+            return                                             # timing noise, not a broken strategy
         if status == "refused":
             self.refusals[domain] = self.refusals.get(domain, 0) + 1
             if self.refusals[domain] >= REFUSALS_TO_PAUSE:
@@ -404,7 +443,7 @@ class Runner:
             self.history.pop()
         self.history.append((sit.tick, sit.score, portfolio))
         window = [h for h in self.history if sit.tick - h[0] <= DROP_WINDOW]
-        for i, label in ((1, "score"), (2, "portfolio")):
+        for i, label in ((2, "portfolio"),):                  # score is relative to the leader: not a loss signal
             top = max(h[i] for h in window)
             if top > 0 and window[-1][i] < top * (1 - DROP_PCT) and sit.tick > self.cautious_until:
                 self.cautious_until = sit.tick + CAUTIOUS_TICKS
@@ -449,6 +488,10 @@ class Runner:
                 out.append(venue.open_action(sit))
         except Exception as e:  # noqa: BLE001
             self._err("venue.should_open", e)
+        packs = [x for x in (sit.me or {}).get("assets") or [] if x.get("kind") == "pack"]
+        if packs:                                               # cards in the album and tradeable; one pack per tick
+            out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="dealers", source="code",
+                              reason=f"Open {packs[0].get('ref', 'pack')}: its cards count in the album and can be traded."))
         if sit.tick % 5 == 0:
             duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)
             if duels is not None and hasattr(duels, "observe_closed"):
@@ -626,7 +669,7 @@ def build(mode: str, only: list[str] | None = None) -> Runner:
             llm.set_ledger(ledger)
         except Exception:  # noqa: BLE001
             pass
-    return Runner(gw, domains=load_domains(only), mode=mode, live=live, make_write_gw=make_write,
+    return Runner(gw, domains=load_domains(only, gw=gw), mode=mode, live=live, make_write_gw=make_write,
                   ledger=ledger, lessons=lessons, llm=llm, rails=rails, executor=executor, arbiter=arbiter,
                   council=getattr(council_mod, "review", None), control_defaults=defaults)
 

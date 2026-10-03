@@ -28,7 +28,7 @@ from ..gateway import GameError, Gateway
 from . import venue
 from .engine import BenchEngine, Match, load_policy, public_plan, run_of, stall_plan
 
-STOP_CODES = {"wait_for_tick", "rate_limited", "too_many_matches", "match_limit", "limit_reached", "bad_broker_key",
+STOP_CODES = {"wait_for_tick", "rate_limited", "too_many_matches", "match_limit", "limit_reached", "bad_broker_key", "bad_key",
               "auto_venue", "not_board"}
 GONE_HINTS = ("gone", "not_found", "closed", "taken", "unknown")
 
@@ -88,8 +88,8 @@ def live_writes_allowed() -> tuple[bool, str]:
     if not config.ALLOW_REAL:
         return False, "BAZAAR_ALLOW_REAL is not 1"
     ctl = _read_json(config.LIVE / "control.json")
-    if ctl.get("armed") is False:
-        return False, "control.json armed=false"
+    if ctl.get("armed") is not True:                           # a missing or unreadable control file is disarmed
+        return False, "control.json not armed"
     return True, ""
 
 

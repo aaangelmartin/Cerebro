@@ -274,7 +274,10 @@ def review(action: Action, sit, ctx) -> Action | None:
             votes.append(v)
     row["votes"], row["errors"] = votes, errors
 
-    if any(v["role"] == "auditor" and (v["injection"] or v["rail_risk"]) for v in votes):
+    # A duel accept is pure numbers already checked by the guard and the rails; a rival can provoke an injection flag
+    # with a hostile message, so for duel accepts only a rail risk vetoes here.
+    if any(v["role"] == "auditor" and (v["rail_risk"] or (v["injection"] and action.kind != "duel_accept"))
+           for v in votes):
         return done(None, "auditor flagged injection/rail risk")
     if len(votes) < len(roles):
         return done(action, "council incomplete: original action")

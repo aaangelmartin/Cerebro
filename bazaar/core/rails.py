@@ -21,7 +21,7 @@ VALUE_MARGIN = 1                 # dealers/market: P of slack against our privat
 FAIR_MAX_PER_HOUR = 4            # deals with the same team per hour
 SCARCE_SETS = {"LAV", "MAL", "RET"}
 WRITE_KINDS = {"open_thread", "thread_message", "close_thread", "accept_offer", "post_offer", "cancel_offer",
-               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce"}
+               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack"}
 VENUE_COST = 270                 # bond 250 (refundable) + 20
 OK = Verdict(True)
 
@@ -65,7 +65,8 @@ def _side(d: dict | None) -> dict:
     d = d or {}
     return {"cash": int(_num(d.get("cash"))), "assets": [_asset_id(a) for a in d.get("assets") or []],
             "asset_refs": {_asset_id(a): a.get("ref") for a in d.get("assets") or [] if isinstance(a, dict)},
-            "types": list(d.get("types") or [])}
+            # `cards: ["LAV-03"]` (any copy of a card) is the same as types ["card:LAV-03"]
+            "types": list(d.get("types") or []) + [f"card:{c}" for c in d.get("cards") or []]}
 
 
 def _find(items, key, value):
@@ -402,7 +403,18 @@ def rail_fair(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
-RAILS = [rail_armed, rail_known, rail_accept_shape, rail_cards, rail_duel, rail_value, rail_cash, rail_pace,
+def rail_pack(action: Action, sit=None, ctx=None) -> Verdict:
+    """Only open sealed packs we actually hold."""
+    if action.kind != "open_pack":
+        return OK
+    aid = (action.params or {}).get("asset")
+    a = _held(sit).get(aid) or _held(sit).get(int(aid) if str(aid).isdigit() else aid)
+    if not a or a.get("kind") != "pack":
+        return Verdict(False, "pack", f"asset {aid} is not a pack of ours")
+    return OK
+
+
+RAILS = [rail_armed, rail_pack, rail_known, rail_accept_shape, rail_cards, rail_duel, rail_value, rail_cash, rail_pace,
          rail_fair]
 
 
@@ -457,8 +469,5 @@ def verify_fresh(action: Action, fresh: dict | None) -> Verdict:
         for k in ("id", "price", "days"):
             if k in exp and exp[k] is not None and str(exp[k]) != str(rival.get(k)):
                 return Verdict(False, "fresh", f"rival offer {k} changed: {exp[k]} -> {rival.get(k)}")
-        mine = fresh.get("your_offer") or {}
-        if mine and _num(mine.get("tick"), -1) > _num(rival.get("tick"), -1):
-            return Verdict(False, "fresh", "our offer is newer than the rival's")
-        return OK
+        return OK                                                # the rival's offer stands after our counters
     return Verdict(False, "fresh", f"{action.kind} is not an accept")

@@ -103,10 +103,14 @@ class Accepts(unittest.TestCase):
 class Posts(unittest.TestCase):
     def test_posts_low_value_cards_above_min_gain(self):
         assets = [card(1, "LAT-09", "rare", 35), card(2, "LAV-01", "common", 16), card(3, "MAL-06", "uncommon", 32.5)]
-        acts = dom().fallback(sit(assets=assets), make_ctx(10))
+        d = dom()
+        acts = d.fallback(sit(assets=assets), make_ctx(10))
         posts = [a for a in acts if a.kind == "post_offer"]
-        self.assertEqual([a.params["give"]["assets"] for a in posts], [[1]])
-        self.assertGreaterEqual(posts[0].params["want"]["cash"], 35 + min_gain(35))
+        self.assertEqual({tuple(a.params["give"].get("assets") or []) for a in posts if a.params["give"].get("assets")},
+                         {(1,)})                                  # only the low-affinity card leaves (sell or swap)
+        _, cands, _ = d._prepare(sit(assets=assets), make_ctx(10))
+        self.assertEqual([c.asset["id"] for c in cands], [1])
+        self.assertGreaterEqual(cands[0].ask, 35 + min_gain(35))
 
     def test_targets_team_that_bids_on_the_set(self):
         d = dom()
@@ -114,9 +118,11 @@ class Posts(unittest.TestCase):
                  "payload": {"offer": bid_offer(50 + i, "LAT-10", 62)}} for i in range(3)]
         assets = [card(1, "LAT-09", "rare", 35)]
         acts = d.fallback(sit(assets=assets, feed=feed), make_ctx(10))
-        posts = [a for a in acts if a.kind == "post_offer"]
-        self.assertEqual(posts[0].params.get("to"), "t18")
-        self.assertGreaterEqual(posts[0].params["want"]["cash"], 44)
+        posts = [a for a in acts if a.kind == "post_offer" and a.params["give"].get("assets")]
+        self.assertEqual(posts[0].params.get("to"), "t18")        # the swap of our LAT card is aimed at t18
+        _, cands, _ = d._prepare(sit(assets=assets), make_ctx(10))
+        self.assertEqual(cands[0].target, "t18")
+        self.assertGreaterEqual(cands[0].ask, 44)
 
     def test_llm_choices_are_clamped(self):
         class LLM:

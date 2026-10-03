@@ -80,7 +80,8 @@ class FreshRail(unittest.TestCase):
         a = Action("duel_accept", {"duel": 9, "expect": {"id": 1, "price": 130}}, "duels")
         self.assertTrue(rails.verify_fresh(a, duel).ok)
         self.assertFalse(rails.verify_fresh(a, {**duel, "rival_offer": {"id": 3, "price": 140, "tick": 6}}).ok)
-        self.assertFalse(rails.verify_fresh(a, {**duel, "your_offer": {"id": 4, "price": 125, "tick": 6}}).ok)
+        # the real API keeps the rival's offer standing after our counter (Friday duel 248): still acceptable
+        self.assertTrue(rails.verify_fresh(a, {**duel, "your_offer": {"id": 4, "price": 125, "tick": 6}}).ok)
         self.assertFalse(rails.verify_fresh(a, {**duel, "status": "deal"}).ok)
 
 
@@ -264,3 +265,32 @@ class AcceptWithChosenCopy(unittest.TestCase):
                                     "expect": offer({"cash": 200}, {"types": ["card:LAV-03"]})}, "market")
         give, _ = rails.flows(a, sit())
         self.assertIn(1, give["assets"])
+
+
+class WantCardsShape(unittest.TestCase):
+    """`want: {"cards": [ref]}` (the documented way to ask for any copy) is valued like types card:ref."""
+
+    def test_bid_post_is_valued(self):
+        bid = lambda p: Action("post_offer", {"venue": "v03", "give": {"cash": p}, "want": {"cards": ["LAV-09"]}}, "market")
+        self.assertTrue(rails.check(bid(100), sit(), ctx()).ok)                 # LAV-09 worth 150 to us
+        self.assertEqual(rails.check(bid(150), sit(), ctx()).rail, "value")
+
+    def test_swap_post_never_gives_last_scarce_copy(self):
+        swap = Action("post_offer", {"venue": "v03", "give": {"assets": [1]}, "want": {"cards": ["LAV-09"]}}, "market")
+        self.assertEqual(rails.check(swap, sit(), ctx()).rail, "cards")         # only LAV-03 copy
+        swap.params["human_ok"] = True
+        self.assertTrue(rails.rail_cards(swap, sit(), ctx()).ok)
+
+    def test_accept_wanting_cards_gives_that_card(self):
+        a = Action("accept_offer", {"offer": 7, "expect": offer({"cash": 30}, {"cards": ["SAL-01"]})}, "market")
+        give, _ = rails.flows(a, sit())
+        self.assertEqual(give["types"], ["card:SAL-01"])
+
+
+class PackRail(unittest.TestCase):
+    def test_only_our_sealed_packs(self):
+        s = sit()
+        s.me = {**s.me, "assets": [*s.me["assets"], {"id": 431, "kind": "pack", "ref": "sobre_bienvenida"}]}
+        self.assertTrue(rails.rail_pack(Action("open_pack", {"asset": 431}, "dealers"), s, ctx()).ok)
+        self.assertFalse(rails.rail_pack(Action("open_pack", {"asset": 1}, "dealers"), s, ctx()).ok)    # a card
+        self.assertFalse(rails.rail_pack(Action("open_pack", {"asset": 999}, "dealers"), s, ctx()).ok)  # not ours

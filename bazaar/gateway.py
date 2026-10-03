@@ -26,7 +26,7 @@ class GameError(Exception):
 
     @property
     def next_tick_in(self) -> float | None:
-        v = self.body.get("next_tick_in") or self.body.get("next_tick")
+        v = self.body.get("next_tick_in")
         return float(v) if isinstance(v, (int, float)) else None
 
 

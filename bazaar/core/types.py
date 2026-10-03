@@ -19,6 +19,7 @@ ActionKind = Literal[
     "venue_patch",      # params: venue, fee_bps?, fee_per_card?, description?
     "broker_match",     # params: sell, buy, price                  (broker key)
     "broker_announce",  # params: text
+    "open_pack",        # params: asset (id of a sealed pack we hold)  -> POST /api/packs/{id}/open
     "noop",
 ]
 

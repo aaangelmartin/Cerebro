@@ -180,14 +180,15 @@ class RunTest(unittest.TestCase):
         self.assertEqual(rep["actions"], [])
         self.assertEqual(r.dom_status["dealers"]["state"], "paused_refusals")
 
-    def test_score_drop_turns_on_cautious_and_blocks_buys(self):
+    def test_portfolio_drop_turns_on_cautious_and_blocks_buys(self):
         buy = Action("accept_offer", {"offer": 1, "expect": {"want": {"cash": 50}}}, "dealers")
         sell = Action("post_offer", {"venue": "rastro", "give": {"assets": [1]}, "want": {"cash": 9}}, "market")
         r = self.runner([Dom("x", [buy, sell])])
         r.step(sit_at(tick=1, score=20.0))
+        r.step(sit_at(tick=2, score=12.0))                 # relative score falls: others gained, not a loss
         self.assertEqual(r.cautious_until, -1)
-        rep = r.step(sit_at(tick=2, score=18.0))
-        self.assertEqual(r.cautious_until, 2 + run.CAUTIOUS_TICKS)
+        rep = r.step(sit_at(tick=3, cash=200))              # portfolio 1000 -> 900
+        self.assertEqual(r.cautious_until, 3 + run.CAUTIOUS_TICKS)
         self.assertEqual([a["kind"] for a in rep["actions"]], ["post_offer"])
 
     def test_injection_flood_forces_code_only(self):
@@ -265,3 +266,18 @@ class RunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuditFixes(unittest.TestCase):
+    def test_duels_never_paused_and_transient_codes_ignored(self):
+        r = run.Runner.__new__(run.Runner)
+        r.refusals, r.paused_until, r._err = {}, {}, lambda *a, **k: None
+        for _ in range(5):
+            r._count_refusal("duels", "refused", 1, "bad_price")
+            r._count_refusal("dealers", "refused", 1, "wait_for_tick")
+        self.assertEqual(r.paused_until, {})
+
+    def test_dashboard_caps_are_flattened(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "control.json").write_text('{"armed": true, "caps": {"cash_reserve": 90}}')
+            self.assertEqual(run.load_control(Path(d))["cash_reserve"], 90)

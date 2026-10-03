@@ -119,6 +119,8 @@ def _call(action: Action, gw):
     if k == "venue_patch":
         body = {f: p[f] for f in ("fee_bps", "fee_per_card", "description", "rules") if p.get(f) is not None}
         return "patch", f"/api/venues/{p['venue']}", body, None
+    if k == "open_pack":
+        return "post", f"/api/packs/{int(p['asset'])}/open", {}, None
     if k == "broker_match":
         return "post", "/api/broker/matches", {"sell": p["sell"], "buy": p["buy"], "price": p["price"]}, "broker"
     if k == "broker_announce":

@@ -87,7 +87,7 @@ class CouncilTest(unittest.TestCase):
                       delays={"negotiator": 3})
         ctx, sit, led = setup(llm=llm, seconds=0.6)
         t = time.time()
-        self.assertIsNone(council.review(Action("duel_accept", {"duel": 9}, "duels"), sit, ctx))
+        self.assertIsNone(council.review(Action("accept_offer", {"offer": 9}, "dealers"), sit, ctx))
         self.assertLess(time.time() - t, 1.5)
         self.assertEqual(led.rows[0][1]["result"], "veto")
 
