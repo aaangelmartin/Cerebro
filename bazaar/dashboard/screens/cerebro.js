@@ -139,20 +139,79 @@
     return p;
   }
 
-  // events: from every plan doc (doc.events) + the overview summary
+  // events: strings from the brain's detector, e.g. "offer #4310 addressed to us by abuela",
+  // "level X: state a -> b", "schedule added: ...", "t06 score 11.1 -> 15.1",
+  // "novelty <kind>: <untrusted source='game'>{json}</untrusted>". Parsed into {kind, text}.
+  const EV_KIND = {
+    offer: ["Oferta", "anuncio", "var(--t-puja)"], level: ["Nivel", "trend", "var(--t-compra)"],
+    schedule: ["Calendario", "bell", "var(--t-cambio)"], score: ["Puntos", "competicion", "var(--t-duelo)"],
+    dealer: ["Dealer", "dealer", "var(--t-dealer)"], venue: ["Tienda", "mercado", "var(--t-dealer)"],
+    news: ["Noticia", "anuncio", "var(--t-anuncio)"], other: ["Evento", "bell", "var(--t-anuncio)"],
+  };
+  const ACTION_ES = { day_closes: "cierre", day_opens: "apertura", bench: "Market Test", duels: "duelos", round: "ronda" };
+  function parseEvent(raw) {
+    let t = typeof raw === "string" ? raw : (raw && (raw.text || raw.event)) || JSON.stringify(raw);
+    const m = t.match(/^novelty ([\w.]+):\s*<untrusted[^>]*>([\s\S]*?)(<\/untrusted>|$)/);
+    if (m) {
+      const kind = m[1];
+      let j = null; try { j = JSON.parse(m[2]); } catch (e) { j = null; }
+      if (kind === "schedule" && j) {
+        const when = j.at_hours != null ? "h" + fmtNum(j.at_hours, 2) : "";
+        return { kind: "schedule", text: `Calendario: ${ACTION_ES[j.action] || j.action} ${when}${j.note ? " · " + j.note : ""}` };
+      }
+      if (j && j.type) {
+        const ex = j.example || {}; const p = ex.payload || {};
+        const head = p.headline || p.title || p.text || "";
+        const k = /news/.test(j.type) ? "news" : /persona|dealer/.test(j.type) ? "dealer" : /venue/.test(j.type) ? "venue" : "other";
+        return { kind: k, text: `Nuevo tipo de evento «${j.type}»${ex.actor ? " de " + ex.actor : ""}${head ? ": " + head : ""}` };
+      }
+      return { kind: /persona|dealer/.test(kind) ? "dealer" : /venue/.test(kind) ? "venue" : "other", text: "Novedad " + kind + (j ? "" : ": " + m[2].slice(0, 160)) };
+    }
+    if (/^offer /.test(t)) return { kind: "offer", text: t.replace(/^offer #(\d+) addressed to us by (\S+)/, "Oferta #$1 dirigida a nosotros por $2") };
+    if (/^level /.test(t)) return { kind: /persona|dealer|chato|abuela|pilar/i.test(t) ? "dealer" : "level", text: t.replace(/^level /, "Nivel/dealer ").replace("state", "estado") };
+    if (/^schedule (added|removed)/.test(t)) {
+      const added = /added/.test(t);
+      const items = t.replace(/^schedule [^:]*:\s*/, "").split(/,\s*/).map((x) => { const [h, a] = x.split("|"); return (ACTION_ES[a] || a || "?") + " h" + h; });
+      return { kind: "schedule", text: (added ? "Calendario añade: " : "Calendario quita: ") + items.join(", ") };
+    }
+    const sc = t.match(/^(t\d+) score ([\d.]+) -> ([\d.]+)/);
+    if (sc) return { kind: "score", text: `${U().teamName ? U().teamName(sc[1]) : sc[1]}: ${fmtNum(+sc[2], 1)} → ${fmtNum(+sc[3], 1)} puntos (${+sc[3] >= +sc[2] ? "+" : ""}${fmtNum(+sc[3] - +sc[2], 1)})` };
+    if (/venue/.test(t)) return { kind: "venue", text: t };
+    return { kind: "other", text: t.replace(/<\/?untrusted[^>]*>/g, "") };
+  }
+  // the plan's priority that talks about this kind of event; the first event of a plan falls back to priority 1
+  const EV_WORDS = { schedule: /schedule|calendar|calendario/i, offer: /offer|#\d+|thread/i, score: /score|points|t\d\d/i,
+    level: /level|unlock|dealer/i, dealer: /dealer|unlock|chato|abuela|pilar/i, venue: /venue|v\d\d|market/i, news: /news|radio|rumour/i };
+  function evConcl(r) {
+    const pri = ((r.doc && r.doc.plan) || {}).priorities || [];
+    const rx = EV_WORDS[r.kind];
+    const hit = rx && pri.find((p) => rx.test(p));
+    return hit || (r.i === 0 ? pri[0] || ((r.doc && r.doc.plan) || {}).situation : "");
+  }
+  function evChip(kind) {
+    const [label, ic, color] = EV_KIND[kind] || EV_KIND.other;
+    const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label));
+    c.style.setProperty("--tc", color);
+    return c;
+  }
   function eventsPanel(d) {
     const rows = [];
-    for (const doc of d.history) for (const e of doc.events || []) rows.push({ ts: doc.updated, tick: doc.tick, text: typeof e === "string" ? e : (e.text || e.event || JSON.stringify(e)), doc });
-    rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    for (const doc of d.history) (doc.events || []).forEach((e, i) => { const pe = parseEvent(e); rows.push({ ts: doc.updated, tick: doc.tick, i, ...pe, doc }); });
+    rows.sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.i - b.i);
     const p = U().panel("Eventos detectados", { sub: rows.length ? rows.length + " eventos" : "" });
     if (!rows.length) { add(p.body, U().empty("Aún no ha detectado eventos (dealer nuevo, nivel, calendario, tiendas, saltos de puntos).")); return p; }
-    const host = el("div", { class: "cb-list" });
-    U().keyedList(host, rows.slice(0, 60), {
-      key: (r) => (r.ts || 0) + "|" + r.text, sig: () => "",
-      render: (r) => U().row({ cls: "cb-t-events", cols: "86px minmax(0,1fr) auto", cells: [
-        { v: el("span", { class: "num" }, when(r.ts)), cls: "cb-time" },
-        { v: el("div", {}, el("div", { class: "cb-rowt", title: r.text }, short(r.text, 220)), el("div", { class: "cb-rows" }, "Conclusión: " + short(concl(r.doc), 260))), cls: "wrap" },
-        statusChip(planStatus(r.doc))] }),
+    const host = el("div", { class: "cb-list cb-events" });
+    U().keyedList(host, rows.slice(0, 80), {
+      key: (r) => (r.ts || 0) + "|" + r.i, sig: () => "",
+      render: (r) => {
+        const n = el("div", { class: "cb-ev" },
+          el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(r.ts)), evChip(r.kind),
+            el("span", { class: "num cb-muted" }, r.tick != null ? "tick " + r.tick : ""), el("span", { class: "cb-sp" }), statusChip(planStatus(r.doc))),
+          el("div", { class: "cb-rowt", title: r.text }, short(r.text, 240)),
+          evConcl(r) ? el("div", { class: "cb-rows" }, "Conclusión del cerebro: " + short(evConcl(r), 240)) : null);
+        n.style.setProperty("--tc", (EV_KIND[r.kind] || EV_KIND.other)[2]);
+        return n;
+      },
     });
     add(p.body, host);
     return p;
@@ -303,15 +362,118 @@
     });
   }
 
+
+  // ---------- chat with the brain ----------
+  // GET brain/chat?since=<ts> -> list (or {messages}/{items}) of {ts, role:"user"|"brain", by, text, refs?}
+  const C = { msgs: [], since: null, host: null, list: null, input: null, state: "idle", err: null, waiting: false, busy: false };
+  const NAME_KEY = "bazaar.dash.chatName";
+  const getName = () => { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } };
+  const setName = (n) => { try { localStorage.setItem(NAME_KEY, n); } catch (e) { /* private mode */ } };
+  const msgList = (r) => (Array.isArray(r) ? r : r && Array.isArray(r.messages) ? r.messages : r && Array.isArray(r.items) ? r.items : []);
+
+  function chatMount() {
+    const list = el("div", { class: "cb-chat-list" });
+    const input = el("textarea", { class: "cb-chat-in", rows: 2, placeholder: "Pregunta o pide algo al cerebro…" });
+    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar");
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } });
+    send.addEventListener("click", chatSend);
+    const nameBox = el("div", { class: "cb-chat-name" });
+    const host = el("aside", { class: "cb-chat" },
+      el("header", { class: "cb-chat-h" }, U().icon("cerebro", 15), el("b", {}, "Habla con el cerebro"), el("span", { class: "cb-chat-st" })),
+      list, nameBox, el("div", { class: "cb-chat-f" }, input, send));
+    C.host = host; C.list = list; C.input = input; C.nameBox = nameBox; C.send = send;
+    renderName(); renderChat();
+    return host;
+  }
+  function renderName() {
+    const box = C.nameBox; if (!box) return;
+    const n = getName();
+    if (n) { box.replaceChildren(el("span", { class: "cb-muted" }, "Escribes como "), el("b", {}, n), " ",
+      el("button", { type: "button", class: "cb-link", onclick: () => { setName(""); renderName(); } }, "cambiar")); return; }
+    const inp = el("input", { class: "cb-q", placeholder: "Tu nombre (por defecto: equipo)" });
+    const ok = () => { setName(inp.value.trim() || "equipo"); renderName(); };
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") ok(); });
+    box.replaceChildren(inp, el("button", { type: "button", class: "cb-seg", onclick: ok }, "Guardar"));
+  }
+  function renderChat() {
+    const list = C.list; if (!list) return;
+    const st = C.host.querySelector(".cb-chat-st");
+    if (st) st.textContent = C.state === "off" ? "inactivo" : C.waiting ? "pensando…" : "";
+    const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 12;
+    const kids = [];
+    if (C.state === "off") kids.push(U().empty("El chat del cerebro aún no está activo."));
+    else if (C.state === "error") kids.push(U().error(C.err));
+    else if (!C.msgs.length && C.state === "idle") kids.push(U().loading());
+    else if (!C.msgs.length) kids.push(U().empty("Aún no hay mensajes. Pregúntale qué está pensando o por qué tomó una decisión."));
+    for (const m of C.msgs) {
+      const me = m.role !== "brain";
+      kids.push(el("div", { class: "cb-msg " + (me ? "is-user" : "is-brain") + (m.pending ? " is-pending" : "") },
+        el("div", { class: "cb-msg-h" }, el("b", {}, me ? (m.by || "equipo") : "Cerebro"), el("span", { class: "num" }, m.ts ? when(m.ts) : "")),
+        el("div", { class: "cb-msg-t" }, m.text || ""),
+        Array.isArray(m.refs) && m.refs.length ? el("div", { class: "cb-msg-refs num" }, m.refs.map((x) => typeof x === "string" ? x : (x.id || x.ref || JSON.stringify(x))).join(" · ")) : null));
+    }
+    if (C.waiting) kids.push(el("div", { class: "cb-msg is-brain is-thinking" }, U().icon("cerebro", 13), "El cerebro está pensando…"));
+    U().keepScroll(list.parentNode, () => list.replaceChildren(...kids));
+    if (atEnd || C.forceEnd) { list.scrollTop = list.scrollHeight; C.forceEnd = false; }
+  }
+  async function chatPull() {
+    if (C.busy || !C.list) return;
+    C.busy = true;
+    try {
+      const r = await A().brainChat(C.since == null ? undefined : C.since);
+      const got = msgList(r);
+      C.state = "on";
+      if (got.length) {
+        const seen = new Set(C.msgs.filter((m) => !m.pending).map((m) => (m.ts || 0) + "|" + m.role + "|" + m.text));
+        let added = false;
+        for (const m of got) {
+          const k = (m.ts || 0) + "|" + m.role + "|" + m.text;
+          if (seen.has(k)) continue;
+          seen.add(k); added = true;
+          // the server copy of our own message replaces the local pending one
+          if (m.role !== "brain") { const i = C.msgs.findIndex((x) => x.pending && x.text === m.text); if (i >= 0) C.msgs.splice(i, 1); }
+          C.msgs.push(m);
+          if (m.role === "brain") C.waiting = false;
+        }
+        C.msgs.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        C.since = Math.max(C.since || 0, ...got.map((m) => +m.ts || 0));
+        if (added) renderChat();
+      } else if (C.state !== C.lastState) renderChat();
+    } catch (e) {
+      C.state = e && e.status === 404 ? "off" : "error"; C.err = e;
+      renderChat();
+    } finally { C.lastState = C.state; C.busy = false; }
+  }
+  async function chatSend() {
+    const text = (C.input.value || "").trim();
+    if (!text || C.sending) return;
+    if (C.state === "off") { renderChat(); return; }
+    const by = getName() || "equipo";
+    C.sending = true; C.send.disabled = true;
+    const mine = { ts: Date.now() / 1000, role: "user", by, text, pending: true };
+    C.msgs.push(mine); C.waiting = true; C.forceEnd = true; C.input.value = "";
+    renderChat();
+    try { await A().brainSay(text, by); mine.pending = false; }
+    catch (e) {
+      C.waiting = false; C.msgs.splice(C.msgs.indexOf(mine), 1); C.input.value = text;
+      U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "El chat del cerebro aún no está activo." : (e && e.message) || "Error" });
+    } finally { C.sending = false; C.send.disabled = false; renderChat(); chatPull(); }
+  }
+  // poll faster than the 2 s screen refresh while waiting for a reply
+  setInterval(() => { if (C.list && C.list.isConnected && C.waiting) chatPull(); }, 1500);
+
   window.Screens.cerebro = {
     title: "Cerebro",
     mount(root) {
       S.root = root;
-      root.replaceChildren(el("div", { class: "scr-cerebro" },
-        el("div", { class: "cb-top" }, U().loading()), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })));
+      root.replaceChildren(el("div", { class: "cb-layout" },
+        el("div", { class: "scr-cerebro" },
+          el("div", { class: "cb-top" }, U().loading()), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })),
+        chatMount()));
     },
     async refresh(root, data, params, opts) {
       S.root = root;
+      chatPull();
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
       // avoid rebuilding when nothing changed (keeps scroll and open history item)
@@ -320,6 +482,6 @@
       S.sig = sig; S.data = d;
       render();
     },
-    unmount() { S.root = null; S.sig = null; S.findHost = null; },
+    unmount() { S.root = null; S.sig = null; S.findHost = null; C.host = null; },
   };
 })();

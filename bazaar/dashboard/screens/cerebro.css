@@ -83,3 +83,44 @@
 .scr-cerebro .cb-d-add { color: var(--ok); } .scr-cerebro .cb-d-del { color: var(--bad); } .scr-cerebro .cb-d-chg { color: var(--warn); } .scr-cerebro .cb-d-pri { color: var(--ink-2); }
 .scr-cerebro .cb-tl-body { padding: 0 14px 12px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 .scr-cerebro .cb-tl-body p { margin: 0 0 8px; }
+
+/* chat with the brain: right column */
+.cb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+@media (max-width: 1300px) { .cb-layout { grid-template-columns: minmax(0, 1fr); } }
+.cb-chat { position: sticky; top: calc(var(--topbar-h) + 16px); height: calc(100vh - var(--topbar-h) - 32px); min-height: 420px;
+  display: flex; flex-direction: column; border: 1px solid var(--line-2); background: var(--s1); }
+.cb-chat-h { display: flex; align-items: center; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.cb-chat-h .ic-wrap { color: var(--signal); }
+.cb-chat-st { margin-left: auto; font-family: var(--font-num); font-size: 11px; color: var(--ink-3); }
+.cb-chat-list { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.cb-msg { max-width: 88%; padding: 8px 10px; border: 1px solid var(--line-2); font-size: 13px; line-height: 1.45; }
+.cb-msg.is-user { align-self: flex-end; background: var(--s3); border-right: 3px solid var(--signal); }
+.cb-msg.is-brain { align-self: flex-start; background: var(--s2); border-left: 3px solid var(--t-dealer); }
+.cb-msg.is-pending { opacity: .6; }
+.cb-msg.is-thinking { display: flex; gap: 6px; align-items: center; color: var(--ink-3); font-style: italic; }
+.cb-msg.is-thinking .ic-wrap { color: var(--t-dealer); animation: refresh-spin 1.6s linear infinite; }
+.cb-msg-h { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); margin-bottom: 3px; }
+.cb-msg-h b { color: var(--ink-2); font-weight: 600; }
+.cb-msg-t { white-space: pre-wrap; word-break: break-word; }
+.cb-msg-refs { margin-top: 4px; font-size: 11px; color: var(--ink-3); }
+.cb-chat-name { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.cb-chat-name .cb-q { margin-left: 0; flex: 1; min-width: 0; }
+.cb-link { background: none; border: 0; color: var(--ink-3); text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+.cb-chat-f { display: flex; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.cb-chat-in { flex: 1; resize: none; background: var(--s2); border: 1px solid var(--line-2); color: var(--ink); font: inherit; font-size: 13px; padding: 7px 9px; border-radius: 0; }
+.cb-chat-in:focus { outline: 1px solid var(--ink-3); outline-offset: -1px; }
+.cb-chat-send { display: inline-flex; align-items: center; gap: 6px; align-self: stretch; padding: 0 12px; background: var(--signal); color: var(--bg);
+  border: 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 0; }
+.cb-chat-send:disabled { opacity: .5; cursor: default; }
+.cb-chat .cb-muted { color: var(--ink-3); font-size: 12px; }
+.cb-chat .cb-q { background: var(--s2); border: 1px solid var(--line-2); color: var(--ink); padding: 5px 8px; font: inherit; font-size: 12.5px; border-radius: 0; }
+.cb-chat .cb-seg { background: var(--s2); border: 1px solid var(--line-2); color: var(--ink-2); padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 0; }
+/* rows never shrink inside the scrolling lists (that made them overlap) */
+.scr-cerebro .cb-list > *, .scr-cerebro .cb-timeline > *, .cb-chat-list > * { flex: none; }
+.scr-cerebro .cb-ev { padding: 9px 14px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--tc);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 5%, transparent), transparent 40%); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.scr-cerebro .cb-ev-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.scr-cerebro .cb-sp { flex: 1; }
+.scr-cerebro .cb-ev .cb-rowt { word-break: break-word; }
+/* chat fits the viewport below the top bar */
+.cb-chat { top: 16px; height: calc(100vh - var(--topbar-h) - 48px); }

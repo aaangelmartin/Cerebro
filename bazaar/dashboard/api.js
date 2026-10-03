@@ -66,6 +66,8 @@
     novelty: (since, limit) => get("novelty", { since, limit }),
     spend: () => get("spend"),
     strategy: (limit) => get("strategy", { limit }),
+    brainChat: (since) => get("brain/chat", { since }, 0),
+    brainSay: (text, by) => write("POST", "brain/chat", { text, by: by || "equipo" }),
     broker: () => get("broker"),
     duelsLive: () => get("duels"),
     tickLatest: () => get("tick/latest"),
