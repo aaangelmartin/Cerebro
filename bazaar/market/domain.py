@@ -477,11 +477,15 @@ class MarketDomain:
                 reserved_n[a["ref"]] = reserved_n.get(a["ref"], 0) + 1
         fair = budget.get("deals_by_team_hour") or {}
 
+        from bazaar.core.rails import kept_sets
+        kept = kept_sets(control)                  # sets we collect: an avoided set's last copy may be sold
+        self._kept = kept
+
         def can_give(a: dict, left: dict) -> bool:
             ref = a.get("ref")
             if a.get("id") in reserved or str(a.get("id")) in protected or str(ref) in protected:
                 return False
-            if values.set_of(ref) in SCARCE_SETS and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
+            if values.set_of(ref) in kept and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
                 return False                               # if every promise fills, one copy must remain
             return True
 
@@ -650,7 +654,7 @@ class MarketDomain:
             ref = a.get("ref")
             if a.get("kind", "card") != "card" or not ref or not can_give(a, counts):
                 continue
-            if values.set_of(ref) in SCARCE_SETS and taken.get(ref, 0) >= counts[ref] - reserved_n.get(ref, 0) - 1:
+            if values.set_of(ref) in kept and taken.get(ref, 0) >= counts[ref] - reserved_n.get(ref, 0) - 1:
                 continue
             taken[ref] = taken.get(ref, 0) + 1
             pool.append(a)
@@ -795,7 +799,7 @@ class MarketDomain:
             given[r] = given.get(r, 0) + 1
 
         def keeps_last(ref: str) -> bool:
-            if Values.set_of(ref) not in SCARCE_SETS:
+            if Values.set_of(ref) not in getattr(self, "_kept", SCARCE_SETS):
                 return True
             return avail.get(ref, 0) - given.get(ref, 0) >= 2
 

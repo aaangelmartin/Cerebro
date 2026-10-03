@@ -20,6 +20,14 @@ MIN_SURPLUS = 1                  # duels: points of slack against our limit
 VALUE_MARGIN = 1                 # dealers/market: P of slack against our private value
 FAIR_MAX_PER_HOUR = 4            # deals with the same team per hour
 SCARCE_SETS = {"LAV", "MAL", "RET"}
+
+
+def kept_sets(control=None) -> set[str]:
+    """Sets whose last copy we never give away: the ones we collect. A set the brain or the operator decided
+    not to buy (control.avoid_buy_sets, strategy overlay included) is not collected, so its last copies may be
+    sold; the value rail still demands a gain on every sale. If the set stops being avoided, the rule returns."""
+    avoid = {str(x).upper()[:3] for x in (control or {}).get("avoid_buy_sets") or []}
+    return SCARCE_SETS - avoid
 WRITE_KINDS = {"open_thread", "thread_message", "close_thread", "accept_offer", "post_offer", "cancel_offer",
                "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack"}
 VENUE_COST = 270                 # bond 250 (refundable) + 20
@@ -180,7 +188,8 @@ def rail_accept_shape(action: Action, sit=None, ctx=None) -> Verdict:
 
 
 def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
-    """2. Only our cards; never the last copy of a LAV/MAL/RET card nor a protected one without a human."""
+    """2. Only our cards; never the last copy of a card of a set we collect (LAV/MAL/RET unless avoided) nor a
+    protected one without a human."""
     give, _ = flows(action, sit)
     if not give["assets"] and not give["types"]:
         return OK
@@ -209,8 +218,9 @@ def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
         out[ref] = out.get(ref, 0) + 1
     if not human:
         promised = _promised_refs(sit, held, exclude=set(give["assets"]))
+        kept = kept_sets(_control(ctx))
         for ref, n in out.items():
-            if str(ref)[:3] in SCARCE_SETS and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
+            if str(ref)[:3] in kept and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
                 if action.kind == "accept_offer" and _brain_exception(sit, ref, (action.params or {}).get("offer")):
                     continue                     # the brain + council granted a one-off exception for this offer
                 return Verdict(False, "cards", f"last copy of {ref} (counting copies already promised)")

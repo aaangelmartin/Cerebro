@@ -588,8 +588,8 @@ class DealersDomain:
                 aid, ref = a.get("id"), a.get("ref")
                 if aid in listed or aid in in_threads or str(aid) in protected or str(ref) in protected:
                     continue
-                if values.set_of(ref) in SCARCE_SETS:
-                    from bazaar.core import rails as _rails
+                from bazaar.core import rails as _rails
+                if values.set_of(ref) in _rails.kept_sets(control):   # avoided sets: the last copy may be sold
                     held = {x.get("id"): x for x in me.get("assets") or []}
                     promised = _rails._promised_refs(sit, held, exclude={aid}).get(ref, 0)
                     if counts.get(ref, 0) - promised <= 1:
