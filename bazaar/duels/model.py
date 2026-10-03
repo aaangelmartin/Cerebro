@@ -14,6 +14,7 @@ The server's `rounds` field is always the truth; our counts only predict the nex
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,6 +33,32 @@ def _num(x) -> float | None:
         return v if v == v and abs(v) != float("inf") else None
     except (TypeError, ValueError):
         return None
+
+
+# --- Duels II: the sign of the days weight ------------------------------------------------------------
+# RULES.md: "each side has a private weight per day (your_days_weight)", days 0-10. The server also sends
+# `days_meaning`. Whether a positive weight is points FOR us per day or a COST per day is read from it:
+#   value words only ("value", "points ... for you", "gain") -> raw weight, unambiguous;
+#   cost words only ("cost", "penalty", "lose")               -> a positive weight counts against us;
+#   both / neither / a negative "cost"                        -> ambiguous: accept only if the deal is worth
+#                                                                >= MIN_SURPLUS under BOTH signs.
+# Every number that involves days (model.utility, policy, guard, accept, prompt) goes through
+# signed_days_weight() so the sign can never disagree between them.
+_COST_WORDS = re.compile(r"\b(cost|costs|costing|lose|loses|lost|loss|penalt\w*|late|delay\w*|hurts?)\b", re.I)
+_VALUE_WORDS = re.compile(r"\b(value|values|worth|gain|gains|benefit\w*|reward\w*|points?|for you|to you)\b", re.I)
+
+
+def days_interpretation(w: float, meaning: str | None) -> tuple[float, bool, str]:
+    """(signed weight = our points per delivery day, ambiguous?, human-readable label)."""
+    meaning = meaning or ""
+    cost, value = bool(_COST_WORDS.search(meaning)), bool(_VALUE_WORDS.search(meaning))
+    if cost and not value:
+        if w >= 0:
+            return -w, False, f"cost: {w:+g}/day counts AGAINST us (days_meaning={meaning!r})"
+        return w, True, f"AMBIGUOUS: negative weight {w:+g} with cost wording (days_meaning={meaning!r})"
+    if value and not cost:
+        return w, False, f"value: {w:+g} points per day for us, sign as given (days_meaning={meaning!r})"
+    return w, True, f"AMBIGUOUS: using {w:+g}/day, accepts checked under both signs (days_meaning={meaning!r})"
 
 
 @dataclass
@@ -136,11 +163,32 @@ class DuelView:
     def surplus(self, price: float) -> float:
         return surplus(self.role, self.limit, price)
 
+    @property
+    def days_w(self) -> float:
+        """Signed value to us of one delivery day (see days_interpretation); 0 in price-only duels."""
+        return days_interpretation(self.w, self.days_meaning)[0] if self.uses_days else 0.0
+
+    @property
+    def days_ambiguous(self) -> bool:
+        return self.uses_days and self.w != 0 and days_interpretation(self.w, self.days_meaning)[1]
+
+    @property
+    def days_label(self) -> str:
+        return days_interpretation(self.w, self.days_meaning)[2] if self.uses_days else "price only"
+
     def utility(self, price: float, days: int | None) -> float:
         """Our margin in points before decay: price surplus plus the value of the delivery days."""
         u = self.surplus(price)
         if self.uses_days and days is not None:
-            u += self.w * days
+            u += self.days_w * days
+        return u
+
+    def safe_utility(self, price: float, days: int | None) -> float:
+        """utility() under the WORSE of the two sign readings when days_meaning is ambiguous (for accepts
+        and for anything the rival can accept)."""
+        u = self.utility(price, days)
+        if self.days_ambiguous and days is not None:
+            u = min(u, self.surplus(price) - self.days_w * days)
         return u
 
     def rounds_if_we_send(self) -> int:

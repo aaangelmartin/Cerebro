@@ -80,6 +80,21 @@ class OpponentMemory:
             self.data["updated"] = time.time()
             return rec
 
+    def note_days_reading(self, v: DuelView) -> bool:
+        """Log once per session how we read the sign of the days weight (for a human to check).
+        Returns True the first time for that session."""
+        if not v.uses_days:
+            return False
+        with self._lock:
+            book = self.data.setdefault("days_reading", {})
+            key = str(v.session)
+            if key in book:
+                return False
+            book[key] = {"duel": v.id, "tick": v.tick, "your_days_weight": v.w, "days_meaning": v.days_meaning,
+                         "signed_weight": v.days_w, "ambiguous": v.days_ambiguous, "reading": v.days_label,
+                         "at": time.time()}
+            return True
+
     def record_result(self, duel_id, status: str, price=None, rounds=None, days=None,
                       accepted_by: str | None = None) -> None:
         with self._lock:

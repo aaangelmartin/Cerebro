@@ -106,8 +106,12 @@ def user_message(v: DuelView, opp: dict, econ: dict, baseline: Move) -> str:
         "offer_history": history,
     }
     if v.uses_days:
-        state["duels_ii"] = {"our_days_weight": v.w, "days_meaning": v.days_meaning,
-                             "our_margin_formula": "price margin + our_days_weight x days"}
+        state["duels_ii"] = {"our_points_per_day": round(v.days_w, 3), "raw_your_days_weight": v.w,
+                             "days_meaning": v.days_meaning, "sign_reading": v.days_label,
+                             "our_margin_formula": "price margin + our_points_per_day x days"}
+        if v.days_ambiguous:
+            state["duels_ii"]["warning"] = ("the sign of the days weight is ambiguous: code only accepts a package "
+                                            "worth >= 1 under BOTH signs; prefer days near 0")
     words = [m for m in v.messages[-6:] if not m.ours and m.text]
     rival_words = "\n".join(_wrap(f"[tick {m.tick}] {m.text}", v.rival) for m in words) or "(none)"
     base = {"action": baseline.action, "price": baseline.price, "days": baseline.days, "why": baseline.reason}

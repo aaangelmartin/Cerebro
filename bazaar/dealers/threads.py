@@ -35,6 +35,9 @@ class ThreadView:
     closed_reason: str | None = None
     is_pack: bool = False
     asset_ids: list[int] = field(default_factory=list)
+    n_messages: int = 0
+    last_our_tick: int | None = None                       # tick of our last message (priced or not)
+    last_dealer_tick: int | None = None
 
     @property
     def buying(self) -> bool:
@@ -128,7 +131,9 @@ def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> Thre
                    closed_reason=raw.get("closed_reason"), is_pack=is_pack, asset_ids=ids)
     for m in raw.get("messages") or []:
         tick = int(m.get("tick") or 0)
+        v.n_messages += 1
         if m.get("sender") == dealer:
+            v.last_dealer_tick = tick
             p = dealer_price(m.get("offer"), buying)
             if p is not None:
                 v.theirs.append(p)
@@ -139,6 +144,7 @@ def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> Thre
             v.dealer_msg_ids.append(m.get("id"))
             v.last_sender = "dealer"
         else:
+            v.last_our_tick = tick
             p = our_price(m, buying)
             if p is not None:
                 v.ours.append(p)

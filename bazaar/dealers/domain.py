@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .. import config
+from ..core.context import conv_key
 from ..core.types import Action, Outcome
 from . import haggle
 from .compat import clean, lessons_block, llm_module, safe_our_text, scan, time_left, wrap
@@ -40,7 +41,18 @@ MIN_LLM_S = 3.0                              # below this much time left, code d
 MAX_CANDIDATES = 12                          # shown to Claude per tick
 EXPECTED_CONCESSION = 0.15                   # we expect to close this share of the range above the dealer's limit
 MIN_POINTS = 0.5
-CATALOG_TTL_S = 3600
+CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
+VENUE_RESERVE_P = 270                        # bond 250 + 20, kept while we have no venue (rails do the same)
+STALE_TICKS = 3                              # close a thread the dealer left unanswered this long
+PACK_EDGE = 1.25                             # until packs can be opened, buy one only if value >= 1.25 x price
+PACK_EDGE_P = 5.0                            # ... and at least this many P above it
+
+# Accept priorities (Action.priority; the team gets ONE accept per tick). Shared scale with duels/domain.py:
+#   >= 150      duel accept with <= 2 ticks left (the duel dies otherwise)
+#   140         dealer FINAL offer inside our limits (the dealer walks if we do not take it now)
+#   100 - 130   other duel accepts
+#   < 100       other accepts (dealer non-final accepts: their expected points)
+FINAL_ACCEPT_PRIORITY = 140.0
 
 
 @dataclass
@@ -57,6 +69,7 @@ class ThreadInfo:
     accept_points: float
     msg_used: bool
     range: tuple[int, int] | None
+    force_close: str = ""        # stale or hopeless: close it whatever Claude says (unless we can accept)
 
 
 @dataclass
@@ -113,6 +126,7 @@ class DealersDomain:
         self.gw = gw
         self._catalog = catalog
         self._catalog_at = time.time() if catalog else 0.0
+        self._catalog_tried = 0.0
         self._llm = llm
         self.model = model
         self.use_llm = use_llm
@@ -167,9 +181,12 @@ class DealersDomain:
 
     # ================================================================== state
     def catalog(self) -> dict | None:
-        if self._catalog and time.time() - self._catalog_at < CATALOG_TTL_S:
+        """The real catalog, read lazily from the gateway and refreshed every CATALOG_TTL_S so sets released
+        mid-game show up in released_refs. A failed read keeps the last good copy."""
+        if self._catalog and (self.gw is None or time.time() - self._catalog_at < CATALOG_TTL_S):
             return self._catalog
-        if self.gw is not None:
+        if self.gw is not None and time.time() - self._catalog_tried >= 30:
+            self._catalog_tried = time.time()
             try:
                 c = self.gw.get("/api/catalog")
                 if isinstance(c, dict) and c.get("sets"):
@@ -236,7 +253,9 @@ class DealersDomain:
         dealer = t.get("dealer", "?")
         status = (detail or {}).get("status")
         reason = str((detail or {}).get("closed_reason") or "")
-        if "cooloff" in reason:
+        if status in ("cooloff", "walked"):
+            reason = reason or str(status)      # Friday: closed_reason was always null, the status carries it
+        if "cooloff" in reason or status in ("cooloff", "walked"):
             self.store.set_cooloff(dealer, (detail or {}).get("until_tick"))
         if "quota" in reason:
             self.store.set_quota_hit(dealer)
@@ -277,16 +296,41 @@ class DealersDomain:
             return values.book_by_rarity.get(rarity, 10) * 0.25
         return values.next_copy(v.item)
 
-    def _spend_cap(self, sit, ctx) -> int:
+    def _spend_cap(self, sit, ctx, committed: int = 0) -> int:
+        """Most we may still promise in ONE deal: cash - reserve (+ the venue bond while we have no venue)
+        and the hour's spend left, both net of `committed` (our other open buy bids), capped per deal."""
         control = _g(ctx, "control") or {}
-        cash = int((_g(sit, "me") or {}).get("cash") or 0)
+        me = _g(sit, "me") or {}
+        cash = int(me.get("cash") or 0)
         reserve = int(control.get("cash_reserve", config.CASH_RESERVE))
+        if control.get("venue_reserve") is not False and not me.get("venue"):
+            reserve += VENUE_RESERVE_P
         per_deal = int(control.get("max_spend_per_deal", config.MAX_SPEND_PER_DEAL))
         hour_left = (_g(ctx, "budget") or {}).get("spend_hour_left")
-        cap = min(cash - reserve, per_deal)
+        avail = cash - reserve
         if hour_left is not None:
-            cap = min(cap, int(hour_left))
-        return max(0, cap)
+            avail = min(avail, int(hour_left))
+        return max(0, min(avail - max(0, int(committed)), per_deal))
+
+    @staticmethod
+    def _stale_or_hopeless(v: ThreadView, limit: int, limit_est: float, tick: int) -> str:
+        """Why this thread should be closed now ("" to keep it). A dealer has one slot per team: a dead
+        thread blocks every other deal with it."""
+        if v.final:
+            return ""
+        since = max(v.created_tick, v.last_our_tick or 0)
+        if v.last_sender != "dealer" and tick - since >= STALE_TICKS:
+            # real dealers answer on the tick after ours: >= 3 ticks of silence is a dead thread
+            return (f"dealer silent for {tick - since} ticks" if v.n_messages
+                    else f"dealer never answered in {tick - v.created_tick} ticks")
+        if v.theirs:
+            gap = max(2.0, 0.15 * max(limit, 1))
+            best = v.last_theirs
+            if v.buying and limit_est and limit < limit_est - gap and best is not None and best > limit:
+                return f"dealer stops near {limit_est:.0f}, our max is {limit}"
+            if not v.buying and limit_est and limit > limit_est + gap and best is not None and best < limit:
+                return f"dealer stops near {limit_est:.0f}, our min is {limit}"
+        return ""
 
     def _prepare(self, sit, ctx) -> Plan:
         tick = int(_g(sit, "tick", 0) or 0)
@@ -301,6 +345,8 @@ class DealersDomain:
         spend_cap = self._spend_cap(sit, ctx)
         used = (_g(ctx, "budget") or {}).get("messages") or {}
         cautious = bool(_g(ctx, "cautious", False))
+        # our open buy bids: if the dealers took them all at once they must still fit in cash - reserve
+        bids = {v.id: int(v.last_ours) for v in views if v.buying and v.last_ours}
         committed = 0
         for v in views:
             if v.dealer not in self.store.data["menus"] and v.dealer not in dealers:
@@ -308,17 +354,28 @@ class DealersDomain:
             level = int((dealers.get(v.dealer) or {}).get("level") or 1)
             kind = self._kind(values, v)
             value = self._value(values, v)
+            budget_bound = False
             if v.buying:
-                limit = min(haggle.buy_max(value), spend_cap)
+                own_cap = self._spend_cap(sit, ctx, committed=sum(bids.values()) - bids.get(v.id, 0))
+                value_limit = haggle.buy_max(value)
+                if v.is_pack:       # cannot open packs yet: only a clear edge on the real catalog's value
+                    value_limit = min(value_limit, self._pack_max(value)) if plan.values.catalog else 0
+                limit = min(value_limit, own_cap)
+                budget_bound = own_cap < value_limit
                 if cautious:
                     limit = 0
             else:
-                limit = haggle.sell_min(value)
+                limit = value_limit = haggle.sell_min(value)
             opening = v.opening or self.store.expect_opening(v.dealer, kind, None) or 0
             limit_est = self.store.expect_limit(v.dealer, kind, opening) if opening else 0.0
             patience = self.store.stat(v.dealer, kind, "patience")
             move = haggle.fallback_move(v, limit, limit_est, tick, patience)
             ok, why = haggle.acceptable(v, limit)
+            if move.kind == "close" and budget_bound and not v.final and not cautious:
+                move = Move("wait", None, "cash committed to our other buy bids: hold this one")
+            force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
+            if force:
+                move = Move("close", None, force)
             pts = 0.0
             if ok and v.standing_price is not None:
                 cap = capture(v.opening, v.standing_price, limit_est, v.buying)
@@ -326,8 +383,10 @@ class DealersDomain:
                 pts = haggle.expected_points(gain, level, ladder_gain(self.store.ladder(level), cap))
             info = ThreadInfo(view=v, level=level, kind=kind, value=round(value, 2), limit=limit,
                               limit_est=round(limit_est, 2), move=move, can_accept=ok, accept_why=why,
-                              accept_points=pts, msg_used=bool(used.get(str(v.id))),
-                              range=haggle.allowed_range(v, limit))
+                              accept_points=pts,
+                              msg_used=bool(used.get(conv_key(Action(kind="thread_message", params={"thread": v.id},
+                                                                     domain=self.name)))),
+                              range=haggle.allowed_range(v, limit), force_close=force)
             plan.infos.append(info)
             if v.buying:
                 committed += max(0, min(limit, v.last_theirs or limit))
@@ -348,7 +407,7 @@ class DealersDomain:
                 continue
             plan.free.append(d)
         if plan.free and plan.slots > 0:
-            budget = max(0, spend_cap - committed)
+            budget = self._spend_cap(sit, ctx, committed=max(committed, sum(bids.values())))
             plan.candidates = self._candidates(plan, sit, ctx, budget if not cautious else 0)
             self._refresh_exact(values, [c.item for c in plan.candidates if c.kind.startswith("buy:")
                                          and not c.kind.endswith("pack")][:3])
@@ -369,7 +428,7 @@ class DealersDomain:
             level = int(p.get("level") or 1)
             ladder_now = self.store.ladder(level)
 
-            def add(topic, kind, item, name, value, list_price, opening_hint=None):
+            def add(topic, kind, item, name, value, list_price, opening_hint=None, max_price=None):
                 if time.time() - self._sold_out.get((d, item), 0) < 1800:
                     return
                 buying = kind.startswith("buy")
@@ -378,7 +437,7 @@ class DealersDomain:
                     return
                 f = self.store.expect_limit(d, kind, o)
                 if buying:
-                    lim = min(haggle.buy_max(value), budget)
+                    lim = min(haggle.buy_max(value) if max_price is None else max_price, budget)
                     exp = f + EXPECTED_CONCESSION * (o - f)
                     if f > lim or o - f < 1:
                         return
@@ -405,8 +464,12 @@ class DealersDomain:
                     per_h = int(entry.get("per_team_per_hour") or FRIDAY_QUOTAS.get(d, {}).get("packs", 2))
                     if self.store.deals_last_hour(d, packs_only=True) >= per_h:
                         continue
-                    add({"buy": {"pack": pid}}, "buy:pack", pid, entry.get("name") or pid, pack_value(pid, values),
-                        entry.get("list_price"), entry.get("opening_ask"))
+                    pv = pack_value(pid, values)
+                    # packs cannot be opened yet: buy one only when its catalog value clearly beats the price
+                    if not values.catalog or not self._pack_ok(pv, entry.get("opening_ask") or entry.get("list_price")):
+                        continue
+                    add({"buy": {"pack": pid}}, "buy:pack", pid, entry.get("name") or pid, pv,
+                        entry.get("list_price"), entry.get("opening_ask"), max_price=self._pack_max(pv))
                 elif entry.get("rarity"):
                     r = entry["rarity"]
                     sets = entry.get("sets")
@@ -441,6 +504,19 @@ class DealersDomain:
             c.id = f"c{i + 1}"
         return kept[:MAX_CANDIDATES]
 
+    @staticmethod
+    def _pack_ok(value: float, price) -> bool:
+        try:
+            p = float(price)
+        except (TypeError, ValueError):
+            return False
+        return p > 0 and value >= PACK_EDGE * p and value - p >= PACK_EDGE_P
+
+    @staticmethod
+    def _pack_max(value: float) -> int:
+        """Highest price at which a pack still clears the edge (buy-limit for pack threads)."""
+        return int(max(0.0, min(value / PACK_EDGE, value - PACK_EDGE_P)))
+
     # ------------------------------------------------------------------ actions
     def _dealer_name(self, plan: Plan, dealer: str) -> str:
         return str((plan.dealers.get(dealer) or {}).get("name") or dealer.title())
@@ -460,10 +536,13 @@ class DealersDomain:
         words = safe_our_text(text or "", default)
         if str(price) not in words:
             words = default
+        # spend: a buy bid the dealer may take without another move from us. Only the RAISE over our previous
+        # bid is new money, so the hour budget's sum over the thread equals our current exposure.
+        spend = {"spend": max(0, int(price) - int(v.last_ours or 0)), "bid": int(price)} if v.buying else {}
         a = Action(kind="thread_message", params={"thread": v.id, "price": int(price), "text": words},
                    domain=self.name, reason=reason, source=source,
                    expected={"value": info.value, "limit": info.limit, "dealer_limit_est": info.limit_est,
-                             **({"value_get": info.value} if v.buying else {})},
+                             **({"value_get": info.value} if v.buying else {}), **spend},
                    big=bool(v.buying and price > config.BIG_DEAL_P), priority=0.0)
         self._sent[a.id] = {"kind": "thread_message", "thread": v.id, "dealer": v.dealer, "price": price, "item": v.item}
         return a
@@ -479,7 +558,8 @@ class DealersDomain:
                    expected={"points": info.accept_points, "value_gain": round(gain, 2), "capture": cap,
                              "price": price, "dealer": v.dealer, "level": info.level,
                              **({"value_get": info.value, "spend": price} if v.buying else {})},
-                   big=bool(v.buying and price > config.BIG_DEAL_P), priority=info.accept_points)
+                   big=bool(v.buying and price > config.BIG_DEAL_P),
+                   priority=FINAL_ACCEPT_PRIORITY if v.final else min(99.0, info.accept_points))
         self._sent[a.id] = {"kind": "accept_offer", "thread": v.id, "dealer": v.dealer, "price": price, "item": v.item}
         return a
 
@@ -622,7 +702,10 @@ class DealersDomain:
             decided.add(tid)
             kind = m.get("move")
             reason = clean(m.get("reason") or "", 240)
-            if kind == "accept" and not info.can_accept:
+            if info.force_close and not (kind == "accept" and info.can_accept):
+                notes.append(f"{tid}: closed by code ({info.force_close})")
+                a = self._act_close(info, "fallback", info.force_close)
+            elif kind == "accept" and not info.can_accept:
                 notes.append(f"{tid}: accept refused by code ({info.accept_why})")
                 a = self._move_action(plan, info, info.move, "fallback")
             elif kind == "price":

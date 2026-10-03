@@ -65,7 +65,7 @@ class FallbackOnSimulator(unittest.TestCase):
         w, t = world_with(scen)
         dom = domain()
         sit, ctx = make_sit(w, scen), make_ctx(w.tick)
-        ctx.budget["messages"] = {str(t.id): 1}
+        ctx.budget["messages"] = {f"thread:{t.id}": 1}
         acts = dom.fallback(sit, ctx)
         self.assertFalse([a for a in acts if a.kind == "thread_message"])
 
@@ -303,3 +303,137 @@ class Packs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def buy_thread(tid, dealer="abuela", card="LAV-07", created=1, theirs=((2, 27),), ours=(), final=False, status="open"):
+    """Raw /api/me/threads item: we buy `card`; theirs/ours = ((tick, price), ...) in time order."""
+    msgs = []
+    rows = sorted([(t, 1, p) for t, p in theirs] + [(t, 0, p) for t, p in ours])
+    for t, who, p in rows:
+        if who:
+            msgs.append({"tick": t, "sender": dealer, "text": "ok",
+                         "offer": {"give": {"types": [f"card:{card}"]}, "want": {"cash": p}, "final": final}})
+        else:
+            msgs.append({"tick": t, "sender": "t10", "text": f"{p} P", "price": p})
+    standing = []
+    if theirs:
+        t, p = theirs[-1]
+        standing = [{"id": 900 + tid, "maker": dealer, "to": "t10", "give": {"types": [f"card:{card}"]},
+                     "want": {"cash": p}, "final": final, "status": "open", "created_tick": t}]
+    return {"id": tid, "kind": "persona", "with": dealer, "topic": {"buy": {"card": card}}, "status": status,
+            "created_tick": created, "messages": msgs, "standing_offers": standing}
+
+
+class AuditFixes(unittest.TestCase):
+    def sit(self, tick=5, cash=400, threads=(), venue=True, assets=None, dealers=FRIDAY_PERSONAS):
+        s = Opening().sit(cash=cash, assets=assets, dealers=dealers, threads=threads)
+        s.tick = tick
+        if venue:
+            s.me["venue"] = "board"
+        return s
+
+    def ctx(self, tick=5, **kw):
+        c = make_ctx(tick)
+        c.budget.update(kw)
+        return c
+
+    def test_buy_bid_carries_incremental_spend(self):
+        dom = domain()
+        th = buy_thread(10, theirs=((2, 27), (4, 26)), ours=((3, 12),))
+        acts = dom.fallback(self.sit(tick=5, threads=[th]), self.ctx(5))
+        msg = [a for a in acts if a.kind == "thread_message"][0]
+        self.assertEqual(msg.expected["bid"], msg.params["price"])
+        self.assertEqual(msg.expected["spend"], msg.params["price"] - 12)
+
+    def test_other_bids_and_venue_bond_cap_each_thread(self):
+        dom = domain()
+        a = buy_thread(10, card="LAV-07", theirs=((2, 27), (4, 26)), ours=((3, 20),))
+        b = buy_thread(11, dealer="chato", card="LAV-09", theirs=((2, 97), (4, 95)), ours=((3, 60),))
+        # cash 120 - reserve 40 = 80 free; the 60 P bid on thread 11 leaves 20 for thread 10
+        plan = dom._prepare(self.sit(cash=120, threads=[a, b]), self.ctx(5))
+        lim = {i.view.id: i.limit for i in plan.infos}
+        self.assertLessEqual(lim[10], 20)
+        self.assertLessEqual(lim[10] + 60, 120 - config.CASH_RESERVE)
+        # without a venue the 270 P bond is kept too: nothing left to bid
+        plan = dom._prepare(self.sit(cash=330, threads=[a, b], venue=False), self.ctx(5))
+        self.assertEqual({i.view.id: i.limit for i in plan.infos}[10], 0)
+        # a budget-bound thread is held, not closed
+        acts = dom.fallback(self.sit(cash=330, threads=[a, b], venue=False), self.ctx(5))
+        self.assertFalse([x for x in acts if x.kind == "close_thread"])
+
+    def test_stale_thread_closed_but_fresh_one_kept(self):
+        dom = domain()
+        fresh = buy_thread(12, created=5, theirs=())                  # opened this tick: dealer answers next tick
+        self.assertFalse([a for a in dom.fallback(self.sit(tick=6, threads=[fresh]), self.ctx(6))
+                          if a.kind == "close_thread"])
+        silent = buy_thread(13, created=1, theirs=())                 # Friday #308: never a message
+        acts = dom.fallback(self.sit(tick=5, threads=[silent]), self.ctx(5))
+        self.assertEqual([a.params["thread"] for a in acts if a.kind == "close_thread"], [13])
+        unanswered = buy_thread(14, theirs=((2, 27),), ours=((3, 15),))
+        self.assertFalse([a for a in dom.fallback(self.sit(tick=5, threads=[unanswered]), self.ctx(5))
+                          if a.kind == "close_thread"])
+        acts = dom.fallback(self.sit(tick=6, threads=[unanswered]), self.ctx(6))
+        self.assertEqual([a.params["thread"] for a in acts if a.kind == "close_thread"], [14])
+
+    def test_hopeless_sell_closed_even_if_claude_waits(self):
+        assets = [{"id": 2, "kind": "card", "ref": "SAL-07", "rarity": "uncommon", "your_value": 22.5},
+                  {"id": 3, "kind": "card", "ref": "SAL-07", "rarity": "uncommon", "your_value": 22.5}]
+        th = {"id": 304, "kind": "persona", "with": "chato", "topic": {"sell": {"assets": [2]}}, "status": "open",
+              "created_tick": 1, "messages": [{"tick": 2, "sender": "chato", "text": "13.",
+                                               "offer": {"give": {"cash": 13}, "want": {"assets": [2]}}}],
+              "standing_offers": [{"id": 77, "maker": "chato", "give": {"cash": 13}, "want": {"assets": [2]},
+                                   "status": "open", "created_tick": 2}]}
+        llm = FakeLLM({"threads": [{"thread": 304, "move": "wait", "price": None, "text": "", "reason": "hold"}],
+                       "open": [], "note": ""})
+        dom = domain(llm)
+        acts = dom.decide(self.sit(tick=3, threads=[th], assets=assets), self.ctx(3))
+        self.assertEqual([a.params["thread"] for a in acts if a.kind == "close_thread"], [304])
+        self.assertEqual([a.params["thread"] for a in domain().fallback(self.sit(tick=3, threads=[th], assets=assets),
+                                                                          self.ctx(3)) if a.kind == "close_thread"], [304])
+
+    def test_final_offer_accept_priority(self):
+        dom = domain()
+        th = buy_thread(15, theirs=((2, 27), (4, 25), (6, 24)), ours=((3, 18), (5, 20)), final=True)
+        acts = dom.fallback(self.sit(tick=7, threads=[th]), self.ctx(7))
+        acc = [a for a in acts if a.kind == "accept_offer"]
+        self.assertEqual(len(acc), 1)
+        self.assertEqual(acc[0].priority, 140.0)
+
+    def test_no_pack_buys_without_catalog_or_edge(self):
+        no_cat = DealersDomain(store=tmp_store(), catalog=None, use_llm=False)
+        plan = no_cat._prepare(self.sit(), self.ctx(5))
+        self.assertFalse([c for c in plan.candidates if c.kind == "buy:pack"])
+        dom = domain()
+        plan = dom._prepare(self.sit(), self.ctx(5))
+        for c in plan.candidates:
+            if c.kind == "buy:pack":
+                self.assertGreaterEqual(c.value, 1.25 * c.limit)
+
+    def test_walked_status_sets_cooloff(self):
+        dom = domain()
+        dom.store.data["threads"]["56"] = {"dealer": "chato", "side": "sell", "item": "SAL-07", "opening": 13,
+                                           "theirs": [13], "ours": [30], "final": False}
+        sit = self.sit()
+        sit.closed_threads = [{"id": 56, "status": "walked", "closed_reason": None, "until_tick": 99}]
+        dom.fallback(sit, make_ctx(5))
+        self.assertTrue(dom.store.in_cooloff("chato", 50))
+
+    def test_catalog_lazy_from_gateway_and_refreshed(self):
+        cat = make_catalog(sets=("LAV",))
+        later = make_catalog(sets=("LAV", "RET"))
+
+        class GW:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, path, **kw):
+                self.calls += 1
+                return cat if self.calls == 1 else later
+        gw = GW()
+        dom = DealersDomain(store=tmp_store(), gw=gw, use_llm=False)
+        self.assertEqual([s["id"] for s in dom.catalog()["sets"]], ["LAV"])
+        dom.catalog()
+        self.assertEqual(gw.calls, 1)
+        dom._catalog_at -= 601
+        dom._catalog_tried -= 601
+        self.assertIn("RET-01", Values({"assets": []}, dom.catalog()).released_refs())

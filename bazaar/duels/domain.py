@@ -13,6 +13,7 @@ import logging
 import time
 from typing import Any
 
+from ..core.context import conv_key
 from ..core.types import Action, Outcome
 from .model import DuelView, parse_duel, points
 from .opponent import OpponentMemory
@@ -21,7 +22,23 @@ from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
 log = logging.getLogger("bazaar.duels")
 
-ACCEPT_PRIORITY = 100.0      # duel accepts outrank everything else in the team's one accept per tick
+# Accept priorities (Action.priority; the team gets ONE accept per tick). Shared scale with dealers/domain.py:
+#   150 - 199   duel accept with <= 2 ticks left (the duel dies at the deadline)
+#   140         dealer FINAL offer inside our limits (dealers.domain.FINAL_ACCEPT_PRIORITY: it walks otherwise)
+#   100 - 130   other duel accepts (100 + expected points, capped at 30)
+#   < 100       other accepts
+ACCEPT_PRIORITY = 100.0
+ACCEPT_SPAN = 30.0
+URGENT_PRIORITY = 150.0
+URGENT_SPAN = 49.0
+URGENT_TICKS = 2
+
+
+def accept_priority(pts: float, ticks_left: int) -> float:
+    pts = max(0.0, float(pts))
+    if ticks_left <= URGENT_TICKS:
+        return round(URGENT_PRIORITY + min(pts, URGENT_SPAN), 2)
+    return round(ACCEPT_PRIORITY + min(pts, ACCEPT_SPAN), 2)
 SAFETY_S = 0.25              # stop waiting for Claude this long before the tick deadline
 
 
@@ -61,8 +78,10 @@ class DuelsDomain:
             v = parse_duel(d, tick)
             if v is None or v.ticks_left <= 0:
                 continue
-            if v.sent_this_tick() or used.get(str(v.id)):
-                continue          # one message per conversation per tick: already spent
+            if self.memory.note_days_reading(v):
+                log.info("duels II session %s: days sign reading = %s", v.session, v.days_label)
+            if v.sent_this_tick() or used.get(conv_key(Action(kind="duel_message", params={"duel": v.id}, domain=self.name))):
+                continue          # one message per conversation per tick: already spent (core conv_key)
             out.append(v)
         return out
 
@@ -71,11 +90,10 @@ class DuelsDomain:
             return None
         if mv.action == "accept":
             r = v.rival_offer
-            margin = v.utility(r.price, r.days)
+            margin = v.safe_utility(r.price, r.days)
             pts = points(margin, v.decay, v.rounds)
-            urgency = 50.0 if v.ticks_left <= 2 else 0.0
             return Action(kind="duel_accept", params={"duel": v.id, "expect": self._expect(v)}, domain=self.name,
-                          reason=mv.reason, big=True, priority=ACCEPT_PRIORITY + urgency + pts, source=mv.source,
+                          reason=mv.reason, big=True, priority=accept_priority(pts, v.ticks_left), source=mv.source,
                           expected={"points": round(pts, 2), "margin": round(margin, 1), "rounds": v.rounds,
                                     "price": r.price, "days": r.days, "rival_type": opp.get("type"),
                                     "pie_est": opp.get("pie_estimate")})

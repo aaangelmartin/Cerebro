@@ -48,18 +48,9 @@ def template_text(v: DuelView, price: int, days: int | None) -> str:
 
 
 # --- days (Duels II) --------------------------------------------------------------------------------
-_COST_WORDS = re.compile(r"\b(cost|costs|lose|loses|penalt\w*|per day late|delay hurts)\b", re.I)
-
-
 def days_weight(v: DuelView) -> float:
-    """Value to us of one delivery day, in points. The sign follows `your_days_weight`; if the server's
-    `days_meaning` says the weight is a cost, a positive weight counts against us."""
-    if not v.uses_days:
-        return 0.0
-    w = v.w
-    if w > 0 and _COST_WORDS.search(v.days_meaning or ""):
-        w = -w
-    return w
+    """Value to us of one delivery day, in points: the ONE signed weight (model.days_interpretation)."""
+    return v.days_w
 
 
 def rival_days_weight(v: DuelView, w: float) -> float:
@@ -104,6 +95,9 @@ def economics(v: DuelView, opp: dict, ask: tuple[int, int | None] | None = None)
         out["accept_now"] = {"price": r.price, "days": r.days, "margin": round(u, 1),
                              "points": round(points(u, v.decay, v.rounds), 2),
                              "inside_limit": v.surplus(r.price) >= MIN_SURPLUS}
+        if v.days_ambiguous:
+            out["accept_now"]["margin_if_days_sign_is_reversed"] = round(v.safe_utility(r.price, r.days), 1)
+            out["accept_now"]["acceptable"] = v.safe_utility(r.price, r.days) >= MIN_SURPLUS
     if ask is not None:
         u = v.utility(*ask)
         out["our_ask_if_accepted"] = {"price": ask[0], "days": ask[1], "margin": round(u, 1),
@@ -170,7 +164,7 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
     pie = max(2.0, float(opp.get("pie_estimate") or 2.0))
     w = days_weight(v)
     d_off = choose_days(v)
-    days_bonus = (w * d_off) if (v.uses_days and d_off is not None) else 0.0
+    days_bonus = (w * d_off) if (v.uses_days and d_off is not None and not v.days_ambiguous) else 0.0
     pie_u = pie + max(0.0, days_bonus)
     q = 1.0 - v.decay
     share = _target_share(v, p)
@@ -181,10 +175,10 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
 
     r = v.rival_offer or (v.rival_offers()[-1] if v.rival_offers() else None)
     usable = r is not None and v.surplus(r.price) >= MIN_SURPLUS and (not v.uses_days or r.days is not None) \
-        and v.utility(r.price, r.days) >= MIN_SURPLUS
+        and v.safe_utility(r.price, r.days) >= MIN_SURPLUS
     step = expected_step(v, opp, p) if r is not None else None
     if usable:
-        u_r = v.utility(r.price, r.days)
+        u_r = v.safe_utility(r.price, r.days)
         why = None
         if u_r >= q * (u_r + step):
             why = f"their next step (~{step:.1f}) is worth less than a round of decay on {u_r:.0f}"
@@ -245,8 +239,9 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
         if v.uses_days and r.days is None:
             notes.append("rival offer has no days")
             return Move("wait"), notes
-        if v.utility(r.price, r.days) < MIN_SURPLUS:
-            notes.append("rival package is worth less than nothing to us once days count")
+        if v.safe_utility(r.price, r.days) < MIN_SURPLUS:
+            notes.append("rival package is worth less than nothing to us once days count"
+                         + (" (worse sign reading)" if v.days_ambiguous else ""))
             return (guard(v, fallback)[0] if fallback and fallback.action != "accept" else Move("wait")), notes
         mv.price, mv.days = r.price, r.days
         mv.expected_points = round(points(v.utility(r.price, r.days), v.decay, v.rounds), 2)
@@ -271,11 +266,15 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
         except (TypeError, ValueError):
             days = choose_days(v)
         days = max(0, min(DAYS_MAX, days))
+    if v.days_ambiguous and days is not None and v.safe_utility(price, days) < MIN_SURPLUS:
+        notes.append("days sign ambiguous: price raised so the offer is safe under both readings")
+        price = price_for(v.role, v.limit, MIN_SURPLUS + abs(v.days_w) * days)
     mv.price, mv.days = price, days
 
     # If the rival already offers at least this, accepting is strictly better than asking for less.
     r = v.rival_offer
-    if r is not None and v.surplus(r.price) >= MIN_SURPLUS and (not v.uses_days or r.days is not None):
+    if r is not None and v.surplus(r.price) >= MIN_SURPLUS and (not v.uses_days or r.days is not None) \
+            and v.safe_utility(r.price, r.days) >= MIN_SURPLUS:
         if v.utility(r.price, r.days) >= v.utility(price, days):
             notes.append("rival already offers at least our ask: accept instead")
             return guard(v, Move("accept", reason=mv.reason + " (rival already there)", source=mv.source))[0], notes

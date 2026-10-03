@@ -290,3 +290,82 @@ class TestTournamentSmoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDaysSign(unittest.TestCase):
+    """Duels II: one signed days weight everywhere; ambiguous wording -> accept only if safe under both signs."""
+
+    def _v(self, meaning, w=2.0, ro=None, **kw):
+        d = duel(issues=["price", "days"], your_days_weight=w, days_meaning=meaning, decay_per_round=0.08,
+                 rival_offer=ro, messages=[{"tick": 100, "from": "Rival Oro", "text": "", **ro}] if ro else [], **kw)
+        return parse_duel(d, 100)
+
+    def test_interpretations(self):
+        from bazaar.duels.model import days_interpretation
+        self.assertEqual(days_interpretation(2.0, "points per delivery day for you")[:2], (2.0, False))
+        self.assertEqual(days_interpretation(2.0, "value to you of each delivery day")[:2], (2.0, False))
+        self.assertEqual(days_interpretation(2.0, "cost per delivery day")[:2], (-2.0, False))
+        self.assertTrue(days_interpretation(2.0, "")[1])
+        self.assertTrue(days_interpretation(2.0, "points you lose per day of delay")[1])
+        self.assertTrue(days_interpretation(-2.0, "cost per day")[1])
+
+    def test_policy_model_and_prompt_share_the_sign(self):
+        from bazaar.duels.policy import days_weight, economics
+        from bazaar.duels.prompt import user_message
+        v = self._v("cost per delivery day", ro={"id": 3, "price": 100, "tick": 100, "days": 10})
+        self.assertEqual(days_weight(v), -2.0)
+        self.assertEqual(v.utility(100, 10), 143 - 100 - 20)
+        self.assertEqual(economics(v, {})["accept_now"]["margin"], 23.0)
+        msg = user_message(v, {}, {}, Move("wait"))
+        self.assertIn('"our_points_per_day":-2.0', msg)
+
+    def test_cost_wording_blocks_a_bad_accept(self):
+        # buyer, value 143: price 130 with 10 days is +13 -20 = -7 when days cost us -> never accept
+        v = self._v("cost per delivery day", ro={"id": 3, "price": 130, "tick": 100, "days": 10})
+        mv, notes = guard(v, Move("accept"))
+        self.assertEqual(mv.action, "wait")
+        self.assertNotEqual(plan(v, {}).action, "accept")
+
+    def test_ambiguous_accept_needs_both_signs(self):
+        ro = {"id": 3, "price": 130, "tick": 100, "days": 10}
+        v = self._v(None, ro=ro, deadline_tick=101)            # last tick: the fallback would take anything inside
+        self.assertTrue(v.days_ambiguous)
+        self.assertEqual(v.utility(130, 10), 33)               # raw sign reading looks great...
+        self.assertEqual(v.safe_utility(130, 10), -7)          # ...the other reading loses
+        self.assertEqual(guard(v, Move("accept"))[0].action, "wait")
+        self.assertNotEqual(plan(v, {}).action, "accept")
+        ok = self._v(None, ro={"id": 3, "price": 100, "tick": 100, "days": 10})
+        self.assertEqual(guard(ok, Move("accept"))[0].action, "accept")     # 43 - 20 >= 1 both ways
+
+    def test_ambiguous_offer_is_safe_under_both_signs(self):
+        v = self._v(None)
+        mv, notes = guard(v, Move("offer", price=140, days=10, text="140 P"))
+        self.assertGreaterEqual(v.safe_utility(mv.price, mv.days), MIN_SURPLUS)
+
+    def test_reading_logged_once_per_session(self):
+        m = mem()
+        dom = DuelsDomain(memory=m, use_llm=False)
+        d1 = duel(duel=8, issues=["price", "days"], your_days_weight=2.0, days_meaning="cost per day")
+        d2 = duel(duel=9, issues=["price", "days"], your_days_weight=1.0, days_meaning="cost per day")
+        dom.fallback(SimpleNamespace(tick=100, duels=[d1, d2]), ctx())
+        dom.fallback(SimpleNamespace(tick=101, duels=[d1, d2]), ctx(tick=101))
+        book = m.data["days_reading"]
+        self.assertEqual(list(book), ["2"])
+        self.assertEqual(book["2"]["duel"], 8)
+        self.assertEqual(book["2"]["signed_weight"], -2.0)
+        self.assertIn("AGAINST", book["2"]["reading"])
+
+
+class TestBudgetKeyAndPriority(unittest.TestCase):
+    def test_budget_uses_conv_key(self):
+        dom = DuelsDomain(memory=mem(), use_llm=False)
+        self.assertEqual(dom.fallback(SimpleNamespace(tick=100, duels=[duel()]), ctx(budget={"messages": {"duel:7": 1}})), [])
+        self.assertTrue(dom.fallback(SimpleNamespace(tick=100, duels=[duel()]), ctx(budget={"messages": {"thread:7": 1}})))
+
+    def test_priority_scale(self):
+        from bazaar.dealers.domain import FINAL_ACCEPT_PRIORITY
+        from bazaar.duels.domain import accept_priority
+        self.assertGreaterEqual(accept_priority(0, 2), 150)
+        self.assertLessEqual(accept_priority(500, 3), 130)
+        self.assertGreaterEqual(accept_priority(0, 3), 100)
+        self.assertTrue(accept_priority(500, 3) < FINAL_ACCEPT_PRIORITY < accept_priority(0, 1))
