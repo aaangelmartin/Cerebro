@@ -860,7 +860,14 @@ class DealersDomain:
             if v.buying and _avoided(v.item, _g(ctx, "control") or {}, values.rarity(v.item)):
                 ok, why = False, "we no longer buy this set"
                 force = "we no longer buy this set: close the thread"
-            if order is None and not v.buying and not v.is_pack and not v.final and not ok:
+            kept = ""
+            if order is None and not v.buying and not v.is_pack:
+                kept = self._keeps(v.item, _g(ctx, "control") or {}, values,
+                                   {ref: len(cs) for ref, cs in values.held.items()})
+                if kept:                    # the code opened this sale on its own: the plan keeps the card
+                    ok, why = False, kept
+                    force = f"{kept}: close the thread without a sale"
+            if order is None and not v.buying and not v.is_pack and not v.final and not ok and not kept:
                 up = self._higher_slot_wants(plan, level, values.rarity(v.item) or "", values.set_of(v.item))
                 if up:
                     force = f"keep this spare for {up}: its ladder slots are empty and weigh more"
@@ -883,7 +890,7 @@ class DealersDomain:
             # answer to our first priced message, so send that bid before closing or waiting.
             gift_bid = False
             if (v.dealer in gifts.DEALERS and not v.ours and not v.final and v.last_theirs is not None
-                    and v.last_sender == "dealer" and limit > 0 and not cautious and not switch_hold
+                    and v.last_sender == "dealer" and limit > 0 and not cautious and not switch_hold and not kept
                     and not force.startswith(("we no longer buy", "dealer silent", "dealer never"))
                     and gifts.window_open(self.store.data, v.dealer, tick)):
                 if force or move.kind in ("close", "wait"):
@@ -953,6 +960,33 @@ class DealersDomain:
                                          and not c.kind.endswith("pack")][:3])
         self._orders_last = list(plan.orders)
         return plan
+
+    @staticmethod
+    def _held_back(control: dict, values: Values) -> tuple[set[str], set[str]]:
+        """Cards the code must not sell to a dealer on its own: the refs the plan in force holds back
+        (reserved_refs) and the sets of a page we are building (a goal card in force), whose single copies stay.
+        The brain can still order such a sale (dealer_orders): that is its decision, not the fallback's."""
+        try:
+            from bazaar.brain.strategy import reserved_refs
+            reserved = {str(r).upper() for r in reserved_refs()}
+        except Exception:  # noqa: BLE001 - no plan, nothing held back
+            reserved = set()
+        try:
+            from bazaar.core.goal import goal_sets
+            building = goal_sets(control, values)
+        except Exception:  # noqa: BLE001
+            building = set()
+        return reserved, building
+
+    def _keeps(self, ref, control: dict, values: Values, counts: dict) -> str:
+        """Why the code keeps this card away from the dealers ('' = it may sell it)."""
+        ref = str(ref or "").upper()
+        reserved, building = self._held_back(control, values)
+        if ref in reserved:
+            return f"the plan holds {ref} back (reserved_refs)"
+        if values.set_of(ref) in building and counts.get(ref, 0) <= 1:
+            return f"{ref} is our only copy of a page we are building"
+        return ""
 
     def _gift_candidates(self, plan: Plan, sit, ctx, budget: int, waiting: dict[str, int]) -> None:
         """Gift window open with a free dealer: make sure a thread with it opens this tick. A deal we would open
@@ -1079,6 +1113,8 @@ class DealersDomain:
                 sets = buys[a["rarity"]].get("sets")
                 if isinstance(sets, list) and values.set_of(ref) not in sets:
                     continue
+                if self._keeps(ref, control, values, counts):
+                    continue        # held back by the plan, or the only copy of a page we are building
                 if self._higher_slot_wants(plan, level, a["rarity"], values.set_of(ref)):
                     continue        # a spare is scarce: keep it for the higher dealer whose ladder slots are empty
                 skind = f"sell:{a['rarity']}" + (":loved" if self._loved(d, a["rarity"], values.set_of(ref)) else "")
