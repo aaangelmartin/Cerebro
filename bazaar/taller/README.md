@@ -6,9 +6,31 @@ Turns el cerebro's code requests (outbox items of kind `code`) into tested, push
 
 **Auto + deploy if the tests pass.**
 
-- **Auto:** low or medium severity requests that don't touch money, rails or keys. Handed out while `open`.
-- **Gated:** critical severity, or anything about rails, the executor, cash, caps, never-lose, the LLM keys or router, or `.env`. Handed out only after someone sets the item to `accepted` (dashboard: Cerebro → Para el equipo → Cambios de código → Aceptar).
-- `--finish` checks again on the files the commit really changed. A commit that touches `bazaar/core/rails.py`, `bazaar/core/executor.py`, `bazaar/llm/`, `bazaar/config.py` or `.env` without acceptance is reverted locally (nothing is pushed) and parked as "pulsa Aceptar".
+- **Gated:** a request waits for **Aceptar** only when
+  - its severity is `critical`, or
+  - its change (`proposed_change`, `patch_sketch`, the paths it mentions) names a gated file — `bazaar/core/rails.py`, `bazaar/core/executor.py`, `bazaar/llm/`, `bazaar/config.py`, `.env` — or a money cap or key: `cash_reserve`, `max_spend_per_deal`, `max_spend_per_hour`, `min_surplus`, an API key.
+
+  Handed out only after someone sets the item to `accepted` (dashboard: Cerebro → Para el equipo → Cambios de código → Aceptar).
+- **Auto:** everything else, handed out while `open`. Loose words in the text ("cash", "spend", "reserve", "rail", "key") do not gate a request: on 3 Oct that filter held back three requests that touched no gated file.
+- **Second net:** `--finish` checks the files the commit really changed. A commit that touches a gated file without acceptance is reverted locally (nothing is pushed) and parked as "pulsa Aceptar", whatever the request's class was.
+
+## Why `--next` gave nothing
+
+`--next` still prints `null` on stdout when there is no work, and now says why on stderr, one line per open request: `id | status | class | severity | reason | title`. `--list` prints the same table and changes nothing. The reasons:
+
+- `eligible (auto|accepted)`: it will be handed out.
+- `gated: <what it names> (Aceptar to run it)`.
+- `another job running: claimed by a fork since HH:MM (released in N min)`.
+- `handled at HH:MM (failed|rejected|needs_accept…): Aceptar to run it again`.
+- `possible duplicate: done in <commit> at HH:MM and filed again`.
+
+"another taller job is running: --finish <id> since HH:MM:SS (pid N)" (exit code 1) means another `--next` or `--finish` holds the lock right now; a `--finish` takes a few minutes (tests, push, restart, watch). Try again on the next loop.
+
+## Claims, parallel work and duplicates
+
+- **Several forks can work at once.** The lock only serialises the `--next` and `--finish` commands themselves; each `--next` claims a different request. The taller does not check that two claimed requests touch different files: each fork commits only its own paths, and `--finish` tests each commit on a clean checkout.
+- **A claim expires.** A request claimed more than 25 minutes ago with no `--finish` or `--fail` is released on the next `--next` (note "liberado", back to `open`, or to `accepted` if a human had accepted it) and handed out again. A fork that needs longer should `--fail` and reclaim, or finish first.
+- **Possible duplicates.** When el cerebro files a request whose title matches one already done, the outbox reopens the old item. If that happens within 2 hours of the fix, the taller notes "posible duplicado" and does not hand it out on its own (Aceptar runs it now). After 2 hours it is taken again: the fix did not hold.
 
 ## The procedure a fork follows
 
@@ -32,7 +54,7 @@ Turns el cerebro's code requests (outbox items of kind `code`) into tested, push
    .venv/bin/python -m bazaar.taller.run --fail <id> --reason "why"
    ```
 
-A request the taller already handled is handed out again only when a human sets it to `accepted` afterwards. Every step goes to `data/live/taller.jsonl`; the state is in `data/taller/state.json`; one job at a time (`data/taller/lock`).
+A request the taller already handled is handed out again only when a human sets it to `accepted` afterwards (or, for a done one filed again, 2 hours after the fix). Every step goes to `data/live/taller.jsonl`; the state is in `data/taller/state.json`; one `--next`/`--finish` command at a time (`data/taller/lock`).
 
 ## Older headless mode (not used)
 

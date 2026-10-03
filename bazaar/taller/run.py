@@ -7,13 +7,17 @@ a /loop in that session. The taller hands out the work and closes it safely:
     python -m bazaar.taller.run --finish ID --commit HASH      # tests on a clean checkout, push, deploy, watch,
                                                                # revert on errors, close the outbox item
     python -m bazaar.taller.run --fail ID --reason "..."       # give it back with the reason
-    python -m bazaar.taller.run --list                         # what is eligible now (changes nothing)
+    python -m bazaar.taller.run --list                         # open requests: status, class, reason (no change)
 
 Policy chosen by the team (Saturday 3 Oct): "auto + deploy if the tests pass".
-- Auto class: low/medium severity requests that don't touch money, rails or keys; taken while "open".
-- Gated class: critical severity, or anything about rails, the executor, cash/caps/never-lose, LLM keys/router or
-  .env; they wait until a human sets the outbox item to "accepted" (dashboard "Aceptar"). A commit that touches the
-  gated files without acceptance is reverted locally and parked.
+- Gated class: critical severity, or a request that names a gated file (rails, executor, llm/, config.py, .env)
+  or a money cap / API key (cash_reserve, max_spend_per_deal, ...); it waits until a human sets the outbox item to
+  "accepted" (dashboard "Aceptar"). Loose words ("cash", "spend", "reserve") do not gate a request.
+- Auto class: everything else; taken while "open".
+- Second net: a commit that touches the gated files without acceptance is reverted locally and parked.
+- --next prints "null" when there is no work and says why on stderr, one line per open request; --list shows the
+  same table. A claim older than 25 minutes without --finish/--fail is released. A request filed again within
+  2 hours of its fix is marked as a possible duplicate and not handed out on its own.
 Every step goes to data/live/taller.jsonl and the outbox item's note.
 
 (--once / --loop-claude are an older headless mode that runs `claude -p`; it is not used.)
@@ -52,8 +56,13 @@ CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 TEST_CMD = [PY, "-m", "unittest", "discover", "-s", "bazaar", "-t", "."]
 
 GATED_PATHS = ("bazaar/core/rails.py", "bazaar/core/executor.py", "bazaar/llm/", "bazaar/config.py", ".env")
-GATED_WORDS = re.compile(r"\b(rails?|executor|never[ _-]?lose|cash|caps?|reserve|budgets?|spend(ing)?|"
-                         r"api[ _-]?keys?|keys?|router|\.env|money|secrets?)\b", re.I)
+# a request is gated by what it names, not by loose words: a gated file, or a money cap / API key
+GATED_NAMES = re.compile(r"(?<![\w/])(?:bazaar/)?(?:core/)?(rails\.py|executor\.py)\b|\bbazaar/llm/|\bllm/\w+\.py\b|"
+                         r"(?<![\w/])(?:bazaar/)?config\.py\b|(?<!\w)\.env\b", re.I)
+GATED_KEYS = re.compile(r"\b(cash_reserve|max_spend_per_deal|max_spend_per_hour|min_surplus|"
+                        r"ANTHROPIC_API_KEY\w*|api[ _-]?keys?)\b", re.I)
+STALE_CLAIM_S = 25 * 60          # a fork's claim with no --finish/--fail after this is given back
+DUPLICATE_S = 2 * 3600           # a request filed again this soon after it was done is a possible duplicate
 FORBIDDEN_PATHS = re.compile(r"(^|/)\.env|secret|credential|\.pem$|\.key$", re.I)
 
 # changed path prefix -> services to restart (dashboard files are static: nothing to restart)
@@ -95,11 +104,30 @@ def claude_env(environ: dict) -> dict:
 
 
 
-def is_gated(item: dict) -> bool:
+def gate_reason(item: dict) -> str | None:
+    """Why this request waits for "Aceptar", or None. Critical severity, or its change (proposed_change,
+    patch_sketch, paths_mentioned) names a gated file or a money cap / API key. Words alone never gate."""
     if (item.get("severity") or "medium") == "critical":
-        return True
-    text = " ".join(str(item.get(k) or "") for k in ("title", "diagnosis", "proposed_change", "patch_sketch"))
-    return bool(GATED_WORDS.search(text)) or any(p in text for p in GATED_PATHS)
+        return "critical severity"
+    paths = item.get("paths_mentioned") or []
+    text = " ".join([str(item.get(k) or "") for k in ("proposed_change", "patch_sketch")]
+                    + [str(p) for p in (paths if isinstance(paths, list) else [paths])])
+    m = GATED_NAMES.search(text)
+    if m:
+        return f"names the gated file {m.group(0).strip()}"
+    m = GATED_KEYS.search(text)
+    if m:
+        return f"names the money cap or key {m.group(0)}"
+    return None
+
+
+def is_gated(item: dict) -> bool:
+    return gate_reason(item) is not None
+
+
+def recurred_after_done(item: dict, st: dict) -> bool:
+    """El cerebro filed the same title again after the taller closed it (the outbox reopens the old item)."""
+    return st.get("state") == "done" and item.get("status") == "open" and bool(item.get("recurred"))
 
 
 def touches_gated(paths: list[str]) -> list[str]:
@@ -134,15 +162,44 @@ def eligible(item: dict, state: dict, now: float | None = None) -> str | None:
     status = item.get("status")
     fresh_human = float(item.get("updated") or 0) > float(st.get("at") or 0) + 0.5
     if st.get("state") == "running":
-        stale = (now or time.time()) - float(st.get("at") or 0) > 2 * CLAUDE_TIMEOUT_S
+        age = (now or time.time()) - float(st.get("at") or 0)
+        if st.get("mode") == "fork" and age > STALE_CLAIM_S:       # the fork never came back: hand it out again
+            return st.get("why") if st.get("why") in ("auto", "accepted") else "auto"
+        stale = age > 2 * CLAUDE_TIMEOUT_S
         return "accepted" if stale and status == "accepted" and fresh_human else None
     if st.get("state") in TERMINAL:
-        return "accepted" if status == "accepted" and fresh_human else None
+        if status == "accepted" and fresh_human:
+            return "accepted"
+        # filed again long after the fix: the fix did not hold, take it again; sooner, it is a possible duplicate
+        if recurred_after_done(item, st) and (now or time.time()) - float(st.get("at") or 0) > DUPLICATE_S \
+                and not is_gated(item):
+            return "auto"
+        return None
     if status == "open" and not is_gated(item):
         return "auto"
     if status == "accepted":
         return "accepted"
     return None
+
+
+def why_not(item: dict, state: dict, now: float | None = None) -> str:
+    """One line on why an open request is not handed out now (for --next on stderr and --list)."""
+    st = state.get(item["id"]) or {}
+    now = now or time.time()
+    at = float(st.get("at") or 0)
+    hhmm = time.strftime("%H:%M", time.localtime(at)) if at else "?"
+    if st.get("state") == "running":
+        left = max(0, int((STALE_CLAIM_S - (now - at)) // 60))
+        return f"another job running: claimed by a fork since {hhmm} (released in {left} min)"
+    if recurred_after_done(item, st):
+        return (f"possible duplicate: done in {st.get('commit') or '?'} at {hhmm} and filed again "
+                f"(Aceptar to run it now; taken again on its own {DUPLICATE_S // 3600} h after the fix)")
+    if st.get("state") in TERMINAL:
+        return f"handled at {hhmm} ({st.get('state')}): Aceptar to run it again"
+    reason = gate_reason(item)
+    if reason:
+        return f"gated: {reason} (Aceptar to run it)"
+    return f"status {item.get('status')}"
 
 
 def build_prompt(item: dict) -> str:
@@ -319,7 +376,7 @@ class Taller:
         except (KeyError, ValueError) as e:
             self.log(item_id, "note_error", error=str(e))
 
-    def acquire(self) -> bool:
+    def acquire(self, what: str = "") -> bool:
         try:
             fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
@@ -330,10 +387,19 @@ class Taller:
                 return False
             except (OSError, ValueError):
                 self.lock.unlink(missing_ok=True)    # stale lock from a dead run
-                return self.acquire()
+                return self.acquire(what)
         with os.fdopen(fd, "w") as f:
-            f.write(json.dumps({"pid": os.getpid(), "at": self.clock()}))
+            f.write(json.dumps({"pid": os.getpid(), "at": self.clock(), "what": what}))
         return True
+
+    def busy(self) -> str:
+        """Who holds the lock, for the 'another taller job is running' message."""
+        try:
+            info = json.loads(self.lock.read_text() or "{}")
+        except (OSError, ValueError):
+            return "another taller job is running"
+        since = time.strftime("%H:%M:%S", time.localtime(float(info.get("at") or 0)))
+        return f"another taller job is running: {info.get('what') or 'a job'} since {since} (pid {info.get('pid')})"
 
     def release(self) -> None:
         self.lock.unlink(missing_ok=True)
@@ -348,11 +414,56 @@ class Taller:
                 out.append((it, why))
         return out
 
+    def report(self) -> list[dict]:
+        """Every code request still open or accepted: id, status, class and why it is or is not handed out."""
+        state, now, out = self.load_state(), self.clock(), []
+        for it in sorted(self.box.list(kind="code", status=["open", "accepted"]), key=lambda x: float(x.get("ts") or 0)):
+            why = eligible(it, state, now)
+            out.append({"id": it["id"], "status": it.get("status"), "severity": it.get("severity"),
+                        "class": "gated" if is_gated(it) else "auto", "title": it.get("title"),
+                        "reason": f"eligible ({why})" if why else why_not(it, state, now)})
+        return out
+
+    @staticmethod
+    def report_lines(rows: list[dict]) -> list[str]:
+        return [f"{r['id']} | {r['status']} | {r['class']} | {r['severity']} | {r['reason']} | {str(r['title'])[:90]}"
+                for r in rows]
+
+    def release_stale(self) -> list[str]:
+        """Give back the fork claims older than STALE_CLAIM_S, so the next --next can hand them out."""
+        state, now, freed = self.load_state(), self.clock(), []
+        for iid, st in state.items():
+            if st.get("state") == "running" and st.get("mode") == "fork" and now - float(st.get("at") or 0) > STALE_CLAIM_S:
+                why = st.get("why") if st.get("why") in ("auto", "accepted") else "auto"
+                self.note(iid, f"reclamado hace más de {STALE_CLAIM_S // 60} min sin --finish ni --fail: liberado",
+                          status="accepted" if why == "accepted" else "open")
+                self.set_state(iid, "released", why=why)
+                self.log(iid, "released_stale", why=why)
+                freed.append(iid)
+        return freed
+
+    def note_duplicates(self) -> list[str]:
+        """Say once, on the outbox item, that a request filed again soon after its fix is a possible duplicate."""
+        state, now, noted = self.load_state(), self.clock(), []
+        for it in self.box.list(kind="code", status="open"):
+            st = state.get(it["id"]) or {}
+            seen = float(it.get("last_seen") or 0)
+            if recurred_after_done(it, st) and now - float(st.get("at") or 0) <= DUPLICATE_S \
+                    and st.get("dup_noted") != seen:
+                self.note(it["id"], f"posible duplicado: ya se hizo en {st.get('commit') or '?'} y el cerebro la ha "
+                                    "vuelto a pedir; no se reclama sola. Pulsa Aceptar si el fallo sigue")
+                state[it["id"]] = {**st, "dup_noted": seen}      # `at` stays: it dates the fix
+                self.log(it["id"], "duplicate", commit=st.get("commit"))
+                noted.append(it["id"])
+        if noted:
+            self.save_state(state)
+        return noted
+
     def poll_once(self) -> dict | None:
         cands = self.candidates()
         if self.dry_run:
-            for it, why in cands:
-                print(f"{it['id']} [{why}] {it.get('severity')} {it.get('title')}")
+            for line in self.report_lines(self.report()):
+                print(line)
             return None
         if not cands:
             return None
@@ -537,6 +648,8 @@ class Taller:
     # ---- fork mode: a fork of the main Claude Code conversation (user's subscription) writes the code ----------
     def next_job(self) -> dict | None:
         """Claim the next eligible request and describe it for the fork that will implement it."""
+        self.release_stale()
+        self.note_duplicates()
         cands = self.candidates()
         if not cands:
             return None
@@ -694,7 +807,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--commit", metavar="HASH", help="the fork's local commit for --finish")
     ap.add_argument("--fail", metavar="ID", help="give a request back (needs --reason)")
     ap.add_argument("--reason", default="", help="why --fail")
-    ap.add_argument("--list", action="store_true", help="list eligible requests, change nothing")
+    ap.add_argument("--list", action="store_true", help="list the open requests with their class and reason")
     ap.add_argument("--loop-claude", action="store_true",
                     help="(not used) the old headless mode: poll and run `claude -p` on each request")
     ap.add_argument("--once", metavar="ID", help="(not used) one request with `claude -p`")
@@ -702,22 +815,26 @@ def main(argv: list[str] | None = None) -> None:
     t = Taller(dry_run=a.list)
     out: Any
     if a.list:
-        t.poll_once()
+        rows = t.report_lines(t.report())
+        print("\n".join(rows) if rows else "no open code requests")
         return
     if a.next:
-        if not t.acquire():
-            sys.exit("another taller job is running")
+        if not t.acquire("--next"):
+            sys.exit(t.busy())
         try:
             out = t.next_job()
+            rows = [] if out else t.report_lines(t.report())
         finally:
             t.release()
         print(json.dumps(out, ensure_ascii=False, default=str) if out else "null")
+        for line in rows:                                    # why nothing was handed out
+            print(line, file=sys.stderr)
         return
     if a.finish:
         if not a.commit:
             sys.exit("--finish needs --commit <hash>")
-        if not t.acquire():
-            sys.exit("another taller job is running")
+        if not t.acquire(f"--finish {a.finish}"):
+            sys.exit(t.busy())
         try:
             out = t.finish_job(a.finish, a.commit)
         finally:
