@@ -1092,6 +1092,8 @@ class DealersDomain:
                             continue
                         if _avoided(ref, control, r):
                             continue
+                        if counts.get(ref, 0) > 0 and d not in probe:
+                            continue        # we hold it: a second copy only on the brain's order (a loop, a bridge)
                         add({"buy": {"card": ref}}, f"buy:{r}", ref, (values.cards.get(ref) or {}).get("name", ref),
                             values.next_copy(ref), entry.get("list_price"),
                             max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal

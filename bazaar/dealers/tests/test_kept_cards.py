@@ -1,9 +1,10 @@
-"""Outbox request code-b294b258.
+"""Outbox requests code-b294b258 and code-7e4774a6.
 
 Tick 1316: the bot bought SAL-09 from Los Pícaros at 52 for the Salamanca page and, one tick later, its own sell
 candidates opened a thread with Doña Pilar and walked the ladder down to a sale at 77. No value was lost, but the
 plan kept that card. The code never sells to a dealer, on its own, a card the plan holds back (reserved_refs) or
-the only copy of a page we are building (a goal in force); it closes a thread it opened that way."""
+the only copy of a page we are building (a goal in force); it closes a thread it opened that way. And it never
+opens a buy for a second copy of a card we hold: that is the brain's call (a loop, a bridge)."""
 from __future__ import annotations
 
 import unittest
@@ -92,6 +93,19 @@ class BrainOrder(Patched):
         acts = self.moves([SAL09])
         self.assertTrue(acts)
         self.assertNotIn("close_thread", [a.kind for a in acts])
+
+
+class SecondCopy(Patched):
+    def buys(self, assets):
+        dom = T.domain()
+        plan = dom._prepare(SIT(tick=5, assets=[dict(a) for a in assets]), CTX(5))
+        return {c.item for c in plan.candidates if c.kind.startswith("buy") and not c.kind.endswith("pack")}
+
+    def test_the_code_opens_no_buy_for_a_card_we_hold(self):
+        held = {"id": 30, "kind": "card", "ref": "LAV-07", "rarity": "uncommon", "set": "LAV", "your_value": 146.0}
+        without = self.buys([])
+        self.assertIn("LAV-07", without)                 # the fixture does offer it when we do not hold it
+        self.assertNotIn("LAV-07", self.buys([held]))
 
 
 if __name__ == "__main__":
