@@ -1,0 +1,15 @@
+{
+ "levels": [
+  {
+   "id": "chato",
+   "kind": "persona",
+   "name": "El Chato",
+   "state": "active",
+   "teaser": "«Better packs, friendly prices. If I like you.»",
+   "how": "Better packs and rare singles; he buys uncommon and rare cards. Open a thread with him (with: chato).",
+   "active_since_hours": 1.633,
+   "opens_to_all_at_hours": 2.633,
+   "open_to_all": true
+  }
+ ]
+}
