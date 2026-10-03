@@ -73,6 +73,21 @@ def rival_days_weight(v: DuelView, w: float) -> float:
 
 
 AMBIGUOUS_PAD_SHARE = 0.25   # sign unknown: give the rival its days only if the safety padding is < 25 % of pie
+COST_DAYS_GOODWILL = 0.10    # days cost us: match the rival's own lowest days only while that costs < 10 % of pie
+
+
+def _days_when_they_cost(v: DuelView, w: float, pie: float | None) -> int:
+    """Days cost us |w| per day: offer 0. The old joint-weight rule guessed the rival's weight from our own
+    |w| and the days it asks for, so a rival that simply asked 10 days got 10 days at our cost (sim duel
+    1168: 23 of 34 P burned, no deal). A rival's day count is not evidence that it pays for days, and every
+    price we ask already charges the days we give (utility-based asks), so days only go out as cheap
+    goodwill: the rival's own lowest days when that costs < COST_DAYS_GOODWILL of the pie."""
+    rival_days = [o.days for o in v.rival_offers() if o.days is not None]
+    if rival_days and pie is not None:
+        low = min(rival_days)
+        if 0 < low and abs(w) * low < COST_DAYS_GOODWILL * pie:
+            return low
+    return 0
 
 
 def choose_days(v: DuelView, pie: float | None = None) -> int | None:
@@ -86,6 +101,8 @@ def choose_days(v: DuelView, pie: float | None = None) -> int | None:
         if last is not None and pie is not None and abs(w) * last < AMBIGUOUS_PAD_SHARE * pie:
             return last
         return 0
+    if w < 0:
+        return _days_when_they_cost(v, w, pie)
     wr = rival_days_weight(v, w)
     joint = w + wr
     if abs(joint) < 1e-9:

@@ -335,7 +335,8 @@ class DealersDomain:
 
     def _spend_cap(self, sit, ctx, committed: int = 0) -> int:
         """Most we may still promise in ONE deal: cash - reserve (+ the venue bond while we have no venue)
-        and the hour's spend left, both net of `committed` (our other open buy bids), capped per deal."""
+        and the hour's spend left, both net of `committed` (our other open buy bids) and of our open market
+        offers' cash (core.context.market_committed), capped per deal."""
         control = _g(ctx, "control") or {}
         me = _g(sit, "me") or {}
         cash = int(me.get("cash") or 0)
@@ -349,6 +350,9 @@ class DealersDomain:
         avail = cash - reserve
         if hour_left is not None:
             avail = min(avail, int(hour_left))
+        # our open market bids can fill in the same tick as these dealer bids: net them out too
+        from bazaar.core.context import market_committed
+        avail -= market_committed(sit)
         return max(0, min(avail - max(0, int(committed)), per_deal))
 
     @staticmethod

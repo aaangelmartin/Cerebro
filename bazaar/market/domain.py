@@ -183,13 +183,14 @@ class MarketDomain:
             if oid is not None:
                 ttl = (meta.get("params") or {}).get("expires_in_ticks") or 40
                 self._posted[str(oid)] = {"action": outcome.action_id, "lessons": meta.get("lessons") or [],
-                                          "value_gain": exp.get("value_gain"),
+                                          "value_gain": exp.get("value_gain"), "spend": meta.get("spend") or 0,
                                           "expires_tick": resp.get("expires_tick") or (outcome.tick + int(ttl))}
         elif meta["kind"] == "cancel_offer" and meta.get("offer") is not None:
             self._cancelled.add(str(meta["offer"]))
 
-    def _close_posted(self, sit) -> None:
-        """Our posted offers that left /api/me/offers: filled (deal) before expiry, else expired/cancelled."""
+    def _close_posted(self, sit, ctx=None) -> None:
+        """Our posted offers that left /api/me/offers: filled (deal) before expiry, else expired/cancelled.
+        A filled bid's cash counts against the hourly spend cap now (the post itself was not spend)."""
         if not self._posted:
             return
         tick = int(_g(sit, "tick", 0) or 0)
@@ -209,6 +210,9 @@ class MarketDomain:
                            tick=tick, action_ids=[rec["action"]], lesson_ids=rec.get("lessons") or [],
                            realised={"value_gain": rec.get("value_gain") if deal else 0.0},
                            response={"offer": oid})
+            if deal and rec.get("spend"):
+                from bazaar.core.context import record_spend
+                record_spend(ctx, rec["spend"])
             self._posted.pop(oid, None)
             self._cancelled.discard(oid)
 
@@ -269,7 +273,7 @@ class MarketDomain:
     def _prepare(self, sit, ctx) -> tuple[list[AcceptCand], list[PostCand], dict]:
         self._ledger = _g(ctx, "ledger", None) or self._ledger
         try:
-            self._close_posted(sit)
+            self._close_posted(sit, ctx)
         except Exception:  # noqa: BLE001 - feedback never blocks trading
             pass
         me = _g(sit, "me") or {}
@@ -399,8 +403,13 @@ class MarketDomain:
         from bazaar.core import rails as _rails
         venue_reserve = (0 if (_rails.own_venue(sit) or control.get("venue_reserve") is False)
                          else _rails._venue_reserve(sit))
-        cash_room = 0 if cautious else max(0, min(cash - reserve - venue_reserve, proto.BID_COMMIT_MAX,
-                                                  per_deal * 2) - committed)
+        # the dealers' open buy bids can fill in the same tick as ours: their cash is not ours to promise,
+        # and the hour's spend left must cover every open bid (a fill counts as spend when it happens)
+        from bazaar.core.context import dealer_committed
+        hour_left = budget.get("spend_hour_left")
+        avail = min(cash - reserve - venue_reserve, int(hour_left) if hour_left is not None else cash)
+        avail -= dealer_committed(sit)
+        cash_room = 0 if cautious else max(0, min(avail, proto.BID_COMMIT_MAX, per_deal * 2) - committed)
         bid_room = max(0, min(MAX_OWN_BIDS - kinds.count("bid"), room_total))
         bids = proto.bid_candidates(values, counts, venues, cash_room, wanted, bid_room) if bid_room else []
         bids = [b for b in bids if b.max_price <= per_deal]
@@ -609,7 +618,7 @@ class MarketDomain:
                    reason=reason or f"bid {price} for {b.ref} (worth {b.value} to us)",
                    expected={"value_gain": round(b.value - price, 2), "points": 0.0, "value_get": b.value,
                              "kind": "bid"}, priority=0.0)
-        self._sent[a.id] = {"kind": "post_offer", "team": None}
+        self._sent[a.id] = {"kind": "post_offer", "team": None, "spend": int(price)}
         return a
 
     def _act_swap(self, s: SwapCand, to: str | None, source: str, reason: str) -> Action:
