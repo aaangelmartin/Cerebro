@@ -162,6 +162,7 @@ def sanitize(raw: Any) -> dict:
         **({"avoid_buy_sets": avoid} if avoid is not None else {}),
         "accept_offers": accepts,
         "post_offers": _post_offers(raw.get("post_offers")),
+        "dealer_orders": _dealer_orders(raw.get("dealer_orders")),
         "whatsapp_replies": [{"reply_to": _clean(x.get("reply_to"), 60), "text": _clean(x.get("text"), 1500),
                               "why": _clean(x.get("why"), 400), "conclusion": _clean(x.get("conclusion"), 600)}
                              for x in (raw.get("whatsapp_replies") or [])[:6]
@@ -261,6 +262,40 @@ def post_offers(live: Path | None = None) -> list[dict]:
     return list(_plan(live).get("post_offers") or [])
 
 
+_DEALER_RX = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
+
+
+def _dealer_orders(raw) -> list[dict]:
+    """Dealer threads the brain orders: {dealer, action: sell|buy, ref, open, bound, max_messages, why}.
+    `bound` is the floor for a sell and the cap for a buy (the model may call it floor_or_cap, floor or cap).
+    The dealers domain opens the thread and haggles inside these bounds; the rails still decide."""
+    out, seen = [], set()
+    for x in (raw or [])[:4] if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        dealer = str(x.get("dealer") or "").strip().lower()
+        action = str(x.get("action") or "").strip().lower()
+        ref = str(x.get("ref") or "").upper().strip()
+        bound = None
+        for k in ("floor_or_cap", "bound", "floor" if action == "sell" else "cap"):
+            bound = _int(x.get(k), 1, 500) if x.get(k) is not None else None
+            if bound is not None:
+                break
+        if not _DEALER_RX.match(dealer) or action not in ("sell", "buy") or not REF_RX.match(ref) or bound is None:
+            continue
+        if (dealer, ref) in seen:
+            continue
+        seen.add((dealer, ref))
+        out.append({"dealer": dealer, "action": action, "ref": ref, "open": _int(x.get("open"), 1, 500),
+                    "bound": bound, "max_messages": _int(x.get("max_messages"), 1, 8) or 4,
+                    "why": _clean(x.get("why"), 200)})
+    return out
+
+
+def dealer_orders(live: Path | None = None) -> list[dict]:
+    return list(_plan(live).get("dealer_orders") or [])
+
+
 # --------------------------------------------------------------------------- outcomes of the brain's posts
 def posts_path(live: Path | None = None) -> Path:
     return Path(live or config.LIVE) / "brain_posts.jsonl"
@@ -304,6 +339,10 @@ def post_outcomes_text(live: Path | None = None, n: int = 10) -> str:
     rows = post_history(live, 200)[-n:]
     lines = []
     for r in rows:
+        if r.get("kind") == "dealer_order":
+            lines.append(f"- t{r.get('tick')}: dealer order {r.get('action')} {r.get('ref')} with {r.get('dealer')} -> "
+                         f"{r.get('status')}" + (f": {r.get('detail')}" if r.get("detail") else ""))
+            continue
         if r.get("kind") == "accept":
             st = r.get("status")
             why = (f" by {r.get('rail')}: {r.get('detail')}" if st == "vetoed"

@@ -44,6 +44,7 @@ MIN_LLM_S = 3.0                              # below this much time left, code d
 MAX_CANDIDATES = 12                          # shown to Claude per tick
 EXPECTED_CONCESSION = 0.15                   # we expect to close this share of the range above the dealer's limit
 MIN_POINTS = 0.5
+ORDER_PRIORITY = 95.0                       # a dealer thread the brain ordered opens before our own candidates
 GOAL_SMALL_DEAL_P = 30                      # while saving for a goal card, other buys must be this cheap...
 GOAL_SMALL_GAIN_P = 3.0                     # ...and create at least this much value (negotiated deals score)
 CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
@@ -105,6 +106,7 @@ class Plan:
     free: list[str] = field(default_factory=list)
     candidates: list[Candidate] = field(default_factory=list)
     slots: int = 0
+    orders: list[dict] = field(default_factory=list)      # the brain's dealer_orders in force
 
 
 def _g(obj: Any, name: str, default: Any = None) -> Any:
@@ -148,6 +150,10 @@ class DealersDomain:
         self.last_notes: list[str] = []
         self._ledger: Any = None                    # ctx.ledger, captured each tick for closings
         self._pending_open: dict[str, dict] = {}    # dealer -> {"actions", "lessons"} until its thread shows up
+        self._order_noted: dict[tuple, str] = {}    # (dealer, action, ref) -> last status/detail told to the brain
+        self._order_done: dict[tuple, int] = {}     # (dealer, action, ref) -> bound of the order that already ended
+        self._order_bound: dict[tuple, int] = {}    # (dealer, action, ref) -> bound of the order we opened
+        self._order_bounds_now: dict[tuple, int] = {}
 
     # ================================================================== Domain protocol
     def fallback(self, sit, ctx) -> list[Action]:
@@ -167,7 +173,130 @@ class DealersDomain:
             return base
         if moves is None:
             return base
-        return self._apply_llm(plan, ctx, moves)
+        return self._with_orders(plan, self._apply_llm(plan, ctx, moves))
+
+    # ------------------------------------------------------------------ the brain's dealer orders
+    def _brain_orders(self) -> list[dict]:
+        """dealer_orders of the plan in force: [{dealer, action, ref, open, bound, max_messages, why}]."""
+        try:
+            from bazaar.brain.strategy import dealer_orders
+            return dealer_orders()
+        except Exception:  # noqa: BLE001 - no plan, no orders
+            return []
+
+    def _note_order(self, o: dict, status: str, detail: str = "", tick: int | None = None, **extra) -> None:
+        """Tell the brain what happened to one of its dealer orders (brain_posts.jsonl), once per change."""
+        key = (o.get("dealer"), o.get("action"), o.get("ref"))
+        sig = f"{status}|{detail}"
+        if self._order_noted.get(key) == sig:
+            return
+        self._order_noted[key] = sig
+        try:
+            from bazaar.brain.strategy import record_post
+            record_post({"kind": "dealer_order", "tick": tick, "dealer": o.get("dealer"), "action": o.get("action"),
+                         "ref": o.get("ref"), "bound": o.get("bound"), "status": status, "detail": detail, **extra})
+        except Exception:  # noqa: BLE001 - reporting never breaks a tick
+            pass
+
+    def _order_for(self, plan: Plan, v: ThreadView) -> dict | None:
+        ref = str(v.item or "").upper()
+        for o in plan.orders:
+            if o["dealer"] == v.dealer and o["ref"] == ref and (o["action"] == "buy") == v.buying:
+                return o
+        return None
+
+    def _order_candidates(self, plan: Plan, sit, ctx, budget: int) -> list[Candidate]:
+        """One candidate per brain order that can start now; every order that cannot gets its reason logged."""
+        out: list[Candidate] = []
+        if not plan.orders:
+            return out
+        values = plan.values
+        me = _g(sit, "me") or {}
+        control = _g(ctx, "control") or {}
+        protected = {str(x) for x in control.get("protected") or []}
+        listed = {a.get("id") if isinstance(a, dict) else a for o in _g(sit, "my_offers") or []
+                  for a in ((o.get("give") or {}).get("assets") or [])}
+        in_threads = {i for info in plan.infos for i in info.view.asset_ids}
+        counts = {ref: len(cs) for ref, cs in values.held.items()}
+        from bazaar.core import rails as _rails
+        from bazaar.core.goal import pending as _goal_pending
+        goal = _goal_pending(sit, control, values)
+        for o in plan.orders:
+            d, ref, selling = o["dealer"], o["ref"], o["action"] == "sell"
+            if any(self._order_for(plan, i.view) is o for i in plan.infos):
+                continue                                         # its thread is open: being haggled
+            if self._order_done.get((d, o["action"], ref)) == int(o["bound"]):
+                continue                                         # already ended with this bound: the brain re-plans it
+            p = plan.dealers.get(d)
+            if p is None:
+                self._note_order(o, "skipped", f"dealer {d} is not available to us", plan.tick)
+                continue
+            if d not in plan.free:
+                self._note_order(o, "skipped", f"{d} is busy, cooling off or at its hourly quota", plan.tick)
+                continue
+            if plan.slots <= 0:
+                self._note_order(o, "skipped", "no free thread slot", plan.tick)
+                continue
+            menu, level = p.get("menu") or {}, int(p.get("level") or 1)
+            rarity, set_id = values.rarity(ref) or "", values.set_of(ref)
+            side = "buys" if selling else "sells"
+            entry = next((e for e in menu.get(side) or [] if e.get("rarity") == rarity
+                          and (not isinstance(e.get("sets"), list) or set_id in e["sets"])), None)
+            if entry is None:
+                self._note_order(o, "skipped", f"{d} does not {'buy' if selling else 'sell'} {rarity or '?'} {set_id}",
+                                 plan.tick)
+                continue
+            if selling:
+                mine = [a for a in me.get("assets") or [] if a.get("kind", "card") == "card" and a.get("ref") == ref]
+                if not mine:
+                    self._note_order(o, "skipped", f"we do not hold {ref}", plan.tick)
+                    continue
+                free = [a for a in mine if a.get("id") not in listed and a.get("id") not in in_threads
+                        and str(a.get("id")) not in protected and str(ref) not in protected]
+                if not free:
+                    self._note_order(o, "skipped", f"{ref} is tied to one of our open offers or threads: "
+                                                   "cancel that offer first", plan.tick)
+                    continue
+                if set_id in _rails.kept_sets(control):
+                    held = {x.get("id"): x for x in me.get("assets") or []}
+                    promised = _rails._promised_refs(sit, held, exclude={free[0].get("id")}).get(ref, 0)
+                    if counts.get(ref, 0) - promised <= 1:
+                        self._note_order(o, "skipped", f"{ref} is the last copy of a set we collect", plan.tick)
+                        continue
+                aid = free[0].get("id")
+                value = values.asset_value(aid)
+                limit = max(int(o["bound"]), haggle.sell_min(value))
+                kind = f"sell:{rarity}" + (":loved" if self._loved(d, rarity, set_id) else "")
+                topic = {"sell": {"assets": [aid]}}
+            else:
+                if _avoided(ref, control):
+                    self._note_order(o, "skipped", f"{set_id} is a set we avoid buying", plan.tick)
+                    continue
+                value = values.next_copy(ref)
+                cap = min(goal[ref], int(value) - 1) if ref in goal else haggle.buy_max(value)
+                limit = min(int(o["bound"]), cap, budget)
+                if limit < 1:
+                    self._note_order(o, "skipped", f"cap {o['bound']} leaves nothing: our max is "
+                                                   f"{min(cap, budget)} P (value {round(value, 1)}, cash to spend {budget})",
+                                     plan.tick)
+                    continue
+                kind = f"buy:{rarity}"
+                topic = {"buy": {"card": ref}}
+            est_open = float(o.get("open") or self.store.expect_opening(d, kind, entry.get("list_price")) or 0)
+            out.append(Candidate(id=f"o{len(out) + 1}", dealer=d, topic=topic, kind=kind, item=ref,
+                                 name=(values.cards.get(ref) or {}).get("name", ref), value=round(value, 2),
+                                 limit=int(limit), est_open=round(est_open, 1), est_limit=float(limit),
+                                 exp_price=float(limit), exp_capture=0.0, points=ORDER_PRIORITY, level=level))
+        return out
+
+    def _with_orders(self, plan: Plan, actions: list[Action]) -> list[Action]:
+        """The brain's dealer orders open first: they replace any other opening with the same dealer."""
+        orders = [c for c in plan.candidates if c.id.startswith("o")]
+        if not orders:
+            return actions
+        mine = {c.dealer for c in orders}
+        kept = [a for a in actions if not (a.kind == "open_thread" and a.params.get("with") in mine)]
+        return kept + self._open_actions(plan, [(c.id, "") for c in orders], "opus")
 
     def remember(self, actions: list[Action]) -> None:
         """Which actions (and cited lessons) belong to which thread, for the closing outcome."""
@@ -187,6 +316,14 @@ class DealersDomain:
             return
         code = _code(outcome.response)
         dealer = meta.get("dealer")
+        if meta.get("kind") == "open_thread" and meta.get("order"):
+            o = {"dealer": dealer, "action": meta.get("side"), "ref": meta.get("item"), "bound": meta.get("bound")}
+            sent = outcome.status in ("sent", "deal")
+            if sent:
+                self._order_bound[(dealer, meta.get("side"), meta.get("item"))] = int(meta.get("bound") or 0)
+            self._note_order(o, "opened" if sent else str(outcome.status),
+                             "" if sent else (code or str(getattr(outcome, "detail", "") or ""))[:160],
+                             getattr(outcome, "tick", None))
         if code == "cooloff" or "cooloff" in code:
             until = (outcome.response or {}).get("until_tick") if isinstance(outcome.response, dict) else None
             self.store.set_cooloff(dealer, until)
@@ -305,6 +442,13 @@ class DealersDomain:
             level = int((dealers.get(dealer) or {}).get("level") or t.get("level") or 1)
             self.store.record_deal(dealer, level, kind, t.get("item", "?"), t.get("opening"), int(price),
                                    t.get("limit_est"), buying, t.get("value"), thread=tid, tick=tick)
+        okey = (dealer, t.get("side"), str(t.get("item") or "").upper())
+        if okey in self._order_bound:                       # this thread came from a brain order: tell it the end
+            self._order_done[okey] = self._order_bound.pop(okey)
+            self._note_order({"dealer": dealer, "action": t.get("side"), "ref": okey[2]},
+                             "deal" if deal else "no_deal",
+                             f"closed at {price} P" if deal else (reason[:60] or str(status or "closed")), tick,
+                             thread=tid)
         fb = self.store.data.setdefault("feedback", {}).pop(str(tid), None) or {}
         value = t.get("value")
         gain = None
@@ -421,6 +565,8 @@ class DealersDomain:
                  if v is not None and v.status == "open"]
         self._sync(sit, views, dealers)
         plan = Plan(tick=tick, cash=int(me.get("cash") or 0), values=values, dealers=dealers)
+        plan.orders = self._brain_orders()
+        self._order_bounds_now = {(o["dealer"], o["ref"]): int(o["bound"]) for o in plan.orders}
         spend_cap = self._spend_cap(sit, ctx)
         used = (_g(ctx, "budget") or {}).get("messages") or {}
         cautious = bool(_g(ctx, "cautious", False))
@@ -451,6 +597,13 @@ class DealersDomain:
                     limit = 0
             else:
                 limit = value_limit = haggle.sell_min(value)
+            order = self._order_for(plan, v)
+            if order is not None:           # the brain's bounds, never looser than our value-based limit
+                if v.buying:
+                    value_limit = min(value_limit, int(order["bound"]))
+                    limit = min(limit, value_limit)
+                else:
+                    limit = value_limit = max(limit, int(order["bound"]))
             opening = v.opening or self.store.expect_opening(v.dealer, kind, None) or 0
             limit_est = self.store.expect_limit(v.dealer, kind, opening) if opening else 0.0
             patience = self.store.stat(v.dealer, kind, "patience")
@@ -462,10 +615,17 @@ class DealersDomain:
             if v.buying and _avoided(v.item, _g(ctx, "control") or {}):
                 ok, why = False, "we no longer buy this set"
                 force = "we no longer buy this set: close the thread"
-            if not v.buying and not v.is_pack and not v.final and not ok:
+            if order is None and not v.buying and not v.is_pack and not v.final and not ok:
                 up = self._higher_slot_wants(plan, level, values.rarity(v.item) or "", values.set_of(v.item))
                 if up:
                     force = f"keep this spare for {up}: its ladder slots are empty and weigh more"
+            if order is not None and not ok and not v.final and not force:
+                if len(v.our_ticks) >= int(order.get("max_messages") or 4):
+                    force = f"brain order: {order['max_messages']} messages used without a deal inside the bound"
+                elif v.last_ours is None and v.last_theirs is not None and order.get("open"):
+                    p0 = haggle.guard_price(v, order["open"], limit)
+                    if p0 is not None:
+                        move = Move("price", p0, f"brain order: open at {order['open']}")
             if force:
                 move = Move("close", None, force)
             pts = 0.0
@@ -498,9 +658,12 @@ class DealersDomain:
             if self.store.deals_last_hour(d) >= quota:
                 continue
             plan.free.append(d)
+        budget = self._spend_cap(sit, ctx, committed=max(committed, sum(bids.values())))
+        ordered = self._order_candidates(plan, sit, ctx, budget if not cautious else 0)
         if plan.free and plan.slots > 0:
-            budget = self._spend_cap(sit, ctx, committed=max(committed, sum(bids.values())))
-            plan.candidates = self._candidates(plan, sit, ctx, budget if not cautious else 0)
+            taken = {c.dealer for c in ordered}
+            plan.candidates = ordered + [c for c in self._candidates(plan, sit, ctx, budget if not cautious else 0)
+                                         if c.dealer not in taken]
             self._refresh_exact(values, [c.item for c in plan.candidates if c.kind.startswith("buy:")
                                          and not c.kind.endswith("pack")][:3])
         return plan
@@ -685,7 +848,13 @@ class DealersDomain:
                    expected={"points": c.points, "value": c.value, "limit": c.limit, "exp_price": c.exp_price,
                              "exp_capture": c.exp_capture, **({"value_get": c.value} if c.kind.startswith("buy") else {})},
                    priority=c.points)
-        self._sent[a.id] = {"kind": "open_thread", "dealer": c.dealer, "item": c.item}
+        self._sent[a.id] = {"kind": "open_thread", "dealer": c.dealer, "item": c.item,
+                            "order": c.id.startswith("o"), "side": "buy" if c.kind.startswith("buy") else "sell",
+                            "limit": c.limit, "bound": self._order_bounds_now.get((c.dealer, c.item), c.limit)}
+        if c.id.startswith("o"):
+            a.reason = reason or (f"brain order: {'buy' if c.kind.startswith('buy') else 'sell'} {c.item} with "
+                                  f"{c.dealer}, {'cap' if c.kind.startswith('buy') else 'floor'} {c.limit} "
+                                  f"(worth {c.value} to us)")
         return a
 
     def _move_action(self, plan: Plan, info: ThreadInfo, move: Move, source: str, text: str | None = None,
