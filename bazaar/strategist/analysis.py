@@ -6,7 +6,7 @@
     venues(venues, our_id)                        -> traffic and fees per venue, ours compared
     offer_outliers(my_offers, me, record)         -> our open offers far above value/market, or outbid
     offers_to_us(my_offers, me, allies)           -> offers addressed to us, values, last copies, page completion
-    dealer_offers_to_us(my_offers, me, catalog)   -> open offers dealers made to us (threads), terms at our values
+    dealer_offers_to_us(my_offers, me, catalog, feed) -> offers dealers made to us (open and just gone), at our values
     unknown_offers(my_offers, live)               -> our open offers no process of ours posted
     gap(leaderboard)                              -> our negotiating/market split against the leaders
 
@@ -381,8 +381,13 @@ def offers_to_us(my_offers: list[dict], me: dict, allies: dict) -> list[dict]:
     return out
 
 
-def dealer_offers_to_us(my_offers: list[dict], me: dict, catalog: dict | None = None) -> list[dict]:
-    """Open offers a DEALER made to us (inside a thread or standalone), with their terms at our values.
+DEALER_OFFER_RECENT_TICKS = 40      # a dealer's offer lives about 4 ticks: keep the last ones in the picture
+
+
+def dealer_offers_to_us(my_offers: list[dict], me: dict, catalog: dict | None = None,
+                        feed: list[dict] | None = None, now_tick: int | None = None) -> list[dict]:
+    """Offers a DEALER made to us (inside a thread or standalone), with their terms at our values: the open ones,
+    then (from the feed) the latest one of each recent thread that is no longer open, as `state: gone`.
     They are not accept_offers material: the dealers domain accepts inside the thread (use dealer_orders)."""
     import re
     held = {a.get("id"): a for a in me.get("assets") or []}
@@ -402,11 +407,29 @@ def dealer_offers_to_us(my_offers: list[dict], me: dict, catalog: dict | None = 
         return [a.get("ref") for a in side.get("assets") or [] if a.get("ref")] + \
                [t.split(":", 1)[1] for t in side.get("types") or [] if ":" in str(t)]
 
-    out = []
-    for o in my_offers:
+    def from_dealer(o):
         maker = str(o.get("maker") or "")
-        if not maker or re.fullmatch(r"t\d+", maker) or o.get("to") != US or o.get("status", "open") != "open":
-            continue
+        return bool(maker) and not re.fullmatch(r"t\d+", maker) and o.get("to") == US
+
+    open_now = [o for o in my_offers if from_dealer(o) and o.get("status", "open") == "open"]
+    seen = {o.get("id") for o in open_now}
+    gone: dict = {}                                    # thread (or offer id) -> its latest offer no longer open
+    if feed:
+        ticks = [r.get("tick") for r in feed[-400:] if isinstance(r.get("tick"), int)]
+        now_tick = now_tick if now_tick is not None else (max(ticks) if ticks else None)
+        for r in feed:
+            o = (r.get("payload") or {}).get("offer")
+            if r.get("type") != "thread.message" or not isinstance(o, dict) or not from_dealer(o):
+                continue
+            if now_tick is not None and int(r.get("tick") or 0) < now_tick - DEALER_OFFER_RECENT_TICKS:
+                continue
+            gone[o.get("thread") or o.get("id")] = dict(o, seen_tick=r.get("tick"))
+        open_threads = {o.get("thread") for o in open_now if o.get("thread")}
+        gone = {k: o for k, o in gone.items() if o.get("id") not in seen and k not in open_threads}
+    out = []
+    for o in open_now + sorted(gone.values(), key=lambda x: x.get("seen_tick") or 0)[-6:]:
+        maker = str(o.get("maker") or "")
+        is_open = o.get("id") in seen
         g, w = o.get("give") or {}, o.get("want") or {}
         they_give, we_give = refs(g), refs(w)
         get_value = int(g.get("cash") or 0)
@@ -432,14 +455,33 @@ def dealer_offers_to_us(my_offers: list[dict], me: dict, catalog: dict | None = 
                 known = known and v is not None
                 give_value += v or 0
                 gives.append({"ref": ref, "value_to_us": v})
-        out.append({"offer": o.get("id"), "dealer": maker, "thread": o.get("thread"),
-                    "kind": "dealer_offer", "final": bool(o.get("final")), "expires_tick": o.get("expires_tick"),
-                    "they_give": {"cash": g.get("cash") or 0, "cards": gets},
-                    "we_give": {"cash": w.get("cash") or 0, "cards": gives},
-                    "value_gain": round(get_value - give_value, 1) if known else None,
-                    "how_to_take": "not accept_offers: use a dealer_order for this dealer and card so the dealers "
-                                   "domain accepts inside the thread, inside your bound"})
+        row = {"offer": o.get("id"), "dealer": maker, "thread": o.get("thread"),
+               "kind": "dealer_offer", "state": "open" if is_open else "gone",
+               "final": bool(o.get("final")), "expires_tick": o.get("expires_tick"),
+               "they_give": {"cash": g.get("cash") or 0, "cards": gets},
+               "we_give": {"cash": w.get("cash") or 0, "cards": gives},
+               "value_gain": round(get_value - give_value, 1) if known else None,
+               "how_to_take": "not accept_offers: use a dealer_order for this dealer and card so the dealers "
+                              "domain accepts inside the thread, inside your bound"}
+        if not is_open:
+            row["seen_tick"] = o.get("seen_tick")
+            row["how_to_take"] = ("no longer open (expired, replaced or settled): it is this dealer's last price, "
+                                  "use it as the bound of a dealer_order")
+        out.append(row)
     return out
+
+
+def dealer_offer_line(row: dict) -> str:
+    """One dealer offer as a short text for an event: who, thread, what for what, our value and gain."""
+    def side(x):
+        cards = [f"{c.get('ref')} (value {c.get('value_to_us')})" for c in x.get("cards") or []]
+        return " + ".join(([f"{x.get('cash')} P"] if x.get("cash") else []) + cards) or "nothing"
+    gain = row.get("value_gain")
+    return (f"{row.get('dealer')} thread {row.get('thread')}: gives {side(row.get('they_give') or {})} "
+            f"for our {side(row.get('we_give') or {})}"
+            + (f", gain {gain:+.1f}" if gain is not None else ", gain unknown")
+            + (", FINAL" if row.get("final") else "")
+            + (f", expires t{row.get('expires_tick')}" if row.get("expires_tick") else ""))
 
 
 def unknown_offers(my_offers: list[dict], live: Path) -> list[dict]:
@@ -900,7 +942,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venues", lambda: venues(venue_list, our_venue)),
                      ("our_offer_outliers", lambda: offer_outliers(my_offers, me, record)),
                      ("offers_to_us", lambda: offers_to_us(my_offers, me, _allies())),
-                     ("dealer_offers_to_us", lambda: dealer_offers_to_us(my_offers, me, catalog)),
+                     ("dealer_offers_to_us", lambda: dealer_offers_to_us(my_offers, me, catalog, feed)),
                      ("our_stale_offers", lambda: stale_offers(my_offers, feed)),
                      ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live)),
                      ("scoreboard", lambda: scoreboard(record, now)),

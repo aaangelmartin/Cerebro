@@ -407,6 +407,12 @@ class EventDetector:
         venues = _read(rec / "venues.json", {}) or {}
         lb = _read(rec / "leaderboard.json", {}) or {}
         me = _read(rec / "me.json", {}) or {}
+        mine = (lambda m: m.get("offers") if isinstance(m, dict) else m)(_read(rec / "my_offers.json", {}) or {}) or []
+        try:                                           # a dealer's offer is gone in ~4 ticks: its terms go in the event
+            from bazaar.strategist import analysis
+            terms = {r["offer"]: analysis.dealer_offer_line(r) for r in analysis.dealer_offers_to_us(mine, me, catalog)}
+        except Exception:  # noqa: BLE001 - the snapshot must never fail on a value lookup
+            terms = {}
         return {
             "dealers": {p.get("id"): {"name": p.get("name"), "status": p.get("status"), "level": p.get("level"),
                                       "open_to_all": p.get("open_to_all"), "unlock": p.get("unlock")}
@@ -423,9 +429,9 @@ class EventDetector:
                        for v in venues.get("venues") or [] if v.get("venue")},
             "scores": {t.get("team"): float(t.get("score") or 0) for t in lb.get("teams") or [] if t.get("team")},
             "me": {"level": me.get("level"), "unlocked": sorted(me.get("unlocked") or [])},
-            "to_us": {o.get("id"): o.get("maker") for o in (lambda m: m.get("offers") if isinstance(m, dict) else m)(
-                _read(rec / "my_offers.json", {}) or {}) or []
+            "to_us": {o.get("id"): o.get("maker") for o in mine
                       if o.get("to") == "t10" and o.get("maker") != "t10" and o.get("status", "open") == "open"},
+            "to_us_terms": terms,
             "t_hours": (_read(rec / "clock.json", {}) or {}).get("t_hours"),
         }
 
@@ -475,7 +481,8 @@ class EventDetector:
                 ev.append(_e("score", f"{'we' if team == 't10' else team} score {before:.1f} -> {sc:.1f}"))
         for oid, maker in (b.get("to_us") or {}).items():
             if oid not in (a.get("to_us") or {}):
-                ev.append(_e("offer", f"offer #{oid} addressed to us by {maker}"))
+                t = (b.get("to_us_terms") or {}).get(oid)
+                ev.append(_e("offer", f"offer #{oid} addressed to us by {maker}" + (f": {t}" if t else "")))
         if a["me"] != b["me"]:
             ev.append(_e("us", f"our level/unlocks {a['me']} -> {b['me']}"))
         return ev
