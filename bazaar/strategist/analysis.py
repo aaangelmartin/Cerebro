@@ -294,6 +294,53 @@ def offer_outliers(my_offers: list[dict], me: dict, record: Path, limit: int = 1
     return {"outliers": out[:limit], "checked": len(my_offers)}
 
 
+def stale_offers(my_offers: list[dict], feed: list[dict]) -> dict:
+    """Our open offers whose target card has left the market, and rare cards that went into a dealer's hands.
+
+    An offer addressed to team X that wants card R is stale once X has sold its R (a settlement moved an R
+    from X) and has not received another since: cancel it, it only ties up what we give. Epics and legendaries
+    bought by a dealer or collector do not come back: dealers do not resell single cards."""
+    holds: dict[tuple[str, str], int] = {}          # (team, ref) -> net copies moved in (+) or out (-), by feed
+    last_out: dict[tuple[str, str], dict] = {}
+    gone = []
+    for r in feed:
+        if r.get("type") != "settlement":
+            continue
+        p = r.get("payload") or {}
+        for it in p.get("items") or []:
+            ref, frm, to = it.get("ref"), it.get("frm"), it.get("to")
+            if not ref:
+                continue
+            if frm:
+                holds[(frm, ref)] = holds.get((frm, ref), 0) - 1
+                last_out[(frm, ref)] = {"tick": p.get("tick") or r.get("tick"), "to": to, "price": p.get("price")}
+            if to:
+                holds[(to, ref)] = holds.get((to, ref), 0) + 1
+            if p.get("persona") and to == p.get("persona") and it.get("rarity") in ("epic", "legendary"):
+                gone.append({"card": ref, "sold_by": frm, "bought_by": to, "price": p.get("price"),
+                             "tick": p.get("tick") or r.get("tick")})
+    stale = []
+    for o in my_offers:
+        if o.get("maker") != US or o.get("status", "open") != "open" or o.get("thread") is not None:
+            continue
+        to = o.get("to")
+        wants = [t[5:] for t in ((o.get("want") or {}).get("types") or []) if str(t).startswith("card:")]
+        wants += [a.get("ref") for a in ((o.get("want") or {}).get("assets") or []) if a.get("ref")]
+        for ref in wants:
+            sold = last_out.get((to, ref)) if to else None
+            left_market = next((g for g in gone if g["card"] == ref), None)
+            if sold and holds.get((to, ref), 0) < 0:
+                stale.append({"offer": o.get("id"), "wants": ref, "to": to, "action": "cancel",
+                              "why": f"{to} sold its {ref} to {sold.get('to')} at tick {sold.get('tick')}"
+                                     f" for {sold.get('price')}"})
+            elif left_market and not to:
+                stale.append({"offer": o.get("id"), "wants": ref, "to": None, "action": "review",
+                              "why": f"{ref} went to {left_market['bought_by']} at tick {left_market['tick']}"})
+    return {"cancel_these": stale, "rare_cards_gone_to_dealers": gone[-8:],
+            "note": "put every `cancel_these` offer id in cancel_offers; a card in rare_cards_gone_to_dealers "
+                    "is no longer obtainable from that seller"}
+
+
 def offers_to_us(my_offers: list[dict], me: dict, allies: dict) -> list[dict]:
     """Offers other teams addressed to us, with what each side gives at our values and the page completion
     of the sets we would give from (the keep-one rule protects the last copy of LAV/MAL/RET cards)."""
@@ -713,6 +760,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venues", lambda: venues(venue_list, our_venue)),
                      ("our_offer_outliers", lambda: offer_outliers(my_offers, me, record)),
                      ("offers_to_us", lambda: offers_to_us(my_offers, me, _allies())),
+                     ("our_stale_offers", lambda: stale_offers(my_offers, feed)),
                      ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live)),
                      ("scoreboard", lambda: scoreboard(record, now)),
                      ("our_buys_by_set_last_3h", lambda: buy_impact(feed, me, now - 3 * 3600)),
