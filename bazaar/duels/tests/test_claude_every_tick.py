@@ -58,19 +58,36 @@ class NeverBidAgainstOurselves(unittest.TestCase):
         d._needs_llm = lambda v: True                          # even if Claude is asked and wants to concede
         self.assertEqual(d.decide(sit(25), CTX), [])
 
-    def test_single_final_step_keeps_a_good_margin(self):
+    def test_short_finish_three_steps_then_silence(self):
         d = Dom([], use_llm=False)
-        acts = d.fallback(sit(38), CTX)                        # 2 ticks left, rival still silent
-        self.assertEqual(len(acts), 1)
-        price = acts[0].params["price"]
-        self.assertGreater(price - 73, 3)                      # not a slide to the limit (73)
-        self.assertLess(price, 110)
-        sent = [{"tick": 20, "from": "you", "text": "", "price": 110, "days": None},
-                {"tick": 38, "from": "you", "text": "", "price": price, "days": None}]
-        d0 = duel(our=price, msgs=sent)
-        d0["your_offer"]["tick"] = 38
-        again = SimpleNamespace(tick=39, duels=[d0])
-        self.assertEqual(d.fallback(again, CTX), [])           # the final step is sent once
+        self.assertEqual(d.fallback(sit(36), CTX), [])         # 4 ticks left: still silent
+        prices, msgs, our = [], [{"tick": 20, "from": "you", "text": "", "price": 110, "days": None}], 110
+        for tick in (37, 38, 39):                              # 3, 2, 1 ticks left
+            dd = duel(our=our, msgs=list(msgs))
+            acts = d.decide(SimpleNamespace(tick=tick, duels=[dd]), CTX)
+            self.assertEqual(len(acts), 1, tick)
+            our = acts[0].params["price"]
+            self.assertIn(str(our), acts[0].params["text"])
+            prices.append(our)
+            msgs.append({"tick": tick, "from": "you", "text": "", "price": our, "days": None})
+            again = duel(our=our, msgs=list(msgs))
+            self.assertEqual(d.fallback(SimpleNamespace(tick=tick, duels=[again]), CTX), [])   # one per tick
+        self.assertEqual(prices, sorted(prices, reverse=True))
+        self.assertEqual(len(set(prices)), 3)
+        self.assertGreater(prices[-1], 73)                     # never at or past our limit
+        self.assertEqual(d.asked, 0)
+
+    def test_late_answer_is_used_next_tick(self):
+        import concurrent.futures as cf
+        d = Dom([])
+        fut = cf.Future()
+        d._pending[7] = (fut, (21, 1, (80, None)))
+        fut.set_result(Move("offer", price=104, text="104", source="opus"))
+        v = d._views(sit(22, rival=80, msgs=MOVED), CTX)[0]
+        d._pending[7] = (fut, (21, len(v.rival_msgs()), v.rival_offer.key()))
+        acts = d.decide(sit(22, rival=80, msgs=MOVED), CTX)
+        self.assertEqual(d.asked, 0)                           # no new call: last tick's answer
+        self.assertEqual([(a.source, a.params["price"]) for a in acts], [("opus", 104)])
 
     def test_duels_two_also_holds(self):
         d = Dom([], use_llm=False)
@@ -81,6 +98,28 @@ class NeverBidAgainstOurselves(unittest.TestCase):
         acts = d.decide(sit(22, rival=80, msgs=MOVED), CTX)
         self.assertEqual(d.asked, 1)
         self.assertEqual([a.source for a in acts], ["opus"])
+
+
+class RivalRepeatsItsPrice(unittest.TestCase):
+    def test_fallback_holds_when_rival_price_unchanged(self):
+        msgs = [{"tick": 20, "from": "you", "text": "", "price": 110, "days": None},
+                {"tick": 21, "from": "Rival Verde", "text": "", "price": 80, "days": None},
+                {"tick": 22, "from": "you", "text": "", "price": 108, "days": None},
+                {"tick": 23, "from": "Rival Verde", "text": "", "price": 80, "days": None}]
+        d = Dom([], use_llm=False)
+        acts = d.fallback(sit(24, our=108, rival=80, msgs=msgs), CTX)
+        self.assertEqual([a for a in acts if a.kind == "duel_message"], [])
+
+    def test_fallback_steps_after_a_rival_move(self):
+        msgs = [{"tick": 20, "from": "you", "text": "", "price": 110, "days": None},
+                {"tick": 21, "from": "Rival Verde", "text": "", "price": 80, "days": None},
+                {"tick": 22, "from": "you", "text": "", "price": 108, "days": None},
+                {"tick": 23, "from": "Rival Verde", "text": "", "price": 86, "days": None}]
+        d = Dom([], use_llm=False)
+        acts = d.fallback(sit(24, our=108, rival=86, msgs=msgs), CTX)
+        for a in acts:
+            if a.kind == "duel_message":
+                self.assertGreaterEqual(a.params["price"], 108 - 3)     # at most half of the rival's 6 P move
 
 
 class FallbackSaysWhy(unittest.TestCase):

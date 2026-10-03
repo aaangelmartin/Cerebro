@@ -20,7 +20,7 @@ from ..core.types import Action, Outcome
 from ..lab import feedback
 from .model import MIN_SURPLUS, DuelView, parse_duel, points
 from .opponent import OpponentMemory
-from .policy import PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_rule, plan
+from .policy import PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_if_rival_unchanged, hold_rule, plan
 from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
 log = logging.getLogger("bazaar.duels")
@@ -50,6 +50,7 @@ def accept_priority(pts: float, ticks_left: int, n_accepting: int = 1) -> float:
     return round(ACCEPT_PRIORITY + min(pts, ACCEPT_SPAN), 2)
 
 
+LATE_GRACE_S = 10.0          # a duel call may run this long past the tick deadline: its answer is used next tick
 SAFETY_S = 0.25              # stop waiting for Claude this long before the tick deadline
 SHORT_TICK_S = 20.0          # Sunday's 15 s ticks: race Opus against Sonnet
 
@@ -95,6 +96,7 @@ class DuelsDomain:
         # used to fill the ticks in between and conceded faster than Claude had chosen to.
         self.llm_every = llm_every
         self._fails: dict[int, int] = {}           # duel -> Claude failures in a row
+        self._pending: dict[int, tuple] = {}       # duel -> (future, asked key): a call that ran past the tick
         self.max_calls = max_calls          # hard cap on Claude calls (tournament / tests)
         self.calls = 0
         self.cost_usd = 0.0
@@ -184,6 +186,8 @@ class DuelsDomain:
         mv = plan(v, opp)
         mv, notes = guard(v, mv)
         mv, hnotes = hold_rule(v, mv, opp)
+        if not hnotes:
+            mv, hnotes = hold_if_rival_unchanged(v, mv)
         notes = notes + hnotes
         mv.source = "fallback"
         self.last_notes[v.id] = notes
@@ -204,9 +208,8 @@ class DuelsDomain:
         return self._finish(views, {k: b[1] for k, b in bases.items()}, bases)
 
     def _needs_llm(self, v: DuelView) -> bool:
-        if (v.our_offer is not None or v.our_offers()) and not v.unanswered_rival_offer() \
-                and v.ticks_left > PARAMS["FINAL_TICKS"]:
-            return False        # the rival owes us an answer: we hold in silence, nothing for Claude to decide
+        if (v.our_offer is not None or v.our_offers()) and not v.unanswered_rival_offer():
+            return False        # the rival owes us an answer: hold in silence, then the coded short finish
         key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
         last = self._last_ask.get(v.id)
         if last is None or last[1:] != key:
@@ -221,11 +224,12 @@ class DuelsDomain:
         kw = dict(purpose="duels", system=system_blocks(ctx),
                   messages=[{"role": "user", "content": user_message(v, opp, econ, base) + _strategy_text()}],
                   tools=[DUEL_MOVE_TOOL], tool_choice={"type": "auto"},
-                  max_tokens=2000, deadline=(deadline - SAFETY_S) if deadline else None)
+                  max_tokens=2000, deadline=(deadline - SAFETY_S + LATE_GRACE_S) if deadline else None)
         tick_s = getattr(ctx, "tick_seconds", None) if ctx is not None else None
         if isinstance(tick_s, (int, float)) and 0 < tick_s <= SHORT_TICK_S:
             from .. import config
             left = (deadline - SAFETY_S - time.time()) if deadline else None
+            kw["deadline"] = (deadline - SAFETY_S) if deadline else None     # short ticks: no grace
             if left is not None and left < SONNET_ONLY_S:
                 res = llm.ask(model=config.SONNET, **kw)
             elif hasattr(llm, "race") and _opus_rung(llm):
@@ -257,8 +261,19 @@ class DuelsDomain:
 
         futures: dict[cf.Future, DuelView] = {}
         asked: dict[int, tuple] = {}
+        live = {v.id for v in views}
+        for k in [k for k in self._pending if k not in live]:
+            self._pending.pop(k)
         for v in views:
             if not self._needs_llm(v):
+                self._pending.pop(v.id, None)
+                continue
+            key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
+            pend = self._pending.pop(v.id, None)
+            if pend is not None and pend[1][1:] == key and (pend[0].done() or pend[1][0] >= v.tick - 1):
+                # last tick's call ran past the deadline and the rival has not moved since: use its answer
+                asked[v.id] = (v.tick, *key)
+                futures[pend[0]] = v
                 continue
             if self.max_calls is not None and self.calls >= self.max_calls:
                 break
@@ -276,6 +291,7 @@ class DuelsDomain:
         for f, v in futures.items():
             if f not in done:
                 why[v.id] = "Claude did not answer before the tick deadline"
+                self._pending[v.id] = (f, asked[v.id])      # its answer is used next tick
                 continue
             try:
                 mv = f.result()
@@ -328,10 +344,14 @@ class DuelsDomain:
         key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
         hold = (last is not None and last[1:] == key and v.ticks_left > 3 and base.action == "offer"
                 and self._fails.get(v.id, 0) < 2 and v.our_offer is not None)
+        if v.id in self._pending and v.ticks_left > 3 and base.action != "accept" \
+                and self._fails.get(v.id, 0) < 2 and (v.our_offer is not None or v.our_offers()):
+            return Move("wait", reason=f"[hold: {why}] its answer is used next tick instead of a blind step",
+                        source="fallback")
         if hold:
             return Move("wait", reason=f"[hold: {why}] keep Claude's standing offer; the rival has not moved",
                         source="fallback")
-        if base.action != "wait":
+        if base.action != "wait" and not base.reason.startswith("finish vs a silent rival"):
             base.reason = f"[fallback: {why}] {base.reason}"
         return base
 

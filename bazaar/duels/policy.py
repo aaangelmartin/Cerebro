@@ -20,10 +20,11 @@ PARAMS = {
     "PROBE_UNTIL": 9,      # leave one rival offer unanswered for a tick while more ticks than this remain
     "LAST_TICKS": 2,       # in the last ticks take any offer inside our limit
     "TOUGH_TAKE": 1.0,     # tough rival: take their offer when it is worth >= TOUGH_TAKE x q x the midpoint
-    "FINAL_TICKS": 2,      # rival owes us an answer: one final step when this many ticks (or fewer) remain
-    # ... to a price that still keeps this share of the pie (never a slide to our limit). Saturday's silent
-    # rivals took 152/95/84 P: 26 %, 17 % and 29 % of the estimated pie, so 25 % reaches two of those three.
-    "FINAL_SHARE": 0.25,
+    # Rival silent since our offer: hold in silence, then a short finish in the last FINAL_TICKS ticks, one
+    # step per tick, down to these shares of the estimated pie (by ticks left). Saturday's silent rivals
+    # accepted at 26 %, 17 % and 29 % of the pie (duels 2328, 2329, 2354), so the steps end at 17 %.
+    "FINAL_TICKS": 3,
+    "FINAL_STEPS": {3: 0.40, 2: 0.28, 1: 0.17},
 }
 
 
@@ -264,43 +265,84 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
 
 
 def final_u(v: DuelView, opp: dict, p=PARAMS) -> float:
-    """The margin our single final step keeps (a share of the pie, at least MIN_SURPLUS)."""
+    """The margin this tick's finish step keeps: a share of the pie, never below MIN_SURPLUS (so never
+    past our limit)."""
     pie = max(2.0, float(opp.get("pie_estimate") or 2.0))
-    return max(float(MIN_SURPLUS), p["FINAL_SHARE"] * pie)
+    steps = p["FINAL_STEPS"]
+    share = steps.get(int(v.ticks_left), steps[min(steps)] if v.ticks_left < min(steps) else steps[max(steps)])
+    return max(float(MIN_SURPLUS), share * pie)
 
 
 def hold_rule(v: DuelView, mv: Move, opp: dict, p=PARAMS) -> tuple[Move, list[str]]:
     """Never bid against ourselves. While the rival owes us an answer (it has said nothing since our last
     priced offer, or nothing at all), our standing offer stays and we send NOTHING: no repeated messages,
-    no lower prices tick after tick. We speak again only when the rival moves, or once near the deadline
-    with a single final step that still keeps a good margin (FINAL_SHARE of the pie). Applies to Claude's
-    moves and to the code fallback, price-only duels and Duels II alike."""
-    if mv.action != "offer" or v.our_offer is None and not v.our_offers():
-        return mv, []                               # accept / wait / our opening offer: nothing to hold
+    no lower prices tick after tick. We speak again when the rival moves (normal haggling), or in the last
+    FINAL_TICKS ticks with a short finish: one step per tick down the FINAL_STEPS shares of the pie, the
+    prices a silent rival has accepted before. Applies to Claude's moves and to the code fallback,
+    price-only duels and Duels II alike."""
+    if mv.action == "accept" or (v.our_offer is None and not v.our_offers()):
+        return mv, []                               # accept / our opening offer: nothing to hold
     if v.unanswered_rival_offer():
         return mv, []                               # the rival moved: answering is the normal game
     prev = v.our_offer or v.our_offers()[-1]
     u_prev = v.utility(prev.price, prev.days)
+    keep = dict(source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids))
     if v.ticks_left > p["FINAL_TICKS"]:
+        if mv.action == "wait":
+            return mv, []
         return Move("wait", reason="hold: the rival has not answered our offer; no message, no concession",
-                    source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), \
-            ["hold: rival silent since our offer"]
+                    **keep), ["hold: rival silent since our offer"]
     floor = final_u(v, opp, p)
-    final_from = v.tick + v.ticks_left - p["FINAL_TICKS"]            # first tick of the final window
-    if prev.tick is not None and prev.tick >= final_from or u_prev <= floor + 0.5:
-        return Move("wait", reason="hold: the final step is already on the table",
-                    source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), ["hold: final step sent"]
-    try:
-        u = v.utility(float(mv.price), mv.days)
-    except (TypeError, ValueError):
-        u = floor
-    if u < floor:                                    # one final step, never a slide toward our limit
-        days_part = u_days(v, mv.days)
-        price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), floor - days_part))
-        d = f" with delivery in {mv.days} days" if v.uses_days and mv.days is not None else ""
-        return Move("offer", price, mv.days, text=f"My final offer: {price} P{d}. Happy to close now.",
-                    reason=f"{mv.reason} [final step kept at {floor:.0f} margin]", source=mv.source,
-                    econ=mv.econ, lesson_ids=list(mv.lesson_ids)), [f"final step raised to margin {floor:.0f}"]
+    if u_prev <= floor + 0.5:
+        return Move("wait", reason="hold: this tick's finish step is already on the table", **keep), \
+            ["hold: finish step already sent"]
+    days = (mv.days if mv.action == "offer" else None)
+    if v.uses_days and days is None:
+        days = prev.days if prev.days is not None else 0
+    price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), floor - u_days(v, days)))
+    if v.surplus(price) < MIN_SURPLUS:
+        price = price_for(v.role, v.limit, MIN_SURPLUS)
+    if price == prev.price and days == prev.days:
+        return Move("wait", reason="hold: this tick's finish step is already on the table", **keep), []
+    d = f" with delivery in {days} days" if v.uses_days and days is not None else ""
+    last = v.ticks_left <= 1
+    text = (f"My final offer: {price} P{d}. Happy to close now." if last
+            else f"I can do {price} P{d} to close today.")
+    return Move("offer", price, days, text=text,
+                reason=f"finish vs a silent rival: {v.ticks_left} ticks left, keep {floor:.0f} of the pie",
+                expected_points=round(points(v.utility(price, days), v.decay, v.rounds_if_we_send()), 2),
+                **keep), [f"finish step to margin {floor:.0f}"]
+
+
+def hold_if_rival_unchanged(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list[str]]:
+    """Code fallback only: if the rival's price has not changed since our last offer (it repeated the same
+    terms), stepping again is bidding against ourselves. Hold until it moves or the last ticks."""
+    if mv.action != "offer" or v.ticks_left <= p["FINAL_TICKS"] or not v.our_offers():
+        return mv, []
+    ro = v.rival_offers()
+    last_ours = max((m.tick for m in v.messages if m.ours and m.price is not None), default=None)
+    if len(ro) < 2 or last_ours is None:
+        return mv, []
+    before = [o for o in ro if o.tick is not None and o.tick <= last_ours]
+    if before and (ro[-1].price, ro[-1].days) == (before[-1].price, before[-1].days):
+        return Move("wait", reason="hold: the rival repeated its price since our last offer; no new step",
+                    source=mv.source), ["hold: rival price unchanged"]
+    # the rival moved: concede at most half of its last move (min 1 P), never the whole time schedule
+    steps = _their_steps(v)
+    prev = v.our_offer or v.our_offers()[-1]
+    u_prev = v.utility(prev.price, prev.days)
+    cap = max(1.0, 0.5 * max(0.0, steps[-1])) if steps else None
+    if cap is not None:
+        try:
+            u = v.utility(float(mv.price), mv.days)
+        except (TypeError, ValueError):
+            return mv, []
+        if u < u_prev - cap:
+            price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), u_prev - cap - u_days(v, mv.days)))
+            d = f" with delivery in {mv.days} days" if v.uses_days and mv.days is not None else ""
+            return Move("offer", price, mv.days, text=f"Meeting you closer: {price} P{d}.",
+                        reason=f"{mv.reason} [step capped at half the rival's move: {cap:.0f} P]",
+                        source=mv.source), [f"step capped to {cap:.0f} P"]
     return mv, []
 
 
