@@ -455,6 +455,39 @@
     return fmtTime(clockRef.at - (Number(clockRef.tick) - Number(tick)) * (clockRef.tick_seconds || 60) * 1000);
   }
 
+  // tick -> wall time, from the recorder's clock stream (first time each tick was seen).
+  // Beyond the last known tick it extrapolates with tick_seconds; before the first known tick it gives null.
+  let tickMap = { ticks: [], ts: [], tickS: 30 };
+  function setTickMap(rows) {
+    const first = new Map(); let tickS = tickMap.tickS;
+    for (const r of rows || []) {
+      const t = Number(r.tick); const ts = Number(r.ts);
+      if (!isFinite(t) || !isFinite(ts)) continue;
+      if (!first.has(t) || ts < first.get(t)) first.set(t, ts);
+      const d = r.data || {}; if (d.tick_seconds) tickS = Number(d.tick_seconds) || tickS;
+    }
+    const ticks = [...first.keys()].sort((a, b) => a - b);
+    tickMap = { ticks, ts: ticks.map((t) => first.get(t)), tickS };
+  }
+  function tickWall(tick) {
+    const t = Number(tick); if (tick === null || tick === undefined || !isFinite(t)) return null;
+    const { ticks, ts, tickS } = tickMap;
+    if (!ticks.length) {
+      if (clockRef && clockRef.tick != null) return (clockRef.at - (Number(clockRef.tick) - t) * (clockRef.tick_seconds || 60) * 1000) / 1000;
+      return null;
+    }
+    if (t < ticks[0]) return null;
+    let lo = 0, hi = ticks.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ticks[m] <= t) lo = m; else hi = m - 1; }
+    if (ticks[lo] === t) return ts[lo];
+    return ts[lo] + (t - ticks[lo]) * tickS;
+  }
+  // "HH:MM:SS" for a tick (or "t<tick>" when the time is unknown)
+  function tickClock(tick, withSeconds) {
+    const w = tickWall(tick);
+    return w ? fmtTime(w, withSeconds) : (tick == null ? "—" : "t" + tick);
+  }
+
   // ------------------------------------------------------------------ confirm + toast
   function confirm({ title, text, confirmLabel, cancelLabel, danger, body } = {}) {
     return new Promise((resolve) => {
@@ -504,6 +537,6 @@
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, confirm, toast,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, confirm, toast,
   };
 })();

@@ -97,3 +97,14 @@
   .scr-mercado .mk-main, .scr-mercado .mk-side { overflow: visible; }
 }
 @media (max-width: 760px) { .scr-mercado .mk-chats { grid-template-columns: minmax(0, 1fr); } }
+/* historial · conversaciones */
+.scr-mercado .mk-conv { display: flex; flex-direction: column; gap: 8px; }
+.scr-mercado .mk-conv-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.scr-mercado .mk-conv-list > .state, .scr-mercado .mk-conv-list > .mk-more { grid-column: 1 / -1; }
+.scr-mercado .mk-chat-hist .mk-msgs { max-height: 420px; overflow: auto; }
+.scr-mercado .mk-chat-hist .mk-chat-f { display: none; }
+.scr-mercado .mk-chat-hist.mk-st-deal .mk-status { color: var(--ok, #3ddc97); }
+.scr-mercado .mk-chat-hist.mk-st-closed .mk-status { color: var(--ink-3, #6A727B); }
+.scr-mercado .mk-histview { margin-right: 8px; }
+@media (max-width: 1300px) { .scr-mercado .mk-conv-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .scr-mercado .mk-conv-list { grid-template-columns: minmax(0, 1fr); } }

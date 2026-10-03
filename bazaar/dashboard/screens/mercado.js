@@ -25,6 +25,7 @@
   const U = () => window.ui || {};
   const fmtP = (n) => (n == null || !isFinite(n) ? "—" : U().fmtP ? U().fmtP(n) : (Math.round(n * 10) / 10).toLocaleString("es-ES") + " P");
   const pad = (n) => String(n).padStart(2, "0");
+  const tclock = (tick) => (U().tickClock ? U().tickClock(tick) : "t" + (tick != null ? tick : "?"));
   const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   function fmtTs(ts, withDay) {
     if (!ts) return "—";
@@ -144,7 +145,8 @@
   const S = {
     feed: [], lastSeq: null, feedErr: null,
     live: { scope: "todos", filter: null },
-    hist: { rows: [], lastSeq: 0, loading: false, done: false, err: null, page: 0, f: { type: "", team: "", card: "", venue: "", from: "", to: "", q: "", us: false } },
+    conv: { cache: {}, list: [], err: null, f: { kind: "", status: "", q: "" }, limit: 24, at: 0 },
+    hist: { view: "eventos", rows: [], lastSeq: 0, loading: false, done: false, err: null, page: 0, f: { type: "", team: "", card: "", venue: "", from: "", to: "", q: "", us: false } },
   };
 
   async function pullFeedTail() {
@@ -188,11 +190,12 @@
     }
     return { limit, theirs };
   }
-  function renderChat(th, decs, dealerNames) {
+  function renderChat(th, decs, dealerNames, opts) {
+    const full = !!(opts && opts.full);
     const tp = th.topic || {};
     const goal = tp.sell ? "venta" : tp.buy ? "compra" : "dealer";
-    const isDealer = th.kind !== "team";
     const who = th.with === US ? th.team : th.with;
+    const isDealer = th.kind !== "team" && !/^t\d+$/.test(who || "");
     const msgs = arr(th.messages).slice().sort((a, b) => (a.tick || 0) - (b.tick || 0) || (a.id || 0) - (b.id || 0));
     const ours = msgs.filter((m) => m.sender === US && m.offer).map((m) => m.offer);
     const theirs = msgs.filter((m) => m.sender !== US && m.offer).map((m) => m.offer);
@@ -221,13 +224,13 @@
         h("span", { class: "mk-status" + (anyFinal ? " is-final" : "") }, status)),
       h("div", { class: "mk-chat-sub" },
         h("span", null, `${goal === "venta" ? "Vendemos" : goal === "compra" ? "Compramos" : ""} ${item}`),
-        h("span", { class: "mk-muted" }, `#${th.id} · ${msgs.length} mensajes`)),
+        h("span", { class: "mk-muted" }, `#${th.id} · ${msgs.length} mensajes` + (msgs.length ? ` · ${tclock(msgs[0].tick)}–${tclock(msgs[msgs.length - 1].tick)}` : ""))),
       h("div", { class: "mk-chat-bar" }, bar, h("span", { class: "mk-lims" }, `lím ${lim.limit != null ? lim.limit : "?"} · ${isDealer ? "él" : "ellos"} ~${lim.theirs != null ? lim.theirs : theirsP != null ? theirsP : "?"}`)),
-      h("div", { class: "mk-msgs" }, msgs.length ? msgs.slice(-8).map((m) => {
+      h("div", { class: "mk-msgs" }, msgs.length ? (full ? msgs : msgs.slice(-8)).map((m) => {
         const us = m.sender === US;
         return h("div", { class: "mk-msg" + (us ? " is-us" : "") + (m.offer && m.offer.final ? " is-final" : "") },
           h("div", { class: "mk-msg-h" }, h("span", null, us ? "Nosotros" : dealerNames[m.sender] || teamName(m.sender)),
-            h("b", null, m.offer ? fmtP(offerCash(m.offer)) : ""), h("span", { class: "mk-muted" }, "t" + (m.tick != null ? m.tick : "?") + (m.offer && m.offer.status && m.offer.status !== "open" ? " · " + m.offer.status : ""))),
+            h("b", null, m.offer ? fmtP(offerCash(m.offer)) : ""), h("span", { class: "mk-muted", title: "tick " + (m.tick != null ? m.tick : "?") }, tclock(m.tick) + (m.offer && m.offer.status && m.offer.status !== "open" ? " · " + m.offer.status : ""))),
           h("div", { class: "mk-msg-t" }, m.text || ""));
       }) : stateBox("empty", "Sin mensajes todavía.")),
       h("footer", { class: "mk-chat-f" },
@@ -297,7 +300,7 @@
     const offerRow = (o, dec) => h("div", { class: "mk-off mk-t-" + offerKind(o) },
       h("div", { class: "mk-tape-a" }, typeChip(offerKind(o)), h("span", null, offerText(o)), h("span", { class: "mk-grow" }),
         h("span", { class: "mk-muted" }, o.venue || (o.thread ? "chat #" + o.thread : o.to ? "a " + teamName(o.to) : ""))),
-      h("div", { class: "mk-tape-b" }, h("span", null, `#${o.id} · ${o.status || "open"} · vence en ${ticksLeft(o, ctx.clock)}`), o.final ? h("span", { class: "mk-final" }, "final") : null, dec ? h("span", { class: "mk-muted" }, " · bot: " + dec) : null));
+      h("div", { class: "mk-tape-b" }, h("span", null, `#${o.id} · ${o.created_tick != null ? tclock(o.created_tick) + " · " : ""}${o.status || "open"} · vence en ${ticksLeft(o, ctx.clock)}`), o.final ? h("span", { class: "mk-final" }, "final") : null, dec ? h("span", { class: "mk-muted" }, " · bot: " + dec) : null));
 
     side.replaceChildren(seg, fb, tape,
       h("div", { class: "mk-sec" }, `NUESTRAS OFERTAS ABIERTAS · ${mine.length}`),
@@ -428,6 +431,55 @@
     a.setAttribute("download", "bazaar-historial.csv");
     S.hist.csv = csv;
   }
+  // ---------- historial: every conversation we had, full transcripts ----------
+  const TH_STATUS = { deal: "acuerdo", closed: "cerrada", open: "abierta", expired: "caducada" };
+  async function pullConversations() {
+    const api = window.api, C = S.conv;
+    if (Date.now() - C.at < 4000 && C.list.length) return;
+    C.at = Date.now();
+    const r = await safe(() => api.recThreads());
+    if (!r.ok) { C.err = r.err; return; }
+    C.err = null;
+    C.list = arr(r.v).slice().sort((a, b) => (b.last_change_tick || b.created_tick || 0) - (a.last_change_tick || a.created_tick || 0) || b.id - a.id);
+    const want = convFiltered().slice(0, C.limit);
+    const need = want.filter((t) => { const c = C.cache[t.id]; return !c || c.count !== t.message_count || (t.status === "open" && Date.now() - c.at > 4000); });
+    const got = await Promise.all(need.map((t) => safe(() => api.recThread(t.id))));
+    got.forEach((g, i) => { if (g.ok) C.cache[need[i].id] = { count: need[i].message_count, at: Date.now(), data: { ...need[i], ...(g.v.thread || g.v) } }; });
+  }
+  function convFiltered() {
+    const f = S.conv.f, q = f.q.toLowerCase();
+    return S.conv.list.filter((t) => {
+      const other = t.with === US ? t.team : t.with;
+      const isDealer = t.kind !== "team" && !/^t\d+$/.test(other || "");
+      if (f.kind === "dealer" && !isDealer) return false;
+      if (f.kind === "equipo" && isDealer) return false;
+      if (f.status && t.status !== f.status) return false;
+      if (q && !`${t.with} ${t.team} ${t.item || ""} ${JSON.stringify(t.topic || {})} #${t.id}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+  function renderConversations(root, dealerNames) {
+    const host = root.querySelector(".mk-conv-list"); if (!host) return;
+    const C = S.conv;
+    if (C.err && !C.list.length) { host.replaceChildren(stateBox("error", C.err)); return; }
+    if (!C.list.length) { host.replaceChildren(stateBox("loading")); return; }
+    const rows = convFiltered();
+    const counts = {}; for (const t of C.list) counts[t.status] = (counts[t.status] || 0) + 1;
+    root.querySelector(".mk-conv-sum").textContent = `${rows.length} de ${C.list.length} conversaciones · ` +
+      Object.entries(counts).map(([k, v]) => `${v} ${TH_STATUS[k] || k}`).join(" · ");
+    const shown = rows.slice(0, C.limit);
+    const cards = shown.map((t) => {
+      const c = C.cache[t.id];
+      const card = renderChat(c ? c.data : t, [], dealerNames, { full: true });
+      card.classList.add("mk-chat-hist", "mk-st-" + (t.status || "open"));
+      const st = card.querySelector(".mk-status"); if (st) st.textContent = TH_STATUS[t.status] || t.status || "";
+      return card;
+    });
+    host.replaceChildren(...(cards.length ? cards : [stateBox("empty", "Ninguna conversación coincide con los filtros.")]),
+      rows.length > C.limit ? h("button", { class: "mk-btn mk-more", onclick: () => { C.limit += 24; C.at = 0; window.Screens.mercado.refresh(root, null, "historial"); } }, `Mostrar más (${rows.length - C.limit})`) : null);
+  }
+  let DEALER_NAMES = {};
+
   function mountHistory(root) {
     const f = S.hist.f;
     const upd = (k) => (ev) => { f[k] = ev.target.type === "checkbox" ? ev.target.checked : ev.target.value; S.hist.page = 0; renderHistory(root); };
@@ -441,9 +493,19 @@
       ev.target.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { ev.target.textContent = "Copiar CSV"; }, 1800);
     } }, "Copiar CSV");
     root.replaceChildren(h("div", { class: "scr-mercado is-hist" },
-      h("div", { class: "mk-head" }, h("h1", null, "Mercado · Historial"), h("span", { class: "mk-muted" }, "todos los eventos del feed desde el viernes"),
+      h("div", { class: "mk-head" }, h("h1", null, "Mercado · Historial"), h("span", { class: "mk-muted" }, S.hist.view === "conv" ? "todas nuestras conversaciones, completas" : "todos los eventos del feed desde el viernes"),
         h("span", { class: "mk-grow" }),
+        h("div", { class: "mk-seg mk-histview" }, ["eventos", "conv"].map((v) => h("button", { class: S.hist.view === v ? "on" : "", "data-v": v, onclick: () => { S.hist.view = v; mountHistory(root); window.Screens.mercado.refresh(root, null, "historial"); } }, v === "eventos" ? "Eventos" : "Conversaciones"))),
         h("div", { class: "mk-seg" }, h("button", { onclick: () => { location.hash = "#mercado"; } }, "● En vivo"), h("button", { class: "on" }, "Historial"))),
+      S.hist.view === "conv" ? h("div", { class: "mk-conv" },
+        h("div", { class: "mk-hfilters" },
+          h("select", { class: "mk-input", onchange: (ev) => { S.conv.f.kind = ev.target.value; S.conv.at = 0; window.Screens.mercado.refresh(root, null, "historial"); } },
+            [["", "Con: todos"], ["dealer", "Dealers"], ["equipo", "Equipos"]].map(([v, l]) => h("option", { value: v, selected: S.conv.f.kind === v ? "selected" : null }, l))),
+          h("select", { class: "mk-input", onchange: (ev) => { S.conv.f.status = ev.target.value; S.conv.at = 0; window.Screens.mercado.refresh(root, null, "historial"); } },
+            [["", "Estado: todos"], ["deal", "Con acuerdo"], ["closed", "Cerradas sin acuerdo"], ["open", "Abiertas"]].map(([v, l]) => h("option", { value: v, selected: S.conv.f.status === v ? "selected" : null }, l))),
+          h("input", { class: "mk-input mk-q", placeholder: "Buscar dealer, equipo, carta…", value: S.conv.f.q, oninput: (ev) => { S.conv.f.q = ev.target.value; S.conv.at = 0; renderConversations(root, DEALER_NAMES); } })),
+        h("div", { class: "mk-conv-sum mk-muted" }),
+        h("div", { class: "mk-conv-list" }, stateBox("loading"))) :
       h("div", { class: "mk-hist" },
         h("div", { class: "mk-hfilters" },
           h("select", { class: "mk-input", onchange: upd("type") }, h("option", { value: "" }, "Tipo: todos"), TYPES.map((t) => h("option", { value: t }, TYPE_LABEL[t]))),
@@ -474,18 +536,22 @@
   window.Screens["mercado"] = {
     title: "Mercado",
     mount(root, params) {
-      S.mode = params === "historial" ? "hist" : "live";
+      S.mode = params === "historial" || params === "conversaciones" ? "hist" : "live";
+      if (params === "conversaciones") S.hist.view = "conv";
       S.live.filter = null;
       if (S.mode === "hist") mountHistory(root); else mountLive(root);
     },
     async refresh(root, data, params) {
-      const mode = params === "historial" ? "hist" : "live";
+      const mode = params === "historial" || params === "conversaciones" ? "hist" : "live";
       if (mode !== S.mode) { this.mount(root, params); }
       try {
-        if (S.mode === "hist") { await pullHistory(); renderHistory(root); }
+        if (S.mode === "hist" && S.hist.view === "conv") {
+          if (!Object.keys(DEALER_NAMES).length) { const d = await safe(() => window.api.rec("dealers")); if (d.ok) for (const p of arr(d.v.personas || d.v)) if (p && p.id) DEALER_NAMES[p.id] = p.name; }
+          await pullConversations(); renderConversations(root, DEALER_NAMES);
+        } else if (S.mode === "hist") { await pullHistory(); renderHistory(root); }
         else await refreshLive(root, data);
       } catch (e) {
-        const host = root.querySelector(S.mode === "hist" ? ".mk-hist-table" : ".mk-chats");
+        const host = root.querySelector(S.mode === "hist" ? ".mk-hist-table, .mk-conv-list" : ".mk-chats");
         if (host) host.replaceChildren(stateBox("error", e));
       }
     },

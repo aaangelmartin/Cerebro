@@ -114,6 +114,7 @@
       S.data = data; S.lastOk = Date.now(); S.apiDown = false;
       window.ui.setClock(data.clock, data.now);
       await loadRec(false);
+      loadTickMap();
       renderTop(data);
       renderStatus(data);
       renderBanners(data);
@@ -123,6 +124,13 @@
       renderBanners(S.data);
     } finally { S.inflight = false; }
     pollNotifications();
+  }
+  let tickMapAt = 0;
+  async function loadTickMap() {
+    if (Date.now() - tickMapAt < 30000) return;
+    tickMapAt = Date.now();
+    try { const r = await api.recStream("clock", { since_seq: 0, limit: 5000 }); window.ui.setTickMap((r && r.rows) || []); }
+    catch (e) { tickMapAt = 0; }
   }
   async function loadRec(force) {
     const now = Date.now();

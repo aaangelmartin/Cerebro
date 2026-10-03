@@ -29,6 +29,7 @@
   const num = (x) => (x === null || x === undefined || x === "" || isNaN(+x) ? null : +x);
   const fmtNum = (n, d = 0) => (n === null || n === undefined ? "—" : U().fmtNum ? U().fmtNum(n, d) : (+n).toFixed(d).replace(".", ","));
   const fmtP = (n) => (n === null || n === undefined ? "—" : U().fmtP ? U().fmtP(n) : fmtNum(n, 0) + " P");
+  const tclock = (tick) => (U().tickClock ? U().tickClock(tick) : "t" + (tick ?? "?"));
   const pts = (n) => (n === null || n === undefined ? "—" : (n > 0 ? "+" : "") + fmtNum(n, 1));
   const items = (r, ...keys) => {
     if (Array.isArray(r)) return r;
@@ -89,7 +90,8 @@
       if (d.role === "buyer" && theirs <= limit) zone = [theirs, limit];
     }
     const closed = d.status === "deal" ? { price: num(d.price) } : null;
-    return { min: lo, max: hi, limit, ours, theirs, zone, closed, noDeal: d.status === "no_deal", compact: !!compact };
+    const history = (d.messages || []).filter((m) => num(m.price) !== null).map((m) => ({ who: isOurs(m) ? "ours" : "theirs", price: num(m.price) }));
+    return { min: lo, max: hi, limit, ours, theirs, zone, closed, history, noDeal: d.status === "no_deal", compact: !!compact };
   }
   const priceBar = (d, compact) => {
     const cfg = barCfg(d, compact);
@@ -123,7 +125,7 @@
       const who = ours ? "Team 10 · Nosotros" : (d.rival || "Rival");
       const fig = [num(m.price) !== null ? fmtP(m.price) : null, num(m.days) !== null ? m.days + " d" : null].filter(Boolean).join(" · ");
       const head = h("div", { class: "dl-msg-h" },
-        h("span", { class: "dl-who" }, who), h("span", { class: "dl-fig" }, fig, round ? h("small", {}, " r" + round) : null, h("small", { class: "dl-muted" }, " t" + (m.tick ?? "?"))));
+        h("span", { class: "dl-who" }, who), h("span", { class: "dl-fig" }, fig, round ? h("small", {}, " r" + round) : null, h("small", { class: "dl-muted", title: "tick " + (m.tick ?? "?") }, " " + tclock(m.tick))));
       const msg = h("div", { class: "dl-msg " + (ours ? "us" : "them") }, head, h("div", { class: "dl-txt" }, m.text || ""));
       if (withReason && ours) {
         const dec = decsForDuel.find((x) => {
@@ -225,6 +227,31 @@
         : comp("empty", "Aún no hay duelos cerrados.") || h("div", { class: "dl-muted" }, "Aún no hay duelos cerrados."));
   }
 
+  // big scoreboard over every duel we have played (all sessions, from the recorder)
+  function scoreboard(ctx) {
+    const all = ctx.heads;
+    const live = all.filter((d) => !d.status || d.status === "live");
+    const done = all.filter((d) => d.status && d.status !== "live");
+    const deals = done.filter((d) => d.status === "deal");
+    const won = deals.filter((d) => (num(d.result) || 0) > 0);
+    const lost = done.filter((d) => (num(d.result) || 0) < 0);
+    const even = deals.filter((d) => (num(d.result) || 0) === 0);
+    const noDeal = done.filter((d) => d.status !== "deal");
+    const points = done.reduce((s, d) => s + (num(d.result) || 0), 0);
+    const cell = (label, value, tone, sub) => h("div", { class: "dl-sc " + (tone ? "tone-" + tone : "") },
+      h("span", { class: "dl-sc-l" }, label), h("b", { class: "dl-sc-v dl-mono" }, value), sub ? h("span", { class: "dl-sc-s" }, sub) : null);
+    const pct = (n) => (done.length ? Math.round((n / done.length) * 100) + " %" : "");
+    return h("div", { class: "dl-score" },
+      cell("Jugados", String(all.length), "", `${done.length} terminados`),
+      cell("Ganados", String(won.length), "ok", pct(won.length)),
+      cell("Perdidos", String(lost.length), "bad", lost.length ? pct(lost.length) : "fuera de límite"),
+      cell("Sin acuerdo", String(noDeal.length), "warn", pct(noDeal.length)),
+      even.length ? cell("Acuerdo a 0", String(even.length), "", pct(even.length)) : null,
+      cell("En juego", String(live.length), "live", live.length ? "ahora" : "ninguno"),
+      cell("Puntos", pts(points), points > 0 ? "ok" : points < 0 ? "bad" : "", "de duelos"),
+      cell("Media", pts(done.length ? points / done.length : null), "", "por duelo"));
+  }
+
   function tapePanel(ctx) {
     const rows = ctx.tape.filter((e) => S.team !== "nosotros" || ctx.ourIds.has(+e.payload.duel));
     const box = h("div", { class: "dl-tape" }, h("div", { class: "dl-sec" }, "Cierres de duelo · todo el juego"));
@@ -238,7 +265,7 @@
         h("div", { class: "dl-row" }, comp("typeChip", "duelo", "Duelo") || "Duelo", ours ? comp("teamTag", "t10", { us: true }) || h("b", {}, "Team 10 · Nosotros") : h("span", { class: "dl-muted" }, "#" + p.duel),
           h("span", { class: "dl-sp" }), rec ? h("b", { class: "dl-mono " + ((num(rec.result) || 0) > 0 ? "dl-ok" : "dl-muted") }, pts(num(rec.result))) : null),
         h("div", { class: "dl-row" }, h("span", {}, (p.item || "") + (rec ? " · vs " + (rec.rival || "") : "")), h("span", { class: "dl-sp" }),
-          h("span", { class: "dl-mono dl-muted" }, (p.status === "deal" ? (rec && rec.price != null ? fmtP(rec.price) : "acuerdo") : "sin acuerdo") + " · t" + (e.tick ?? ""))),
+          h("span", { class: "dl-mono dl-muted" }, (p.status === "deal" ? (rec && rec.price != null ? fmtP(rec.price) : "acuerdo") : "sin acuerdo") + " · " + tclock(e.tick))),
       ];
       const onClick = ours ? () => { location.hash = "#duelos/" + p.duel; } : null;
       const r = comp("row", { type: "duelo", cells: [h("div", {}, ...cells)], cols: "1fr", onClick, us: ours }) || h("div", { class: "dl-trow" }, ...cells);
@@ -301,7 +328,7 @@
       const v = dec.verdict || {};
       const status = !v.ok ? "vetado" : dec.dry_run ? "sin_enviar" : o ? ({ sent: "enviado", deal: "cerrado", no_deal: "sin_acuerdo", refused: "rechazado", error: "rechazado", vetoed: "vetado", expired: "sin_acuerdo" }[o.status] || "pendiente") : "pendiente";
       const card = h("div", { class: "dl-dec" },
-        h("div", { class: "dl-row" }, h("span", { class: "dl-mono dl-muted" }, "t" + (dec.tick ?? "?")), h("b", {}, moveText(dec)), h("span", { class: "dl-sp" }),
+        h("div", { class: "dl-row" }, h("span", { class: "dl-mono dl-muted", title: "tick " + (dec.tick ?? "?") }, tclock(dec.tick)), h("b", {}, moveText(dec)), h("span", { class: "dl-sp" }),
           srcTag(sourceOf(dec, ctx.councilByAction)), comp("resultChip", status) || status),
         h("div", {}, a.reason || ""),
         !v.ok && (v.rail || v.detail) ? h("div", { class: "dl-bad" }, `Rail ${v.rail}: ${v.detail}`) : null,
@@ -320,7 +347,7 @@
       body.append(h("div", { class: "dl-out" },
         h("div", {}, h("small", {}, `Si aceptamos ${fmtP(th)}`), h("b", { class: "dl-mono " + ((marg || 0) > 0 ? "dl-ok" : "dl-bad") }, marg === null ? "—" : pts(marg * Math.pow(1 - dec, rr)) + " pts")),
         h("div", {}, h("small", {}, "Otra ronda"), h("b", { class: "dl-mono" }, `r${rr + 1} · ×${fmtNum(Math.pow(1 - dec, rr + 1), 2)}`)),
-        h("div", {}, h("small", {}, `Sin acuerdo (t${d.deadline_tick ?? "?"})`), h("b", { class: "dl-mono dl-bad" }, "0 pts"))));
+        h("div", {}, h("small", {}, `Sin acuerdo (${tclock(d.deadline_tick)})`), h("b", { class: "dl-mono dl-bad" }, "0 pts"))));
     } else {
       body.append(h("div", { class: "dl-out" },
         h("div", {}, h("small", {}, "Estado"), h("b", {}, d.status === "deal" ? "Acuerdo" : "Sin acuerdo")),
@@ -401,6 +428,8 @@
     }
     for (const d of list) grid.append(paneFor(d, ctx));
     grid.querySelectorAll(".dl-chat").forEach((c) => { const s = S.scrolls[c.dataset.duel]; c.scrollTop = s === undefined || s === "end" ? c.scrollHeight : s; });
+    const sc = root.querySelector(".dl-scorehost");
+    if (sc) sc.replaceChildren(scoreboard(ctx));
     const side = root.querySelector(".dl-side-body");
     side.replaceChildren(resultsPanel(ctx), tapePanel(ctx));
     // drawer
@@ -439,7 +468,7 @@
       drawSegs();
       const fb = S.fb = comp("filterBar", { types: ["compra", "venta"], team: false, search: true, onChange: (st) => { S.filter = st; refreshNow(); } });
       const side = h("aside", { class: "dl-side" }, segs, fb ? h("div", { class: "dl-fb" }, fb) : null, h("div", { class: "dl-side-body" }, window.ui.loading()));
-      root.append(h("div", { class: "dl-layout" }, h("section", { class: "dl-main" }, titleBar, grid), side));
+      root.append(h("div", { class: "dl-layout" }, h("section", { class: "dl-main" }, titleBar, h("div", { class: "dl-scorehost" }), grid), side));
       let lastData = null;
       refreshNow = () => this.refresh(root, lastData, S.params);
       const orig = this.refresh;
