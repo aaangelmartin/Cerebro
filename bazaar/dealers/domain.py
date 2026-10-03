@@ -364,8 +364,8 @@ class DealersDomain:
                 limit = min(int(o["bound"]), cap, budget)
                 if limit < 1:
                     self._note_order(o, "skipped", f"cap {o['bound']} leaves nothing: our max is "
-                                                   f"{min(cap, budget)} P (value {round(value, 1)}, cash to spend {budget})",
-                                     plan.tick)
+                                                   f"{min(cap, budget)} P (value {round(value, 1)}, cash to spend "
+                                                   f"{budget}: {self._spend_formula(sit, ctx)})", plan.tick)
                     continue
                 kind = f"buy:{rarity}"
                 topic = {"buy": {"card": ref}}
@@ -685,6 +685,18 @@ class DealersDomain:
         from bazaar.core.context import market_committed
         avail -= market_committed(sit)
         return max(0, min(avail - max(0, int(committed)), per_deal))
+
+    def _spend_formula(self, sit, ctx) -> str:
+        """The numbers behind _spend_cap, for a skip reason the brain can act on."""
+        control = _g(ctx, "control") or {}
+        b = _g(ctx, "budget") or {}
+        from bazaar.core.context import dealer_committed, market_committed
+        cash = int((_g(sit, "me") or {}).get("cash") or 0)
+        reserve = int(control.get("cash_reserve", config.CASH_RESERVE))
+        hour_cap = b.get("spend_hour_cap", control.get("max_spend_per_hour", config.MAX_SPEND_PER_HOUR))
+        return (f"min(cash {cash} - reserve {reserve}, hour left {b.get('spend_hour_left')} of {hour_cap}) "
+                f"- our open market bids {market_committed(sit)} - our open dealer bids {dealer_committed(sit)}, "
+                f"per deal {int(control.get('max_spend_per_deal', config.MAX_SPEND_PER_DEAL))}")
 
     @staticmethod
     def _near_limit(v: ThreadView, limit: int) -> bool:

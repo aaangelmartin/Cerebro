@@ -317,7 +317,8 @@ class Runner:
         self.values.refresh(sit.me)
         sit.values = self.values.values
         return TickContext(value=self.values, tick=sit.tick, day=sit.day, deadline=sit.deadline, lessons=self.lessons, llm=self.llm,
-                           ledger=self.ledger, budget=self.budget.for_tick(sit.tick, sit.limits, self.now()),
+                           ledger=self.ledger, budget=self.budget.for_tick(sit.tick, sit.limits, self.now(),
+                                                                       hour_cap=control.get("max_spend_per_hour")),
                            control=control, tick_seconds=sit.tick_seconds, tick_start=sit.tick_start,
                            cautious=sit.tick <= self.cautious_until, llm_ok=sit.tick > self.flood_until)
 
@@ -538,7 +539,8 @@ class Runner:
                     self._ledger("outcome", outcome, a)
                 self._observe(a, outcome)
                 self.budget.record(a, outcome.status, self.now())
-                ctx.budget = self.budget.for_tick(sit.tick, sit.limits, self.now())   # rails see it at once
+                ctx.budget = self.budget.for_tick(sit.tick, sit.limits, self.now(),   # rails see it at once
+                                                  hour_cap=(ctx.control or {}).get("max_spend_per_hour"))
                 self._count_refusal(a.domain, outcome.status, sit.tick, (outcome.response or {}).get("error"))
                 if outcome.status in ("sent", "deal"):
                     self.recent.append((sit.tick, a, outcome.status))
