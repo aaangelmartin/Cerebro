@@ -1,6 +1,6 @@
 # El cerebro · replay eval
 
-Updated 2026-10-03 · code-side: deterministic run of all 11 scenarios (no API calls) · brain plan: real brain prompt (Opus 5.5, medium, purpose brain_eval). Eval spend: 2.81 $ earlier + about 1.48 $ in this run (cap 1.60 $ approved by the user).
+Updated 2026-10-03 · code-side: deterministic run of all 11 scenarios (no API calls) · brain plan: real brain prompt (Opus 5.5, medium, purpose brain_eval). Eval spend: 2.81 $ + 1.48 $ earlier + 0.99 $ for the last 4 scenarios after the timeout fix (cap 1.00 $ approved by the user).
 
 Each scenario rebuilds the game at that tick from the recorder streams and the bot's logs, builds the brain's picture with the real `Strategist.picture()`, checks the facts and detectors (code-side), and with `--live-llm` asks the real brain prompt for a plan and grades it. The brain is given a neutral reason ("every 4 ticks" / "N game event(s)"), never the scenario title.
 
@@ -9,23 +9,22 @@ Each scenario rebuilds the game at that tick from the recorder streams and the b
 | key_b | 197 | finding on key B + fallback | 3/3 PASS | 2/2 PASS |
 | cash_locked | 232 | cancel the outbid bids, free the cash | 3/3 PASS | 2/2 PASS |
 | announce_429 | 215 | back off / announce at most every 20 ticks | 2/2 PASS | 2/2 PASS |
-| goal_freeze | 240 | allow small value deals while saving | 3/3 PASS | not graded: API timeout at 60 s |
+| goal_freeze | 240 | allow small value deals while saving | 3/3 PASS | 2/2 PASS (60 s) |
 | team5_ret01 | 273 | accept #4167 | 3/3 PASS | 1/1 PASS |
 | outlier_asks | 268 | cancel #4117/#4144 and flag the unknown actor | 3/3 PASS | 2/2 PASS |
 | ret_no_score | 300 | avoid_buy_sets RET | 2/2 PASS | 1/1 PASS |
-| mal_goals | 230 | goals MAL-09/10 at <= 90 P | 3/3 PASS | not graded: API timeout at 60 s |
-| t12_carmen | 230 | rival analysis of Team 12 | 3/3 PASS | not graded: API timeout at 60 s |
-| new_dealer | 263 | re-plan for Pilar: unlock path | 2/2 PASS | not graded: API timeout at 60 s |
+| mal_goals | 230 | goals MAL-09/10 at <= 90 P | 3/3 PASS | 2/2 PASS (61 s) |
+| t12_carmen | 230 | rival analysis of Team 12 | 3/3 PASS | 2/2 PASS (65 s) |
+| new_dealer | 263 | re-plan for Pilar: unlock path | 2/2 PASS | 2/2 PASS (81 s; one stale accept_offers id caught by the sanity check) |
 | probe_refused | 212 | finding on the broker probe bug | 2/2 PASS | 1/1 PASS |
 
-**Result:** all 11 detections pass in code. 7 of 11 brain decisions are graded and all 7 are correct. 4 (goal_freeze, mal_goals, t12_carmen, new_dealer) could not be graded: each request hit the 60 s API timeout (Opus at medium effort takes 50-60 s on this prompt) and the approved budget was used up by the re-asks and the 3 successful plans, so they were not retried.
+**Result:** all 11 detections pass in code, and all 11 brain decisions are graded and correct. The last 4 (goal_freeze, mal_goals, t12_carmen, new_dealer) were run after the per-call timeout for `strategy`/`brain_eval` went from 60 s to 150 s (commit 253989f); they took 60-81 s, so the old limit would have cut them.
 
-**Avoid-set contradictions:** gone. The 3 new plans (key_b, probe_refused, announce_429) passed the code-side sanity check with no validation errors (avoid_buy_sets = LAT). In the earlier run every plan had "post_offers wants LAT-07/SAL-10/... a set we avoid".
+**Avoid-set contradictions:** gone. No new plan had an avoid-set error. The only sanity-check error left was in new_dealer: `accept_offers 4078` was not an open offer addressed to us at that tick; the code-side check rejects it and the repair step drops it.
 
 ## What the brain side still needs
 
-1. **Timeout for the brain's own calls.** The eval runner uses the client default `DEFAULT_TIMEOUT_S = 60` (`bazaar/llm/client.py`), and 4 of 7 brain plans timed out at 60 s (the successful ones took 49-59 s). The live strategist did not hit this (47 ok plans in the last 2 h, its 3 errors were key B 400/401), but the margin is thin. Fix: pass a per-purpose timeout of about 150 s for purpose `strategy` / `brain_eval` (council can stay at 60 s), and in the eval runner give `ask()` a deadline of 150 s.
-2. Re-run the 4 ungraded scenarios once the timeout is raised (about 0.9 $).
+Nothing blocking. Watch item: plans now take 60-81 s, under the 150 s per-call limit and the strategist's 200 s deadline.
 
 ## key_b · Key B answers every call with 400 (no workspace); bot falls back to code
 Tick 197 · expected: finding on key B + fallback
