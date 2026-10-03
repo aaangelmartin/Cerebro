@@ -25,6 +25,13 @@ EFFORT = {config.OPUS: "low", config.SONNET: "low"}    # output_config.effort pe
 # for the tool and callers must handle a text-only answer.
 NO_FORCED_TOOL = {config.OPUS, config.SONNET}
 DEFAULT_TIMEOUT_S = 60.0
+# slow, non-latency-critical purposes: el cerebro's plans take 50-60 s at medium effort
+PURPOSE_TIMEOUT_S = {"strategy": 150.0, "brain_eval": 150.0}
+
+
+def call_timeout(purpose: str) -> float:
+    """Per-attempt HTTP timeout for a purpose (the deadline still caps it)."""
+    return PURPOSE_TIMEOUT_S.get(purpose, DEFAULT_TIMEOUT_S)
 MIN_CALL_S = 0.5                   # don't start an attempt with less time than this
 MAX_ATTEMPTS = 6
 COOLDOWN_S = {"rate": 15.0, "overloaded": 5.0, "server": 3.0, "network": 2.0, "timeout": 2.0}
@@ -182,7 +189,8 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
             continue
         label, key = picked
         tried.add(label)
-        timeout = DEFAULT_TIMEOUT_S if remaining is None else max(MIN_CALL_S, min(remaining, DEFAULT_TIMEOUT_S))
+        per_call = call_timeout(purpose)
+        timeout = per_call if remaining is None else max(MIN_CALL_S, min(remaining, per_call))
         kwargs = {"model": used, "max_tokens": max_tokens, "system": system, "messages": messages, "timeout": timeout}
         if tools:
             kwargs["tools"] = tools

@@ -15,6 +15,7 @@ Files in data/live (one JSON object per line unless noted):
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,10 @@ def read_rows(path: Path, since: float | None = None, limit: int = 200) -> list[
 
 
 # --------------------------------------------------------------------------- chat
+CHAT_DUP_WINDOW_S = 15.0
+_CHAT_LOCK = threading.Lock()
+
+
 def chat_post(live: Path, text: str, by: str = "", role: str = "user", refs: dict | None = None,
               now: float | None = None) -> dict:
     text = str(text or "").strip()[:2000]
@@ -54,7 +59,12 @@ def chat_post(live: Path, text: str, by: str = "", role: str = "user", refs: dic
            "by": str(by or ("cerebro" if role == "brain" else "equipo"))[:40], "text": text}
     if refs:
         row["refs"] = refs
-    _append(Path(live) / "brain_chat.jsonl", row)
+    with _CHAT_LOCK:
+        if row["role"] == "user":           # the dashboard sometimes submits twice: same by + text within 15 s
+            for r in reversed(read_rows(Path(live) / "brain_chat.jsonl", row["ts"] - CHAT_DUP_WINDOW_S, 50)):
+                if r.get("role") == "user" and r.get("by") == row["by"] and r.get("text") == text:
+                    return {**r, "duplicate": True}
+        _append(Path(live) / "brain_chat.jsonl", row)
     return row
 
 

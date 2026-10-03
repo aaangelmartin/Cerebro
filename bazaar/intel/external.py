@@ -298,6 +298,9 @@ def load(live_dir=None, since: float | None = None) -> list[dict]:
     return out
 
 
+DUP_WINDOW_S = 15.0          # identical paste (same author + text) within this window = the same submit
+
+
 def ingest(text: str, by: str = "", live_dir=None, record_dir=None, team_hint: str | None = None,
            use_llm: bool = False, now: float | None = None) -> dict:
     """Parse, dedupe, classify and store pasted messages. Returns {"added": [...], "duplicates": n}."""
@@ -307,11 +310,15 @@ def ingest(text: str, by: str = "", live_dir=None, record_dir=None, team_hint: s
     venues = _load_venues(_record_dir(record_dir, live))
     with _lock:
         authors = _load_authors(live)
-        seen = {r.get("id") for r in load(live)}
+        rows = load(live)
+        seen = {r.get("id") for r in rows}
+        # a paste without WhatsApp headers gets ts = now, so a double submit seconds apart has another id
+        recent = {(str(r.get("author") or "").strip().lower(), str(r.get("text") or "").strip()) for r in rows
+                  if now - float(r.get("received_at") or 0) <= DUP_WINDOW_S}
         added, dups = [], 0
         for m in parse(text, by=by, now=now):
             mid = msg_id(m["ts"], m["author"], m["text"])
-            if mid in seen:
+            if mid in seen or (m["author"].strip().lower(), m["text"].strip()[:4000]) in recent:
                 dups += 1
                 continue
             seen.add(mid)
