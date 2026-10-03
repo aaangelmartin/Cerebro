@@ -52,6 +52,29 @@ FRIDAY_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
     },
 }
 
+# Measured on Saturday from the public feed (every team's threads with Chato and Pilar, ticks 160-480).
+# Appended once to a live profile (see ProfileStore: "seeds_applied"), so Friday's samples stay too.
+SATURDAY_SEED: dict[str, dict[str, dict[str, list[float]]]] = {
+    "chato": {
+        # buys uncommons: sticky 13, final 14-15 after 5-7 steps (t02 13->14, 13->15; t13 13->14).
+        "sell:uncommon": {"open": [13, 13, 13, 13], "limit_ratio": [1.15, 1.08, 1.15, 1.08, 1.15],
+                          "mirror": [0.1, 0.1], "patience": [6, 7]},
+        # sells uncommons: opens 33; finals 27 (t13 LAV-06), 28 (t13 LAV-07), 30-31 (t18, t05, t14).
+        "buy:uncommon": {"open": [33, 33, 33, 33], "limit_ratio": [0.82, 0.85, 0.94, 0.94, 0.91],
+                         "mirror": [0.4, 0.5], "patience": [5, 7]},
+        # sells rares: opens 97; finals 85-87 (t09 LAV-10 85, t05 RET-10 86, RET-09 87), t17 MAL-09 88.
+        "buy:rare": {"open": [97, 97, 97], "limit_ratio": [0.876, 0.887, 0.897], "mirror": [0.8, 0.75],
+                     "patience": [6, 7]},
+    },
+    "pilar": {
+        # buys uncommons: opens 16, final 19 after 8 steps of 1 P from the team (t13).
+        "sell:uncommon": {"open": [16, 16, 16], "limit_ratio": [1.19, 1.12], "mirror": [0.15, 0.2], "patience": [8]},
+        # the cards she loves (SAL, RET): opened 22 for t13; her limit is not seen yet (guess from 16 -> 19).
+        "sell:uncommon:loved": {"open": [22], "limit_ratio": [1.18], "mirror": [0.15], "patience": [8]},
+    },
+}
+SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED}
+
 # Hourly quotas measured Friday (the menu says it too).
 FRIDAY_QUOTAS = {"abuela": {"deals": 8, "packs": 3}, "chato": {"deals": 6, "packs": 2}}
 DEFAULT_LIST = {"common": 10, "uncommon": 25, "rare": 77, "epic": 190, "legendary": 480}
@@ -99,6 +122,17 @@ class ProfileStore:
                     for name, xs in samples.items():
                         if not k.get(name):
                             k[name] = list(xs)
+            applied = self.data.setdefault("seeds_applied", [])
+            for sid, seeds in SEEDS_ONCE.items():       # newer measurements: appended once, newest last
+                if sid in applied:
+                    continue
+                for dealer, kinds in seeds.items():
+                    prof = self.data["profiles"].setdefault(dealer, {})
+                    for kind, samples in kinds.items():
+                        k = prof.setdefault(kind, {})
+                        for name, xs in samples.items():
+                            k[name] = (list(k.get(name) or []) + list(xs))[-MAX_SAMPLES:]
+                applied.append(sid)
 
     def save(self) -> None:
         with self.lock:
@@ -124,6 +158,8 @@ class ProfileStore:
     # --- estimates -----------------------------------------------------------------
     def stat(self, dealer: str, kind: str, name: str) -> float:
         samples = ((self.data["profiles"].get(dealer) or {}).get(kind) or {}).get(name) or []
+        if not samples and kind.count(":") == 2:          # "sell:uncommon:loved" -> "sell:uncommon"
+            return self.stat(dealer, kind.rsplit(":", 1)[0], name)
         if not samples and kind.startswith("buy:") and name != "open":
             # a buy of another rarity from the same dealer is a better prior than the traits
             for other, k in (self.data["profiles"].get(dealer) or {}).items():

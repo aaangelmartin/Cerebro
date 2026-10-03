@@ -238,8 +238,9 @@ class DealersDomain:
                 continue
             if not isinstance(p["id"], str) or not _DEALER_ID.match(p["id"]):
                 continue
-            if p.get("kind", "dealer") not in ("dealer", "persona"):
-                continue
+            menu = p.get("menu") or {}
+            if p.get("kind", "dealer") not in ("dealer", "persona") and not (menu.get("buys") or menu.get("sells")):
+                continue        # any persona with a menu is a dealer on the ladder (Doña Pilar is a "collector")
             self.store.remember_menu(p)
             if unlocked and p["id"] not in unlocked and not p.get("open_to_all"):
                 continue
@@ -321,7 +322,19 @@ class DealersDomain:
             return f"{v.side}:pack"
         if ":" in v.item and not v.item.startswith("asset:"):
             return f"{v.side}:{v.item.split(':')[0]}"
-        return f"{v.side}:{values.rarity(v.item) or 'common'}"
+        rarity = values.rarity(v.item) or "common"
+        if not v.buying and self._loved(v.dealer, rarity, values.set_of(v.item)):
+            return f"sell:{rarity}:loved"
+        return f"{v.side}:{rarity}"
+
+    def _loved(self, dealer: str, rarity: str, set_id: str) -> bool:
+        """The dealer's menu names this set for this rarity AND also buys the rarity in general: a collector's
+        favourite (Pilar: SAL, RET; Chato: MAL rares). It opens and stops higher for these, so they get their
+        own profile kind ("sell:<rarity>:loved")."""
+        buys = ((self.store.data["menus"].get(dealer) or {}).get("menu") or {}).get("buys") or []
+        named = any(e.get("rarity") == rarity and isinstance(e.get("sets"), list) and set_id in e["sets"] for e in buys)
+        generic = any(e.get("rarity") == rarity and not isinstance(e.get("sets"), list) for e in buys)
+        return named and generic
 
     def _value(self, values: Values, v: ThreadView) -> float:
         if not v.buying:
@@ -567,7 +580,8 @@ class DealersDomain:
                 sets = buys[a["rarity"]].get("sets")
                 if isinstance(sets, list) and values.set_of(ref) not in sets:
                     continue
-                add({"sell": {"assets": [aid]}}, f"sell:{a['rarity']}", ref, a.get("name") or ref,
+                skind = f"sell:{a['rarity']}" + (":loved" if self._loved(d, a["rarity"], values.set_of(ref)) else "")
+                add({"sell": {"assets": [aid]}}, skind, ref, a.get("name") or ref,
                     values.asset_value(aid), buys[a["rarity"]].get("list_price"))
         out.sort(key=lambda c: -c.points)
         # keep the best few per dealer so every free dealer gets a choice

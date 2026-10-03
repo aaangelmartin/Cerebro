@@ -688,6 +688,16 @@ def _allies() -> dict:
         return {}
 
 
+def dealer_ladder(record: Path, live: Path, me: dict, feed: list[dict], now: float) -> dict:
+    """Our dealer ladder slot by slot and the live score components (bazaar.dealers.ladder)."""
+    from bazaar.dealers.ladder import report
+    try:
+        personas = json.loads((Path(record) / "dealers.json").read_text(encoding="utf-8")).get("personas") or []
+    except (OSError, ValueError):
+        personas = []
+    return report(live, me, personas, feed)
+
+
 def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: dict, venue_list: list[dict],
               my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict], status: dict,
               spend: dict, now: float | None = None, hours: float = 2.0) -> dict[str, Any]:
@@ -709,6 +719,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600)),
                      ("broker", lambda: broker(live, now)),
                      ("our_venue_growth", lambda: venue_growth(record, feed, venue_list, me, our_venue, now)),
+                     ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()

@@ -23,7 +23,9 @@ ANCHOR_K = 1.2           # first price sits this many (opening - limit) spans be
 STEP_FRAC = 0.22         # share of the gap we concede per step
 STALL_STEP = 1           # once the dealer stops moving, 1 P steps
 WAIT_REPLY_TICKS = 3     # ticks we wait for a dealer reply before nudging again
-LADDER_WEIGHT_P = 4.0    # round-4 strategy: Friday ladder was ~1 raw point. P-equivalent of one full capture unit at level 1 (higher levels weigh more)
+LADDER_WEIGHT_P = 10.0   # P-equivalent of one full capture unit at level 1 (higher levels weigh more). Raised on
+# Saturday: /api/me shows the ladder is its own score component (ladder_points), dealer deals add nothing to
+# neg_points, and an empty slot counts as zero, so filling a slot matters more than the P gained in the deal.
 MAX_PRICE = 10_000_000
 
 
