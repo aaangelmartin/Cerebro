@@ -305,3 +305,32 @@ def tearDownModule():
     for p in _PINS:
         p.stop()
     _PINS.clear()
+
+
+class AlliedVenueTest(unittest.TestCase):
+    """Alliance with Team 5: our asks from ALLIED_MIN_ASK go to its v10 when the taker pays less there."""
+    RASTRO = {"venue": "rastro", "fee_bps": 500, "fee_per_card": 1, "house": True}
+    V10 = {"venue": "v10", "owner": "t05", "fee_bps": 0, "fee_per_card": 0, "status": "open"}
+    RIVAL = {"venue": "v02", "owner": "t12", "fee_bps": 0, "fee_per_card": 0, "status": "open"}
+
+    def test_ask_goes_to_ally_when_cheaper_for_taker(self):
+        self.assertEqual(proto.choose_venue([self.RASTRO, self.V10, self.RIVAL], 20, 1), "v10")
+
+    def test_cheap_ask_and_swaps_stay_on_rastro(self):
+        self.assertEqual(proto.choose_venue([self.RASTRO, self.V10], 8, 1), "rastro")
+        self.assertEqual(proto.choose_venue([self.RASTRO, self.V10], 0, 2), "rastro")
+
+    def test_rival_venue_never_chosen(self):
+        self.assertEqual(proto.choose_venue([self.RASTRO, self.RIVAL], 30, 1), "rastro")
+
+    def test_ally_with_high_fee_is_not_used(self):
+        pricey = dict(self.V10, fee_bps=1000, fee_per_card=5)
+        self.assertEqual(proto.choose_venue([self.RASTRO, pricey], 30, 1), "rastro")
+
+    def test_venue_owned_by_someone_else_is_not_allied(self):
+        self.assertFalse(proto.is_allied({"venue": "v10", "owner": "t09"}))
+        self.assertTrue(proto.is_allied(self.V10))
+
+    def test_ally_fee_taken_as_posted(self):
+        self.assertEqual(proto.taker_fee(self.V10, 30, 1), 0)
+        self.assertEqual(proto.taker_fee(self.RIVAL, 30, 1), 8)       # rival venues: worst case 10 % + 5 P
