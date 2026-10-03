@@ -48,7 +48,14 @@ def load_env(path):
     return env
 
 
-ENV = {**load_env(Path(os.environ.get("DASHBOARD_ENV_FILE") or ROOT.parent / ".env")), **os.environ}
+def env_file():
+    """DASHBOARD_ENV_FILE, else legacy/.env, else the repository's own .env (where the keys really live)."""
+    if os.environ.get("DASHBOARD_ENV_FILE"):
+        return Path(os.environ["DASHBOARD_ENV_FILE"])
+    return next((p for p in (ROOT.parent / ".env", ROOT.parent.parent / ".env") if p.exists()), ROOT.parent / ".env")
+
+
+ENV = {**load_env(env_file()), **os.environ}
 BASE = ENV.get("BAZAAR_BASE_URL", "https://bazaar.causaprima.ai").rstrip("/")
 TEAM_KEY = ENV.get("BAZAAR_TEAM_KEY", "")
 # Personal gateway tokens, "name:token,name:token"; GATEWAY_TOKEN is the owner's.
@@ -58,6 +65,15 @@ GATEWAY_TOKENS = dict(
 if ENV.get("GATEWAY_TOKEN"):
     GATEWAY_TOKENS[ENV["GATEWAY_TOKEN"]] = "owner"
 DASHBOARD_AUTH = f"{ENV.get('DASHBOARD_USER', '')}:{ENV.get('DASHBOARD_PASSWORD', '')}"
+
+
+def require_login(env):
+    """The gateway never starts without the dashboard login: an empty one locks everybody out of the panel."""
+    missing = [k for k in ("DASHBOARD_USER", "DASHBOARD_PASSWORD") if not (env.get(k) or "").strip()]
+    if missing:
+        raise SystemExit(
+            f"gateway NOT started: {' and '.join(missing)} empty. The env file was not read. Start it from the "
+            "repository root with: DASHBOARD_ENV_FILE=.env .venv/bin/python -u legacy/dashboard/server.py")
 
 # Public reads are fetched without the key; the rest of the dashboard's reads need it.
 PUBLIC = {
@@ -220,18 +236,23 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
 PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
 PLAZA_RX = re.compile(
     r"/plaza(?:/(?:agents\.md|cards\.json|static/(?:plaza\.css|plaza\.js|components\.js)"
-    r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|floor|market|wall|agents"
-    r"|api/(?:health|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}|card/[A-Z]{3}-\d{2}))?)?")
-PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9-]{1,12}(?:&[a-z]{2,8}=[A-Za-z0-9-]{1,12}){0,6})?")
-PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor)"), "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+    r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents|connect|me"
+    r"|art/[A-Z]{3}-\d{2}\.svg"
+    r"|api/(?:health|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}|card/[A-Z]{3}-\d{2}"
+    r"|connect/status|me|match/m-[0-9a-f]{10}))?)?")
+PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent"
+                                   r"|match/m-[0-9a-f]{10}/message)"),
+                "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+PLAZA_COOKIE = re.compile(r"(?:^|;\s*)(plaza_session=[A-Za-z0-9_-]{20,64})(?:;|$)")   # the only cookie forwarded
 PLAZA_STREAM = "/plaza/api/floor/stream"
 # Our own panel over the plaza: dashboard login only. The plaza process trusts the token it wrote for this run.
-PLAZA_ADMIN_RX = re.compile(r"/plaza/admin(?:/(?:static/admin\.js|api/(?:overview|activity))?)?")
+PLAZA_ADMIN_RX = re.compile(r"/plaza/admin(?:/(?:static/admin\.js|api/(?:overview|activity|matchmaker))?)?")
 PLAZA_ADMIN_WRITE = "/plaza/admin/api/action"
 PLAZA_TOKEN_FILE = Path(ENV.get("PLAZA_TOKEN_FILE") or ROOT.parent.parent / "bazaar" / "data" / "live" / "plaza_admin.token")
 PLAZA_MAX_BODY = 16 * 1024
 PLAZA_PASS = ("Content-Type", "Cache-Control", "Location", "Access-Control-Allow-Origin", "X-Content-Type-Options",
-              "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy")
+              "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Set-Cookie")
 
 
 def is_plaza(path, method="GET"):
@@ -621,9 +642,14 @@ class Handler(SimpleHTTPRequestHandler):
             body = self.rfile.read(length) if length else b"{}"
         fwd = (self.headers.get("CF-Connecting-IP") or self.client_address[0] or "")[:45]
         headers = {"X-Plaza-Client": fwd if re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd) else "0.0.0.0"}
-        for name in ("Content-Type", "X-Plaza-Pin"):
+        for name in ("Content-Type", "X-Plaza-Pin", "X-Plaza-Token"):
             if self.headers.get(name):
                 headers[name] = self.headers[name][:120]
+        cookie = PLAZA_COOKIE.search(self.headers.get("Cookie") or "")
+        if cookie and not admin:                              # the browser's connection session, nothing else
+            headers["Cookie"] = cookie.group(1)
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            headers["X-Plaza-Proto"] = "https"
         if admin:
             headers["X-Plaza-Admin"] = plaza_token()
         status, out, payload = plaza_proxy(parts[0], parts[1] if len(parts) > 1 else "", method, body, headers)
@@ -773,6 +799,7 @@ class Server(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
+    require_login(ENV)
     if not TEAM_KEY:
         print("warning: BAZAAR_TEAM_KEY is empty in .env")
     if not GATEWAY_TOKENS:
