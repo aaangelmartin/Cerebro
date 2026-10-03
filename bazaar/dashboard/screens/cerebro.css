@@ -123,4 +123,11 @@
 .scr-cerebro .cb-sp { flex: 1; }
 .scr-cerebro .cb-ev .cb-rowt { word-break: break-word; }
 /* chat fits the viewport below the top bar */
-.cb-chat { top: 16px; height: calc(100vh - var(--topbar-h) - 48px); }
+.cb-layout { margin-right: -20px; margin-bottom: -28px; }
+.cb-layout > .scr-cerebro { padding-bottom: 28px; }
+.cb-chat { position: sticky; top: -18px; margin-top: -18px; height: calc(100vh - var(--topbar-h)); min-height: 0;
+  border-top: 0; border-right: 0; border-bottom: 0; }
+.cb-chat-list { min-height: 0; }
+.cb-chat-name, .cb-chat-f { flex: none; }
+@media (max-width: 1300px) { .cb-layout { margin-right: 0; } .cb-chat { position: static; margin-top: 0; height: 70vh; border: 1px solid var(--line-2); } }
+.scr-cerebro .filterbar { padding: 10px 16px; border-bottom: 1px solid var(--line); }

@@ -24,9 +24,10 @@
     events: ["Evento", "bell", "var(--t-dealer)"], general: ["General", "supervision", "var(--t-anuncio)"],
   };
   const topicOf = (t) => TOPICS[t] || TOPICS.general;
-  function topicChip(t) {
+  function topicChip(t, count) {
     const [label, ic, color] = topicOf(t);
-    const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label));
+    const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label),
+      count !== undefined && count !== null ? el("span", { class: "chip-count num" }, String(count)) : null);
     c.style.setProperty("--tc", color);
     return c;
   }
@@ -52,7 +53,7 @@
   }
 
   // ---------- state ----------
-  const S = { root: null, data: null, err: null, topic: "todos", q: "", histSel: null };
+  const S = { root: null, data: null, err: null, histSel: null, fb: null, fbKey: null, fbState: null, fbKnown: null };
 
   async function load(ov) {
     let r = null, err = null;
@@ -230,30 +231,36 @@
     for (const r of rows) r.doc = byTick.get(r.tick) || d.history.find((h) => Math.abs((h.updated || 0) - (r.ts || 0)) < 5) || null;
     return rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   }
+  // filter bar: the shared ui.filterBar (as in Home/Colección) with one chip per finding topic; built once and kept
   function findingsPanel(d) {
     const all = findingRows(d);
     const counts = {};
-    for (const r of all) counts[r.topic || "general"] = (counts[r.topic || "general"] || 0) + 1;
+    for (const r of all) { const t = TOPICS[r.topic] ? r.topic : "general"; counts[t] = (counts[t] || 0) + 1; }
+    const topics = Object.keys(TOPICS).filter((t) => counts[t]);
     const p = U().panel("Hallazgos y autorrevisión", { sub: all.length ? all.length + " hallazgos" : "" });
-    const bar = el("div", { class: "cb-fbar" },
-      el("button", { type: "button", class: "cb-seg" + (S.topic === "todos" ? " on" : ""), onclick: () => { S.topic = "todos"; render(); } }, "Todos ", el("span", { class: "num" }, String(all.length))),
-      Object.keys(TOPICS).filter((t) => counts[t]).map((t) => {
-        const b = el("button", { type: "button", class: "cb-seg" + (S.topic === t ? " on" : ""), onclick: () => { S.topic = t; render(); } }, topicChip(t), el("span", { class: "num" }, String(counts[t])));
-        return b;
-      }),
-      el("input", { class: "cb-q", placeholder: "Buscar…", value: S.q, oninput: (e) => { S.q = e.target.value; renderFindings(); } }));
+    const tkey = topics.join(",");
+    if (!S.fb || S.fbKey !== tkey) {
+      const prev = S.fbState;
+      S.fbKey = tkey;
+      S.fb = U().filterBar({ types: topics, counts, search: true, placeholder: "Buscar en hallazgos…",
+        selected: prev ? topics.filter((t) => prev.types.has(t) || !S.fbKnown || !S.fbKnown.has(t)) : topics,
+        chip: (t, n) => topicChip(t, n),
+        onChange: (st) => { S.fbState = st; renderFindings(); } });
+      S.fbState = S.fb.state; S.fbKnown = new Set(topics);
+    } else S.fb.setCounts(counts);
     const host = el("div", { class: "cb-list cb-findings" });
-    add(p.body, bar, host);
+    add(p.body, topics.length ? S.fb : null, host);
     S.findHost = host; S.findAll = all;
     renderFindings();
     return p;
   }
   function renderFindings() {
     const host = S.findHost; if (!host) return;
-    const q = S.q.trim().toLowerCase();
-    const rows = (S.findAll || []).filter((r) => (S.topic === "todos" || (r.topic || "general") === S.topic)
+    const st = S.fbState || { types: null, q: "" };
+    const q = (st.q || "").toLowerCase();
+    const rows = (S.findAll || []).filter((r) => (!st.types || st.types.has(TOPICS[r.topic] ? r.topic : "general"))
       && (!q || `${r.finding || ""} ${r.evidence || ""} ${r.fix || ""}`.toLowerCase().includes(q)));
-    if (!rows.length) { U().keyedList(host, [], { key: () => "", render: () => el("div") , tail: [U().empty(S.findAll && S.findAll.length ? "Nada coincide con el filtro." : "Aún no hay hallazgos. El cerebro los publica en cada revisión.")] }); return; }
+    if (!rows.length) { U().keyedList(host, [], { key: () => "", render: () => el("div"), tail: [U().empty(S.findAll && S.findAll.length ? "Nada coincide con el filtro." : "Aún no hay hallazgos. El cerebro los publica en cada revisión.")] }); return; }
     U().keyedList(host, rows.slice(0, 150), {
       key: (r) => (r.ts || 0) + "|" + (r.topic || "") + "|" + (r.finding || "").slice(0, 40), sig: () => "",
       render: (r) => U().row({ cls: "cb-t-" + (TOPICS[r.topic] ? r.topic : "general"), cols: "86px 150px minmax(0,1fr) auto auto", cells: [
@@ -477,7 +484,7 @@
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
       // avoid rebuilding when nothing changed (keeps scroll and open history item)
-      const sig = JSON.stringify([d.cur && d.cur.updated, d.status && d.status.updated, d.history.length, d.findings.length, d.err && d.err.status, S.topic, S.histSel]);
+      const sig = JSON.stringify([d.cur && d.cur.updated, d.status && d.status.updated, d.history.length, d.findings.length, d.err && d.err.status, S.histSel]);
       if (sig === S.sig && S.data && !(opts && opts.force)) return;
       S.sig = sig; S.data = d;
       render();

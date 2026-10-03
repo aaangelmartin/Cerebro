@@ -164,7 +164,7 @@
     const typeRow = el("div", { class: "fb-row" });
     const chips = {};
     for (const t of types) {
-      const b = el("button", { type: "button", class: "fb-type", "aria-pressed": "true" }, typeChip(t, null, counts[t] || 0));
+      const b = el("button", { type: "button", class: "fb-type", "aria-pressed": "true" }, o.chip ? o.chip(t, counts[t] || 0) : typeChip(t, null, counts[t] || 0));
       b.addEventListener("click", (e) => {
         if (e.altKey || e.metaKey) { state.types = new Set([t]); }
         else if (state.types.has(t)) state.types.delete(t); else state.types.add(t);
