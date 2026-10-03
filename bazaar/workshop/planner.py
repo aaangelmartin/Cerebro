@@ -199,7 +199,7 @@ def plan_actions(sit, control: dict | None = None, orders: Any = "auto", values=
     if a is not None:
         return [a]
     if isinstance(orders, list) and orders:
-        return _free_ordered(sit, control, orders, values)
+        return []
     held = {x.get("id"): x for x in me.get("assets") or [] if isinstance(x, dict)}
     counts: dict[str, int] = {}
     for x in held.values():
@@ -242,26 +242,6 @@ def plan_actions(sit, control: dict | None = None, orders: Any = "auto", values=
                                   f"+{a.expected.get('value_gain')} P, more than this cheap ask is likely to bring.")
                     for x in (need or dropped)]
     return []
-
-
-def _free_ordered(sit, control, orders: list, values) -> list[Action]:
-    """The brain ordered a craft but its copies sit inside open offers of ours (the market's code listed them
-    first): withdraw those offers when the craft would then run (it follows next tick). Thread offers stay."""
-    me = _g(sit, "me") or {}
-    wanted = {i for tri in orders if isinstance(tri, (list, tuple)) for i in tri}
-    offers = [o for o in _g(sit, "my_offers") or [] if isinstance(o, dict)]
-    holding = [o for o in offers if o.get("maker") in (None, me.get("id")) and o.get("status", "open") == "open"
-               and o.get("thread") is None
-               and any((a.get("id") if isinstance(a, dict) else a) in wanted
-                       for a in (o.get("give") or {}).get("assets") or [])]
-    if not holding:
-        return []
-    sit2 = {"me": me, "threads": _g(sit, "threads") or [], "my_offers": [o for o in offers if o not in holding]}
-    if plan(sit2, control, orders, values) is None:
-        return []
-    return [Action(kind="cancel_offer", params={"offer": o.get("id")}, domain="workshop", source="code",
-                   reason="Free a copy the brain ordered crafted at The Workshop: it sits in an open offer of ours.")
-            for o in holding]
 
 
 # ---- results and facts for the brain ---------------------------------------------------------

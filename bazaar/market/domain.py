@@ -661,26 +661,12 @@ class MarketDomain:
 
         brain_hold = self._brain_reserved(own_market, control)   # spares the brain's planned posts give
 
-        try:                                       # copies the brain ordered crafted at The Workshop: not ours to list
-            from bazaar.brain.strategy import workshop_orders
-            crafts = workshop_orders()
-            craft_ids = {int(i) for tri in crafts for i in tri} if isinstance(crafts, list) else set()
-        except Exception:  # noqa: BLE001 - no plan, nothing ordered
-            craft_ids = set()
-        try:                                       # pages with a goal in force: their single copies stay
-            from bazaar.core.goal import goal_sets
-            building = goal_sets(control, values)
-        except Exception:  # noqa: BLE001
-            building = set()
-
-        def can_give(a: dict, left: dict, brain: bool = False) -> bool:
+        def can_give(a: dict, left: dict) -> bool:
             ref = a.get("ref")
             if a.get("id") in reserved or str(a.get("id")) in protected or str(ref) in protected:
                 return False
-            if str(ref) in ordered or a.get("id") in craft_ids:
-                return False                               # a dealer order, reserved_refs or a Workshop order holds it
-            if not brain and values.set_of(ref) in building and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
-                return False                               # the code never sells the only copy of a page we build
+            if str(ref) in ordered:
+                return False                               # a dealer order or the plan's reserved_refs holds it
             if values.set_of(ref) in kept and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
                 return False                               # if every promise fills, one copy must remain
             return True
@@ -947,8 +933,7 @@ class MarketDomain:
         stale = [(o, why) for o, why in stale
                  if not (h := self._hands_off(o, own_market, control, tick))
                  or (h == "human" and o.get("id") in flagged)]
-        brain_posts = self._brain_posts(me, own_market, lambda a, c: can_give(a, c, brain=True), counts, control,
-                                        tick)        # the brain's own post may sell a page-goal single; the code not
+        brain_posts = self._brain_posts(me, own_market, can_give, counts, control, tick)
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,
                  "accept_candidates": [self._accept_row(c) for c in accepts],

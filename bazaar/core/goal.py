@@ -127,13 +127,6 @@ def strategy_goals(values=None) -> dict[str, int]:
     return out
 
 
-def goal_sets(control, values=None) -> set[str]:
-    """Sets with a goal card in force (automatic, the strategist's or the operator's): a page we are building, so
-    the market's code posters keep the single copy of each of its cards."""
-    goals = {**auto_goals(values), **strategy_goals(values), **goal_buys(control)}
-    return {str(r).upper()[:3] for r, p in goals.items() if p > 0 and not avoided(r, control)}
-
-
 def pending(sit, control, values=None) -> dict[str, int]:
     """Goal cards we do not hold yet, with their max price: automatic goals < the strategist's < the
     operator's (control.goal_buys). A price of 0 or less drops the goal."""
