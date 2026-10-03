@@ -67,6 +67,8 @@ INJECTION_FLOOD = 4              # flagged texts from others in one tick -> code
 FLOOD_TICKS = 5
 ATTRIBUTE_TICKS = 3              # score deltas go to actions sent in the last N ticks
 STUCK_TICKS = 3                  # a domain's decide() still busy after this many ticks -> exit, supervisor restarts
+STUCK_S = 90.0                   # ...and after this many real seconds (3 ticks at 30 s; 6 ticks on Sunday's 15 s)
+REAL_TICK_MIN_S = 5.0            # the game's shortest tick; faster clocks are the simulator and the tests
 STUCK_EXIT_CODE = 3
 GATEWAY_RETRY_S = 3.0            # clock read failed: write a gateway_down heartbeat and retry this often
 
@@ -219,6 +221,18 @@ def _fallback_select(actions: list[Action]) -> list[Action]:
 
 # --------------------------------------------------------------------------- the runner
 
+def stuck_ticks(tick_seconds: float | None) -> int:
+    """Ticks a decide() may stay busy before the process gives up. The patience is real time (STUCK_S), so a
+    shorter tick needs more ticks: a slow model call is not a hang just because the clock runs faster."""
+    try:
+        ts = float(tick_seconds or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    if ts < REAL_TICK_MIN_S:
+        return STUCK_TICKS
+    return max(STUCK_TICKS, math.ceil(STUCK_S / ts))
+
+
 class Runner:
     def __init__(self, gw, *, domains: list, mode: str = "live", live: Path | None = None,
                  make_write_gw: Callable[[], Any] | None = None, ledger=None, lessons=None, llm=None,
@@ -327,7 +341,7 @@ class Runner:
             busy = self.running.get(d.name)
             if busy is not None and not busy.done():
                 since = self.submitted_tick.get(d.name, sit.tick)
-                if sit.tick - since >= STUCK_TICKS:
+                if sit.tick - since >= stuck_ticks(sit.tick_seconds):
                     self.stuck(d.name, since, sit, ctx)
                 continue                                      # still thinking since an earlier tick
             if not ctx.llm_ok:

@@ -33,6 +33,7 @@ CATALOG_EVERY_S = 900.0
 DEALER_DETAIL_EVERY_S = 1800.0
 BOOK_SNAPSHOT_EVERY = 20      # ticks between full snapshots of each venue's book
 BOOK_ALWAYS = ("v07",)  # our venue: read every tick even when rate-limited (El Rastro always is)
+SHORT_TICK_S = 20.0           # Sunday's 15 s ticks: books are read on the squeezed rota (see plan_books)
 BOOK_SQUEEZED_EVERY = 3       # while rate-limited, every other venue's book is read once in this many ticks
 THREADS_ALL_EVERY = 20        # ticks between reads of every thread (not only the open ones)
 DUELS_DONE_EVERY = 10         # ticks between reads of finished duels
@@ -477,7 +478,9 @@ class Recorder:
             self._dirty = True
         # While the game is rate-limiting our address, the essential reads (feed, clock, leaderboard, our own
         # state) go first: only El Rastro, our venue and a rotating third of the other books are read per tick.
-        squeezed = self.lanes["public"].limited_recently() > 0
+        # A short tick squeezes the same way: every book every 15 s asks for more than the public lane's budget
+        # and would starve the slower reads queued behind the books.
+        squeezed = self.lanes["public"].limited_recently() > 0 or (self.open and self.tick_seconds() < SHORT_TICK_S)
         core = {"rastro", str(self.state.get("own_venue") or ""), *BOOK_ALWAYS}
         for i, vid in enumerate(ids):
             if squeezed and vid not in core and (i + int(self.tick or 0)) % BOOK_SQUEEZED_EVERY:

@@ -25,6 +25,18 @@ from typing import Any
 from .. import config
 
 SLOW_EVERY = 10                     # ticks between slow reads
+SHORT_TICK_S = 20.0                 # Sunday's 15 s ticks...
+SHORT_TICK_DEADLINE = 0.65          # ...decide until this share of the tick (9.75 s of 15): a per-tick model call
+#                                     takes 5-8 s after ~1.5 s of reads, and 55 % (8.25 s) cuts off about half of them
+REAL_TICK_MIN_S = 5.0               # the game's shortest tick; faster clocks are the simulator and the tests
+
+
+def decision_share(tick_seconds: float) -> float:
+    """Share of the tick the domains may think. The model's latency does not shrink with the tick, so a short tick
+    gives it a larger share; what is left (5 s at 15 s ticks) still sends every action before the tick ends."""
+    if REAL_TICK_MIN_S <= tick_seconds <= SHORT_TICK_S:
+        return max(config.DECISION_DEADLINE, SHORT_TICK_DEADLINE)
+    return config.DECISION_DEADLINE
 FEED_LIMIT = 500
 # Feed events that make the slow reads worth refreshing right away.
 REFRESH_TYPES = ("level.", "persona.", "venue.", "clock.", "announcement", "day.", "dealer.", "schedule.")
@@ -330,7 +342,7 @@ def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every
     if (prev is not None and prev.tick == tick and prev.tick_start and not prev.paused
             and prev.doors == "open" and not paused and doors == "open"):
         tick_start = prev.tick_start           # same running tick seen twice: keep the first estimate
-    deadline = tick_start + config.DECISION_DEADLINE * tick_seconds
+    deadline = tick_start + decision_share(tick_seconds) * tick_seconds
 
     sit = Situation(tick=tick, t_hours=float(clock.get("t_hours") or 0.0), day=str(clock.get("today") or ""),
                     tick_seconds=tick_seconds, doors=doors, paused=paused, deadline=deadline,
