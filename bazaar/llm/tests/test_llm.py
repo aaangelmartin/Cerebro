@@ -356,3 +356,20 @@ def tearDownModule():
     for p in _PINS:
         p.stop()
     _PINS.clear()
+
+
+class WorkspaceKeyIsDead(unittest.TestCase):
+    def test_key_without_workspace_is_dropped(self):
+        from bazaar.llm.client import _classify
+
+        class E(Exception):
+            status_code = 400
+        e = E("Error code: 400 - This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header")
+        self.assertEqual(_classify(e)[0], "dead")
+
+    def test_bad_request_stays_fatal(self):
+        from bazaar.llm.client import _classify
+
+        class E(Exception):
+            status_code = 400
+        self.assertEqual(_classify(E('tool_choice: type "tool" and "any" are not supported for this model.'))[0], "fatal")

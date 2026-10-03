@@ -517,6 +517,8 @@ class Runner:
                     self.recent.append((sit.tick, a, outcome.status))
                     if a.kind == "broker_announce":
                         self.last_announce = sit.t_hours or 0
+                elif a.kind == "broker_announce":               # the game allows one per venue every 20 ticks
+                    self.announce_retry_tick = sit.tick + 20
                 elif a.kind == "open_pack":
                     self.pack_backoff[(a.params or {}).get("asset")] = sit.tick + 20
             report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
@@ -605,7 +607,8 @@ class Runner:
                                   reason=f"Close the thread {who} opened with us: it holds one of our 6 "
                                          "thread slots and the bot trades with teams through offers."))
         vid = _own_venue(sit)
-        if vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H:
+        if (vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H
+                and sit.tick >= getattr(self, "announce_retry_tick", -1)):
             try:
                 from bazaar.market.protocol import broker_pitch
                 text = broker_pitch(vid)
