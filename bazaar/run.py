@@ -226,6 +226,7 @@ class Runner:
                  clock_fn: Callable[[], float] = time.time):
         self.gw = gw
         self.closed_team_threads: set = set()
+        self.last_packs: set = set()
         self.pack_backoff: dict = {}
         self.last_announce = -99.0
         self.domains = domains
@@ -534,6 +535,10 @@ class Runner:
                      + (VENUE_BOND if _own_venue(sit) else 0))
         if self.history and self.history[-1][0] == sit.tick:
             self.history.pop()
+        packs = {a.get("id") for a in me.get("assets") or [] if a.get("kind") == "pack"}
+        if packs != self.last_packs:                       # opening a pack revalues the collection: new baseline
+            self.history.clear()
+        self.last_packs = packs
         self.history.append((sit.tick, sit.score, portfolio))
         window = [h for h in self.history if sit.tick - h[0] <= DROP_WINDOW]
         for i, label in ((2, "portfolio"),):                  # score is relative to the leader: not a loss signal

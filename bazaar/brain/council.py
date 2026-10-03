@@ -236,7 +236,7 @@ def judge_model(day: str) -> str:
 def _opinion(llm, role: str, brief: str, deadline: float) -> dict | None:
     res = llm.ask(purpose="council", system=ROLES[role] + COMMON,
                   messages=[{"role": "user", "content": brief}], tools=[VOTE_TOOL],
-                  tool_choice={"type": "auto"}, model=None, max_tokens=400, deadline=deadline)
+                  tool_choice={"type": "auto"}, model=None, max_tokens=700, deadline=deadline)
     v = parse_vote(res)
     if v is not None:
         v.update(role=role, model=getattr(res, "model", ""), cost=getattr(res, "cost_usd", 0.0))
@@ -302,7 +302,7 @@ def review(action: Action, sit, ctx) -> Action | None:
     try:
         jres = llm.ask(purpose="council", system=JUDGE_SYSTEM, messages=[{"role": "user", "content": jbrief}],
                        tools=[VOTE_TOOL], tool_choice={"type": "auto"}, model=judge_model(day),
-                       max_tokens=400, deadline=deadline)
+                       max_tokens=700, deadline=deadline)
         jv = parse_vote(jres)
     except Exception as e:  # noqa: BLE001
         row["judge_error"] = type(e).__name__
