@@ -107,6 +107,7 @@ class Plan:
     candidates: list[Candidate] = field(default_factory=list)
     slots: int = 0
     orders: list[dict] = field(default_factory=list)      # the brain's dealer_orders in force
+    frees: list[Action] = field(default_factory=list)     # our own offers cancelled to free a spare for an order
 
 
 def _g(obj: Any, name: str, default: Any = None) -> Any:
@@ -158,11 +159,11 @@ class DealersDomain:
     # ================================================================== Domain protocol
     def fallback(self, sit, ctx) -> list[Action]:
         plan = self._prepare(sit, ctx)
-        return self._fallback_actions(plan, ctx)
+        return self._with_frees(plan, self._fallback_actions(plan, ctx))
 
     def decide(self, sit, ctx) -> list[Action]:
         plan = self._prepare(sit, ctx)
-        base = self._fallback_actions(plan, ctx)
+        base = self._with_frees(plan, self._fallback_actions(plan, ctx))
         if not self._worth_asking(plan, ctx):
             return base
         try:
@@ -173,7 +174,7 @@ class DealersDomain:
             return base
         if moves is None:
             return base
-        return self._with_orders(plan, self._apply_llm(plan, ctx, moves))
+        return self._with_frees(plan, self._with_orders(plan, self._apply_llm(plan, ctx, moves)))
 
     # ------------------------------------------------------------------ the brain's dealer orders
     def _brain_orders(self) -> list[dict]:
@@ -261,7 +262,24 @@ class DealersDomain:
                     held = {x.get("id"): x for x in me.get("assets") or []}
                     promised = _rails._promised_refs(sit, held, exclude={free[0].get("id")}).get(ref, 0)
                     if counts.get(ref, 0) - promised <= 1:
-                        self._note_order(o, "skipped", f"{ref} is the last copy of a set we collect", plan.tick)
+                        # two copies held but the other one sits in one of our own market offers: the order
+                        # outranks a plain listing, so withdraw it (never a protected or hand-posted one)
+                        tied = self._offers_holding(sit, ref, free[0].get("id")) if counts.get(ref, 0) >= 2 else []
+                        mine_to_drop = [x for x in tied if self._may_withdraw(x, control)]
+                        if mine_to_drop:
+                            oid = mine_to_drop[0].get("id")
+                            plan.frees.append(Action(
+                                kind="cancel_offer", params={"offer": oid}, domain=self.name, source="code",
+                                reason=f"the brain's order: free the spare {ref} from our offer #{oid} to sell "
+                                       f"it to {d}", priority=0.0))
+                            self._note_order(o, "waiting", f"the spare {ref} is in our offer #{oid}: withdrawing "
+                                                           "it, the thread opens next tick", plan.tick)
+                        elif tied:
+                            self._note_order(o, "skipped", f"the spare {ref} is promised in offer "
+                                                           f"#{tied[0].get('id')} (protected or posted by hand): "
+                                                           "cancel it to sell this copy", plan.tick)
+                        else:
+                            self._note_order(o, "skipped", f"{ref} is the last copy of a set we collect", plan.tick)
                         continue
                 aid = free[0].get("id")
                 value = values.asset_value(aid)
@@ -288,6 +306,36 @@ class DealersDomain:
                                  limit=int(limit), est_open=round(est_open, 1), est_limit=float(limit),
                                  exp_price=float(limit), exp_capture=0.0, points=ORDER_PRIORITY, level=level))
         return out
+
+    @staticmethod
+    def _offers_holding(sit, ref: str, except_asset) -> list[dict]:
+        """Our open market offers (no thread) that give another copy of `ref`."""
+        my_id = (_g(sit, "me") or {}).get("id")
+        out = []
+        for o in _g(sit, "my_offers") or []:
+            if not isinstance(o, dict) or o.get("thread") is not None or o.get("status", "open") != "open":
+                continue
+            if o.get("maker") not in (None, my_id):
+                continue
+            if any(isinstance(a, dict) and a.get("ref") == ref and a.get("id") != except_asset
+                   for a in ((o.get("give") or {}).get("assets") or [])):
+                out.append(o)
+        return out
+
+    @staticmethod
+    def _may_withdraw(offer: dict, control: dict) -> bool:
+        """Only offers this bot posted itself (data/live/bot_posted_offers.json) and the team does not protect."""
+        oid = str(offer.get("id"))
+        if oid in {str(x) for x in (control or {}).get("protected_offers") or []}:
+            return False
+        try:
+            rec = json.loads((config.LIVE / "bot_posted_offers.json").read_text())
+            return oid in {str(x) for x in rec.get("ids") or []}
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    def _with_frees(self, plan: Plan, actions: list[Action]) -> list[Action]:
+        return list(plan.frees) + actions if plan.frees else actions
 
     def _with_orders(self, plan: Plan, actions: list[Action]) -> list[Action]:
         """The brain's dealer orders open first: they replace any other opening with the same dealer."""

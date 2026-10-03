@@ -119,6 +119,48 @@ class OrderOpensTest(unittest.TestCase):
         self.assertFalse([a for a in acts if a.kind == "open_thread"])
         self.assertIn("tied to one of our open offers", notes[0][2])
 
+    # --- the spare copy of a set we collect (outbox request code-b424c250) ----------------------------
+    LAV07 = [{"id": 3, "kind": "card", "ref": "LAV-07", "rarity": "uncommon", "set": "LAV", "your_value": 40},
+             {"id": 4, "kind": "card", "ref": "LAV-07", "rarity": "uncommon", "set": "LAV", "your_value": 6}]
+
+    def _opens(self, acts):
+        return [a for a in acts if a.kind == "open_thread" and "brain order" in a.reason]
+
+    def test_two_copies_one_is_sellable(self):
+        dom, notes = domain([order(ref="LAV-07", bound=45)])
+        acts = dom.fallback(sit([dict(a) for a in self.LAV07]), make_ctx(5))
+        self.assertEqual(len(self._opens(acts)), 1)
+        self.assertEqual(notes, [])
+
+    def test_two_copies_with_one_in_our_own_offer_frees_it_first(self):
+        dom, notes = domain([order(ref="LAV-07", bound=45)])
+        offers = [{"id": 99, "maker": "t10", "give": {"assets": [dict(self.LAV07[1])]}, "want": {"cash": 30}}]
+        with mock.patch.object(DealersDomain, "_may_withdraw", staticmethod(lambda offer, control: True)):
+            acts = dom.fallback(sit([dict(a) for a in self.LAV07], offers=offers), make_ctx(5))
+        self.assertFalse(self._opens(acts))                      # never both copies out at once
+        cancels = [a for a in acts if a.kind == "cancel_offer"]
+        self.assertEqual([a.params for a in cancels], [{"offer": 99}])
+        self.assertEqual(notes[0][1], "waiting")
+        self.assertIn("our offer #99", notes[0][2])
+
+    def test_two_copies_with_one_in_a_protected_or_hand_posted_offer_stays_blocked(self):
+        dom, notes = domain([order(ref="LAV-07", bound=45)])
+        offers = [{"id": 99, "maker": "t10", "give": {"assets": [dict(self.LAV07[1])]}, "want": {"cash": 30}}]
+        with mock.patch.object(DealersDomain, "_may_withdraw", staticmethod(lambda offer, control: False)):
+            acts = dom.fallback(sit([dict(a) for a in self.LAV07], offers=offers), make_ctx(5))
+        self.assertFalse(self._opens(acts))
+        self.assertFalse([a for a in acts if a.kind == "cancel_offer"])
+        self.assertEqual(notes[0][1], "skipped")
+        self.assertIn("promised in offer #99", notes[0][2])
+
+    def test_may_withdraw_only_bot_posted_and_unprotected(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "bot_posted_offers.json").write_text('{"since_tick": 1, "ids": ["99"]}')
+            with mock.patch("bazaar.dealers.domain.config.LIVE", Path(d)):
+                self.assertTrue(DealersDomain._may_withdraw({"id": 99}, {}))
+                self.assertFalse(DealersDomain._may_withdraw({"id": 98}, {}))                      # posted by hand
+                self.assertFalse(DealersDomain._may_withdraw({"id": 99}, {"protected_offers": [99]}))
+
     def test_buy_order_respects_value_and_avoided_sets(self):
         chato = next(p for p in FRIDAY_PERSONAS if p["id"] == "chato")
         o = {"dealer": "chato", "action": "buy", "ref": "MAL-09", "open": 72, "bound": 200, "max_messages": 4}
