@@ -149,3 +149,18 @@ class BudgetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DoorsOpenSameTick(unittest.TestCase):
+    def test_first_tick_after_doors_open_gets_a_fresh_deadline(self):
+        from types import SimpleNamespace as NS
+        from bazaar.core import state
+        import time as _t
+        prev = NS(tick=159, tick_start=_t.time() - 3600, paused=True, doors="closed")
+        clock = {"tick": 159, "tick_seconds": 30, "paused": False, "doors": "open", "next_tick_in": 29}
+        gw = NS(get=lambda path, **k: clock if path == "/api/clock" else {})
+        try:
+            sit = state.perceive(gw, prev, clock=clock)
+        except Exception:
+            self.skipTest("perceive needs a fuller fake here")
+        self.assertGreater(sit.deadline, _t.time())

@@ -327,8 +327,9 @@ def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every
         tick_start = t0
     else:
         tick_start = t0 - (tick_seconds - nti)
-    if prev is not None and prev.tick == tick and prev.tick_start:
-        tick_start = prev.tick_start           # same tick seen twice: keep the first estimate
+    if (prev is not None and prev.tick == tick and prev.tick_start and not prev.paused
+            and prev.doors == "open" and not paused and doors == "open"):
+        tick_start = prev.tick_start           # same running tick seen twice: keep the first estimate
     deadline = tick_start + config.DECISION_DEADLINE * tick_seconds
 
     sit = Situation(tick=tick, t_hours=float(clock.get("t_hours") or 0.0), day=str(clock.get("today") or ""),
