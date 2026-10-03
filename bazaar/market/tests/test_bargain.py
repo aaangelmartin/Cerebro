@@ -127,3 +127,65 @@ class BargainCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def ret03(oid=15573, price=12, ref="RET-03", aid=901):
+    o = offer(oid, {"assets": [{"id": aid, "kind": "card", "ref": ref, "set": ref[:3]}]}, {"cash": price},
+              maker="t06", venue="rastro")
+    o["expires_tick"] = 520
+    return o
+
+
+class DuplicateCase(unittest.TestCase):
+    """Outbox request code-9754ab82: at t1032 the fast path took RET-03 at 14 P all-in as the copy that
+    completes the Retiro page (83.9 P) while the same card was being bought from Carmen; it was a spare."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        p = mock.patch.object(bargain.config, "LIVE", Path(self.tmp.name))
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def run_tick(self, held, o, threads=()):
+        d = dom()
+        s = sit(assets=[card(i + 1, r, 11.0) for i, r in enumerate(held)], venues=[RASTRO], cash=68)
+        s.feed_new = [listed(o)]
+        s.threads = list(threads)
+        return d, kinds(d.decide(s, make_ctx(10)), "accept_offer")
+
+    NINE = [f"RET-{i:02d}" for i in range(1, 11) if i != 3]
+
+    def test_first_copy_that_completes_the_page_is_taken_at_once(self):
+        d, acc = self.run_tick(self.NINE, ret03())
+        self.assertEqual([a.params["offer"] for a in acc], [15573])
+        self.assertTrue(acc[0].expected.get("bargain"))
+
+    def test_duplicate_of_a_complete_page_is_not_bought(self):
+        d, acc = self.run_tick(self.NINE + ["RET-03"], ret03())
+        self.assertEqual(acc, [])
+
+    def test_card_already_being_bought_from_a_dealer_is_a_spare(self):
+        carmen = {"id": 1530, "kind": "persona", "with": "abuela", "status": "open",
+                  "topic": {"buy": {"card": "RET-03"}}, "messages": []}
+        d, acc = self.run_tick(self.NINE, ret03(), threads=[carmen])
+        self.assertEqual(acc, [])
+        closed = {**carmen, "status": "closed"}                     # the thread ended without a deal: buy it here
+        d, acc = self.run_tick(self.NINE, ret03(), threads=[closed])
+        self.assertEqual(len(acc), 1)
+
+    def test_pending_buys_reads_open_buy_threads_only(self):
+        threads = [{"id": 1, "status": "open", "topic": {"buy": {"card": "RET-03"}}},
+                   {"id": 2, "status": "closed", "topic": {"buy": {"card": "RET-04"}}},
+                   {"id": 3, "topic": {"sell": {"assets": [7]}}},
+                   {"id": 4, "topic": {"buy": {"pack": "sobre_plata"}}}]
+        self.assertEqual(bargain.pending_buys(threads), {"RET-03": 1})
+
+    def test_spare_with_a_real_marginal_gain_is_still_bought(self):
+        """A second LAV-09 is worth 70 x 1.6 x 0.25 = 28 P to us: at 10 P it still gains value."""
+        d = dom()
+        s = sit(assets=[card(1, "LAV-09", 112.0)], venues=[RASTRO], cash=68)
+        s.feed_new = [listed(ret03(oid=15600, price=10, ref="LAV-09", aid=902))]
+        acc = kinds(d.decide(s, make_ctx(10)), "accept_offer")
+        self.assertEqual([a.params["offer"] for a in acc], [15600])
+        self.assertGreaterEqual(acc[0].expected["value_gain"], 2)

@@ -708,6 +708,7 @@ class MarketDomain:
         fast_cap = 0 if cautious else max(0, min(cash - reserve - promised, per_deal,
                                                  int(hour_left) if hour_left is not None else cash))
         exact_reads = 0
+        pending = bargain.pending_buys(_g(sit, "threads"))   # cards a dealer thread is already buying
         shorts: list[AcceptCand] = []
         live_bargains: set = set()
         try:
@@ -768,7 +769,7 @@ class MarketDomain:
                     continue                                       # we cannot trade on our own venue
                 if o.get("expires_tick") is not None and int(o["expires_tick"]) <= tick:
                     continue
-                c = self._evaluate(o, venue, values, counts, can_give)
+                c = self._evaluate(o, venue, values, counts, can_give, pending)
                 if c is None:
                     continue
                 c.addressed = is_addr or o.get("to") == my_id
@@ -784,7 +785,7 @@ class MarketDomain:
                             values.remember_exact(ref, gw.get("/api/me/value", card=ref))
                         except Exception:  # noqa: BLE001
                             pass
-                    c2 = self._evaluate(o, venue, values, counts, can_give)
+                    c2 = self._evaluate(o, venue, values, counts, can_give, pending)
                     if c2 is None:
                         continue
                     c2.addressed, c = c.addressed, c2
@@ -960,7 +961,11 @@ class MarketDomain:
                 "fee": c.fee, "value_in": c.value_in, "value_out": c.loss, "page_bonus": round(c.page, 2),
                 "gain": c.gain}
 
-    def _evaluate(self, o: dict, venue: dict, values: Values, counts: dict, can_give) -> AcceptCand | None:
+    def _evaluate(self, o: dict, venue: dict, values: Values, counts: dict, can_give,
+                  pending: dict | None = None) -> AcceptCand | None:
+        """`pending`: ref -> copies we are already buying elsewhere (bargain.pending_buys). A card on its way is
+        valued as held: the offered copy is a spare (marginal value, no page bonus), never the first copy."""
+        pending = {r: n for r, n in (pending or {}).items() if n > 0}
         give, want = o.get("give") or {}, o.get("want") or {}
         if give.get("types") and any(not str(t).startswith("card:") for t in give["types"]):
             return None                                   # packs and lots: not priced here
@@ -997,13 +1002,15 @@ class MarketDomain:
             take(min(have, key=lambda a: float(a.get("your_value") or 0)))
         value_in = 0.0
         for i, ref in enumerate(in_refs):
-            n = values.count(ref) + in_refs[:i].count(ref)          # copies we will hold before this one
+            n = values.count(ref) + pending.get(ref, 0) + in_refs[:i].count(ref)   # copies held before this one
             value_in += values.next_copy(ref) if n == values.count(ref) else \
                 values.book(ref) * values.affinity.get(values.set_of(ref), 1.0) * values.marginal(n)
+        if pending:                                       # the page counts the copies on their way as held
+            counts = {**counts, **{r: counts.get(r, 0) + n for r, n in pending.items()}}
         page = page_delta(values, counts, in_refs, out_refs)
         fee = fee_for(venue, max(cash_in, cash_out), len(in_refs) + len(out_refs))
         gain = value_in + cash_in - cash_out - fee - loss + page
-        if any(values.is_exact(r) for r in in_refs):
+        if any(values.is_exact(r) and not pending.get(r) for r in in_refs):
             # the game's exact value of a card that completes a page already holds the page bonus (MAL-09: 91 +
             # 86.1 = 177.1): do not count that bonus a second time
             gain -= max(0.0, page_delta(values, counts, in_refs, []))

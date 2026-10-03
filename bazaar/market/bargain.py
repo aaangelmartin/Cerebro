@@ -91,6 +91,21 @@ def counter_give(cash_room: int, ask_price: int, value_in: float, pool: list[tup
             "covers": cash + book >= ask_price}
 
 
+def pending_buys(threads: list | None) -> dict[str, int]:
+    """Cards we are already buying somewhere else: ref -> copies, from our open dealer threads opened to buy
+    one named card (the bot's and the ones a human writes by hand). Saturday t1032: RET-03 was being closed
+    with Carmen while the fast path took another RET-03 on El Rastro, valued as the copy that completes the
+    page (83.9 P); the second copy was a spare worth 2.8 P bought at 14 P."""
+    out: dict[str, int] = {}
+    for t in threads or []:
+        if not isinstance(t, dict) or t.get("status", "open") != "open":
+            continue
+        ref = ((t.get("topic") or {}).get("buy") or {}).get("card")
+        if ref:
+            out[str(ref)] = out.get(str(ref), 0) + 1
+    return out
+
+
 def feasible(gap: float, liquid: float, ticks_left: int | None) -> bool:
     """Can a bargain we cannot pay yet still be funded? The cash missing must fit in what our sellable spares
     are worth on the market, and the offer must stay open long enough to sell them."""
