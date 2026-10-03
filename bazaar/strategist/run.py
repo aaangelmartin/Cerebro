@@ -167,6 +167,16 @@ STRATEGY_TOOL = {
                             "{task, why}", "items": {"type": "object"}},
             "chat_summary": {"type": "string", "description": "running summary of the whole team chat so far (what "
                              "was asked, what you answered and decided); update it when there are chat events"},
+            "broker_policy": {"type": "object", "description": "our Market Test broker's knobs, applied at the next "
+                              "session start (never mid-session; council vote): cross_rule quotes|limits|probe, "
+                              "max_probes, probe_after, max_bench_matches_per_tick, hard_traders, and per profile "
+                              "(profiles.normal / profiles.hard): wait_ticks, endgame_ticks, hazard, prior_shade, "
+                              "firm_ticks, stop_ticks, limit_margin, limit_margin_abs, limit_conf, tt_bonus. Change "
+                              "it only from evidence: research.broker.sessions_vs_stall (bench efficiency vs the free "
+                              "stall; stall level = half the bench points, the top-3 mean = full points), broker "
+                              "lessons from the Lab with their sim/replay deltas. Omit to keep it.",
+                              "additionalProperties": True},
+            "broker_policy_why": {"type": "string", "description": "the evidence behind a broker_policy change"},
             "duel_claude_mode": {"type": "string", "enum": list(S.DUEL_MODES),
                                  "description": "how much Claude's duel moves weigh; omit to keep it"},
             "next_check_in_ticks": {"type": "integer", "description": "3-6 (events trigger a plan at once)"},
@@ -975,6 +985,7 @@ class Strategist:
                 "score_at_plan": {k: us_now.get(k) for k in ("score", "negotiating", "market")}}
         doc = self.publish(plan, pic, meta)
         self.plan = plan
+        self._broker_overlay(plan)
         if new.get("policies"):
             B.apply_policies(self.live, new["policies"], by="cerebro", now=self.now())
         self._file_outbox(new, doc)
@@ -987,6 +998,20 @@ class Strategist:
                         refs={"plan_tick": doc.get("tick"), "council": None if council is None else council["ok"]},
                         now=self.now())
         return doc
+
+    def _broker_overlay(self, plan: dict) -> None:
+        """Write the accepted broker_policy to data/live/broker_policy.json (the broker reads it at the next session
+        start). Only when it differs from what is there."""
+        if "broker_policy" not in plan:
+            return
+        try:
+            from bazaar.broker import policy_overlay as PO
+            cur = PO.load(self.live / "broker_policy.json")
+            if cur["policy"] != (plan.get("broker_policy") or {}):
+                PO.write(self.live / "broker_policy.json", plan.get("broker_policy") or {}, by="cerebro",
+                         why=plan.get("broker_policy_why") or "", now=self.now())
+        except Exception as e:  # noqa: BLE001
+            self.errors.append({"ts": self.now(), "error": f"broker overlay: {type(e).__name__}: {e}"[:200]})
 
     @contextlib.contextmanager
     def thinking(self, reason: str, every_s: float = 10.0):

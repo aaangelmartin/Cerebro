@@ -430,6 +430,17 @@ class BenchEngine:
                         and len(self.refusal_runs) >= int(self.policy.get("probe_refusal_runs", 2)):
                     self.rule = "quotes"               # one odd session (bad estimates) cannot settle it alone
 
+    def apply_policy(self, policy: dict) -> None:
+        """Swap in a new policy between sessions (never call it while a session runs). A changed cross_rule
+        restarts what the engine learned about the rule."""
+        old_rule = self.policy.get("cross_rule")
+        self.policy = policy
+        if policy.get("cross_rule") != old_rule:
+            self.rule = policy.get("cross_rule", "quotes")
+            self.learn_rule = self.rule == "probe"
+            self.probe_refusals = 0
+            self.refusal_runs = set()
+
     def probe_budget(self) -> int:
         if self.rule == "probe":
             return int(self.policy.get("max_probes", 2))

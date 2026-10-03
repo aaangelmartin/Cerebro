@@ -509,6 +509,23 @@ def broker(live: Path, now: float | None = None) -> dict:
                          "vs_stall": round(float(sc["bench_efficiency"]) - float(r["stall_efficiency"]), 4)
                          if sc.get("bench_efficiency") is not None and r.get("stall_efficiency") is not None else None})
     out["sessions_vs_stall"] = sessions[-6:]
+    try:
+        from bazaar.broker import policy_overlay as PO
+        cur = PO.load(Path(live) / "broker_policy.json")
+        out["overlay"] = {k: cur.get(k) for k in ("version", "policy", "by", "why", "updated", "rejected")}
+    except Exception:  # noqa: BLE001
+        pass
+    out["policy_version"] = st.get("policy_version")
+    try:
+        from bazaar.lab.store import LessonStore
+        from bazaar import config as _cfg
+        out["broker_lessons"] = [{"id": l.id, "status": l.status, "rule": l.rule[:300],
+                                  "broker_policy": (l.params or {}).get("broker_policy"),
+                                  "predicted_delta": ((l.params or {}).get("prediction") or {}).get("delta")}
+                                 for l in LessonStore(_cfg.LAB / "lessons.jsonl").all()
+                                 if l.scope == "broker" and l.status != "retired"][-6:]
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 

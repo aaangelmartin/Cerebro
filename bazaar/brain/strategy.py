@@ -183,7 +183,21 @@ def sanitize(raw: Any) -> dict:
                         for x in (raw.get("human_tasks") or [])[:4] if isinstance(x, dict) and x.get("task")]
         if isinstance(raw.get("human_tasks"), list) else [],
         **({"duel_claude_mode": duel_mode} if duel_mode in DUEL_MODES else {}),
+        **_broker_policy(raw),
     }
+
+
+def _broker_policy(raw: dict) -> dict:
+    """The broker's Market Test knobs, validated and bounded by bazaar.broker.policy_overlay."""
+    if not isinstance(raw.get("broker_policy"), dict):
+        return {}
+    from bazaar.broker.policy_overlay import validate
+    clean, _ = validate(raw["broker_policy"])
+    out = {"broker_policy": clean}
+    why = _clean(raw.get("broker_policy_why"), 600)
+    if why:
+        out["broker_policy_why"] = why
+    return out
 
 
 LESSON_STATUSES = ("shadow", "canary", "active", "retired")
@@ -339,6 +353,8 @@ def big_changes(old: dict | None, new: dict) -> list[str]:
         out.append(f"accept offers addressed to us {fresh} (may give a last copy)")
     if new.get("duel_claude_mode") and new.get("duel_claude_mode") != old.get("duel_claude_mode"):
         out.append(f"duel mode {old.get('duel_claude_mode')} -> {new['duel_claude_mode']}")
+    if "broker_policy" in new and (new.get("broker_policy") or {}) != (old.get("broker_policy") or {}):
+        out.append(f"broker policy {old.get('broker_policy') or {}} -> {new.get('broker_policy') or {}}")
     return out
 
 
@@ -375,6 +391,13 @@ def merge_accepted(old: dict | None, new: dict, council_ok: bool) -> dict:
         out["duel_claude_mode"] = old["duel_claude_mode"]
     else:
         out.pop("duel_claude_mode", None)
+    if "broker_policy" in old:
+        out["broker_policy"] = dict(old["broker_policy"])
+        if "broker_policy_why" in old:
+            out["broker_policy_why"] = old["broker_policy_why"]
+    else:
+        out.pop("broker_policy", None)
+        out.pop("broker_policy_why", None)
     return out
 
 

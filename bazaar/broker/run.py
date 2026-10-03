@@ -141,7 +141,10 @@ class BrokerLoop:
         self.out = out_dir
         self.out.mkdir(parents=True, exist_ok=True)
         self.policy = policy or load_policy()
+        self.base_policy = json.loads(json.dumps(self.policy))     # code defaults + the tuned file, no overlay
         self.engine = BenchEngine(self.policy)
+        self.overlay_file = (status_file or (out_dir.parent / "broker_status.json")).parent / "broker_policy.json"
+        self.overlay: dict = {"policy": {}, "version": None, "rejected": []}
         self.writes_allowed = writes_allowed
         self.control_file = control_file
         self.status_file = status_file or (self.out.parent / "broker_status.json")
@@ -229,6 +232,22 @@ class BrokerLoop:
         if ticks:
             self.policy["session_ticks"] = int(ticks)
 
+    def _load_overlay(self) -> None:
+        """Read data/live/broker_policy.json (validated, bounded) on top of the base policy."""
+        from .policy_overlay import apply, load
+        try:
+            ov = load(self.overlay_file)
+        except Exception as e:  # noqa: BLE001 - a bad overlay must never stop the broker
+            self._err(None, "overlay", e)
+            return
+        ticks = self.policy.get("session_ticks")
+        pol = apply(self.base_policy, ov["policy"])
+        if ticks:
+            pol["session_ticks"] = ticks
+        self.policy = pol
+        self.engine.apply_policy(pol)
+        self.overlay = ov
+
     # ---- one poll
     def poll(self) -> None:
         try:
@@ -267,14 +286,21 @@ class BrokerLoop:
             ends[str(meta["run"])] = meta["ends_tick"]
         for run in runs:
             self.absent.pop(run, None)
+        if runs - self.active_runs and not self.active_runs:
+            self._load_overlay()                       # only between sessions: never mid-session
         for run in runs - self.active_runs:            # a session starts
             hard = any(abs(self.t_hours - h) < 0.25 for h in self.hard_hours)
             if hard:
                 self.engine.run_profile[run] = "hard"
             self.stats[run] = {"start_tick": tick, "matches": 0, "refused": 0, "fallback": 0, "probes": 0,
-                               "est_surplus": 0.0, "profile": "hard" if hard else "auto"}
+                               "est_surplus": 0.0, "profile": "hard" if hard else "auto",
+                               "policy_version": self.overlay.get("version")}
             self._append(self.session_name(run), {"type": "start", "tick": tick, "t_hours": self.t_hours,
-                                                  "profile": self.stats[run]["profile"], "policy": self.policy})
+                                                  "profile": self.stats[run]["profile"], "policy": self.policy,
+                                                  "policy_version": self.overlay.get("version"),
+                                                  "overlay": self.overlay.get("policy"),
+                                                  "overlay_by": self.overlay.get("by"),
+                                                  "overlay_rejected": self.overlay.get("rejected")})
         still = set()
         for run in self.active_runs - runs:            # missing: ended, or a blip in the book?
             self.absent[run] = self.absent.get(run, 0) + 1
@@ -485,6 +511,8 @@ class BrokerLoop:
                                                                   "stall_efficiency", "vs_stall")}
                             if self.last_result else None),
             "errors": self.errors[-10:],
+            "policy_version": self.overlay.get("version"), "overlay": self.overlay.get("policy"),
+            "overlay_rejected": self.overlay.get("rejected"),
         }
         tmp = self.status_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(st, default=str))
