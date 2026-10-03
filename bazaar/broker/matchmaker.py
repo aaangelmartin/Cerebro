@@ -130,13 +130,60 @@ def find_pairs(report: dict, rarity_of: dict[str, str] | None = None, us: str = 
 
 
 def pair_key(p: dict) -> str:
+    if p["kind"] == "relist":
+        return f"relist:{p['side']}:{p['seller'] or p['buyer']}:{p['ref']}"
     return f"{p['kind'] == 'swap' and 'swap' or 'sale'}:{p['seller']}>{p['buyer']}:{p['ref']}"
+
+
+BIG_RARITIES = ("rare", "epic", "legendary")
+
+
+def big_tickets(report: dict, rarity_of: dict[str, str] | None = None, us: str = US, venue: str = VENUE,
+                exclude: tuple[str, ...] = ()) -> list[dict]:
+    """Rare-or-better public asks and bids of rival teams that sit on a fee venue (El Rastro: 5 % + 1 P to the
+    taker). These are the trades that create the most value, and the ones that settled on a fee venue all
+    Saturday night (RET-11 at 216, SAL-11 at 207, MAL-11 at 195). One line each: move it to our venue."""
+    rarity_of = rarity_of or {}
+    out: list[dict] = []
+    for t, r in (report.get("rivals") or {}).items():
+        if t == us or t in exclude:
+            continue
+        for side, book, field in (("ask", r.get("selling") or {}, "ask"), ("bid", r.get("hunting") or {}, "bid")):
+            for ref, o in book.items():
+                if not _is_card(ref) or rarity_of.get(ref) not in BIG_RARITIES:
+                    continue
+                price = float((o or {}).get(field) or 0)
+                if price <= 0 or (o or {}).get("venue") != "rastro" or (o or {}).get("to"):
+                    continue                                   # only public offers on the house market
+                rarity = rarity_of[ref]
+                if side == "ask" and price < FLOOR.get(rarity, 0):
+                    continue                                   # a giveaway destroys value: never push it
+                if side == "bid" and price < FLOOR.get(rarity, 0):
+                    continue                                   # a bid nobody should take: not worth a line
+                saves = rastro_fee(price)
+                score = 1.0 + {"rare": 1.5, "epic": 2.5, "legendary": 3.0}[rarity] + min(2.0, saves / 5)
+                out.append({"kind": "relist", "side": side, "seller": t if side == "ask" else None,
+                            "buyer": t if side == "bid" else None, "ref": ref, "rarity": rarity,
+                            "price": int(round(price)), "ask": price if side == "ask" else 0.0,
+                            "bid": price if side == "bid" else 0.0, "offer": (o or {}).get("offer"),
+                            "saves": saves, "maybe_last": False, "score": round(score, 2),
+                            "why": f"{t} {'asks' if side == 'ask' else 'bids'} {price:.0f} on El Rastro"})
+    out.sort(key=lambda p: (-p["score"], p["ref"], p["seller"] or p["buyer"]))
+    return out
 
 
 def top_rivals(report: dict, n: int = 2, us: str = US) -> tuple[str, ...]:
     """The n best-placed rivals: we do not hand them page cards through our own venue."""
     rows = [(float(r.get("score") or 0), t) for t, r in (report.get("rivals") or {}).items() if t != us]
     return tuple(t for _, t in sorted(rows, reverse=True)[:n])
+
+
+def mix(pairs: list[dict], tickets: list[dict]) -> list[dict]:
+    """The best big ticket, then the best two-team pair, then the next ticket, then the rest by score: an
+    announcement always carries a named pair when there is one, and the high-value line leads."""
+    head = tickets[:1] + pairs[:1] + tickets[1:2]
+    rest = sorted(pairs[1:] + tickets[2:], key=lambda p: -p["score"])
+    return head + rest
 
 
 def one_per_card(pairs: list[dict]) -> list[dict]:
@@ -149,23 +196,35 @@ def one_per_card(pairs: list[dict]) -> list[dict]:
 
 
 def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len: int = MAX_TEXT) -> str | None:
-    """One public line per card, with who, what and at which price."""
+    """One public line per card, with who, what and at which price. The recipe is the one that settled every
+    team-venue deal on Saturday: one side posts the offer ADDRESSED to the other on a 0-fee venue and the
+    other accepts it; no broker wait and nobody can snipe it."""
     lines = []
     for p in one_per_card(pairs)[:limit]:
         if p["kind"] == "swap":
             lines.append(f"{p['ref']} <> {p['ref_back']}: {p['seller']} and {p['buyer']} each hold what the other "
-                         f"wants. Swap card for card on {venue}, no cash, no fee.")
+                         f"wants. {p['seller']}: post give {p['ref']} want {p['ref_back']} on {venue} to "
+                         f"{p['buyer']}; {p['buyer']}: accept it. Card for card, no cash, no fee.")
+        elif p["kind"] == "relist" and p["side"] == "ask":
+            lines.append(f"{p['ref']} ({p['rarity']}): {p['seller']} asks {p['price']} on El Rastro, where the "
+                         f"buyer pays {p['saves']:.0f} P of fee. {p['seller']}: list it on {venue} too; "
+                         f"buyers: take it here and pay 0.")
+        elif p["kind"] == "relist":
+            lines.append(f"{p['ref']} ({p['rarity']}): {p['buyer']} bids {p['price']} on El Rastro, where the "
+                         f"seller loses {p['saves']:.0f} P to the fee. {p['buyer']}: post the bid on {venue}; "
+                         f"holders: accept it here and keep the full {p['price']}.")
         elif p["kind"] == "wanted":
             lines.append(f"{p['ref']}: {p['buyer']} is hunting it at the dealers, {p['seller']} sells it at "
-                         f"{p['ask']:.0f}. {p['seller']}: list it PUBLIC on {venue}; {p['buyer']}: bid "
-                         f"{p['price']} there. 0 fee, paired the same tick.")
+                         f"{p['ask']:.0f}. {p['seller']}: post it on {venue} to {p['buyer']} at {p['price']}; "
+                         f"{p['buyer']}: accept it. 0 fee, done in one tick.")
         else:
             lines.append(f"{p['ref']}: {p['buyer']} bids {p['bid']:.0f}, {p['seller']} asks {p['ask']:.0f}. "
-                         f"Both post it PUBLIC on {venue} at {p['price']}: paired this tick, saves "
-                         f"{p['saves']:.0f} P of Rastro fee.")
+                         f"{p['seller']}: post it on {venue} to {p['buyer']} at {p['price']}; {p['buyer']}: "
+                         f"accept it. Saves {p['saves']:.0f} P of Rastro fee.")
     if not lines:
         return None
-    head = f"{venue} (Team 10) matches cards to the team that needs them. 0 % fee, 0 P a card. Pairs waiting now: "
+    head = (f"{venue} (Team 10) matches cards to the team that needs them. 0 % fee, 0 P a card: post your "
+            f"offer here addressed to the other team and they accept it. Open now: ")
     text = head + " | ".join(lines)
     while len(text) > max_len and len(lines) > 1:
         lines.pop()
@@ -180,14 +239,20 @@ def thread_texts(p: dict, venue: str = VENUE) -> dict[str, str]:
              f"Post give {{give}} want {{get}} on {venue} addressed to {{other}}: card for card, no cash, 0 fee.")
         return {p["seller"]: t.format(other=p["buyer"], get=p["ref_back"], give=p["ref"]),
                 p["buyer"]: t.format(other=p["seller"], get=p["ref"], give=p["ref_back"])}
+    if p["kind"] == "relist":
+        team = p["seller"] or p["buyer"]
+        what = "ask" if p["side"] == "ask" else "bid"
+        return {team: (f"Matchmaker note from {venue}, not a trade request: your {what} of {p['price']} for "
+                       f"{p['ref']} sits on El Rastro, where the taker pays {p['saves']:.0f} P of fee. Post it on "
+                       f"{venue} too: 0 fee, so the other side keeps or saves that and takes it sooner.")}
     return {
         p["seller"]: (f"Matchmaker note from {venue}, not a trade request: {p['buyer']} wants {p['ref']}"
                       + (f" (bids {p['bid']:.0f})" if p["bid"] else "")
-                      + f". List it PUBLIC on {venue} at {p['price']}: 0 fee, our broker pairs it the tick both "
-                        f"offers are in."),
+                      + f". Post it on {venue} addressed to {p['buyer']} at {p['price']}: 0 fee, they accept "
+                        f"it and it settles the next tick."),
         p["buyer"]: (f"Matchmaker note from {venue}, not a trade request: {p['seller']} sells {p['ref']} "
-                     f"(asks {p['ask']:.0f}). Bid {p['price']} PUBLIC on {venue}: 0 fee, you save "
-                     f"{p['saves']:.0f} P of Rastro fee, paired the tick both offers are in."),
+                     f"(asks {p['ask']:.0f}). Ask them to post it on {venue} addressed to you at {p['price']}, "
+                     f"or bid {p['price']} there: 0 fee, you save {p['saves']:.0f} P of Rastro fee."),
     }
 
 
@@ -250,7 +315,9 @@ class MatchMaker:
         ctl = self.control_fn() or {}
         exclude = ctl.get("matchmaker_exclude")
         exclude = tuple(exclude) if isinstance(exclude, list) else top_rivals(report, 2, self.us)
-        pairs = find_pairs(report, self.rarity_fn(), us=self.us, venue=self.venue, exclude=exclude)
+        rar = self.rarity_fn()
+        pairs = find_pairs(report, rar, us=self.us, venue=self.venue, exclude=exclude)
+        pairs = mix(pairs, big_tickets(report, rar, us=self.us, venue=self.venue, exclude=exclude))
         done = {"pairs": len(pairs), "announced": False, "messages": 0}
         old = {pair_key(p): p for p in self.state.get("pairs", [])}
         kept = []

@@ -143,6 +143,74 @@ class Runner(unittest.TestCase):
         self.assertEqual(json.loads((self.dir / "m2.json").read_text())["log"][-1]["what"], "announce_failed")
 
 
+class BigTicketsAndWording(unittest.TestCase):
+    """What settled on other teams' venues on Saturday night: an addressed offer the other side accepts, and
+    the rare-or-better trades that paid the El Rastro fee."""
+
+    RAR = {**RARITY, "MAL-11": "epic", "LAT-10": "rare", "RET-09": "rare"}
+
+    def test_a_public_epic_bid_on_the_house_market_gets_a_relist_line(self):
+        r = report(t17=rival(hunting={"MAL-11": {"bid": 150, "venue": "rastro", "offer": 5, "to": None}}))
+        (p,) = M.big_tickets(r, self.RAR)
+        self.assertEqual((p["kind"], p["side"], p["buyer"], p["seller"], p["price"]), ("relist", "bid", "t17", None, 150))
+        self.assertEqual(p["saves"], M.rastro_fee(150))
+        text = M.announcement([p])
+        self.assertIn("t17 bids 150 on El Rastro", text)
+        self.assertIn("keep the full 150", text)
+
+    def test_a_rare_ask_on_the_house_market_gets_a_relist_line(self):
+        r = report(t18=rival(selling={"LAT-10": {"ask": 72, "venue": "rastro", "offer": 9}}))
+        (p,) = M.big_tickets(r, self.RAR)
+        self.assertEqual((p["side"], p["seller"], p["buyer"]), ("ask", "t18", None))
+        self.assertIn("pay 0", M.announcement([p]))
+
+    def test_commons_giveaways_other_venues_addressed_offers_us_and_excluded_teams_are_left_out(self):
+        r = report(
+            t09=rival(selling={"RET-03": {"ask": 10, "venue": "rastro", "offer": 1},          # a common
+                               "RET-09": {"ask": 20, "venue": "rastro", "offer": 2}}),          # a giveaway
+            t12=rival(hunting={"MAL-11": {"bid": 150, "venue": "v21", "offer": 3, "to": None}}),   # not a fee venue
+            t13=rival(hunting={"LAT-10": {"bid": 72, "venue": "rastro", "offer": 4, "to": "t09"}}),  # addressed
+            t10=rival(hunting={"MAL-11": {"bid": 195, "venue": "rastro", "offer": 6, "to": None}}),  # us
+            t06=rival(selling={"RET-09": {"ask": 84, "venue": "rastro", "offer": 7}}))            # excluded
+        self.assertEqual(M.big_tickets(r, self.RAR, exclude=("t06",)), [])
+
+    def test_the_announcement_tells_one_side_to_post_addressed_and_the_other_to_accept(self):
+        r = report(t07=rival(hunting={"LAT-06": {"bid": 20, "venue": "rastro", "offer": 1}}),
+                   t09=rival(selling={"LAT-06": {"ask": 18, "venue": "rastro", "offer": 2}}))
+        text = M.announcement(M.find_pairs(r, RARITY))
+        self.assertIn("t09: post it on v07 to t07 at 19; t07: accept it", text)
+        self.assertNotIn("PUBLIC", text)
+
+    def test_a_relist_message_goes_to_the_one_team_and_is_not_a_trade_request(self):
+        r = report(t17=rival(hunting={"MAL-11": {"bid": 150, "venue": "rastro", "offer": 5, "to": None}}))
+        (p,) = M.big_tickets(r, self.RAR)
+        texts = M.thread_texts(p)
+        self.assertEqual(list(texts), ["t17"])
+        self.assertIn("not a trade request", texts["t17"])
+        self.assertTrue(M.pair_key(p).startswith("relist:bid:t17:MAL-11"))
+
+    def test_the_runner_puts_a_big_ticket_ahead_of_a_cheap_common_pair(self):
+        import tempfile
+        from pathlib import Path
+        r = report(t03=rival(hunting={"LAT-03": {"bid": 0, "dealer_threads": 2}}),
+                   t09=rival(selling={"LAT-03": {"ask": 8, "venue": "rastro", "offer": 2}}),
+                   t17=rival(hunting={"MAL-11": {"bid": 150, "venue": "rastro", "offer": 5, "to": None}}))
+        said = []
+        with tempfile.TemporaryDirectory() as d:
+            m = M.MatchMaker(Path(d) / "m.json", lambda: r, lambda: {"matchmaker_exclude": []},
+                             announce=said.append, rarity_fn=lambda: self.RAR)
+            done = m.step(100)
+        self.assertTrue(done["announced"])
+        self.assertLess(said[0].index("MAL-11"), said[0].index("LAT-03"))
+
+    def test_a_named_pair_always_makes_the_announcement_next_to_the_big_tickets(self):
+        tickets = [{"kind": "relist", "ref": f"X{i}", "score": 5.0 - i} for i in range(4)]
+        pairs = [{"kind": "wanted", "ref": "P0", "score": 1.4}, {"kind": "wanted", "ref": "P1", "score": 1.2}]
+        self.assertEqual([p["ref"] for p in M.mix(pairs, tickets)], ["X0", "P0", "X1", "X2", "X3", "P1"])
+        self.assertEqual([p["ref"] for p in M.mix(pairs, [])], ["P0", "P1"])
+        self.assertEqual([p["ref"] for p in M.mix([], tickets[:2])], ["X0", "X1"])
+
+
 if __name__ == "__main__":
     unittest.main()
 
