@@ -274,7 +274,7 @@ def post_key(p: dict) -> tuple:
 
 def record_post(row: dict, live: Path | None = None) -> None:
     """One line per brain post attempt: {ts, tick, give, want_card, want_cash, venue, to, status, rail, detail,
-    offer_id, why}. status: sent | vetoed | refused | error."""
+    offer_id, why}. status: sent | vetoed | refused | error | skipped (never left the bot: detail says why)."""
     p = posts_path(live)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)

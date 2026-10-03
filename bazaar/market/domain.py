@@ -213,18 +213,63 @@ class MarketDomain:
             elif r.get("status") == "sent" and tick_now - int(r.get("tick") or 0) < BRAIN_REPOST_TICKS:
                 recent_ok.add(k)
         out = []
+
+        def board_of(x: dict) -> tuple:
+            return ((x["give"],), (x["want_card"],) if x.get("want_card") else (), int(x.get("want_cash") or 0))
+
+        planned = {board_of(x) for x in wanted}
+        cancelling: set = set()
         for p in wanted:
             if len(out) >= 2:
                 break
-            if p.get("want_card") and _avoided(p["want_card"], control):
-                continue
-            board = ((p["give"],), (p["want_card"],) if p.get("want_card") else (), int(p.get("want_cash") or 0))
             key = post_key(p)
-            if board in live or key in self._brain_posted or key in refused or key in recent_ok:
+            if p.get("want_card") and _avoided(p["want_card"], control):
+                self._skip_brain_post(p, key, tick_now, f"wants {p['want_card']}, a set we avoid buying")
                 continue
-            copies = sorted((a for a in me.get("assets") or [] if a.get("ref") == p["give"] and can_give(a, counts)),
-                            key=lambda a: float(a.get("your_value") or 0))
+            board = board_of(p)
+            if board in live or key in self._brain_posted or key in recent_ok:
+                continue                                 # already on the board (or just sent): nothing to say
+            if key in refused:
+                self._skip_brain_post(p, key, tick_now, "an identical post was vetoed or refused before: "
+                                                        "change the price, the venue or the target")
+                continue
+            held = [a for a in me.get("assets") or [] if a.get("ref") == p["give"]]
+            copies = sorted((a for a in held if can_give(a, counts)), key=lambda a: float(a.get("your_value") or 0))
             if not copies:
+                # why not: no copy, or every copy is already inside one of our open offers, or the last-copy rule
+                ids = {a.get("id") for a in held}
+                tied = [o for o in own_market
+                        if any((x.get("id") if isinstance(x, dict) else x) in ids
+                               for x in (o.get("give") or {}).get("assets") or [])]
+                if not held:
+                    self._skip_brain_post(p, key, tick_now, f"we hold no copy of {p['give']}")
+                elif tied:
+                    def o_board(o):
+                        return (tuple(a.get("ref") for a in (o.get("give") or {}).get("assets") or []),
+                                tuple(want_cards(o)), int((o.get("want") or {}).get("cash") or 0))
+                    # free the card: withdraw an older offer of ours that the current plan no longer lists
+                    stale = next((o for o in tied if o_board(o) not in planned
+                                  and o.get("id") not in cancelling), None)
+                    if stale is not None:
+                        cancelling.add(stale.get("id"))
+                        c = Action(kind="cancel_offer", params={"offer": stale.get("id")}, domain=self.name,
+                                   source="council", priority=0.0,
+                                   reason=f"the brain: free {p['give']} from our offer #{stale.get('id')} "
+                                          "for its new post")
+                        self._sent[c.id] = {"kind": "cancel_offer", "offer": stale.get("id")}
+                        out.append(c)
+                        self._skip_brain_post(p, key, tick_now,
+                                              f"{p['give']} is inside our open offer #{stale.get('id')}: "
+                                              "cancelling it now, this post goes out next", once=False)
+                    else:
+                        self._skip_brain_post(p, key, tick_now,
+                                              f"{p['give']} is already inside our open offer(s) "
+                                              f"{', '.join('#' + str(o.get('id')) for o in tied)}, also in this plan: "
+                                              "one card cannot be in two offers; drop one of them")
+                else:
+                    self._skip_brain_post(p, key, tick_now,
+                                          f"no copy of {p['give']} may be given: last copy of a set we collect, "
+                                          "or protected")
                 continue
             a = copies[0]
             venue = p.get("venue") or "rastro"
@@ -250,6 +295,21 @@ class MarketDomain:
             self._brain_posted.add(key)
             out.append(act)
         return out
+
+    def _skip_brain_post(self, p: dict, key: tuple, tick: int, why: str, once: bool = True) -> None:
+        """A brain post that did not go out this tick: say why in brain_posts.jsonl (the brain reads it).
+        Logged once per (post, reason) so a standing obstacle does not flood the log."""
+        seen = self.__dict__.setdefault("_brain_skip_seen", set())
+        if once and (key, why) in seen:
+            return
+        seen.add((key, why))
+        try:
+            from bazaar.brain.strategy import record_post
+            record_post({"tick": tick, "give": p.get("give"), "want_card": p.get("want_card"),
+                         "want_cash": p.get("want_cash"), "venue": p.get("venue") or "rastro", "to": p.get("to"),
+                         "status": "skipped", "rail": None, "detail": why, "offer_id": None, "why": p.get("why")})
+        except Exception:  # noqa: BLE001 - logging must never break a tick
+            pass
 
     def _brain_first(self, actions: list[Action], state: dict) -> list[Action]:
         """Offers addressed to us that the brain + council approved go first (at most one per tick)."""

@@ -96,3 +96,52 @@ class BrainPostsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrainPostSkipsTest(unittest.TestCase):
+    """A planned post that cannot go out says why, and a card tied up in an older offer of ours is freed."""
+
+    def setUp(self):
+        self.live = Path(tempfile.mkdtemp())
+        self.p = mock.patch.object(config, "LIVE", self.live)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+
+    ME10 = {"assets": [{"id": 797, "kind": "card", "ref": "SAL-10", "your_value": 63}]}
+    ASK = {"give": "SAL-10", "want_card": None, "want_cash": 78, "to": "t08", "venue": "rastro", "why": "fund MAL-09"}
+    OLD = {"id": 8084, "maker": "t10", "status": "open", "give": {"cash": 0, "assets": [{"id": 797, "ref": "SAL-10"}]},
+           "want": {"cash": 0, "types": ["card:LAV-11"]}}
+
+    def run_once(self, d, posts, own, can_give, tick=600):
+        with mock.patch.object(S, "post_offers", return_value=posts):
+            return d._brain_posts(self.ME10, own, can_give, {"SAL-10": 1}, {}, tick)
+
+    def test_card_inside_an_older_offer_is_freed_and_reported(self):
+        d = domain()
+        acts = self.run_once(d, [self.ASK], [self.OLD], lambda a, c: False)     # reserved by offer 8084
+        self.assertEqual([(a.kind, a.params) for a in acts], [("cancel_offer", {"offer": 8084})])
+        row = S.post_history()[-1]
+        self.assertEqual(row["status"], "skipped")
+        self.assertIn("#8084", row["detail"])
+        acts = self.run_once(d, [self.ASK], [], lambda a, c: True, tick=601)    # next tick: free, goes out
+        self.assertEqual([a.kind for a in acts], ["post_offer"])
+        self.assertEqual(acts[0].params["want"], {"cash": 78})
+
+    def test_two_planned_offers_for_one_card_report_the_conflict(self):
+        d = domain()
+        swap = {"give": "SAL-10", "want_card": "LAV-11", "want_cash": None, "to": "t08", "venue": "rastro"}
+        acts = self.run_once(d, [swap, self.ASK], [self.OLD], lambda a, c: False)
+        self.assertEqual(acts, [])                                           # nothing cancelled: both are planned
+        self.assertIn("two offers", S.post_history()[-1]["detail"])
+
+    def test_no_copy_and_refused_posts_are_logged_once(self):
+        d = domain()
+        with mock.patch.object(S, "post_offers", return_value=[self.ASK]):
+            for t in (600, 601, 602):
+                d._brain_posts({"assets": []}, [], lambda a, c: True, {}, {}, t)
+        rows = [r for r in S.post_history() if r.get("status") == "skipped"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("no copy", rows[0]["detail"])
+        self.assertIn("skipped: we hold no copy", S.post_outcomes_text())
