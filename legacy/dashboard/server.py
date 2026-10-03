@@ -198,14 +198,21 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
         headers["X-Dashboard"] = "1"
     if body is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(V2_URL + rest, data=body, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status, r.headers.get("Content-Type", "application/json"), r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("Content-Type", "application/json"), e.read()
-    except urllib.error.URLError as e:
-        return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(e.reason)}).encode()
+    last = None
+    for attempt in range(3):                     # a page load fires ~25 requests at once: retry a refused one
+        req = urllib.request.Request(V2_URL + rest, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.headers.get("Content-Type", "application/json"), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", "application/json"), e.read()
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            last = e
+            if method != "GET":
+                break
+            time.sleep(0.15 * (attempt + 1))
+    reason = getattr(last, "reason", last)
+    return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(reason)}).encode()
 
 
 SECRET_FIELDS = {"broker_key", "key", "x-broker-key"}
@@ -616,6 +623,7 @@ def _query(path):
 
 
 class Server(ThreadingHTTPServer):
+    request_queue_size = 128
     daemon_threads = True
 
 

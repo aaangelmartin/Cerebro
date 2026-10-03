@@ -357,7 +357,9 @@ def make_server(port: int = config.API_PORT, live: Path | None = None, lab: Path
     record = Path(record) if record else (config.DATA / "record" if live == config.LIVE else live.parent / "record")
     handler = type("BoundHandler", (Handler,), {"live": live, "lab": Path(lab or config.LAB), "record": record,
                                                 "stop_file": Path(stop_file or config.STOP_FILE)})
+    ThreadingHTTPServer.request_queue_size = 128     # a page load asks for ~25 files at once
     srv = ThreadingHTTPServer((host, port), handler)
+    srv.daemon_threads = True
     srv.daemon_threads = True
     return srv
 
