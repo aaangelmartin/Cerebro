@@ -49,6 +49,7 @@ Turns el cerebro's code requests (outbox items of kind `code`) into tested, push
    - pushes `feat/bazaar-v2` (never force, never `main`; if origin moved it answers `push_failed`: `git pull --rebase origin feat/bazaar-v2` and `--finish` again with the new hash);
    - restarts only the affected processes (bazaar.supervise starts them again) and watches their logs for about three ticks;
      a process that is missing at the end of the watch is re-checked for up to 45 s before it counts as down, so somebody else restarting it at that moment does not revert a sound commit;
+   - errors while the network is down (the game or GitHub does not resolve) prove nothing: the commit stays, nothing is reverted and the item is parked as `needs_retry` for a human;
    - errors → `git revert`, push, restart, item `rejected` with the errors; clean → item `done` with the commit.
 5. **If the request is wrong or impossible:**
    ```bash

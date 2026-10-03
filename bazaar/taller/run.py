@@ -88,7 +88,8 @@ MODULE_OF = {"api": "bazaar.api.server", "bot": "bazaar.run", "broker": "bazaar.
              "recorder": "bazaar.recorder.run", "strategist": "bazaar.strategist.run",
              "official": "bazaar.intel.official"}
 
-TERMINAL = {"done", "rejected", "failed", "needs_accept", "pending_integration", "revert_failed"}
+TERMINAL = {"done", "rejected", "failed", "needs_accept", "pending_integration", "revert_failed", "needs_retry"}
+NET_HOSTS = ("bazaar.causaprima.ai", "github.com")   # the game and the remote: both must resolve to judge a deploy
 
 
 # --------------------------------------------------------------------------- pure helpers
@@ -243,7 +244,8 @@ class Taller:
                  clock: Callable[[], float] = time.time, dry_run: bool = False,
                  sleep: Callable[[float], None] | None = None,
                  pids: Callable[[str], list[int]] | None = None,
-                 kill: Callable[[int, int], None] | None = None):
+                 kill: Callable[[int, int], None] | None = None,
+                 online: Callable[[], bool] | None = None):
         self.box = outbox or Outbox()
         self.repo, self.work, self.live = Path(repo), Path(work), Path(live)
         self.sh = sh or self._sh
@@ -255,6 +257,7 @@ class Taller:
         self.sleep = sleep or time.sleep
         self.pids = pids or self._pids
         self.kill = kill or os.kill
+        self.online = online or self._online
         self.work.mkdir(parents=True, exist_ok=True)
         self.state_path = self.work / "state.json"
         self.lock = self.work / "lock"
@@ -342,6 +345,30 @@ class Taller:
             if not self._back(s):
                 errors.append(f"{s}: not running after the restart")
         return errors[:10]
+
+    @staticmethod
+    def _online() -> bool:
+        """Can this machine resolve the game and the remote? Without the network the bot cannot reach the game
+        and a sound deploy looks like a failed one (Saturday 23:37: eb5c81b was reverted during an outage)."""
+        import socket
+        for host in NET_HOSTS:
+            try:
+                socket.getaddrinfo(host, 443)
+            except OSError:
+                return False
+        return True
+
+    def _hold_offline(self, iid: str, head: str, services: list[str], errors: list[str]) -> str | None:
+        """Errors after a deploy while the network is down prove nothing about the commit: keep it, do not
+        revert, and park the request as needs_retry for a human (or a later --finish). None when online."""
+        if self.online():
+            return None
+        self.log(iid, "needs_retry", commit=head, errors=errors, why="network down")
+        self.finish(iid, "needs_retry",
+                    f"{head} sigue desplegado: el despliegue dio errores SIN RED ({'; '.join(errors)[:300]}), así que "
+                    "no se ha revertido. Con la red de vuelta, comprobar los procesos y marcar Hecho, o pulsar "
+                    "Aceptar para volver a desplegar.", status="open", commit=head, services=services, errors=errors)
+        return "needs_retry"
 
     def _back(self, service: str) -> bool:
         """Is the service running at the end of the watch? Another deploy (or a person) may be restarting it
@@ -582,7 +609,7 @@ class Taller:
             return {"id": iid, "result": "pending_integration", "commit": head}
         errors = self._deploy(iid, services)
         if errors:
-            res = self._revert(iid, wt, head, services, errors)
+            res = self._hold_offline(iid, head, services, errors) or self._revert(iid, wt, head, services, errors)
             return {"id": iid, "result": res, "commit": head, "errors": errors}
         summary = subject.splitlines()[0][:160]
         self.finish(iid, "done", f"hecho en {head} ({summary}); desplegado: {', '.join(services) or 'nada que reiniciar'}",
@@ -789,6 +816,9 @@ class Taller:
         services = services_for(files)
         errors = self._deploy(iid, services)
         if errors:
+            held = self._hold_offline(iid, head, services, errors)
+            if held:
+                return {"id": iid, "result": held, "commit": head, "errors": errors}
             rv = self.sh(["git", "revert", "--no-edit", full])
             pv = self.sh(["git", "push", "-q", REMOTE, f"HEAD:{BRANCH}"]) if rv.returncode == 0 else rv
             if rv.returncode != 0:

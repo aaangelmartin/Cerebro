@@ -122,6 +122,7 @@ class JobTest(unittest.TestCase):
         self.it = self.box.file_code("Add a docstring to bazaar/intel/__init__.py", ["no docstring"],
                                      "the package has no docstring", "add one", severity="low")
         self.restarted = []
+        self.net = True
 
         def claude(wt, prompt):
             (wt / ".taller_commit_msg").write_text("docs(intel): add a package docstring")
@@ -136,7 +137,7 @@ class JobTest(unittest.TestCase):
     def make(self, sh, watch_errors=()):
         return T.Taller(outbox=self.box, repo=self.dirs, work=self.dirs / "work", live=self.dirs / "live", sh=sh,
                         claude=self.claude, restart=lambda s: self.restarted.append(s) or True,
-                        watch=lambda svcs, since: list(watch_errors))
+                        watch=lambda svcs, since: list(watch_errors), online=lambda: self.net)
 
     def test_happy_path_done(self):
         sh = FakeSh()
@@ -176,6 +177,14 @@ class JobTest(unittest.TestCase):
         self.assertEqual(res["result"], "reverted")
         self.assertTrue(any(c[:2] == ["git", "revert"] for c in sh.calls))
         self.assertEqual(self.box.get(self.it["id"])["status"], "rejected")
+
+    def test_errors_after_deploy_without_network_do_not_revert(self):
+        sh = FakeSh()
+        self.net = False
+        res = self.make(sh, watch_errors=["bot: Traceback"]).poll_once()
+        self.assertEqual(res["result"], "needs_retry")
+        self.assertFalse(any(c[:2] == ["git", "revert"] for c in sh.calls))
+        self.assertEqual(self.box.get(self.it["id"])["status"], "open")
 
     def test_lock_blocks_a_second_job(self):
         t = self.make(FakeSh())
@@ -333,6 +342,20 @@ class ForkModeTest(JobTest):
         self.assertEqual(res["result"], "reverted")
         self.assertEqual(self.restarted, ["broker", "broker"])          # deploy, then again after the revert
         self.assertEqual(self.box.get(job["id"])["status"], "rejected")
+
+    def test_finish_keeps_the_commit_when_the_network_is_down(self):
+        sh = FakeSh(changed=["bazaar/dealers/domain.py"])
+        self.net = False                                                # the bot cannot reach the game: no verdict
+        t = self.make(sh, watch_errors=["bot: not running after the restart"])
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "needs_retry")
+        self.assertFalse(any(c[:2] == ["git", "revert"] for c in sh.calls))   # a sound commit stays
+        self.assertEqual(self.restarted, ["bot"])
+        got = self.box.get(job["id"])
+        self.assertEqual(got["status"], "open")
+        self.assertIn("SIN RED", got["human_note"])
+        self.assertIsNone(t.next_job())                                 # parked, not handed out again in a loop
 
     def test_finish_says_so_when_the_revert_fails(self):
         class NoRevert(FakeSh):
