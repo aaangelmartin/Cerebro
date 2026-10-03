@@ -362,6 +362,12 @@ class DealersDomain:
             # real dealers answer on the tick after ours: >= 3 ticks of silence is a dead thread
             return (f"dealer silent for {tick - since} ticks" if v.n_messages
                     else f"dealer never answered in {tick - v.created_tick} ticks")
+        from .haggle import stalled as _stalled
+        if (v.theirs and v.last_theirs is not None and not v.final and abs(v.last_theirs - limit) <= 2
+                and limit <= 10 and _stalled(v) >= 1):
+            ok_side = v.last_theirs <= limit if v.buying else v.last_theirs >= limit
+            if not ok_side:
+                return f"dealer at {v.last_theirs}, within 2 P of our limit {limit} but outside it: free the slot"
         if v.theirs:
             gap = max(2.0, 0.15 * max(limit, 1))
             best = v.last_theirs

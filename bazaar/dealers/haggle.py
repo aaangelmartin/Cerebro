@@ -144,6 +144,10 @@ def plan_next(v: ThreadView, limit: int, limit_est: float, patience: float = 6.0
     return guard_price(v, nxt, limit)
 
 
+QUICK_GAP = 2                # P: on small deals, settle or close when the dealer is this close to our limit
+SMALL_DEAL_P = 10            # ...only for cards worth this little (5-8 P commons); bigger haggles keep their range
+
+
 def fallback_move(v: ThreadView, limit: int, limit_est: float, tick: int, patience: float = 6.0) -> Move:
     """Code-only decision for one thread."""
     ok, why = acceptable(v, limit)
@@ -157,6 +161,13 @@ def fallback_move(v: ThreadView, limit: int, limit_est: float, tick: int, patien
         if tick - last_tick < WAIT_REPLY_TICKS:
             return Move("wait", None, "waiting for the dealer's answer")
     nxt = plan_next(v, limit, limit_est, patience)
+    # Team decision 2026-10-03: small haggles are not worth the dealer's only slot. Within QUICK_GAP of our
+    # limit, take the offer if it is acceptable, otherwise close.
+    if limit <= SMALL_DEAL_P and abs(theirs - limit) <= QUICK_GAP:
+        if ok:
+            return Move("accept", theirs, f"within {QUICK_GAP} P of our limit: settle now")
+        if stalled(v) >= 1:                    # it stopped conceding just outside our limit: free the slot
+            return Move("close", None, f"dealer stalled within {QUICK_GAP} P outside our limit")
     if ok:
         # AC_next: their price is no worse than what we would offer next; or already at/below its estimated limit.
         at_limit = theirs <= limit_est if v.buying else theirs >= limit_est

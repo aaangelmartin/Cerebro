@@ -181,7 +181,7 @@ class Posting(unittest.TestCase):
         for a in b:
             ref = a.params["want"]["cards"][0]
             self.assertIn(ref[:3], proto.CORE_SETS)
-            self.assertEqual(a.params["venue"], "v02")                              # taker pays nothing there
+            self.assertEqual(a.params["venue"], "rastro")                           # never feed a rival's venue
             self.assertEqual(a.params["expires_in_ticks"], proto.BID_EXPIRES)
             v = a.expected["value_get"]
             price = a.params["give"]["cash"]
@@ -203,7 +203,7 @@ class Posting(unittest.TestCase):
         self.assertTrue(sw)
         self.assertIn(sw[0].params["give"]["assets"][0], (1, 2))                      # a duplicate first
         self.assertEqual(sw[0].params.get("to"), "t08")
-        self.assertEqual(sw[0].params["venue"], "v03")                               # board, no per-card fee
+        self.assertEqual(sw[0].params["venue"], "rastro")                            # never feed a rival's venue
         given = [a.params["give"]["assets"][0] for a in kinds(acts, "post_offer") if a.params["give"].get("assets")]
         self.assertLessEqual(len([x for x in given if x in (1, 2)]), 1)              # never both MAL-02 copies
 
@@ -270,7 +270,7 @@ class Venues(unittest.TestCase):
         self.assertNotIn("/api/venues/v09/offers", gw.calls + gw2.calls)
 
     def test_choose_venue_and_fees(self):
-        self.assertEqual(proto.choose_venue([RASTRO, V03, V04], 0, 2), "v03")
+        self.assertEqual(proto.choose_venue([RASTRO, V03, V04], 0, 2), "rastro")   # team decision: El Rastro only
         self.assertEqual(proto.choose_venue([RASTRO], 10, 1), "rastro")
         pending = dict(V03, pending_fee={"fee_bps": 1000, "fee_per_card": 5, "effective_tick": 200})
         self.assertEqual(proto.taker_fee(pending, 0, 2), 10)                          # worse of now and announced

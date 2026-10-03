@@ -81,8 +81,8 @@ def tradable_venues(venues: list[dict], my_id: str | None, my_venue: str | None)
 
 def choose_venue(venues: list[dict], cash: int, cards: int) -> str:
     """Where to post a maker offer: lowest fee for the taker on a board (or house) venue."""
-    cands = [v for v in venues if ((v.get("rules") or {}).get("mechanism", "board") == "board" or v.get("house")
-                                   or venue_id(v) == "rastro")]
+    # Team decision 2026-10-03: post only on El Rastro. A trade on a rival's venue scores for its owner.
+    cands = [v for v in venues if v.get("house") or venue_id(v) == "rastro"]
     if not cands:
         return "rastro"
     best = min(cands, key=lambda v: (taker_fee(v, cash, cards), venue_id(v) not in PREFERRED_VENUES,
