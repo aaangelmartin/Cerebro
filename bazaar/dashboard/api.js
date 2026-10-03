@@ -65,6 +65,7 @@
     setLesson: (id, status, why) => write("POST", "lessons/" + enc(id), { status, why }),
     novelty: (since, limit) => get("novelty", { since, limit }),
     spend: () => get("spend"),
+    strategy: (limit) => get("strategy", { limit }),
     broker: () => get("broker"),
     duelsLive: () => get("duels"),
     tickLatest: () => get("tick/latest"),

@@ -112,6 +112,7 @@
       case "broker_match": return `Empareja ${p.sell} con ${p.buy} a ${fmtP(p.price)}`;
       case "broker_announce": return "Anuncio del broker";
       case "open_pack": return `Abre sobre #${p.asset}`;
+      case "brain_plan": return "Cerebro: " + ([...(p.changes || []), ...((p.cancel_offers || []).length ? ["retira " + p.cancel_offers.map((x) => "#" + x).join(", ")] : [])].join(" · ") || "plan");
       default: return a.kind || "acción";
     }
   }
@@ -124,21 +125,44 @@
     return parts.join(" + ") || "nada";
   }
 
+  // decisions of the brain (strategist): each plan that changed settings or cancelled offers is a decision too
+  function brainRows(r) {
+    if (!r || typeof r !== "object") return [];
+    const docs = (r.history || []).slice();
+    if (r.current && !docs.some((d) => d.updated === r.current.updated)) docs.push(r.current);
+    const out = [];
+    for (const doc of docs) {
+      const plan = doc.plan || {};
+      const changes = (doc.big_changes || []).slice();
+      const cancels = plan.cancel_offers || [];
+      if (!changes.length && !cancels.length) continue;
+      const c = doc.council;
+      const total = c && Array.isArray(c.votes) ? c.votes.length : 0;
+      const a = { id: "cerebro-" + Math.round(doc.updated || 0), kind: "brain_plan", domain: "cerebro", source: c ? "council" : "opus",
+        params: { changes, cancel_offers: cancels }, reason: (plan.priorities || [])[0] || plan.situation || doc.reason || "" };
+      out.push({ dec: { id: a.id, ts: doc.updated, tick: doc.tick, source: a.source, action: a }, a, c: null, o: null, outs: [], v: { ok: !(c && c.ok === false) },
+        src: c ? "consejo" : "opus", extra: c ? `${c.yes ?? 0}/${total}` : null, res: c && c.ok === false ? "vetado" : "enviado", type: "anuncio" });
+    }
+    return out;
+  }
+
   // ---------- state ----------
   const S = { root: null, filter: null, extra: {}, drawerFor: null, selected: null, params: "", lastData: null };
 
   async function load() {
-    const [stR, decR, couR, outR, logR] = await Promise.all([
+    const [stR, decR, couR, outR, logR, strR] = await Promise.all([
       safe(() => A().status(), {}),
       safe(() => A().decisions(undefined), { items: [] }),
       safe(() => A().council(undefined), { items: [] }),
       safe(() => A().outcomes(undefined), { items: [] }),
       safe(() => (A().controlLog ? A().controlLog() : A().journal ? A().journal("control") : null), null),
+      safe(() => (A().strategy ? A().strategy(100) : null), null),
     ]);
     const councilByAction = {}; for (const c of items(val(couR))) if (c.action_id) councilByAction[c.action_id] = c;
     const outsByAction = {}; for (const o of items(val(outR))) if (o.action_id) (outsByAction[o.action_id] = outsByAction[o.action_id] || []).push(o);
     const ctx = { councilByAction, outsByAction };
-    const rows = items(val(decR)).map((d) => enrich(d, ctx)).sort((a, b) => (b.dec.id ?? 0) - (a.dec.id ?? 0));
+    const rows = items(val(decR)).map((d) => enrich(d, ctx)).concat(brainRows(val(strR)))
+      .sort((a, b) => (b.dec.ts ?? 0) - (a.dec.ts ?? 0) || (b.dec.id ?? 0) - (a.dec.id ?? 0));
     return {
       status: val(stR) || {}, rows, council: items(val(couR)), log: logR === null ? null : items(val(logR)),
       decErr: isErr(decR) ? decR.__error : null, statErr: isErr(stR) ? stR.__error : null,
