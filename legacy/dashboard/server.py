@@ -218,10 +218,17 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
 # The public market board (bazaar/plaza/server.py, its own process): the ONLY routes served without the dashboard
 # login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
 PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
-PLAZA_RX = re.compile(r"/plaza(?:/(?:agents\.md|cards\.json|static/plaza\.(?:css|js)"
-                      r"|api/(?:health|teams|matches|wall|claim|team/t\d{2}))?)?")
-PLAZA_QUERY = re.compile(r"(?:team=t\d{2})?")
-PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/claim"), "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+PLAZA_RX = re.compile(
+    r"/plaza(?:/(?:agents\.md|cards\.json|static/(?:plaza\.css|plaza\.js|components\.js)"
+    r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|floor|market|wall|agents"
+    r"|api/(?:health|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}|card/[A-Z]{3}-\d{2}))?)?")
+PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9-]{1,12}(?:&[a-z]{2,8}=[A-Za-z0-9-]{1,12}){0,6})?")
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor)"), "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+PLAZA_STREAM = "/plaza/api/floor/stream"
+# Our own panel over the plaza: dashboard login only. The plaza process trusts the token it wrote for this run.
+PLAZA_ADMIN_RX = re.compile(r"/plaza/admin(?:/(?:static/admin\.js|api/(?:overview|activity))?)?")
+PLAZA_ADMIN_WRITE = "/plaza/admin/api/action"
+PLAZA_TOKEN_FILE = Path(ENV.get("PLAZA_TOKEN_FILE") or ROOT.parent.parent / "bazaar" / "data" / "live" / "plaza_admin.token")
 PLAZA_MAX_BODY = 16 * 1024
 PLAZA_PASS = ("Content-Type", "Cache-Control", "Location", "Access-Control-Allow-Origin", "X-Content-Type-Options",
               "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy")
@@ -235,9 +242,26 @@ def is_plaza(path, method="GET"):
     return bool(rx and rx.fullmatch(path))
 
 
+def is_plaza_admin(path, method="GET"):
+    if method in ("GET", "HEAD"):
+        return bool(PLAZA_ADMIN_RX.fullmatch(path))
+    return method == "POST" and path == PLAZA_ADMIN_WRITE
+
+
+def plaza_token():
+    try:
+        return PLAZA_TOKEN_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def plaza_url(path, query):
+    return PLAZA_URL + path + ("?" + query if query and PLAZA_QUERY.fullmatch(query) else "")
+
+
 def plaza_proxy(path, query, method="GET", body=None, headers=None):
     """Forwards one whitelisted plaza request; returns (status, headers, body)."""
-    url = PLAZA_URL + path + ("?" + query if query and PLAZA_QUERY.fullmatch(query) else "")
+    url = plaza_url(path, query)
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     try:
         opener = urllib.request.build_opener(_NoRedirect)
@@ -437,10 +461,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if is_plaza(path):                                # the public market board: no login, whitelisted routes
-            return self.plaza("GET")
+            return self.plaza_stream() if path == PLAZA_STREAM else self.plaza("GET")
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
+        if is_plaza_admin(path):                          # our panel over the plaza: dashboard login only
+            if client != "dashboard":
+                return self.send_error(403)
+            return self.plaza("GET", admin=True)
         if path == V2_PREFIX or path.startswith(V2_PREFIX + "/"):
             return self.v2(client, "GET")
         if path == "/bot/status":
@@ -510,6 +538,10 @@ class Handler(SimpleHTTPRequestHandler):
         client = self.client()
         if client is None:
             return self.deny()
+        if is_plaza_admin(path, method):                  # hide a message, block a team, refresh, on/off
+            if client != "dashboard" or self.headers.get("X-Dashboard") != "1":
+                return self.send_error(403)
+            return self.plaza(method, admin=True)
         if path.startswith(V2_PREFIX + "/"):
             return self.v2(client, method)
         if path.startswith(BOT_CONTROL_PREFIXES):
@@ -533,7 +565,49 @@ class Handler(SimpleHTTPRequestHandler):
         log_action(client, method, path, body, status, resp)
         self.send_json(status, resp)
 
-    def plaza(self, method):
+    def plaza_stream(self):
+        """The live floor (server-sent events): relays the plaza's stream line by line until either side closes."""
+        parts = self.path.split("?", 1)
+        fwd = (self.headers.get("CF-Connecting-IP") or self.client_address[0] or "")[:45]
+        headers = {"X-Plaza-Client": fwd if re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd) else "0.0.0.0",
+                   "Accept": "text/event-stream"}
+        last = self.headers.get("Last-Event-ID") or ""
+        if re.fullmatch(r"\d{1,9}", last):
+            headers["Last-Event-ID"] = last
+        req = urllib.request.Request(plaza_url(parts[0], parts[1] if len(parts) > 1 else ""), headers=headers)
+        try:
+            upstream = urllib.request.urlopen(req, timeout=40)
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            self.send_response(e.code)
+            self.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            return self.send_error(502)
+        self.send_response(200)
+        for k in ("Content-Type", "Cache-Control", "X-Accel-Buffering", "Access-Control-Allow-Origin",
+                  "X-Content-Type-Options", "Content-Security-Policy"):
+            if upstream.headers.get(k):
+                self.send_header(k, upstream.headers[k])
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        try:
+            with upstream:
+                while True:
+                    line = upstream.readline()
+                    if not line:
+                        break
+                    self.wfile.write(line)
+                    if line == b"\n":
+                        self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            pass
+
+    def plaza(self, method, admin=False):
         """The public board: forwards the request with the caller's address so the plaza can budget per client."""
         parts = self.path.split("?", 1)
         body = None
@@ -550,6 +624,8 @@ class Handler(SimpleHTTPRequestHandler):
         for name in ("Content-Type", "X-Plaza-Pin"):
             if self.headers.get(name):
                 headers[name] = self.headers[name][:120]
+        if admin:
+            headers["X-Plaza-Admin"] = plaza_token()
         status, out, payload = plaza_proxy(parts[0], parts[1] if len(parts) > 1 else "", method, body, headers)
         self.send_response(status)
         for k, v in out.items():

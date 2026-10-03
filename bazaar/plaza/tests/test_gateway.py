@@ -47,6 +47,18 @@ class GatewayTest(unittest.TestCase):
                      "/plaza/static/plaza.js", "/plaza/api/teams", "/plaza/api/team/t04", "/plaza/api/matches",
                      "/plaza/api/wall", "/plaza/api/health"):
             self.assertTrue(g.is_plaza(path), path)
+        for path in ("/plaza/team/t02", "/plaza/card/SAL-09", "/plaza/floor", "/plaza/market", "/plaza/api/offers",
+                     "/plaza/api/floor", "/plaza/api/floor/stream", "/plaza/api/card/SAL-09", "/plaza/static/components.js"):
+            self.assertTrue(g.is_plaza(path), path)
+        for path in ("/plaza/admin", "/plaza/admin/", "/plaza/admin/api/overview", "/plaza/admin/static/admin.js",
+                     "/plaza/api/admin", "/plaza/team/t2", "/plaza/card/sal-09"):
+            self.assertFalse(g.is_plaza(path), path)
+        self.assertTrue(g.is_plaza("/plaza/api/floor", "POST"))
+        self.assertFalse(g.is_plaza("/plaza/admin/api/action", "POST"))
+        self.assertTrue(g.is_plaza_admin("/plaza/admin/api/action", "POST"))
+        self.assertFalse(g.is_plaza_admin("/plaza/admin/api/action", "PUT"))
+        self.assertFalse(g.is_plaza_admin("/plaza/admin/api/../../x"))
+        self.assertTrue(g.PLAZA_QUERY.fullmatch("set=SAL&rarity=rare&side=ask"))
         for path in ("/plaza/static/../../.env", "/plaza/api/team/t4", "/plaza/api/control", "/plaza/x", "/plazax",
                      "/plaza/static/app.js", "/v2/plaza/", "/plaza/api/team/t04/x", "/plaza//", "/plaza/api/claim/"):
             self.assertFalse(g.is_plaza(path), path)
@@ -66,7 +78,23 @@ class GatewayTest(unittest.TestCase):
                              ("DELETE", "/plaza/api/team/t04"), ("POST", "/plaza/api/teams")):
             self.assertEqual(self.status(method, path), 401, (method, path))
 
+    def test_admin_needs_the_dashboard_login(self):
+        for path in ("/plaza/admin/", "/plaza/admin/api/overview", "/plaza/admin/api/activity", "/plaza/admin/static/admin.js"):
+            self.assertEqual(self.status("GET", path), 401, path)
+        self.assertEqual(self.status("POST", "/plaza/admin/api/action"), 401)
+        if self.g.GATEWAY_TOKENS:                             # a bot token is not a dashboard login
+            token = next(iter(self.g.GATEWAY_TOKENS))
+            self.assertEqual(self.status("GET", "/plaza/admin/api/overview", **{"X-Team-Key": token}), 403)
+        if self.g.DASHBOARD_AUTH != ":":
+            import base64
+            basic = {"Authorization": "Basic " + base64.b64encode(self.g.DASHBOARD_AUTH.encode()).decode()}
+            self.assertEqual(self.status("GET", "/plaza/admin/api/overview", **basic), 502)       # forwarded
+            self.assertEqual(self.status("POST", "/plaza/admin/api/action", **basic), 403)        # no X-Dashboard header
+            self.assertEqual(self.status("POST", "/plaza/admin/api/action", **basic, **{"X-Dashboard": "1"}), 502)
+
     def test_plaza_routes_pass_without_login(self):
+        self.assertEqual(self.status("GET", "/plaza/api/floor/stream"), 502)
+        self.assertEqual(self.status("POST", "/plaza/api/floor"), 502)
         self.assertEqual(self.status("GET", "/plaza/api/health"), 502)      # forwarded: the upstream is down here
         self.assertEqual(self.status("POST", "/plaza/api/claim"), 502)
         self.assertEqual(self.status("PUT", "/plaza/api/team/t04"), 502)
