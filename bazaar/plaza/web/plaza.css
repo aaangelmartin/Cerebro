@@ -151,3 +151,45 @@ pre.code { margin: 0 0 10px; padding: 12px; background: var(--bg); border: 1px s
 }
 @media (min-width: 1700px) { body { font-size: 17px; } .app { max-width: 1760px; } .cards { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); } }
 @media (prefers-reduced-motion: no-preference) { .team, .btn, .nav a { transition: background .12s, border-color .12s; } }
+
+/* ---- added with the team home, live floor, market board and card detail */
+.okc { color: var(--ok); }
+a.card { display: block; }
+.cols.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.match.offer.home-venue { border-left-color: var(--ok); }
+.saves.fee { color: var(--warn); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; align-items: end; }
+.filters .btn.on { background: var(--signal); color: var(--bg); border-color: var(--signal); }
+.field { display: grid; gap: 3px; font: 500 10px var(--font-num); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.field select { font: 500 13px var(--font-ui); color: var(--ink); background: var(--s2); border: 1px solid var(--line-2); padding: 7px 8px; min-width: 110px; }
+.count.live { color: var(--ok); display: inline-flex; align-items: center; gap: 6px; }
+.count.live i { width: 7px; height: 7px; background: var(--ok); display: inline-block; }
+.floor-wrap { background: var(--s1); border: 1px solid var(--line); }
+.floor-wrap .empty { padding: 14px; margin: 0; }
+.floor { max-height: 360px; overflow-y: auto; }
+.floor.tall { max-height: none; }
+.msg { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 9px 14px;
+  border-bottom: 1px solid var(--line); border-left: 3px solid transparent; }
+.msg.agent { border-left-color: var(--t-cambio); background: color-mix(in oklab, var(--t-cambio) 5%, transparent); }
+.msg.home-venue { border-left-color: var(--ok); }
+.msg.k-deal .msg-kind { color: var(--ok); } .msg.k-want .msg-kind { color: var(--t-compra); } .msg.k-offer .msg-kind { color: var(--t-venta); }
+.msg.agent .msg-kind { color: var(--t-cambio); }
+.msg-kind { font: 600 10px var(--font-num); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.msg-body { min-width: 0; overflow-wrap: anywhere; }
+.msg-body .arrow { color: var(--ink-3); }
+.msg-text { color: var(--ink-2); }
+.msg-time { color: var(--ink-3); font-size: 11px; }
+.card-page { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+.card-big .card-art { width: 100%; }
+.who-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.table { background: var(--s1); border: 1px solid var(--line); }
+.trow { display: grid; grid-template-columns: 70px minmax(0, 1fr) 90px 80px; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.trow span:last-child { text-align: right; }
+a.wanted { color: inherit; }
+a.wanted:hover { background: var(--s2); }
+.nav { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .cols.two { grid-template-columns: 1fr; }
+  .card-page { grid-template-columns: 1fr; } .card-big { max-width: 180px; }
+  .msg { grid-template-columns: 60px minmax(0, 1fr); } .msg-time { display: none; }
+}

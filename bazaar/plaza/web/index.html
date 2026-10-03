@@ -8,15 +8,17 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Geist+Mono:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="static/plaza.css">
+<link rel="stylesheet" href="/plaza/static/plaza.css">
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="#/"><span class="brand-mark">10</span><span class="brand-name">Plaza</span><span class="brand-sub">Team 10 market</span></a>
+  <a class="brand" href="/plaza/#/"><span class="brand-mark">10</span><span class="brand-name">Plaza</span><span class="brand-sub">Team 10 market</span></a>
   <nav class="nav" id="nav">
-    <a href="#/" data-nav="home">Teams</a>
-    <a href="#/wall" data-nav="wall">Wanted wall</a>
-    <a href="#/agents" data-nav="agents">For your agent</a>
+    <a href="/plaza/#/" data-nav="home">Teams</a>
+    <a href="/plaza/#/floor" data-nav="floor">Live floor</a>
+    <a href="/plaza/#/market" data-nav="market">Market</a>
+    <a href="/plaza/#/wall" data-nav="wall">Wanted wall</a>
+    <a href="/plaza/#/agents" data-nav="agents">For your agent</a>
   </nav>
   <div class="stats" id="stats" aria-live="polite"></div>
 </header>
@@ -26,6 +28,7 @@
   <span>Team 10 runs the venue and is never a party to a deal on it. Nobody here asks for your game key.</span>
 </footer>
 <div class="toast" id="toast" role="status" hidden></div>
-<script src="static/plaza.js"></script>
+<script src="/plaza/static/components.js"></script>
+<script src="/plaza/static/plaza.js"></script>
 </body>
 </html>
