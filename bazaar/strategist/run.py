@@ -33,6 +33,7 @@ from bazaar import config
 from bazaar.brain import strategy as S
 from bazaar.strategist import brainio as B
 from bazaar.strategist import budget as BG
+from bazaar.strategist import limiter as L
 
 MIN_GAP_S = float(config.ENV.get("BAZAAR_STRATEGY_MIN_GAP_S", "150"))     # at most one plan this often
 TRIGGER_GAP_S = 45.0                                                      # ...or this often on a big change
@@ -467,6 +468,14 @@ class Strategist:
         self._llm = llm
         self.now = now
         self.last_call = 0.0
+        try:                                    # a restart is not a reason to plan again: keep the last plan's time
+            self.last_call = float((_read(self.live / "strategist_status.json", {}) or {}).get("last_call") or 0.0)
+        except (TypeError, ValueError):
+            self.last_call = 0.0
+        self.last_chat_plan = 0.0               # limiter state (strategist/limiter.py)
+        self.last_emergency = 0.0
+        self.gate_state: dict = {}
+        self.votes = L.VoteCache()
         self.last_plan_tick: int | None = None
         self.last_score: float | None = None
         self.seen_events: set[str] = set()
@@ -893,24 +902,11 @@ class Strategist:
         self.poll_inputs(tick)
         cfg = self.intensity(pic)
         stopped = bool(clock.get("paused")) or clock.get("doors") not in (None, "open")
-        urgent_kinds = ("chat",) if stopped else BG.ALWAYS_KINDS     # a paused game only answers the team
-        chat = any(e.get("kind") in urgent_kinds for e in self.pending_events)
         now = self.now()
-        since = now - self.last_call
-        if chat and since >= CHAT_GAP_S:
-            kinds = sorted({e.get("kind") for e in self.pending_events if e.get("kind") in urgent_kinds})
-            return "message in the team chat" if kinds == ["chat"] else f"new input: {', '.join(kinds)}"
-        if stopped:
-            return ""
-        wake = [e for e in self.pending_events if e.get("kind") in cfg["wake_kinds"]]
-        reasons = [f"{len(wake)} game event(s): " + ", ".join(sorted({str(e.get('kind')) for e in wake}))] if wake else []
-        score = (pic.get("us") or {}).get("score")
-        score = score.get("score") if isinstance(score, dict) else score
-        if (cfg["wake_on_score_drop"] and isinstance(score, (int, float)) and self.last_score is not None
-                and self.last_score - score >= SCORE_DROP):
-            reasons.append(f"score dropped {self.last_score}->{score}")
+        kinds = {e.get("kind") for e in self.pending_events}
+        has_chat = bool(kinds & {"chat", "external"})            # humans: the only input that may cut the gap
         t_h = clock.get("t_hours")
-        passed = set()
+        passed, session_start = set(), False
         sched = _read(self.record / "schedule.json", {}) or {}
         for u in sched.get("upcoming") or []:
             key = f"{u.get('at_hours')}|{u.get('action')}"
@@ -918,16 +914,60 @@ class Strategist:
                 passed.add(key)
         new_events = passed - self.seen_events
         if self.seen_events and new_events:
-            reasons.append(f"event {sorted(new_events)[:2]}")
+            session_start = any(k.endswith("|duels") for k in new_events)
+            self.sched_dirty = sorted(new_events)[:2]
         self.seen_events |= passed
-        if reasons and since >= TRIGGER_GAP_S:
+        if stopped and not has_chat:
+            return ""
+        # Hard limits (strategist/limiter.py): a minimum gap per level and a rolling spend bucket. Game events never
+        # cut the gap: they wait in pending_events and are read at the next slot.
+        rows = L._tail_rows(self.live / "llm.jsonl", now - L.WINDOW_S)
+        tg = self._targets(clock)
+        sb = L.bucket("strategy", tg["strategy"], self.live, now, rows=rows)
+        chat_ok = L.bucket("strategy", tg["strategy"], self.live, now, slack=L.CHAT_SLACK, rows=rows)["ok"]
+        g = L.gate(now=now, level=cfg["level"], last_plan_ts=self.last_call, has_chat=has_chat,
+                   last_chat_plan_ts=self.last_chat_plan,
+                   emergency=(not stopped) and L.is_emergency(self.pending_events, session_start),
+                   last_emergency_ts=self.last_emergency, strategy_bucket=sb, chat_bucket_ok=chat_ok)
+        self.gate_state = {"ok": g["ok"], "why": g["why"], "kind": g["kind"], "min_gap_s": L.min_gap_s(cfg["level"]),
+                           "strategy_bucket": sb, "targets_usd_h": tg}
+        if not g["ok"]:
+            return ""
+        if g["kind"] == "chat":
+            self.last_chat_plan = now
+            return "message in the team chat" if "chat" in kinds else "new input: external"
+        if g["kind"] == "emergency":
+            self.last_emergency = now
+            return "emergency: " + ("duel session starts" if session_start else "big bargain needs funding")
+        wake = [e for e in self.pending_events if e.get("kind") in set(cfg["wake_kinds"]) | set(BG.ALWAYS_KINDS)]
+        reasons = [f"{len(wake)} game event(s): " + ", ".join(sorted({str(e.get('kind')) for e in wake}))] if wake else []
+        score = (pic.get("us") or {}).get("score")
+        score = score.get("score") if isinstance(score, dict) else score
+        if (cfg["wake_on_score_drop"] and isinstance(score, (int, float)) and self.last_score is not None
+                and self.last_score - score >= SCORE_DROP):
+            reasons.append(f"score dropped {self.last_score}->{score}")
+        if getattr(self, "sched_dirty", None):
+            reasons.append(f"event {self.sched_dirty}")
+            self.sched_dirty = None
+        if reasons:
             return "; ".join(reasons)
         every = int(cfg["interval_ticks"])           # the intensity level sets the cadence (budget.settings)
         if self.last_plan_tick is None:
-            return "first plan" if since >= TRIGGER_GAP_S else ""
-        if isinstance(tick, int) and tick - self.last_plan_tick >= every and since >= cfg["min_gap_s"]:
+            return "first plan"
+        if isinstance(tick, int) and tick - self.last_plan_tick >= every:
             return f"every {every} ticks (intensity {cfg['level']})"
         return ""
+
+    def _targets(self, clock: dict) -> dict:
+        """Dollars per hour the brain and the council may spend now (limiter.targets from the budget plan)."""
+        full_clock = {**(_read(self.record / "clock.json", {}) or {}), **(clock or {})}
+        tick_s = float((clock or {}).get("tick_seconds") or 30.0)
+        try:
+            est = BG.estimate_usd_per_hour(self.level, tick_s, BG.measured(self.live, self.now()))
+        except Exception:  # noqa: BLE001
+            est = None
+        return L.targets(self.budget_plan or (BG.read_state(self.live).get("plan") or {}),
+                         BG.hours_left(full_clock, self.now()), est if self.level_mode == "manual" else None)
 
     # ------------------------------------------------------------------ intensity (strategist/budget.py)
     def _signals(self, pic: dict) -> dict:
@@ -976,7 +1016,8 @@ class Strategist:
             level, why = BG.govern(clock=full_clock, spent=self.spent_today(), cap=cap,
                                    upcoming=sched.get("upcoming") or [], signals=self._signals(pic),
                                    tick_seconds=float(clock.get("tick_seconds") or 30.0),
-                                   m=BG.measured(self.live, self.now()), now=self.now())
+                                   m=BG.measured(self.live, self.now()), now=self.now(),
+                                   real_usd_h=L.trailing(self.live, self.now())["brain"])
         if level != self.level or md != self.level_mode:
             BG.log_change(self.live, level, why, md, self.now())
         BG.write_state(self.live, {**state, "level": level, "mode": md, "reason": why,
@@ -1219,7 +1260,9 @@ class Strategist:
         rejected = []
         if errors:
             rejected = errors
-            got2 = self.ask(pic, reason, fix=errors, previous=got["raw"]) if cfg_now["max_reasks"] else None
+            # one paid re-ask at most, only from intensity 50 and only for errors that change what we do
+            got2 = (self.ask(pic, reason, fix=errors, previous=got["raw"])
+                    if cfg_now["max_reasks"] and self.level >= L.LOW_LEVEL and L.material(errors) else None)
             if got2 is not None:
                 got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
                 new = self._urgency(B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or [])), pic)
@@ -1232,12 +1275,23 @@ class Strategist:
         changes = S.big_changes(self.plan, new)
         council = None
         ok = True
-        vote = [c for c in changes if cfg_now["council_minor"] or not c.startswith(MINOR_CHANGES)]
+        vote = L.votable([c for c in changes if cfg_now["council_minor"] or not c.startswith(MINOR_CHANGES)],
+                         self.level)
         if changes and not vote:
-            changes = []                       # low intensity: minor (no money, no pause) changes skip the vote
+            changes = []                       # minor changes (and, below 50, money moves under 25 P) skip the vote
         if changes:
-            with self.thinking("council vote: " + ", ".join(changes)[:60]):
-                council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
+            changes = vote
+            council = self.votes.get(changes, clock.get("tick"))        # one vote per distinct proposal
+            if council is None:
+                cb = L.bucket("council", self._targets(clock)["council"], self.live, self.now())
+                if not cb["ok"]:
+                    council = L.offline_vote(changes, "council budget spent for now (%.2f of %.2f $ in 30 min)"
+                                             % (cb["spent"], cb["allowed"]))
+                    self._finding("budget", council["why"], {"changes": changes})
+                else:
+                    with self.thinking("council vote: " + ", ".join(changes)[:60]):
+                        council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
+                    self.votes.put(changes, clock.get("tick"), council)
             ok = council["ok"]
         plan = S.merge_accepted(self.plan, new, ok)
         if "min_asks" not in plan and (self.plan or {}).get("min_asks"):
@@ -1325,6 +1379,7 @@ class Strategist:
               "intensity": {"level": self.level, "mode": self.level_mode, "reason": self.level_reason,
                             "interval_ticks": BG.settings(self.level)["interval_ticks"]},
               "thinking_since": self.thinking_since, "thinking_reason": self.thinking_reason,
+              "limiter": self.gate_state,
               "errors": self.errors[-5:], **(extra or {})}
         p = self.live / "strategist_status.json"
         with self._hb_lock:

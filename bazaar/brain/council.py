@@ -342,6 +342,17 @@ def review(action: Action, sit, ctx) -> Action | None:
             return done(None, "same offer, same terms (voted at tick %s): %s" % (hit["tick"], hit["why"]))
         return done(replace(action, source="council"), "same offer, same terms: approved at tick %s" % hit["tick"])
 
+    try:                                    # budget limiter: small moves and an empty council bucket skip the model
+        from bazaar.strategist import limiter as _lim
+        skip = _lim.trading_council_gate(action, live=getattr(ctx, "live", None))
+    except Exception:  # noqa: BLE001 - the limiter must never break a decision
+        skip = None
+    if skip is not None:
+        row.update(votes=[], limiter=skip[1])
+        if skip[0] == "veto":
+            return done(None, skip[1])
+        return done(replace(action, source="council"), skip[1])
+
     if time.time() >= deadline:
         row["votes"] = []
         return done(action, "no time: original action")

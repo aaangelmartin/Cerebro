@@ -285,7 +285,7 @@ def hours_left(clock: dict, now: float | None = None) -> float:
 
 def govern(*, clock: dict, spent: float, cap: float, upcoming: list[dict] | None = None,
            signals: dict | None = None, tick_seconds: float = 30.0, m: dict | None = None,
-           now: float | None = None) -> tuple[int, str]:
+           now: float | None = None, real_usd_h: float | None = None) -> tuple[int, str]:
     """(level, reason) for auto mode. `signals`: {bargain, chat, behind_pace, rank_drop, duels_live, bench_live,
     unchanged, no_feasible_action}; `upcoming`: schedule rows {at_hours, action}."""
     sig = signals or {}
@@ -328,6 +328,10 @@ def govern(*, clock: dict, spent: float, cap: float, upcoming: list[dict] | None
         level = min(level, max(base, ceiling))
     if left <= 0:
         return 0, "brain budget spent"
+    if isinstance(real_usd_h, (int, float)) and real_usd_h > pace * 1.25:
+        # the real spend of the last 30 minutes, not the model's estimate, decides: slow down until it is back on pace
+        level = min(level, level_for_budget(max(0.5, pace * pace / real_usd_h), tick_seconds, m))
+        why.append(f"real brain spend {real_usd_h:.2f} $/h is above the pace")
     return int(_clamp(level, 5, 100)), "; ".join(why)
 
 
@@ -339,6 +343,14 @@ def log_change(live: Path | None, level: int, reason: str, mode_: str, now: floa
                                ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def state_path(live: Path | None = None) -> Path:
@@ -380,10 +392,17 @@ def report(live: Path | None = None, clock: dict | None = None, spend: dict | No
     plan = st.get("plan") or {}
     hl = hours_left(clock, now)
     per_h = estimate_usd_per_hour(level, tick_s, m)
+    from bazaar.strategist import limiter as _lim
+    real = _lim.trailing(live, now)                       # what we really spent in the last 30 minutes, per hour
     day_spent = float(spend.get("usd") or 0.0)
     by_key = spend.get("by_key") or {}
     return {"mode": md, "level": level, "reason": st.get("reason"), "changed": st.get("changed"),
-            "settings": settings(level), "usd_per_hour_now": per_h, "table": table(tick_s, m),
+            "settings": settings(level), "usd_per_hour_now": real["brain"], "usd_per_hour_all_now": real["all"],
+            "usd_per_hour_brain_now": real["brain"],
+            "usd_per_hour_council_now": real["council"], "usd_per_hour_by_purpose": real["by_purpose"],
+            "usd_per_hour_level": per_h, "min_gap_s": _lim.min_gap_s(level),
+            "limiter": (_read_json(live / "strategist_status.json") or {}).get("limiter"),
+            "projected_day_by_close": round(day_spent + real["all"] * hl, 2), "table": table(tick_s, m),
             "measured": m, "spent_today": round(spent, 2), "cap_today": cap,
             "cap_limits": {"brain_max": BRAIN_CAP_MAX, "day_max": config.DAY_CAP_MAX_USD},
             "day_total_spent": round(day_spent, 2), "day_cap": config.day_cap_usd(),
