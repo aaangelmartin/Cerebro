@@ -150,7 +150,7 @@ class ExecutorTest(unittest.TestCase):
         live = Path(self.dir.name) / "live"
         bfile = live / "broker.json"
         gw = SlowGW({"/api/me": {"id": "t10", "venue": "v9", "broker_key": "bk-secret", "cash": 100},
-                     "/api/venues": {"venues": [{"id": "v9", "name": "board"}]}})
+                     "/api/venues": {"venues": [{"id": "v9", "name": "board", "rules": {"mechanism": "board"}, "bond": 250}]}})
         notices = []
         from bazaar.broker import venue
         with mock.patch.object(executor.config, "LIVE", live), mock.patch.object(venue, "BROKER_FILE", bfile), \

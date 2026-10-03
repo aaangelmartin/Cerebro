@@ -210,7 +210,8 @@ class TestVenue(unittest.TestCase):
 
     def test_open_venue_is_idempotent(self):
         gw = mock.Mock()
-        gw.get.return_value = {"venue": "v07", "cash": 500}
+        gw.get.side_effect = lambda path, **kw: ({"venues": [{"venue": "v07", "rules": {"mechanism": "board"}, "bond": 250}]}
+                                                 if path == "/api/venues" else {"venue": "v07", "cash": 500})
         out = venue.open_venue(gw)
         self.assertTrue(out["reused"])
         gw.post.assert_not_called()
@@ -233,18 +234,22 @@ class TestVenue(unittest.TestCase):
         self.assertTrue(venue.should_open(sit, reserve=40))
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "t_hours": 4.0}), reserve=40))
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "cash": 300}}), reserve=40))
-        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "venue": "v1"}}), reserve=40))
+        board = [{"venue": "v1", "rules": {"mechanism": "board"}, "bond": 250}]
+        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "venue": "v1"}, "venues": board}),
+                                           reserve=40))
         a = venue.open_action(sit)
         self.assertEqual(a.kind, "venue_open")
         self.assertEqual(a.params["mechanism"], "board")
 
     def test_starter_stall_is_not_our_venue(self):
         venues = {"venues": [{"venue": "stall10", "starter": True}, {"venue": "rastro", "house": True},
-                             {"venue": "v03", "starter": False}]}
+                             {"venue": "v03", "starter": False, "rules": {"mechanism": "board"}, "bond": 250},
+                             {"venue": "v05", "rules": {"mechanism": "auto"}}]}
         self.assertIsNone(venue.own_venue_id({"venue": "stall10"}, venues))
         self.assertIsNone(venue.own_venue_id({"venue": {"venue": "s9", "starter": True}}))
         self.assertEqual(venue.own_venue_id({"venue": "v03"}, venues), "v03")
-        self.assertEqual(venue.own_venue_id({"venue": "v03"}), "v03")
+        self.assertIsNone(venue.own_venue_id({"venue": "v05"}, venues))          # real stall: auto, no flag
+        self.assertIsNone(venue.own_venue_id({"venue": "v03"}))                  # unknown: not ours until proven
         self.assertIsNone(venue.own_venue_id({}, venues))
         venue.save_from_response({"venue": "stall10"})                 # the id saved in broker.json always counts
         self.assertEqual(venue.own_venue_id({"venue": "stall10"}, venues), "stall10")
@@ -254,7 +259,8 @@ class TestVenue(unittest.TestCase):
         sit = SimpleNamespace(t_hours=4.06, doors="open", paused=False, me=me,
                               venues=[{"venue": "stall10", "starter": True, "rules": {"mechanism": "auto"}}])
         self.assertTrue(venue.should_open(sit, reserve=40))
-        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "venues": []}), reserve=40))
+        # venues unknown: try to open (a refused opening costs nothing)
+        self.assertTrue(venue.should_open(SimpleNamespace(**{**sit.__dict__, "venues": []}), reserve=40))
 
     def test_open_venue_ignores_starter_stall(self):
         gw = mock.Mock()

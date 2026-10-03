@@ -310,16 +310,9 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
 
 
 def own_venue(sit) -> str | None:
-    """Our own venue id: the free starter stall (from hour 3.0) is not ours."""
-    vid = (_get(sit, "me") or {}).get("venue")
-    if isinstance(vid, dict):
-        vid = vid.get("venue") or vid.get("id")
-    if not vid:
-        return None
-    for v in _get(sit, "venues") or []:
-        if isinstance(v, dict) and (v.get("venue") or v.get("id")) == vid and (v.get("starter") or v.get("house")):
-            return None
-    return vid
+    """Our own venue id: the free starter stall (from hour 3.0) is not ours. One rule for the whole bot."""
+    from bazaar.broker.venue import own_venue_id
+    return own_venue_id(_get(sit, "me") or {}, _get(sit, "venues"))
 
 
 GRANT_AT_HOURS, GRANT_CASH = 4.05, 150   # Saturday allowance; the bond can count on it before it arrives

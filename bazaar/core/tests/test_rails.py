@@ -17,6 +17,7 @@ def card(i, ref, value):
 
 def sit(**kw):
     base = dict(tick=10, limits=dict(LIMITS), threads=[], my_offers=[], duels=[], values={"LAV-09": 150.0},
+                venues=[{"venue": "v99", "owner": "t10", "rules": {"mechanism": "board"}, "bond": 250}],
                 me={"cash": 300, "venue": "v99", "assets": [card(1, "LAV-03", 120.0), card(2, "SAL-01", 9.0), card(3, "SAL-01", 2.0),
                                             card(4, "MAL-02", 13.0), card(5, "LAT-04", 5.0)]})
     base.update(kw)
@@ -309,8 +310,12 @@ class VenueReserveEdges(unittest.TestCase):
         s.t_hours, s.me = 3.5, {**s.me, "venue": "v09", "cash": 186}
         s.venues = [{"venue": "v09", "owner": "t10", "starter": True}]
         self.assertIsNone(rails.own_venue(s))
-        s.venues = [{"venue": "v09", "owner": "t10", "starter": False}]
+        s.venues = [{"venue": "v09", "owner": "t10", "rules": {"mechanism": "auto"}, "bond": 0}]   # real stall shape
+        self.assertIsNone(rails.own_venue(s))
+        s.venues = [{"venue": "v09", "owner": "t10", "rules": {"mechanism": "board"}, "bond": 250}]
         self.assertEqual(rails.own_venue(s), "v09")
+        s.venues = []                                                   # unknown: not ours until proven
+        self.assertIsNone(rails.own_venue(s))
 
 
 class FreshDuelChangedOffer(unittest.TestCase):

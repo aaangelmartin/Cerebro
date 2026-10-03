@@ -147,6 +147,15 @@ def own_venue_id(me: dict, venues: Any = None) -> str | None:
         return None
     if vid in starter_ids(venues):
         return None
+    # Only our simulator flags the free stall; the real API only says it is mechanism "auto" (SDK). So a venue
+    # is ours only when /api/venues shows it as a board venue with a bond; unknown or auto means "not ours"
+    # (a refused opening costs nothing, a stall mistaken for ours would cost the Market Test all weekend).
+    entry = next((v for v in _venue_list(venues) if _vid(v) == vid), None)
+    if entry is None:
+        return None
+    mech = ((entry.get("rules") or {}).get("mechanism") or entry.get("mechanism") or "").lower()
+    if mech != "board" or entry.get("bond") in (0, "0"):
+        return None
     return vid
 
 
