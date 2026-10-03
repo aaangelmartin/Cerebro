@@ -155,7 +155,7 @@ def _own_venue(sit: Situation) -> str | None:
         return None
 
 
-ANNOUNCE_EVERY_H = 2.0           # broker_announce for our venue: once on opening, then every 2 game hours
+ANNOUNCE_EVERY_H = 1.0           # broker_announce for our venue: once on opening, then every game hour
 
 
 def _urgent_duel_accept(a: Action, sit: Situation) -> bool:

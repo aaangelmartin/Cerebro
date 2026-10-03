@@ -415,8 +415,8 @@ class MarketDomain:
         bids = [b for b in bids if b.max_price <= per_deal]
         from bazaar.core.goal import pending as _goal_pending
         goal = _goal_pending(sit, control, values)  # cash is saved for these: bid only on them
-        if goal:
-            bids = [b for b in bids if b.ref in goal]
+        if goal:                                    # goal cards come from the dealers: no cash parked in bids
+            bids = []
 
         # swaps: our duplicates / low-affinity cards for cards we lack, aimed at teams that value what we give
         swap_room = max(0, min(MAX_OWN_SWAPS - kinds.count("swap"), room_total))
@@ -436,8 +436,7 @@ class MarketDomain:
         if goal:                                    # free the cash locked in bids for other cards
             seen = {o.get("id") for o, _ in stale}
             for o in own_market:
-                if (offer_kind(o) == "bid" and o.get("id") not in seen
-                        and not (set(want_cards(o)) & set(goal))):
+                if offer_kind(o) == "bid" and o.get("id") not in seen:
                     stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,

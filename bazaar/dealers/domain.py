@@ -43,6 +43,8 @@ MIN_LLM_S = 3.0                              # below this much time left, code d
 MAX_CANDIDATES = 12                          # shown to Claude per tick
 EXPECTED_CONCESSION = 0.15                   # we expect to close this share of the range above the dealer's limit
 MIN_POINTS = 0.5
+GOAL_SMALL_DEAL_P = 30                      # while saving for a goal card, other buys must be this cheap...
+GOAL_SMALL_GAIN_P = 3.0                     # ...and create at least this much value (negotiated deals score)
 CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
 VENUE_RESERVE_P = 270                        # bond 250 + 20, kept while we have no venue (rails do the same)
 STALE_TICKS = 3                              # close a thread the dealer left unanswered this long
@@ -485,7 +487,7 @@ class DealersDomain:
             level = int(p.get("level") or 1)
             ladder_now = self.store.ladder(level)
 
-            def add(topic, kind, item, name, value, list_price, opening_hint=None, max_price=None):
+            def add(topic, kind, item, name, value, list_price, opening_hint=None, max_price=None, small_only=False):
                 if time.time() - self._sold_out.get((d, item), 0) < 1800:
                     return
                 buying = kind.startswith("buy")
@@ -507,6 +509,8 @@ class DealersDomain:
                         return
                     exp = max(exp, lim)
                     gain = exp - value
+                if small_only and (exp > GOAL_SMALL_DEAL_P or gain < GOAL_SMALL_GAIN_P):
+                    return                                   # saving for a goal: only small deals with a clear gain
                 cap = capture(int(round(o)), int(round(exp)), f, buying)
                 pts = haggle.expected_points(gain, level, ladder_gain(ladder_now, cap))
                 if pts < MIN_POINTS or gain < 0.5:
@@ -535,11 +539,10 @@ class DealersDomain:
                     for ref in values.released_refs(r):
                         if isinstance(sets, list) and values.set_of(ref) not in sets:
                             continue
-                        if goal and ref not in goal:
-                            continue
                         add({"buy": {"card": ref}}, f"buy:{r}", ref, (values.cards.get(ref) or {}).get("name", ref),
                             values.next_copy(ref), entry.get("list_price"),
-                            max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal else None)
+                            max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal else None,
+                            small_only=bool(goal) and ref not in goal)
             buys = {e.get("rarity"): e for e in menu.get("buys") or [] if e.get("rarity")}
             for a in me.get("assets") or []:
                 if a.get("kind", "card") != "card" or a.get("rarity") not in buys:
