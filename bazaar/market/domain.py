@@ -410,8 +410,8 @@ class MarketDomain:
         st = outcome.status
         status = "sent" if st in ("sent", "deal") else st if st in ("vetoed", "refused") else "error"
         record_post({"kind": "accept", "tick": outcome.tick, "offer_id": oid, "status": status,
-                     "rail": resp.get("rail"),
-                     "detail": resp.get("detail") or resp.get("message") or resp.get("error")})
+                     "rail": resp.get("rail") or resp.get("by"),
+                     "detail": resp.get("detail") or resp.get("why") or resp.get("message") or resp.get("error")})
 
     def _record_brain_post(self, p: dict, outcome: Outcome) -> None:
         """Log the outcome of a brain post (brain_posts.jsonl) so the brain re-plans what was refused."""

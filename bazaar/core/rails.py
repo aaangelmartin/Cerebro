@@ -498,13 +498,14 @@ def rail_pace(action: Action, sit=None, ctx=None) -> Verdict:
         if left is None:
             left = duel_accept_cap(lim) - int(b.get("duel_accepts_used", 0))
         if left <= 0:
-            return Verdict(False, "pace", "no duel accept left this tick")
+            return Verdict(False, "pace", f"no duel accept left this tick (cap {duel_accept_cap(lim)})")
     elif action.kind in ACCEPT_KINDS:
         left = b.get("accepts_left")
         if left is None:
             left = int(lim.get("accepts_per_team_per_tick", 1)) - int(b.get("accepts_used", 0))
         if left <= 0:
-            return Verdict(False, "pace", "no accept left this tick")
+            return Verdict(False, "pace", "no accept left this tick "
+                                          f"(cap {int(lim.get('accepts_per_team_per_tick', 1))} offer accept per tick)")
     if action.kind in MESSAGE_KINDS:
         key = conv_key(action)
         if (b.get("messages") or {}).get(key, 0) >= int(lim.get("messages_per_side_per_tick", 1)):

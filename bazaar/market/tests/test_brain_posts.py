@@ -145,3 +145,30 @@ class BrainPostSkipsTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertIn("no copy", rows[0]["detail"])
         self.assertIn("skipped: we hold no copy", S.post_outcomes_text())
+
+
+class BrainAcceptReasonTest(unittest.TestCase):
+    """A vetoed accept tells the brain which rule blocked it and with what number."""
+
+    def setUp(self):
+        self.live = Path(tempfile.mkdtemp())
+        self.p = mock.patch.object(config, "LIVE", self.live)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+
+    def test_council_and_arbiter_vetoes_carry_their_reason(self):
+        d = domain()
+        d._record_brain_accept(8169, Outcome("a1", 560, "vetoed", {"by": "council", "why": "auditor: pays 83 vs ask 78"}))
+        d._record_brain_accept(8169, Outcome("a2", 582, "vetoed", {
+            "rail": "arbiter", "detail": "accept already used this tick (cap 1 offer accept per tick; retried next tick)"}))
+        d._record_brain_accept(8169, Outcome("a3", 583, "vetoed", {
+            "rail": "cash", "detail": "spend 83 > per-deal cap 50"}))
+        rows = S.post_history()
+        self.assertEqual([(r["rail"], r["detail"][:20]) for r in rows],
+                         [("council", "auditor: pays 83 vs "), ("arbiter", "accept already used "),
+                          ("cash", "spend 83 > per-deal ")])
+        text = S.post_outcomes_text()
+        self.assertIn("accept #8169 -> vetoed by council: auditor: pays 83 vs ask 78", text)
+        self.assertIn("vetoed by cash: spend 83 > per-deal cap 50", text)

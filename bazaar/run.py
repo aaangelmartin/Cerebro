@@ -387,6 +387,8 @@ class Runner:
                 if a not in keep:
                     self._ledger("decision", a, Verdict(False, "council", "LLM off: big action held"),
                                  tick=sit.tick, dry_run=not self.can_write(ctx.control or {}))
+                    self._observe(a, Outcome(a.id, sit.tick, "vetoed",
+                                             {"rail": "council", "detail": "LLM off: big action held, no council"}))
             return keep
         if council is None:
             return actions
@@ -406,7 +408,9 @@ class Runner:
                 self._ledger("decision", a, Verdict(False, "council", ("vetoed by the council: " + why)[:400]
                                                     if why else "vetoed by the council"),
                              tick=sit.tick, dry_run=False)
-                self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"by": "council", "why": why}))
+                self._observe(a, Outcome(a.id, sit.tick, "vetoed",
+                                         {"by": "council", "why": why, "rail": "council",
+                                          "detail": why or "vetoed by the council (no reason recorded)"}))
                 alt = None
                 if self.arbiter is not None and hasattr(self.arbiter, "alternative"):
                     try:
@@ -458,6 +462,8 @@ class Runner:
                 if a.kind != "noop":
                     self._ledger("decision", a, Verdict(False, "arbiter", str(why)), tick=sit.tick,
                                  dry_run=False)
+                    if a.kind == "accept_offer":         # the domain (and the brain) learn why it did not go
+                        self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"rail": "arbiter", "detail": str(why)}))
             return list(chosen or [])
         return list(got or [])
 

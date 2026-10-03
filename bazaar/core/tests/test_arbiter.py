@@ -32,8 +32,9 @@ class ArbiterTest(unittest.TestCase):
         duels = [Action("duel_accept", {"duel": i, "expect": {}}, "duels", priority=1) for i in (7, 8)]
         chosen, dropped = select(accs + duels, sit(), budget(duel_accepts_left=1))
         self.assertEqual(sorted(a.kind for a in chosen), ["accept_offer", "duel_accept"])
-        self.assertEqual(sorted(w for _, w in dropped),
-                         ["accept already used this tick", "duel accepts already used this tick"])
+        whys = sorted(w for _, w in dropped)
+        self.assertTrue(whys[0].startswith("accept already used this tick (cap 1 "))      # the number that blocked
+        self.assertTrue(whys[1].startswith("duel accepts already used this tick (cap "))
 
     def test_spent_trade_accept_leaves_duel_accepts_alone(self):
         duel = Action("duel_accept", {"duel": 9, "expect": {}}, "duels", priority=1)
