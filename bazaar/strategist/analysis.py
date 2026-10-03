@@ -139,6 +139,22 @@ def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: li
     acted = {t for t in ticks if cur is not None and t > cur - window}
     idle_ticks = window - len(acted) if cur is not None else None
     cash = int(me.get("cash") or 0)
+    control = {}
+    try:
+        control = json.loads((Path(live) / "control.json").read_text())
+    except (OSError, ValueError):
+        pass
+    try:
+        from bazaar import config as _cfg
+        reserve = int(control.get("cash_reserve", _cfg.CASH_RESERVE))
+    except Exception:  # noqa: BLE001
+        reserve = 15
+    small = int(control.get("goal_small_deal_p", 30))
+    try:
+        from bazaar.core.context import dealer_committed
+        dealer = int(dealer_committed({"me": me, "threads": status.get("threads") or []}))
+    except Exception:  # noqa: BLE001
+        dealer = 0
     locked = sum(int((o.get("give") or {}).get("cash") or 0) for o in my_offers
                  if o.get("maker") == US and o.get("status", "open") == "open" and o.get("thread") is None)
     vetoes: dict[str, int] = {}
@@ -155,8 +171,10 @@ def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: li
     for d in decisions:
         sources[d.get("source") or "?"] = sources.get(d.get("source") or "?", 0) + 1
     causes = []
-    if locked and cash - locked < 20:
-        causes.append(f"{locked} P of our {cash} P is locked in open market bids")
+    available = cash - reserve - locked - dealer
+    if locked and available < small:
+        causes.append(f"{locked} P of our {cash} P is locked in open market bids: after the {reserve} P reserve "
+                      f"and {dealer} P in dealer bids only {available} P is free for deals (< {small} P)")
     if goals:
         causes.append(f"saving for goal cards {goals}: other buys are limited")
     if vetoes:
@@ -168,6 +186,7 @@ def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: li
     doms = status.get("domains") or {}
     quiet = [k for k, v in doms.items() if isinstance(v, dict) and not v.get("actions")]
     return {"tick": cur, "ticks_without_actions_last_20": idle_ticks, "cash": cash, "cash_locked_in_bids": locked,
+            "cash_reserve": reserve, "dealer_committed": dealer, "cash_available": available,
             "decision_sources": sources, "rail_vetoes": vetoes, "refusals": refused,
             "domains_without_actions_now": quiet, "likely_causes": causes}
 
@@ -219,6 +238,7 @@ def offer_outliers(my_offers: list[dict], me: dict, record: Path, limit: int = 1
     sell (we give a card for cash): ask > max(2 x our value + 5, 1.5 x the cheapest other ask of that card + 3)
     bid (we give cash for a card): price >= our value of the card (paying above value loses points), or
     the bid has been open > 60 ticks while others bid more for the same card."""
+    own_ids = {o.get("id") for o in my_offers if o.get("maker") == US}
     held = {a.get("id"): a for a in me.get("assets") or []}
     asks: dict[str, list[int]] = {}
     bids: dict[str, list[int]] = {}
@@ -233,7 +253,8 @@ def offer_outliers(my_offers: list[dict], me: dict, record: Path, limit: int = 1
         except (OSError, ValueError):
             continue
         for o in b.get("offers") or []:
-            if o.get("maker") == US or o.get("status", "open") != "open":
+            # public books anonymise makers: drop our own offers by id too
+            if o.get("maker") == US or o.get("id") in own_ids or o.get("status", "open") != "open":
                 continue
             g, w = o.get("give") or {}, o.get("want") or {}
             if w.get("cash") and len(g.get("assets") or []) == 1:
@@ -253,9 +274,11 @@ def offer_outliers(my_offers: list[dict], me: dict, record: Path, limit: int = 1
             value = (held.get(a.get("id")) or {}).get("your_value")
             best = min(asks.get(ref) or [0]) or None
             ask = int(w["cash"])
-            limit_v = 2 * (value or 0) + 5 if value is not None else None
-            limit_m = 1.5 * best + 3 if best else None
-            if (limit_v is not None and ask > limit_v) and (limit_m is None or ask > limit_m):
+            others = sorted(asks.get(ref) or [])
+            median = others[len(others) // 2] if others else None
+            limit_v = value + max(10.0, 0.9 * value) if value is not None else None
+            limit_m = 1.6 * median if median else None
+            if (limit_v is not None and ask > limit_v) or (limit_m is not None and ask > limit_m):
                 out.append({"offer": o.get("id"), "venue": o.get("venue"), "kind": "sell", "card": ref, "ask": ask,
                             "our_value": value, "cheapest_other_ask": best,
                             "why": "ask far above our value and the market: it will not fill and holds the card"})
@@ -455,6 +478,30 @@ def alliances(feed: list[dict], allies: dict, our_venue: str | None, my_offers: 
     return out
 
 
+def broker(live: Path, now: float | None = None) -> dict:
+    """Our broker and the Market Test: heartbeat (session_stats, efficiency_estimate, errors) and the refused
+    matches of the latest bench run (e.g. "price must sit between the ask and the bid" = a probe bug)."""
+    st = {}
+    try:
+        st = json.loads((Path(live) / "broker_status.json").read_text())
+    except (OSError, ValueError):
+        pass
+    out = {k: st.get(k) for k in ("session", "mode", "rule", "writes", "has_key", "efficiency_estimate",
+                                  "stall_efficiency", "session_stats", "matches_total", "errors")}
+    runs = sorted((Path(live) / "bench").glob("*.jsonl"), key=lambda p: p.stat().st_mtime) if (Path(live) / "bench").exists() else []
+    refused, ok = [], 0
+    for p in runs[-2:]:
+        for r in read_jsonl(p, 400_000):
+            for res in r.get("results") or []:
+                if res.get("status") == "ok":
+                    ok += 1
+                elif res.get("status"):
+                    refused.append({"tick": r.get("tick"), "kind": res.get("kind"), "error": res.get("error"),
+                                    "message": str(res.get("message") or "")[:120], "price": res.get("price")})
+    out.update(bench_runs=[p.stem for p in runs[-2:]], matches_ok=ok, refused=refused[-8:], refused_count=len(refused))
+    return out
+
+
 def _allies() -> dict:
     try:
         from bazaar.market.protocol import ALLIED_VENUES
@@ -482,6 +529,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("scoreboard", lambda: scoreboard(record, now)),
                      ("our_buys_by_set_last_3h", lambda: buy_impact(feed, me, now - 3 * 3600)),
                      ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600)),
+                     ("broker", lambda: broker(live, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()

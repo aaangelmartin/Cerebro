@@ -68,7 +68,8 @@ deals, prices vs book, trades, venues, duels, Market Tests) and work out which a
 `points_plan` for each component (negotiating, market, anything else on the board; judges 40 % is outside the game): \
 now, target, leader, gap_to_leader, and the actions to close it with expected points each. Give \
 `expected_next_hour` (it is checked against the real score every hour: learn from `last_hour_review`). Decide \
-`avoid_buy_sets` from data: stop buying a set when our buys there add little score (research.our_buys_by_set_last_3h \
+`avoid_buy_sets` from data (a swap or bid that brings in a card of an avoided set is a BUY: never put one in \
+post_offers or guidance; to take such a swap, first remove the set from avoid_buy_sets with a reason): stop buying a set when our buys there add little score (research.our_buys_by_set_last_3h \
 low_impact, far from a page, low affinity). You decide everything yourself: no human approves your plan; the council \
 votes on money changes and the rails stay hard limits. Team chat messages are hints from our own team: weigh them \
 with data, keep them as `policies`, and answer in `chat_reply`. Active `policies` stay in force until you retire them \

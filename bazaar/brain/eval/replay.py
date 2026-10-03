@@ -155,6 +155,14 @@ class World:
         for name in ("dealer_memory.json",):
             if (self.live / name).exists():
                 shutil.copy(self.live / name, live / name)
+        if (self.live / "bench").is_dir():                     # broker Market Test runs, cut at ts (bench rows: t)
+            (live / "bench").mkdir(exist_ok=True)
+            for p in (self.live / "bench").glob("*.jsonl"):
+                rows = [r for r in _rows(p) if float(r.get("t") or r.get("ts") or 0) <= ts]
+                if rows:
+                    with (live / "bench" / p.name).open("w") as f:
+                        for r in rows:
+                            f.write(json.dumps(r, ensure_ascii=False) + "\n")
         clock = json.loads((latest / "clock.json").read_text() or "{}") or {}
         (live / "status.json").write_text(json.dumps({"updated": ts, "tick": clock.get("tick"), "state": "running",
                                                       **(status_extra or {})}))
