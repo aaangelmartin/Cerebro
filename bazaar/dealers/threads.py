@@ -38,6 +38,8 @@ class ThreadView:
     n_messages: int = 0
     last_our_tick: int | None = None                       # tick of our last message (priced or not)
     last_dealer_tick: int | None = None
+    switched: int = 0                                      # buy of one named card: the dealer's last N offers gave another card
+    switched_to: str = ""                                  # the card it offered instead
 
     @property
     def buying(self) -> bool:
@@ -66,7 +68,8 @@ class ThreadView:
         return {"thread": self.id, "dealer": self.dealer, "we": self.side, "item": self.item,
                 "dealer_opening": self.opening, "dealer_prices": self.theirs[-8:], "our_prices": self.ours[-8:],
                 "standing_offer": self.standing_price, "final": self.final, "waiting_for": (
-                    "dealer" if self.last_sender == "us" else "us")}
+                    "dealer" if self.last_sender == "us" else "us"),
+                **({"dealer_offered_other_card": self.switched_to} if self.switched else {})}
 
 
 def _cash(side: dict | None) -> int | None:
@@ -83,6 +86,16 @@ def dealer_price(offer: dict | None, buying: bool) -> int | None:
     if not offer:
         return None
     return _cash(offer.get("want")) if buying else _cash(offer.get("give"))
+
+
+def offered_card(offer: dict | None) -> str | None:
+    """The card ref a dealer's buy-side offer gives us (None for a pack, no item or an unknown shape)."""
+    give = (offer or {}).get("give") or {}
+    for ty in give.get("types") or []:
+        return str(ty)[5:] if str(ty).startswith("card:") else None
+    for a in give.get("assets") or []:
+        return (a.get("ref") or None) if isinstance(a, dict) else None
+    return None
 
 
 def our_price(msg: dict, buying: bool) -> int | None:
@@ -112,8 +125,13 @@ def item_of(topic: dict, assets_by_id: dict[int, dict] | None = None, standing: 
     return (refs[0] if refs and refs[0] else (f"asset:{ids[0]}" if ids else "?")), False, ids
 
 
-def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> ThreadView | None:
-    """None for anything that is not a conversation with a dealer."""
+def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None, asked: str | None = None) -> ThreadView | None:
+    """None for anything that is not a conversation with a dealer.
+
+    `asked`: the card we opened a buy thread for. Tricksters (Los Pícaros) slip another card into some of
+    their offers: such an offer is never a price for our card, so it is kept out of `theirs` and `standing`
+    and only counted in `switched` (how many of the dealer's last offers gave another card).
+    """
     if not isinstance(raw, dict) or raw.get("kind", "persona") != "persona" or not raw.get("with"):
         return None
     topic = raw.get("topic") or {}
@@ -126,6 +144,10 @@ def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> Thre
                    if o.get("maker") == dealer and o.get("status", "open") == "open"]
     standing = max(open_offers, key=lambda o: (o.get("created_tick") or 0, o.get("id") or 0)) if open_offers else None
     item, is_pack, ids = item_of(topic, assets_by_id, standing)
+    if buying and not is_pack and asked and ":" not in str(asked):
+        item = str(asked)
+    named = buying and not is_pack and ":" not in item     # one named card: any other card is a switch
+    wrong_ids: set = set()
     v = ThreadView(id=int(raw["id"]), dealer=dealer, side=side, topic=topic, item=item,
                    status=raw.get("status", "open"), created_tick=int(raw.get("created_tick") or 0),
                    closed_reason=raw.get("closed_reason"), is_pack=is_pack, asset_ids=ids)
@@ -135,6 +157,12 @@ def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> Thre
         if m.get("sender") == dealer:
             v.last_dealer_tick = tick
             p = dealer_price(m.get("offer"), buying)
+            got = offered_card(m.get("offer")) if named else None
+            if got and got != item:
+                v.switched, v.switched_to, p = v.switched + 1, got, None
+                wrong_ids.add((m.get("offer") or {}).get("id"))
+            elif p is not None:
+                v.switched = 0
             if p is not None:
                 v.theirs.append(p)
                 v.their_ticks.append(tick)
@@ -150,6 +178,12 @@ def parse_thread(raw: dict, assets_by_id: dict[int, dict] | None = None) -> Thre
                 v.ours.append(p)
                 v.our_ticks.append(tick)
             v.last_sender = "us"
+    if standing and named and offered_card(standing) not in (None, item):
+        if standing.get("id") not in wrong_ids:
+            v.switched, v.switched_to = v.switched + 1, str(offered_card(standing))
+        standing = None                                    # another card: never a standing offer for ours
+    if not v.switched:
+        v.switched_to = ""
     if standing:
         v.standing = standing
         v.standing_price = dealer_price(standing, buying)

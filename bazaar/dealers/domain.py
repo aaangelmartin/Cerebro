@@ -51,6 +51,7 @@ GOAL_SMALL_GAIN_P = 3.0                     # ...and create at least this much v
 CATALOG_TTL_S = 600                          # sets are released mid-game (RET Saturday, CHA Sunday)
 VENUE_RESERVE_P = 270                        # bond 250 + 20, kept while we have no venue (rails do the same)
 STALE_TICKS = 3                              # close a thread the dealer left unanswered this long
+SWITCH_CLOSE = 2                             # close after this many dealer offers in a row for another card
 HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
 HOLD_GAP_SHARE = 0.05                        # "near our limit": within 1 P, or this share of it for larger prices
 PACK_EDGE = 1.25                             # until packs can be opened, buy one only if value >= 1.25 x price
@@ -79,6 +80,8 @@ class ThreadInfo:
     msg_used: bool
     range: tuple[int, int] | None
     force_close: str = ""        # stale or hopeless: close it whatever Claude says (unless we can accept)
+    switch_hold: bool = False    # the dealer offered another card: the code repeats our bid or waits, Claude does not decide
+    rebid_text: str = ""         # the words of that repeated bid: they name the card we asked for
 
 
 @dataclass
@@ -154,6 +157,7 @@ class DealersDomain:
         self.last_prompt: dict | None = None
         self.last_notes: list[str] = []
         self._ledger: Any = None                    # ctx.ledger, captured each tick for closings
+        self._asked_open: dict[str, str] = {}       # dealer -> the card we just opened a buy thread for
         self._pending_open: dict[str, dict] = {}    # dealer -> {"actions", "lessons"} until its thread shows up
         self._order_noted: dict[tuple, str] = {}    # (dealer, action, ref) -> last status/detail told to the brain
         self._order_done: dict[tuple, int] = {}     # (dealer, action, ref) -> bound of the order that already ended
@@ -388,6 +392,9 @@ class DealersDomain:
                 if a.domain != self.name:
                     continue
                 if a.kind == "open_thread" and a.params.get("with"):
+                    card = ((a.params.get("topic") or {}).get("buy") or {}).get("card")
+                    if card:
+                        self._asked_open[str(a.params["with"])] = str(card)
                     feedback.track(self._pending_open, str(a.params["with"]), a.id, a.lesson_ids)
                 elif a.params.get("thread") is not None:
                     feedback.track(book, str(a.params["thread"]), a.id, a.lesson_ids)
@@ -493,8 +500,12 @@ class DealersDomain:
                     pend = self._pending_open.pop(v.dealer)
                     for aid in pend["actions"]:
                         feedback.track(book, str(v.id), aid, pend["lessons"])
+                if str(v.id) not in tracked:
+                    self._asked_open.pop(v.dealer, None)
                 t = tracked.setdefault(str(v.id), {"dealer": v.dealer, "side": v.side, "item": v.item,
-                                                   "opened_tick": v.created_tick})
+                                                   "opened_tick": v.created_tick,
+                                                   "asked": v.item if v.buying and not v.is_pack
+                                                   and ":" not in v.item else None})
                 t.update(opening=v.opening, theirs=v.theirs[-30:], ours=v.ours[-30:], final=v.final,
                          seen_tick=tick, item=v.item)
             for tid in list(tracked):
@@ -651,6 +662,38 @@ class DealersDomain:
                 return f"dealer stops near {limit_est:.0f}, our min is {limit}"
         return ""
 
+    def _asked(self, raw) -> str | None:
+        """The card we opened this buy thread for: remembered from our own open, so a dealer that switches
+        the card (in an offer or in the topic) never changes what we are buying."""
+        if not isinstance(raw, dict) or "buy" not in (raw.get("topic") or {}):
+            return None
+        t = self.store.data["threads"].get(str(raw.get("id")))
+        return (t.get("asked") if t is not None else self._asked_open.get(str(raw.get("with")))) or None
+
+    def _switch_move(self, v: ThreadView, order: dict | None, limit: int, limit_est: float, patience: float,
+                     max_msgs: int, plan: Plan) -> tuple[Move, str, str]:
+        """(move, force_close, text) when the dealer's last offer gave another card than the one we asked for.
+        Never accept it and never walk at the first switch: Los Pícaros return to our card on their next offer
+        (20 threads on Saturday). Repeat our bid naming the card; close after SWITCH_CLOSE switches in a row."""
+        if v.switched >= SWITCH_CLOSE:
+            return Move("close", None, ""), (f"dealer offered {v.switched_to} instead of {v.item} "
+                                             f"{v.switched} times in a row"), ""
+        if v.last_sender == "us":
+            return Move("wait", None, f"we repeated our bid for {v.item}: waiting for the dealer's answer"), "", ""
+        if len(v.our_ticks) >= max_msgs:
+            return Move("close", None, ""), f"dealer offered {v.switched_to}, not {v.item}, and our messages are used", ""
+        if v.last_ours is not None:
+            p = int(v.last_ours)
+        elif order is not None and order.get("open"):
+            p = int(order["open"])
+        else:
+            p = haggle.plan_next(v, limit, limit_est, patience) or int((limit_est or limit) * 0.85)
+        p = min(p, limit)
+        if p < 1:
+            return Move("close", None, ""), f"dealer offered {v.switched_to}, not {v.item}, and no bid fits our limit", ""
+        text = f"We asked for {v.item} ({self._item_name(plan, v)}), not {v.switched_to}. {p} P for {v.item}."
+        return Move("hold", p, f"dealer offered {v.switched_to}, not {v.item}: repeat our bid {p} for {v.item}"), "", text
+
     def _prepare(self, sit, ctx) -> Plan:
         self._ledger = _g(ctx, "ledger", None) or self._ledger
         tick = int(_g(sit, "tick", 0) or 0)
@@ -658,7 +701,7 @@ class DealersDomain:
         values = Values(me, self.catalog(), self._exact)
         dealers = self._dealers(sit)
         assets_by_id = {a.get("id"): a for a in me.get("assets") or []}
-        views = [v for v in (parse_thread(t, assets_by_id) for t in _g(sit, "threads") or [])
+        views = [v for v in (parse_thread(t, assets_by_id, self._asked(t)) for t in _g(sit, "threads") or [])
                  if v is not None and v.status == "open"]
         self._sync(sit, views, dealers)
         plan = Plan(tick=tick, cash=int(me.get("cash") or 0), values=values, dealers=dealers)
@@ -738,6 +781,12 @@ class DealersDomain:
                     p0 = haggle.guard_price(v, order["open"], limit)
                     if p0 is not None:
                         move = Move("price", p0, f"brain order: open at {order['open']}")
+            switch_hold, rebid_text = False, ""
+            if v.buying and v.switched and not cautious and not force.startswith("we no longer buy"):
+                silent = force.startswith(("dealer silent", "dealer never"))
+                s_move, s_force, rebid_text = self._switch_move(v, order, limit, limit_est, patience, max_msgs, plan)
+                if not (silent and s_move.kind == "wait"):
+                    move, force, hold, switch_hold = s_move, s_force, False, not s_force
             if force:
                 move = Move("close", None, force)
             elif hold and move.kind == "close":
@@ -758,7 +807,8 @@ class DealersDomain:
                               accept_points=pts,
                               msg_used=bool(used.get(conv_key(Action(kind="thread_message", params={"thread": v.id},
                                                                      domain=self.name)))),
-                              range=haggle.allowed_range(v, limit), force_close=force)
+                              range=haggle.allowed_range(v, limit), force_close=force,
+                              switch_hold=switch_hold, rebid_text=rebid_text)
             plan.infos.append(info)
             if v.buying:
                 committed += max(0, min(limit, v.last_theirs or limit))
@@ -1000,7 +1050,7 @@ class DealersDomain:
             v, p = info.view, move.price
             if info.msg_used or p is None or info.limit <= 0 or (p > info.limit if v.buying else p < info.limit):
                 return None
-            return self._act_price(plan, info, int(p), None, source, reason)
+            return self._act_price(plan, info, int(p), info.rebid_text or None, source, reason)
         return None
 
     def _fallback_actions(self, plan: Plan, ctx) -> list[Action]:
@@ -1125,6 +1175,9 @@ class DealersDomain:
             if info.force_close and not (kind == "accept" and info.can_accept):
                 notes.append(f"{tid}: closed by code ({info.force_close})")
                 a = self._act_close(info, "fallback", info.force_close)
+            elif info.switch_hold:
+                notes.append(f"{tid}: dealer offered {info.view.switched_to}, not {info.view.item}; code repeats our bid")
+                a = self._move_action(plan, info, info.move, "fallback")
             elif kind == "accept" and not info.can_accept:
                 notes.append(f"{tid}: accept refused by code ({info.accept_why})")
                 a = self._move_action(plan, info, info.move, "fallback")
