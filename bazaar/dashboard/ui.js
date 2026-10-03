@@ -489,6 +489,48 @@
     return w ? fmtTime(w, withSeconds) : (tick == null ? "—" : "t" + tick);
   }
 
+  // ------------------------------------------------------------------ scroll-safe updates
+  // Scroll positions of `node` and its scrolling ancestors (and the page), to put back after a DOM update.
+  function scrollers(node) {
+    const out = [];
+    for (let n = node; n && n.nodeType === 1; n = n.parentElement) if (n.scrollTop > 0) out.push([n, n.scrollTop]);
+    const se = document.scrollingElement;
+    if (se && se.scrollTop > 0 && !out.some(([n]) => n === se)) out.push([se, se.scrollTop]);
+    return out;
+  }
+  function restoreScroll(saved) { for (const [n, t] of saved) if (n.isConnected && Math.abs(n.scrollTop - t) > 1) n.scrollTop = t; }
+  // Run a synchronous DOM update without the page (or `node`'s scrolling parents) jumping.
+  function keepScroll(node, fn) { const saved = scrollers(node); try { return fn(); } finally { restoreScroll(saved); } }
+  // Keyed list update: keeps a child whose signature did not change (so its scroll survives), re-renders the
+  // rest, carries the inner scroll (selector `inner`) of a re-rendered child, and never empties the host.
+  // opts: {key(item), sig(item), render(item), inner, stickEnd, tail: [nodes after the list]}
+  function keyedList(host, list, opts) {
+    const saved = scrollers(host);
+    const old = new Map();
+    for (const c of Array.from(host.children)) if (c.dataset && c.dataset.key) old.set(c.dataset.key, c);
+    const restores = [];
+    const want = list.map((it) => {
+      const k = String(opts.key(it)), sg = String(opts.sig ? opts.sig(it) : "");
+      const prev = old.get(k);
+      if (prev && prev.dataset.sig === sg) return prev;
+      const n = opts.render(it); n.dataset.key = k; n.dataset.sig = sg;
+      if (prev && opts.inner) {
+        const a = prev.querySelector(opts.inner);
+        if (a) {
+          const atEnd = a.scrollHeight - a.scrollTop - a.clientHeight < 8, top = a.scrollTop;
+          restores.push(() => { const b = n.querySelector(opts.inner); if (b) b.scrollTop = atEnd && opts.stickEnd ? b.scrollHeight : top; });
+        }
+      } else if (opts.inner && opts.stickEnd) restores.push(() => { const b = n.querySelector(opts.inner); if (b) b.scrollTop = b.scrollHeight; });
+      return n;
+    });
+    const all = want.concat((opts.tail || []).filter(Boolean));
+    const keep = new Set(all);
+    for (const c of Array.from(host.children)) if (!keep.has(c)) c.remove();
+    all.forEach((n, i) => { if (host.children[i] !== n) host.insertBefore(n, host.children[i] || null); });
+    restores.forEach((f) => f());
+    restoreScroll(saved);
+  }
+
   // ------------------------------------------------------------------ confirm + toast
   function confirm({ title, text, confirmLabel, cancelLabel, danger, body } = {}) {
     return new Promise((resolve) => {
@@ -538,6 +580,6 @@
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, confirm, toast,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast,
   };
 })();

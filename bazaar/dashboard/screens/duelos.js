@@ -457,7 +457,8 @@
         h("td", null, r.who === "t10" ? comp("teamTag", "t10", { us: true }) || "Nosotros" : h("span", { class: "mk-team" }, r.who || "—")),
         h("td", { class: "mk-det" }, r.text), h("td", { class: "mk-mono" }, r.duel != null ? "#" + r.duel : ""),
         h("td", { class: "mk-mono mk-r" }, r.price != null ? fmtP(r.price) : "")))));
-    host.querySelector(".mk-hist-table").replaceChildren(slice.length ? table : comp("empty", "Ningún evento coincide con los filtros.") || h("div", {}, "Nada"));
+    const tHost = host.querySelector(".mk-hist-table");
+    U().keepScroll(tHost, () => tHost.replaceChildren(slice.length ? table : comp("empty", "Ningún evento coincide con los filtros.") || h("div", {}, "Nada")));
     const pg = host.querySelector(".mk-pager");
     const btn = (label, p, on) => h("button", { class: on ? "on" : "", disabled: p < 0 || p >= pages ? "disabled" : null, onclick: () => { f.page = p; renderEvents(root, ctx); } }, label);
     const list = [...new Set([0, pages - 1, f.page - 1, f.page, f.page + 1].filter((p) => p >= 0 && p < pages))].sort((a, b) => a - b);
@@ -516,7 +517,7 @@
       h("div", { class: "mk-conv-list" }, window.ui.loading()))));
   }
   async function renderHist(root, ctx) {
-    const sc = root.querySelector(".dl-scorehost"); if (sc) sc.replaceChildren(scoreboard(ctx));
+    const sc = root.querySelector(".dl-scorehost"); if (sc) U().keepScroll(sc, () => sc.replaceChildren(scoreboard(ctx)));
     if (S.hist.sub === "eventos") return renderEvents(root, ctx);
     const host = root.querySelector(".mk-conv-list"); if (!host) return;
     if (ctx.listErr && !ctx.heads.length) { host.replaceChildren(comp("error", ctx.listErr) || h("div", {}, "Error")); return; }
@@ -525,10 +526,12 @@
     root.querySelector(".mk-conv-sum").textContent = `${rows.length} de ${ctx.heads.length} duelos · ` + Object.entries(counts).map(([k, v]) => `${v} ${ST_TXT[k] || k}`).join(" · ");
     const shown = await Promise.all(rows.slice(0, S.hist.limit).map((hd) => getTranscript(hd)));
     if (!root.isConnected || S.view !== "historial") return;
-    const keep = {}; host.querySelectorAll(".mk-msgs").forEach((m, i) => { keep[i] = m.scrollTop; });
-    host.replaceChildren(...(shown.length ? shown.map(duelCard) : [comp("empty", "Ningún duelo coincide con los filtros.") || h("div", {}, "Nada")]),
-      rows.length > S.hist.limit ? h("button", { class: "mk-btn mk-more", type: "button", onclick: () => { S.hist.limit += 24; refreshNow(); } }, `Mostrar más (${rows.length - S.hist.limit})`) : null);
-    host.querySelectorAll(".mk-msgs").forEach((m, i) => { if (keep[i] !== undefined) m.scrollTop = keep[i]; });
+    U().keyedList(host, shown, {
+      key: (d) => d.duel ?? d.id,
+      sig: (d) => [(d.messages || []).length, d.status, d.result, d.price].join("|"),
+      render: duelCard, inner: ".mk-msgs",
+      tail: [shown.length ? null : comp("empty", "Ningún duelo coincide con los filtros.") || h("div", {}, "Nada"),
+        rows.length > S.hist.limit ? h("button", { class: "mk-btn mk-more", type: "button", onclick: () => { S.hist.limit += 24; refreshNow(); } }, `Mostrar más (${rows.length - S.hist.limit})`) : null] });
     const p = S.params ? String(S.params).split("/")[0] : "";
     if (p && p !== S.drawerFor) openDrawer(p, ctx).catch((e) => console.error("duelos drawer", e));
     if (!p) S.drawerFor = null;
@@ -618,23 +621,25 @@
 
   function render(root, ctx, params) {
     const grid = root.querySelector(".dl-grid");
-    // keep per-pane scroll (stick to bottom when already there)
-    grid.querySelectorAll(".dl-chat").forEach((c) => { S.scrolls[c.dataset.duel] = c.scrollHeight - c.scrollTop - c.clientHeight < 8 ? "end" : c.scrollTop; });
-    grid.replaceChildren();
     if (S.fb && S.fb.setCounts) { const c = { compra: 0, venta: 0 }; for (const d of ctx.shown) c[roleType(d)]++; S.fb.setCounts(c); }
     const list = ctx.shown.filter(matches);
     root.querySelector(".dl-sub").textContent = `${ctx.liveCount} en vivo · ${ctx.closedOurs.length} cerrados${ctx.tick !== null ? " · tick " + ctx.tick : ""}`;
+    const tail = [];
     if (!list.length) {
       const msg = S.view === "vivo" ? (ctx.liveErr ? null : "No hay duelos en vivo ahora. El juego está cerrado o no hay sesión de duelos.") : "No hay duelos cerrados que mostrar.";
-      grid.append(msg ? comp("empty", msg) || h("div", { class: "dl-muted" }, msg) : comp("error", ctx.liveErr) || h("div", {}, "Error"));
-      if (S.view === "vivo" && ctx.closedOurs.length) grid.append(h("button", { class: "dl-btn", type: "button", onclick: () => setView("historial") }, "Ver historial →"));
+      tail.push(msg ? comp("empty", msg) || h("div", { class: "dl-muted" }, msg) : comp("error", ctx.liveErr) || h("div", {}, "Error"));
+      if (S.view === "vivo" && ctx.closedOurs.length) tail.push(h("button", { class: "dl-btn", type: "button", onclick: () => setView("historial") }, "Ver historial →"));
     }
-    for (const d of list) grid.append(paneFor(d, ctx));
-    grid.querySelectorAll(".dl-chat").forEach((c) => { const s = S.scrolls[c.dataset.duel]; c.scrollTop = s === undefined || s === "end" ? c.scrollHeight : s; });
+    // panes keyed by duel: unchanged ones stay, changed ones keep their chat scroll (stuck to the end when it was there)
+    U().keyedList(grid, list, {
+      key: (d) => d.duel ?? d.id,
+      sig: (d) => { const id = d.duel ?? d.id, decs = ctx.decsByDuel[id] || [], last = decs[decs.length - 1];
+        return JSON.stringify([(d.messages || []).length, d.status, d.rounds, d.your_offer, d.rival_offer, last && last.id, ctx.tick]); },
+      render: (d) => paneFor(d, ctx), inner: ".dl-chat", stickEnd: true, tail });
     const sc = root.querySelector(".dl-scorehost");
-    if (sc) sc.replaceChildren(scoreboard(ctx));
+    if (sc) U().keepScroll(sc, () => sc.replaceChildren(scoreboard(ctx)));
     const side = root.querySelector(".dl-side-body");
-    side.replaceChildren(resultsPanel(ctx), tapePanel(ctx));
+    U().keepScroll(side, () => side.replaceChildren(resultsPanel(ctx), tapePanel(ctx)));
     // drawer
     const p = params ? String(params).split("/")[0] : "";
     if (p && p !== S.drawerFor) openDrawer(p, ctx).catch((e) => console.error("duelos drawer", e));

@@ -319,11 +319,11 @@
         h("span", { class: "mk-muted" }, o.venue || (o.thread ? "chat #" + o.thread : o.to ? "a " + teamName(o.to) : ""))),
       h("div", { class: "mk-tape-b" }, h("span", null, `#${o.id} · ${o.created_tick != null ? tclock(o.created_tick) + " · " : ""}${o.status || "open"} · vence en ${ticksLeft(o, ctx.clock)}`), o.final ? h("span", { class: "mk-final" }, "final") : null, dec ? h("span", { class: "mk-muted" }, " · bot: " + dec) : null));
 
-    side.replaceChildren(seg, fb, tape,
+    U().keepScroll(side, () => side.replaceChildren(seg, fb, tape,
       h("div", { class: "mk-sec" }, `NUESTRAS OFERTAS ABIERTAS · ${mine.length}`),
       h("div", { class: "mk-offs" }, mine.length ? mine.map((o) => offerRow(o)) : stateBox("empty", "No tenemos ofertas abiertas.")),
       h("div", { class: "mk-sec" }, `OFERTAS A NOSOTROS · ${toUs.length}`),
-      h("div", { class: "mk-offs" }, toUs.length ? toUs.map((o) => offerRow(o, decFor(o))) : stateBox("empty", "Nadie nos ha dirigido ofertas.")));
+      h("div", { class: "mk-offs" }, toUs.length ? toUs.map((o) => offerRow(o, decFor(o))) : stateBox("empty", "Nadie nos ha dirigido ofertas."))));
   }
 
   async function refreshLive(root, data) {
@@ -351,7 +351,11 @@
       const full = details.map((d, i) => (d.ok ? { ...open[i], ...(d.v.thread || d.v) } : open[i]));
       const nd = full.filter((t) => t.kind !== "team").length;
       if (head) head.textContent = `${full.length} conversaciones abiertas · ${nd} con dealers y ${full.length - nd} con equipos`;
-      chatsHost.replaceChildren(...(full.length ? full.map((t) => renderChat(t, decs, dealerNames)) : [stateBox("empty", "No hay conversaciones abiertas ahora mismo. El mercado puede estar cerrado.")]));
+      U().keyedList(chatsHost, full, {
+        key: (t) => t.id,
+        sig: (t) => JSON.stringify([arr(t.messages).length, t.status, arr(t.messages).map((m) => m.offer && m.offer.status), arr(t.standing_offers).map((o) => [o.id, o.status]), decisionsFor(decs, t).length]),
+        render: (t) => renderChat(t, decs, dealerNames), inner: ".mk-msgs", stickEnd: true,
+        tail: full.length ? [] : [stateBox("empty", "No hay conversaciones abiertas ahora mismo. El mercado puede estar cerrado.")] });
     }
     renderSide(root, ctx);
   }
@@ -431,7 +435,8 @@
         h("td", { class: "mk-mono" }, fmtTs(e.ts, true)), h("td", { class: "mk-mono" }, e.tick != null ? "t" + e.tick : ""),
         h("td", null, typeChip(e.type, e.label)), h("td", null, teamTag(e.team)),
         h("td", { class: "mk-det" }, e.text), h("td", { class: "mk-mono" }, e.venue), h("td", { class: "mk-mono mk-r" }, e.price != null ? fmtP(e.price) : "")))));
-    host.querySelector(".mk-hist-table").replaceChildren(slice.length ? table : stateBox("empty", "Ningún evento coincide con los filtros."));
+    const tHost = host.querySelector(".mk-hist-table");
+    U().keepScroll(tHost, () => tHost.replaceChildren(slice.length ? table : stateBox("empty", "Ningún evento coincide con los filtros.")));
     // pager
     const pg = host.querySelector(".mk-pager");
     const btn = (label, p, on) => h("button", { class: on ? "on" : "", disabled: p < 0 || p >= pages ? "disabled" : null, onclick: () => { H.page = p; renderHistory(root); } }, label);
@@ -485,15 +490,21 @@
     root.querySelector(".mk-conv-sum").textContent = `${rows.length} de ${C.list.length} conversaciones · ` +
       Object.entries(counts).map(([k, v]) => `${v} ${TH_STATUS[k] || k}`).join(" · ");
     const shown = rows.slice(0, C.limit);
-    const cards = shown.map((t) => {
+    const decs = S.conv.decs || [];
+    const render = (t) => {
       const c = C.cache[t.id];
-      const card = renderChat(c ? c.data : t, S.conv.decs || [], dealerNames, { full: true });
+      const card = renderChat(c ? c.data : t, decs, dealerNames, { full: true });
       card.classList.add("mk-chat-hist", "mk-st-" + (t.status || "open"));
       const st = card.querySelector(".mk-status"); if (st) st.textContent = TH_STATUS[t.status] || t.status || "";
       return card;
-    });
-    host.replaceChildren(...(cards.length ? cards : [stateBox("empty", "Ninguna conversación coincide con los filtros.")]),
-      rows.length > C.limit ? h("button", { class: "mk-btn mk-more", onclick: () => { C.limit += 24; C.at = 0; window.Screens.mercado.refresh(root, null, "historial"); } }, `Mostrar más (${rows.length - C.limit})`) : null);
+    };
+    // a card is only rebuilt when its transcript, status or bot decisions change, so scrolling survives the refresh
+    U().keyedList(host, shown, {
+      key: (t) => t.id,
+      sig: (t) => { const c = C.cache[t.id]; return [c ? c.count : "-", t.status, decisionsFor(decs, c ? c.data : t).length].join("|"); },
+      render, inner: ".mk-msgs",
+      tail: [shown.length ? null : stateBox("empty", "Ninguna conversación coincide con los filtros."),
+        rows.length > C.limit ? h("button", { class: "mk-btn mk-more", onclick: () => { C.limit += 24; C.at = 0; window.Screens.mercado.refresh(root, null, "historial"); } }, `Mostrar más (${rows.length - C.limit})`) : null] });
   }
   let DEALER_NAMES = {};
 
