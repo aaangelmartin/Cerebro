@@ -421,9 +421,16 @@ class Handler(SimpleHTTPRequestHandler):
         if STATIC.fullmatch(path) and ".." not in path:
             return self.send_file(ROOT / path.lstrip("/"), STATIC_TYPES[path.rsplit(".", 1)[1]])
         if not path.startswith("/api/"):
-            if path not in ("/", "/index.html"):
-                return self.send_error(404)
-            return self.send_file(ROOT / "index.html", "text/html; charset=utf-8")
+            if path in ("/", "/index.html"):
+                # The supervisor dashboard (bazaar v2) is the team's dashboard now; the old one stays at /v1/.
+                self.send_response(302)
+                self.send_header("Location", V2_PREFIX + "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if path in ("/v1", "/v1/"):
+                return self.send_file(ROOT / "index.html", "text/html; charset=utf-8")
+            return self.send_error(404)
         if path.startswith("/api/admin"):
             return self.send_error(403)
         if is_public(path):
