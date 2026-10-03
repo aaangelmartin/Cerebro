@@ -140,9 +140,21 @@ class RunTest(unittest.TestCase):
         d = Dom("dealers", [a])
         r = self.runner([d], rails=rails_ok(False))
         rep = r.step(sit_at())
-        self.assertEqual(rep["actions"][0]["status"], "vetoed")
+        self.assertEqual(rep["actions"], [])            # a vetoed accept never takes the tick's single accept
         self.assertEqual(self.exe.sent, [])
         self.assertEqual(d.seen[0].status, "vetoed")
+
+    def test_vetoed_accept_does_not_block_a_good_one(self):
+        bad = Action("accept_offer", {"offer": 3, "expect": {}}, "market", priority=90)
+        good = Action("accept_offer", {"offer": 4, "expect": {}}, "dealers", priority=10)
+
+        class Rails:
+            @staticmethod
+            def check(a, sit, ctx):
+                return Verdict(a.params["offer"] != 3, "cash" if a.params["offer"] == 3 else "")
+        r = self.runner([Dom("x", [bad, good])], rails=Rails)
+        rep = r.step(sit_at())
+        self.assertEqual([x["params"]["offer"] for x in rep["actions"]], [4])
 
     def test_fallback_select_one_accept(self):
         acts = [Action("accept_offer", {"offer": 1}, "dealers", priority=5),

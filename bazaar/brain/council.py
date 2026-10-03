@@ -186,8 +186,21 @@ def _apply(action: Action, vote: dict) -> Action:
             changes["days"] = max(0, min(10, int(changes["days"])))
         except (TypeError, ValueError):
             changes.pop("days")
+    old = (action.params or {}).get("price")
+    if "price" in changes and old is not None and changes["price"] != old:
+        buying = (action.expected or {}).get("spend") is not None or action.kind == "accept_offer"
+        conservative = changes["price"] < old if buying else changes["price"] > old
+        if action.kind in ("thread_message", "duel_message") and not conservative:
+            changes.pop("price")                               # the council may only make us safer, never riskier
     params = {**action.params, **changes}
-    return replace(action, params=params, source="council",
+    expected = dict(action.expected or {})
+    if "price" in changes and old is not None:
+        import re as _re
+        if isinstance(params.get("text"), str):
+            params["text"] = _re.sub(rf"\b{int(old)}\b", str(changes["price"]), params["text"])
+        if "spend" in expected:
+            expected["spend"] = max(0, int(expected["spend"]) + changes["price"] - int(old))
+    return replace(action, params=params, expected=expected, source="council",
                    reason=(action.reason + " | council: " + vote.get("reason", ""))[:600])
 
 

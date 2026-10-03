@@ -57,7 +57,7 @@ DROP_WINDOW = 10                 # ...within 10 ticks -> cautious (no buys) for 
 VENUE_BOND = 250
 CAUTIOUS_TICKS = 10
 REFUSALS_TO_PAUSE = 3            # consecutive refusals of one domain -> pause it PAUSE_TICKS
-NEVER_PAUSE = {"duels"}          # a 10-tick pause is most of a 16-tick duel: duels are never paused
+NEVER_PAUSE = {"duels", "packs", "broker"}         # a 10-tick pause is most of a 16-tick duel: duels are never paused
 TRANSIENT_CODES = {"wait_for_tick", "rate_limited", "too_early", "duel_closed", "not_live", "closed",
                    "expired", "offer_gone", "thread_closed", "too_many_requests"}
 PAUSE_TICKS = 10
@@ -207,6 +207,7 @@ class Runner:
                  rails=None, executor=None, arbiter=None, council=None, control_defaults: dict | None = None,
                  clock_fn: Callable[[], float] = time.time):
         self.gw = gw
+        self.pack_backoff: dict = {}
         self.last_announce = -99.0
         self.domains = domains
         self.mode = mode                         # "sim" | "live"
@@ -352,6 +353,21 @@ class Runner:
         return out
 
     def select(self, actions: list[Action], sit: Situation, ctx: TickContext) -> list[Action]:
+        # The tick's single accept must go to an accept the rails will let through, not to one they veto.
+        if self.rails is not None:
+            kept = []
+            for a in actions:
+                if a.kind in ("accept_offer", "duel_accept"):
+                    try:
+                        v = self.rails.check(a, sit, ctx)
+                    except Exception as e:  # noqa: BLE001
+                        v = Verdict(False, "rails_error", str(e)[:200])
+                    if not v.ok:
+                        self._ledger("decision", a, v, source=a.source, tick=sit.tick, dry_run=False)
+                        self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"rail": v.rail, "detail": v.detail}))
+                        continue
+                kept.append(a)
+            actions = kept
         if self.arbiter is None:
             return _fallback_select(actions)
         try:
@@ -429,6 +445,10 @@ class Runner:
                 self._count_refusal(a.domain, outcome.status, sit.tick, (outcome.response or {}).get("error"))
                 if outcome.status in ("sent", "deal"):
                     self.recent.append((sit.tick, a, outcome.status))
+                    if a.kind == "broker_announce":
+                        self.last_announce = sit.t_hours or 0
+                elif a.kind == "open_pack":
+                    self.pack_backoff[(a.params or {}).get("asset")] = sit.tick + 20
             report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
                            "reason": a.reason, "verdict": {"ok": verdict.ok, "rail": verdict.rail,
                                                            "detail": verdict.detail}, "status": status})
@@ -508,12 +528,12 @@ class Runner:
             except Exception:  # noqa: BLE001
                 text = None
             if text:
-                self.last_announce = sit.t_hours or 0
                 out.append(Action(kind="broker_announce", params={"text": text}, domain="broker", source="code",
                                   reason="Invite other teams' bids and swaps to our fee-0 venue: their trades score for us."))
-        packs = [x for x in (sit.me or {}).get("assets") or [] if x.get("kind") == "pack"]
+        packs = [x for x in (sit.me or {}).get("assets") or [] if x.get("kind") == "pack"
+                 and sit.tick >= self.pack_backoff.get(x.get("id"), -1)]
         if packs:                                               # cards in the album and tradeable; one pack per tick
-            out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="dealers", source="code",
+            out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="packs", source="code",
                               reason=f"Open {packs[0].get('ref', 'pack')}: its cards count in the album and can be traded."))
         if sit.tick % 5 == 0:
             duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)

@@ -335,8 +335,9 @@ def _venue_pending(sit, ctx) -> bool:
 
 def _venue_reserve(sit) -> int:
     """Cash to keep for the bond: the Saturday grant will cover part of it if it has not arrived yet."""
-    t = _num(_get(sit, "t_hours"), 0)
-    return max(0, VENUE_COST - (GRANT_CASH if t < GRANT_AT_HOURS else 0))
+    t = _get(sit, "t_hours")
+    before_grant = t is not None and 0 < _num(t, 0) < GRANT_AT_HOURS
+    return max(0, VENUE_COST - (GRANT_CASH if before_grant else 0))
 
 
 def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:

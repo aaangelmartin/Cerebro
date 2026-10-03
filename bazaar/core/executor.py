@@ -26,6 +26,8 @@ def _tick(sit, ctx) -> int:
 
 
 def broker_key() -> str | None:
+    if config.ENV.get("BAZAAR_BROKER_KEY"):
+        return config.ENV["BAZAAR_BROKER_KEY"]
     try:
         d = json.loads(BROKER_FILE.read_text())
     except (OSError, ValueError):

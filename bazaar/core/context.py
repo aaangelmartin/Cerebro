@@ -68,9 +68,7 @@ def _cash_out(action: Action) -> int:
     if action.kind == "accept_offer":
         exp = p.get("expect") or {}
         return int(((exp.get("want") or {}).get("cash")) or 0)   # we give what the maker wants
-    if action.kind == "post_offer":
-        return int(((p.get("give") or {}).get("cash")) or 0)
-    return 0
+    return 0                     # a posted bid is a promise, not spend: it counts when it fills
 
 
 class ValueCache:
