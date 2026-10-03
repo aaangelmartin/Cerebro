@@ -274,7 +274,12 @@ def chosen(env: dict | None = None) -> tuple[str, list[Service], set[str]]:
     env = os.environ if env is None else env
     names = lambda key: {x.strip() for x in env.get(key, "").split(",") if x.strip()}   # noqa: E731
     only, skip = names("BAZAAR_SUPERVISE_ONLY"), names("BAZAAR_SUPERVISE_SKIP")
-    services = [s for s in default_services() if s.name not in skip and (not only or s.name in only)]
+    pool = default_services()
+    tunnel = (env.get("PLAZA_TUNNEL_CONFIG") or "").strip()
+    if tunnel and "plaza-tunnel" in only:              # the plaza's own hostname: only when asked for by name
+        pool.append(Service("plaza-tunnel", ["cloudflared", "tunnel", "--no-autoupdate", "--config",
+                                             os.path.expanduser(tunnel), "run"]))
+    services = [s for s in pool if s.name not in skip and (not only or s.name in only)]
     if only and not services:
         raise SystemExit(f"BAZAAR_SUPERVISE_ONLY names no known service: {sorted(only)}")
     lock = "supervise-" + "-".join(sorted(s.name for s in services)) if only else "supervise"
