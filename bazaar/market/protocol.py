@@ -326,6 +326,13 @@ def broker_pitch(venue: dict | str | None) -> str | None:
     vid = venue_id(venue) if venue else None
     if not vid:
         return None
+    try:                                    # the brain's own text (concrete pairs and prices) when it wrote one
+        from bazaar.brain.strategy import venue_announcement
+        text = venue_announcement()
+        if text and vid in text:
+            return text
+    except Exception:  # noqa: BLE001 - the default pitch is always available
+        pass
     v = venue if isinstance(venue, dict) else {}
     bps, per = float(v.get("fee_bps") or 0), float(v.get("fee_per_card") or 0)    # our own listed fee
     fee = "no fee" if not bps and not per else f"fee {bps / 100:g} % + {per:g} P per card"

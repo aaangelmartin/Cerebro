@@ -529,6 +529,157 @@ def broker(live: Path, now: float | None = None) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- growing our venue
+RASTRO_BPS, RASTRO_PER_CARD = 500, 1
+
+
+def _open_books(record: Path) -> dict[str, list[dict]]:
+    out = {}
+    for p in sorted((Path(record) / "books").glob("*.json")):
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        doc = doc.get("data", doc) if isinstance(doc, dict) else {}
+        out[p.stem] = [o for o in doc.get("offers") or [] if isinstance(o, dict) and o.get("status", "open") == "open"]
+    return out
+
+
+def _single_card(side: dict | None) -> str | None:
+    side = side or {}
+    refs = [a.get("ref") for a in side.get("assets") or [] if isinstance(a, dict) and a.get("ref")]
+    refs += [t.split(":", 1)[1] for t in side.get("types") or [] if isinstance(t, str) and t.startswith("card:")]
+    return refs[0] if len(refs) == 1 else None
+
+
+def venue_growth(record: Path, feed: list[dict], venue_list: list[dict], me: dict, our_venue: str | None,
+                 now: float | None = None, limit: int = 8) -> dict:
+    """How to raise the value other teams create on OUR venue (the half of market-making that is not the Market
+    Test; we cannot trade there ourselves). Gives: the measured flow per venue (fills and volume in the last hour
+    and today), our venue's value_created and the points it produced, and concrete PAIRS of other teams whose
+    public offers already cross (bid >= ask for the same card) but sit on venues where nobody pairs them, or
+    where one side only has to accept the other's offer on our venue. Each pair names both teams, both prices,
+    the midpoint and what the buyer saves against El Rastro's fee: material for targeted messages."""
+    if not our_venue:
+        return {}
+    now = now or time.time()
+    my_id = me.get("id")
+    maker = {}
+    for r in feed:
+        if r.get("type") == "offer.listed":
+            o = (r.get("payload") or {}).get("offer") or {}
+            if o.get("id") is not None:
+                maker[o["id"]] = o.get("maker") or r.get("actor")
+    flow: dict[str, dict] = {}
+    for r in feed:
+        if r.get("type") != "settlement":
+            continue
+        p = r.get("payload") or {}
+        v = p.get("venue")
+        if not v:
+            continue
+        f = flow.setdefault(v, {"fills_today": 0, "volume_today": 0, "fills_last_hour": 0, "volume_last_hour": 0})
+        price = float(p.get("price") or 0)
+        f["fills_today"] += 1
+        f["volume_today"] += price
+        if now - float(r.get("ts") or 0) <= 3600:
+            f["fills_last_hour"] += 1
+            f["volume_last_hour"] += price
+    stats = {v.get("venue"): v for v in venue_list}
+    ranking = sorted(({"venue": v, "owner": (stats.get(v) or {}).get("owner"),
+                       "value_created": (stats.get(v) or {}).get("value_created"), **f} for v, f in flow.items()),
+                     key=lambda x: -x["fills_last_hour"])[:6]
+    asks, bids = [], []
+    for venue, offers in _open_books(record).items():
+        for o in offers:
+            team = maker.get(o.get("id"))
+            if o.get("to") or not team or team == my_id:
+                continue
+            g, w = o.get("give") or {}, o.get("want") or {}
+            row = {"offer": o.get("id"), "team": team, "venue": venue}
+            if _single_card(g) and int(w.get("cash") or 0) > 0 and not _single_card(w):
+                asks.append({**row, "card": _single_card(g), "price": int(w["cash"])})
+            elif _single_card(w) and int(g.get("cash") or 0) > 0 and not (g.get("assets") or []):
+                bids.append({**row, "card": _single_card(w), "price": int(g["cash"])})
+    pairs, used = [], set()
+    for b in sorted(bids, key=lambda x: -x["price"]):
+        best = None
+        for a in asks:
+            if a["card"] != b["card"] or a["team"] == b["team"] or a["offer"] in used or a["price"] > b["price"]:
+                continue
+            if a["venue"] == our_venue and b["venue"] == our_venue:
+                continue                                  # our broker already pairs these
+            if best is None or a["price"] < best["price"]:
+                best = a
+        if best is None:
+            continue
+        used.add(best["offer"])
+        mid = (best["price"] + b["price"]) / 2
+        rastro_fee = round(mid * RASTRO_BPS / 10_000 + RASTRO_PER_CARD, 1)
+        if b["venue"] == our_venue:
+            how = f"{best['team']} only has to accept bid #{b['offer']} on {our_venue}"
+        elif best["venue"] == our_venue:
+            how = f"{b['team']} only has to accept ask #{best['offer']} on {our_venue}"
+        else:
+            how = f"both repost on {our_venue}: the broker pairs them at {mid:g} with no fee"
+        pairs.append({"card": b["card"], "seller": best["team"], "ask": best["price"], "ask_venue": best["venue"],
+                      "ask_offer": best["offer"], "buyer": b["team"], "bid": b["price"], "bid_venue": b["venue"],
+                      "bid_offer": b["offer"], "midpoint": mid, "surplus": b["price"] - best["price"],
+                      "rastro_fee_saved": rastro_fee, "how": how})
+    pairs.sort(key=lambda x: (-x["surplus"], -x["bid"]))
+    # nearly crossing: the smallest gaps between another team's best ask and best bid for a card (any venue)
+    near = []
+    for card in {a["card"] for a in asks} & {b["card"] for b in bids}:
+        a = min((x for x in asks if x["card"] == card), key=lambda x: x["price"])
+        b = max((x for x in bids if x["card"] == card), key=lambda x: x["price"])
+        if a["team"] != b["team"] and a["price"] > b["price"]:
+            near.append({"card": card, "seller": a["team"], "ask": a["price"], "ask_venue": a["venue"],
+                         "buyer": b["team"], "bid": b["price"], "bid_venue": b["venue"], "gap": a["price"] - b["price"]})
+    near.sort(key=lambda x: x["gap"])
+    # who has shown the other side of each public offer on our venue today (listed or bid for that card anywhere)
+    sellers_of, buyers_of = {}, {}
+    for r in feed:
+        if r.get("type") != "offer.listed":
+            continue
+        o = (r.get("payload") or {}).get("offer") or {}
+        t = o.get("maker") or r.get("actor")
+        if not t or t == my_id:
+            continue
+        g, w = o.get("give") or {}, o.get("want") or {}
+        if _single_card(g) and int(w.get("cash") or 0) > 0:
+            sellers_of.setdefault(_single_card(g), {})[t] = int(w["cash"])
+        elif _single_card(w) and int(g.get("cash") or 0) > 0:
+            buyers_of.setdefault(_single_card(w), {})[t] = int(g["cash"])
+    interest = []
+    for x in asks + bids:
+        if x["venue"] != our_venue:
+            continue
+        is_ask = x in asks
+        other = (buyers_of if is_ask else sellers_of).get(x["card"]) or {}
+        other = {t: p for t, p in other.items() if t != x["team"]}
+        interest.append({"offer": x["offer"], "by": x["team"], "side": "ask" if is_ask else "bid", "card": x["card"],
+                         "price": x["price"],
+                         ("teams_that_bid_for_it_today" if is_ask else "teams_that_listed_it_today"):
+                             dict(sorted(other.items(), key=lambda kv: -kv[1] if is_ask else kv[1])[:4])})
+    ours = {**((me.get("venue") if isinstance(me.get("venue"), dict) else {}) or {}), **(stats.get(our_venue) or {})}
+    score = me.get("score") or {}
+    book_here = _open_books(record).get(our_venue, [])
+    return {"venue": our_venue,
+            "ours": {"trades": ours.get("trades"), "volume": ours.get("volume"), "traders": ours.get("traders"),
+                     "pairs": ours.get("pairs"), "value_created": ours.get("value_created"),
+                     "mm_points": score.get("mm_points"), "bench_points": score.get("bench_points"),
+                     "market_score": score.get("market"),
+                     "public_offers_now": sum(1 for o in book_here if not o.get("to")),
+                     "public_makers_now": len({maker.get(o.get("id")) for o in book_here if not o.get("to")} - {None}),
+                     **(flow.get(our_venue) or {"fills_today": 0, "fills_last_hour": 0})},
+            "busiest_venues_last_hour": ranking,
+            "crossing_pairs_elsewhere": pairs[:limit],
+            "nearly_crossing": near[:6],
+            "open_public_offers_on_our_venue": interest[:12],
+            "note": "We cannot trade on our own venue. mm_points come from value created between OTHER teams there. "
+                    "A broker match needs two different makers with public crossing offers on the venue."}
+
+
 def _allies() -> dict:
     try:
         from bazaar.market.protocol import ALLIED_VENUES
@@ -557,6 +708,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("our_buys_by_set_last_3h", lambda: buy_impact(feed, me, now - 3 * 3600)),
                      ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600)),
                      ("broker", lambda: broker(live, now)),
+                     ("our_venue_growth", lambda: venue_growth(record, feed, venue_list, me, our_venue, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()

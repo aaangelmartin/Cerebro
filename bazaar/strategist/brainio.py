@@ -244,6 +244,8 @@ def validate(plan: dict, pic: dict) -> list[str]:
     for i, r in enumerate(plan.get("whatsapp_replies") or [], 1):
         if looks_non_english(r.get("text")):
             errors.append(f"whatsapp_reply {i} is not in English (the WhatsApp group is in English)")
+    if looks_non_english(plan.get("venue_announcement")):
+        errors.append("venue_announcement is not in English (the in-game board is in English)")
     pp = plan.get("points_plan") or {}
     if not pp:
         errors.append("points_plan is missing (targets per component, gap to the leader, actions with expected points)")
@@ -295,5 +297,7 @@ def repair(plan: dict, pic: dict, errors: list[str]) -> dict:
     if any(e.startswith("whatsapp_reply ") for e in errors):
         out["whatsapp_replies"] = [{**r, "text": ""} if looks_non_english(r.get("text")) else r
                                    for r in plan.get("whatsapp_replies") or []]
+    if any(e.startswith("venue_announcement ") for e in errors):
+        out.pop("venue_announcement", None)
     out["validation_errors"] = errors
     return out

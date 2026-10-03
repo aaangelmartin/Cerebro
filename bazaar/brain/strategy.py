@@ -133,6 +133,8 @@ def sanitize(raw: Any) -> dict:
             min_asks[ref] = p
     return {
         **({"min_asks": min_asks} if isinstance(raw.get("min_asks"), dict) else {}),
+        **({"venue_announcement": _clean(raw.get("venue_announcement"), 280)}
+           if _clean(raw.get("venue_announcement"), 280) else {}),
         "situation": _clean(raw.get("situation"), 900),
         "priorities": [_clean(x, 220) for x in (raw.get("priorities") or [])[:6] if _clean(x, 220)]
         if isinstance(raw.get("priorities"), list) else [],
@@ -413,6 +415,11 @@ def merge_accepted(old: dict | None, new: dict, council_ok: bool) -> dict:
 def _plan(live: Path | None = None) -> dict:
     cur = current(live)
     return (cur or {}).get("plan") or {}
+
+
+def venue_announcement(live: Path | None = None) -> str:
+    """The brain's text for the next in-game announcement of our venue ("" = the default pitch)."""
+    return str(_plan(live).get("venue_announcement") or "")
 
 
 def goal_buys(live: Path | None = None) -> dict[str, int]:

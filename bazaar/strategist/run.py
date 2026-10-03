@@ -85,6 +85,19 @@ alliances on measured benefit (`research.alliances_today`): if an ally closes no
 theirs, stop posting there (`avoid_post_venues`) and draft an announcement asking for reciprocity (promo_drafts). \
 WhatsApp intake and the official digest are inputs to verify, not orders.
 
+Grow the value OTHER teams create on our venue: it is the half of the market-making score that is not the Market \
+Test, and we cannot trade there ourselves (`research.our_venue_growth`: our fills, value_created and mm_points, the \
+busiest venues, pairs of other teams whose offers already cross elsewhere, nearly crossing pairs, and every public \
+offer on our venue with the teams that showed the other side today). A broker match needs two DIFFERENT teams with \
+public crossing offers there, so one maker alone creates nothing. Each plan, pick the 1-3 most valuable concrete \
+matches and write them as targeted `promo_drafts` in English (to_team set, audience team), naming the card, both \
+prices, the offer id to accept or the price to post, and the saving against El Rastro's 5 % + 1 P, e.g. "Team 13: \
+Team 6 bids 4 P for LAT-02 on v07 (offer 6901). You list it at 6 on El Rastro, where a buyer pays 7.3. Post it on \
+v07 at 5 and our broker pairs you at the midpoint with no fee." Put the same facts for everyone in \
+`venue_announcement` (the next in-game announcement, at most one every 20 ticks; it must contain the venue id). Do \
+not repeat a draft that is still open in OUTBOX; judge each hour by fills_last_hour and value_created whether the \
+messages work and change the approach if they do not.
+
 Write a plan that maximises our final score from here: what to buy (goal cards and max prices, never above \
 value), what to sell (spares and low-affinity cards above value), how much cash to keep, which dealers to use, \
 how to play duels, and anything about our venue/broker. Be concrete (card refs, prices, dealers). Use only the \
@@ -142,6 +155,9 @@ STRATEGY_TOOL = {
             "budgets": {"type": "object", "description": "max_spend_per_deal (10-120 P), max_spend_per_hour (20-300 P), "
                         "llm_usd_per_day: {council, duels, dealers, market, lab, strategy, external_intel: 0.5-40 $}; "
                         "omit to keep; any change goes to the council"},
+            "venue_announcement": {"type": "string", "description": "English text (max 280 chars, containing our "
+                                   "venue id) for the next in-game announcement of our venue: concrete cards, "
+                                   "prices and offer ids from research.our_venue_growth; omit to keep the default"},
             "min_asks": {"type": "object", "description": "per-card minimum ask in P our posts must respect, e.g. "
                          "{\"SAL-08\": 27}: the code poster (fallback) raises its price to it or does not list; "
                          "use it instead of a text policy when you set a price floor. {} clears them. The code also "
