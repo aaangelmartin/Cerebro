@@ -5,6 +5,8 @@
 - One message per conversation per tick, and none where we already spoke this tick.
 - Listing cap per tick and open offers/threads caps; one open thread per dealer.
 - The same card is never promised twice in one tick.
+- Nothing goes to a team in control.json "blocked_teams" (the humans' veto): no accept of its offers, no offer
+  addressed to it, no thread with it.
 - An accept that loses the single slot is not silence: if it carries `params.fallback_message` (duels: an
   offer of exactly the rival's standing terms), that message is considered in its place, under the same
   one-message-per-conversation rule.
@@ -59,8 +61,38 @@ def alternative(a: Action) -> Action | None:
                   expected={**(a.expected or {}), "alt_for": a.id})
 
 
-def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action], list[tuple[Action, str]]]:
+def blocked_teams(ctx=None, sit=None) -> set[str]:
+    """control.json "blocked_teams": teams the humans forbid us to deal with (lower-cased ids)."""
+    ctl = _get(ctx, "control") or _get(sit, "control") or {}
+    raw = ctl.get("blocked_teams") if isinstance(ctl, dict) else None
+    return {str(x).strip().lower() for x in raw or [] if str(x).strip()}
+
+
+def blocked_counterparty(a: Action, sit, blocked: set[str]) -> str | None:
+    """The blocked team this action would deal with, or None. Duels are never blocked (the game pairs them)."""
+    if not blocked or a.domain == "duels":
+        return None
+    p = a.params or {}
+    who = None
+    if a.kind == "accept_offer":
+        who = (p.get("expect") or {}).get("maker") or (a.expected or {}).get("counterparty")
+    elif a.kind == "post_offer":
+        who = p.get("to")
+    elif a.kind == "open_thread":
+        who = p.get("with")
+    elif a.kind == "thread_message":
+        tid = str(p.get("thread"))
+        for t in _get(sit, "threads") or []:
+            if str(_get(t, "id")) == tid:
+                who = _get(t, "with")
+                break
+    who = str(who).strip().lower() if who else ""
+    return who if who in blocked else None
+
+
+def select(actions: list[Action], sit, budget: dict | None, ctx=None) -> tuple[list[Action], list[tuple[Action, str]]]:
     budget = budget or {}
+    blocked = blocked_teams(ctx, sit)
     lim = {**(budget.get("limits") or {}), **(_get(sit, "limits") or {})}
     accepts_left = budget.get("accepts_left")
     if accepts_left is None:
@@ -93,6 +125,8 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
         why = ""
         if a.kind == "noop":
             why = "noop"
+        elif blocked_counterparty(a, sit, blocked):
+            why = f"team {blocked_counterparty(a, sit, blocked)} is in control.blocked_teams"
         elif sig in seen_sigs:
             why = "duplicate"
         elif a.kind == "duel_accept" and duel_accepts_left <= 0:

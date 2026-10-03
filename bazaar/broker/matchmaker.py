@@ -315,6 +315,9 @@ class MatchMaker:
         ctl = self.control_fn() or {}
         exclude = ctl.get("matchmaker_exclude")
         exclude = tuple(exclude) if isinstance(exclude, list) else top_rivals(report, 2, self.us)
+        blocked = ctl.get("blocked_teams")                     # the humans' veto always applies on top
+        if isinstance(blocked, list):
+            exclude = tuple(dict.fromkeys(list(exclude) + [str(x).strip().lower() for x in blocked]))
         rar = self.rarity_fn()
         pairs = find_pairs(report, rar, us=self.us, venue=self.venue, exclude=exclude)
         pairs = mix(pairs, big_tickets(report, rar, us=self.us, venue=self.venue, exclude=exclude))

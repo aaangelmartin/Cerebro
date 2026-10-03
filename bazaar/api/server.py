@@ -218,6 +218,11 @@ def apply_control(live: Path, body: dict) -> dict:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):
                 raise ValueError(f"{key} must be a list")
             change[key] = body[key]
+    if "blocked_teams" in body:                         # core.arbiter: no accept, offer or thread with these teams
+        b = body["blocked_teams"]
+        if not isinstance(b, list) or not all(isinstance(x, str) and re.fullmatch(r"t\d{1,2}", x.strip().lower()) for x in b):
+            raise ValueError('blocked_teams must be a list of team ids like "t06"')
+        change["blocked_teams"] = sorted({x.strip().lower() for x in b})
     if "matchmaker" in body:                            # broker.matchmaker: invite pairs of other teams to our venue
         if body["matchmaker"] not in ("on", "off"):
             raise ValueError("matchmaker must be \"on\" or \"off\"")
