@@ -114,6 +114,10 @@ def _classify(exc: Exception) -> tuple[str, float]:
         return "timeout", COOLDOWN_S["timeout"]
     if status in (401, 403) or "credit balance" in msg or "billing" in msg:
         return "dead", 0.0
+    # the key hit its own spend limit in the Console ("You have reached your specified API usage limits.
+    # You will regain access on ..."): it is out for the day, use the next key
+    if "usage limit" in msg or "regain access" in msg:
+        return "dead", 0.0
     # a key the API rejects for what it is (e.g. an admin key with no workspace) can never work: drop it, try the next
     if "workspace" in msg or "api key" in msg or "x-api-key" in msg or "invalid_api_key" in msg:
         return "dead", 0.0

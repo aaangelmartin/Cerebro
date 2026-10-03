@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import threading
@@ -67,7 +68,7 @@ class KeyRouter:
         self.lock = threading.RLock()
         self.dead: dict[str, str] = {}          # label -> why
         self.cool: dict[str, float] = {}        # label -> epoch when usable again
-        self.state = {"keys": {}, "days": {}}
+        self.state = {"keys": {}, "days": {}, "dead": {}}
         self._reload()
 
     def _reload(self):
@@ -76,7 +77,22 @@ class KeyRouter:
         except (OSError, ValueError):
             return
         if isinstance(loaded, dict):
-            self.state = {"keys": loaded.get("keys") or {}, "days": loaded.get("days") or {}}
+            self.state = {"keys": loaded.get("keys") or {}, "days": loaded.get("days") or {},
+                          "dead": loaded.get("dead") or {}}
+            self._merge_dead()
+
+    def _fingerprint(self, label: str) -> str:
+        key = dict(self.keys).get(label) or ""
+        return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+    def _merge_dead(self):
+        """Dead keys other processes found today (same key value) count here too; a new day or a replaced
+        key clears the mark."""
+        today = self.day()
+        for label, d in (self.state.get("dead") or {}).items():
+            if (isinstance(d, dict) and d.get("day") == today and d.get("fp") == self._fingerprint(label)
+                    and label in dict(self.keys)):
+                self.dead.setdefault(label, str(d.get("why") or "dead"))
 
     # --- keys ---------------------------------------------------------------------
     def key_spent(self, label: str) -> float:
@@ -107,6 +123,14 @@ class KeyRouter:
     def mark_dead(self, label: str, why: str):
         with self.lock:
             self.dead[label] = why
+            try:                                # shared with the other processes for the rest of the day
+                with _FileLock(self.path.with_suffix(".lock")):
+                    self._reload()
+                    self.state.setdefault("dead", {})[label] = {"why": str(why)[:300], "day": self.day(),
+                                                                "fp": self._fingerprint(label), "at": self.clock()}
+                    self._save()
+            except OSError:
+                pass
         log.warning("llm key %s dead: %s", label, why)
 
     def cooldown(self, label: str, seconds: float):
