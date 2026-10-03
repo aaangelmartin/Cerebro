@@ -1,0 +1,137 @@
+"""The gift window: Abuela gives a card every 240 ticks in her answer to our first priced message of a thread.
+The bot opens a thread with her by itself once the window is open, once, and names a price before anything else."""
+from __future__ import annotations
+
+import json
+import unittest
+
+from bazaar.core.types import Outcome
+from bazaar.dealers import gifts
+from bazaar.dealers.tests import test_card_switch as S
+from bazaar.dealers.tests import test_domain as T
+
+SIT, CTX = T.AuditFixes().sit, T.AuditFixes().ctx
+SPARES = [{"id": 1, "kind": "card", "ref": "LAT-01", "rarity": "common", "set": "LAT", "your_value": 5.0},
+          {"id": 2, "kind": "card", "ref": "LAT-01", "rarity": "common", "set": "LAT", "your_value": 5.0}]
+
+
+def domain(last_gift=100):
+    dom = T.domain()
+    dom._brain_orders = lambda: []
+    if last_gift is not None:
+        gifts.record(dom.store.data, "abuela", last_gift, ["LAV-05"])
+    return dom
+
+
+def opens(dom, tick, control=None, threads=()):
+    ctx = CTX(tick)
+    ctx.control = control or {}
+    # cash 60 leaves nothing to spend in this fixture: no deal with Abuela is worth opening on its own
+    out = dom.fallback(SIT(tick=tick, cash=60, assets=[dict(a) for a in SPARES], threads=list(threads)), ctx)
+    return [a for a in out if a.kind == "open_thread" and a.params.get("with") == "abuela"], out
+
+
+class Window(unittest.TestCase):
+    def test_closed_window_opens_nothing(self):
+        self.assertEqual(opens(domain(), 339)[0], [])
+
+    def test_open_window_opens_one_thread_and_only_once(self):
+        dom = domain()
+        first, _ = opens(dom, 340)
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0].params["topic"], {"sell": {"assets": [1]}})
+        dom.observe(Outcome(action_id=first[0].id, tick=340, status="sent", response={}))
+        self.assertEqual(gifts.tries(dom.store.data, "abuela"), [{"tick": 340, "item": "LAT-01"}])
+        self.assertEqual(opens(dom, 341)[0], [])                       # no second thread right behind the first
+        self.assertEqual(opens(dom, 340 + gifts.RETRY_TICKS)[0], [])   # ...and the same card is not offered twice
+
+    def test_no_gift_ever_means_the_window_is_open(self):
+        self.assertEqual(len(opens(domain(last_gift=None), 5)[0]), 1)
+
+    def test_tries_are_capped(self):
+        dom = domain()
+        for i in range(gifts.MAX_TRIES):
+            gifts.note_try(dom.store.data, "abuela", 340 + 10 * i, f"X-{i}")
+        self.assertEqual(opens(dom, 500)[0], [])
+
+    def test_a_gift_restarts_the_clock(self):
+        dom = domain()
+        gifts.note_try(dom.store.data, "abuela", 340, "LAT-01")
+        ev = {"id": 9, "tick": 342, "type": "gift.given", "actor": "abuela",
+              "payload": {"team": "t10", "cards": ["SAL-08"], "cash": 0, "packs": []}}
+        other = {"id": 8, "tick": 341, "type": "gift.given", "actor": "abuela", "payload": {"team": "t07", "cards": ["X"]}}
+        s = SIT(tick=343, cash=60, assets=[dict(a) for a in SPARES])
+        s.me["id"] = "t10"
+        s.feed_new = [other, ev]
+        self.assertEqual([a for a in dom.fallback(s, CTX(343)) if a.kind == "open_thread"
+                          and a.params.get("with") == "abuela"], [])
+        g = dom.store.data["gifts"]["abuela"]
+        self.assertEqual((g["last_tick"], g["cards"], g["tries"], g["count"]), (342, ["SAL-08"], [], 2))
+        self.assertFalse(gifts.window_open(dom.store.data, "abuela", 342 + 239))
+        self.assertTrue(gifts.window_open(dom.store.data, "abuela", 342 + 240))
+        self.assertTrue(gifts.window_open(dom.store.data, "abuela", 3))          # a new day's clock
+
+    def test_a_manual_thread_is_left_alone(self):
+        th = S.thread([("d", 339, 27, S.CARD)])
+        mine, out = opens(domain(), 340, control={"manual_threads": [10]}, threads=[th])
+        self.assertEqual(mine, [])
+        self.assertEqual([a for a in out if a.kind in ("thread_message", "close_thread", "accept_offer")], [])
+
+    def test_a_deal_worth_opening_serves_as_the_gift_thread(self):
+        dom = domain()
+        plan = dom._prepare(SIT(tick=340, cash=400), CTX(340))
+        own = [c for c in plan.candidates if c.dealer == "abuela"]
+        self.assertTrue(own and own[0].id in plan.forced and not own[0].id.startswith("g"))
+        kept = dom._with_orders(plan, [])                              # Claude picked nothing: it opens anyway
+        self.assertEqual([a.params["with"] for a in kept if a.kind == "open_thread"], ["abuela"])
+
+
+class FirstBid(unittest.TestCase):
+    def test_the_code_names_a_price_before_claude_may_close(self):
+        dom = domain()
+        th = S.thread([("d", 340, 27, S.CARD)])
+        plan = dom._prepare(SIT(tick=341, threads=[th]), CTX(341))
+        info = plan.infos[0]
+        self.assertTrue(info.gift_bid)
+        out = dom._apply_llm(plan, CTX(341), {"threads": [{"thread": 10, "move": "close", "price": None, "text": "",
+                                                          "reason": "not worth it"}], "open": [], "lesson_ids": []})
+        self.assertEqual([(a.kind, a.params["thread"]) for a in out if a.params.get("thread") == 10],
+                         [("thread_message", 10)])
+        self.assertLessEqual(out[0].params["price"], info.limit)
+
+    def test_no_flag_once_we_named_a_price_or_the_window_is_closed(self):
+        dom = domain()
+        th = S.thread([("d", 340, 27, S.CARD), ("u", 341, 12), ("d", 342, 26, S.CARD)])
+        self.assertFalse(dom._prepare(SIT(tick=343, threads=[th]), CTX(343)).infos[0].gift_bid)
+        th = S.thread([("d", 200, 27, S.CARD)])
+        self.assertFalse(domain()._prepare(SIT(tick=201, threads=[th]), CTX(201)).infos[0].gift_bid)
+
+
+class Memory(unittest.TestCase):
+    def test_bootstrap_reads_our_gifts_from_the_recorded_feed(self):
+        dom = domain(last_gift=None)
+        rows = [{"id": 1, "tick": 657, "type": "gift.given", "actor": "abuela", "payload": {"team": "t10", "cards": ["LAV-05"]}},
+                {"id": 2, "tick": 759, "type": "gift.given", "actor": "abuela", "payload": {"team": "t07", "cards": ["LAV-01"]}},
+                {"id": 3, "tick": 929, "type": "gift.given", "actor": "abuela", "payload": {"team": "t10", "cards": ["MAL-02"]}}]
+        (dom.store.path.parent / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
+        s = SIT(tick=1100, cash=60, assets=[dict(a) for a in SPARES])
+        s.me["id"] = "t10"
+        self.assertEqual([a for a in dom.fallback(s, CTX(1100)) if a.kind == "open_thread"
+                          and a.params.get("with") == "abuela"], [])
+        self.assertEqual(gifts.next_tick(dom.store.data, "abuela"), 1169)
+        s.tick = 1169
+        self.assertEqual(len([a for a in dom.fallback(s, CTX(1169)) if a.kind == "open_thread"
+                              and a.params.get("with") == "abuela"]), 1)
+
+    def test_summary_for_the_brain(self):
+        mem: dict = {}
+        gifts.record(mem, "abuela", 657, ["LAV-05"])
+        gifts.record(mem, "abuela", 929, ["MAL-02"])
+        self.assertFalse(gifts.record(mem, "abuela", 929, ["MAL-02"]))
+        row = gifts.summary(mem, 1100)["abuela"]
+        self.assertEqual((row["last_gift_tick"], row["next_possible_tick"], row["gifts_received"], row["window_open"]),
+                         (929, 1169, 2, False))
+
+
+if __name__ == "__main__":
+    unittest.main()

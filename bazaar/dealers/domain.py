@@ -28,7 +28,7 @@ from .. import config
 from ..core.context import conv_key
 from ..core.types import Action, Outcome
 from ..lab import feedback
-from . import haggle
+from . import gifts, haggle
 from .compat import clean, lessons_block_for, llm_module, safe_our_text, scan, time_left, wrap
 from .haggle import Move
 from .profiles import FRIDAY_QUOTAS, ProfileStore, capture, ladder_gain
@@ -82,6 +82,7 @@ class ThreadInfo:
     force_close: str = ""        # stale or hopeless: close it whatever Claude says (unless we can accept)
     switch_hold: bool = False    # the dealer offered another card: the code repeats our bid or waits, Claude does not decide
     rebid_text: str = ""         # the words of that repeated bid: they name the card we asked for
+    gift_bid: bool = False       # gift window open and no priced message of ours yet: the code sends that bid
 
 
 @dataclass
@@ -115,6 +116,7 @@ class Plan:
     orders: list[dict] = field(default_factory=list)      # the brain's dealer_orders in force
     frees: list[Action] = field(default_factory=list)     # our own offers cancelled to free a spare for an order
     quota_left: dict[str, int] = field(default_factory=dict)   # threads left this hour per dealer (deals, conversations)
+    forced: list[str] = field(default_factory=list)       # candidate ids that open whatever Claude picks (gift window)
 
 
 def _g(obj: Any, name: str, default: Any = None) -> Any:
@@ -378,6 +380,7 @@ class DealersDomain:
     def _with_orders(self, plan: Plan, actions: list[Action]) -> list[Action]:
         """The brain's dealer orders open first: they replace any other opening with the same dealer."""
         orders = [c for c in plan.candidates if c.id.startswith("o")]
+        orders += [c for c in plan.candidates if c.id in plan.forced and c not in orders]    # the gift window
         if not orders:
             return actions
         mine = {c.dealer for c in orders}
@@ -420,6 +423,11 @@ class DealersDomain:
                 self.store.set_quota_hit(dealer)
             elif outcome.status in ("sent", "deal"):
                 self.store.note_open(dealer)
+                tick = int(getattr(outcome, "tick", None) or getattr(self, "_tick", 0) or 0)
+                if gifts.window_open(self.store.data, dealer, tick):      # this thread is our try for the gift
+                    with self.store.lock:
+                        gifts.note_try(self.store.data, dealer, tick, meta.get("item", ""))
+                        self.store.save()
         if code == "cooloff" or "cooloff" in code:
             until = (outcome.response or {}).get("until_tick") if isinstance(outcome.response, dict) else None
             self.store.set_cooloff(dealer, until)
@@ -704,6 +712,11 @@ class DealersDomain:
         views = [v for v in (parse_thread(t, assets_by_id, self._asked(t)) for t in _g(sit, "threads") or [])
                  if v is not None and v.status == "open"]
         self._sync(sit, views, dealers)
+        self._tick = tick
+        with self.store.lock:               # gifts we were given: they restart that dealer's gift window
+            gifts.bootstrap(self.store.data, self.store.path.parent / "events.jsonl", me.get("id"))
+            if gifts.note_feed(self.store.data, _g(sit, "feed_new") or [], me.get("id")):
+                self.store.save()
         # threads a human is writing in from the dashboard (control.manual_threads): never answer, accept or
         # close them, and open no second thread with that dealer
         manual = {int(x) for x in (_g(ctx, "control") or {}).get("manual_threads") or [] if str(x).isdigit()}
@@ -792,6 +805,18 @@ class DealersDomain:
                 s_move, s_force, rebid_text = self._switch_move(v, order, limit, limit_est, patience, max_msgs, plan)
                 if not (silent and s_move.kind == "wait"):
                     move, force, hold, switch_hold = s_move, s_force, False, not s_force
+            # Gift window open and we have not named a price in this thread yet: the gift comes with the dealer's
+            # answer to our first priced message, so send that bid before closing or waiting.
+            gift_bid = False
+            if (v.dealer in gifts.DEALERS and not v.ours and not v.final and v.last_theirs is not None
+                    and v.last_sender == "dealer" and limit > 0 and not cautious and not switch_hold
+                    and not force.startswith(("we no longer buy", "dealer silent", "dealer never"))
+                    and gifts.window_open(self.store.data, v.dealer, tick)):
+                if force or move.kind in ("close", "wait"):
+                    p_gift = haggle.guard_price(v, haggle.plan_next(v, limit, limit_est, patience) or limit, limit)
+                    if p_gift is not None:
+                        move, force = Move("price", p_gift, "gift window open: name our price before anything else"), ""
+                gift_bid = move.kind == "price"
             if force:
                 move = Move("close", None, force)
             elif hold and move.kind == "close":
@@ -813,7 +838,7 @@ class DealersDomain:
                               msg_used=bool(used.get(conv_key(Action(kind="thread_message", params={"thread": v.id},
                                                                      domain=self.name)))),
                               range=haggle.allowed_range(v, limit), force_close=force,
-                              switch_hold=switch_hold, rebid_text=rebid_text)
+                              switch_hold=switch_hold, rebid_text=rebid_text, gift_bid=gift_bid)
             plan.infos.append(info)
             if v.buying:
                 committed += max(0, min(limit, v.last_theirs or limit))
@@ -845,11 +870,42 @@ class DealersDomain:
             plan.candidates = ordered + [c for c in self._candidates(plan, sit, ctx, budget if not cautious else 0)
                                          if c.dealer not in taken
                                          and plan.quota_left.get(c.dealer, 1) > waiting.get(c.dealer, 0)]
+            if not cautious:
+                self._gift_candidates(plan, sit, ctx, budget, waiting)
             self._refresh_exact(values, [c.item for c in plan.candidates if c.kind.startswith("buy:")
                                          and not c.kind.endswith("pack")][:3])
         return plan
 
-    def _candidates(self, plan: Plan, sit, ctx, budget: int) -> list[Candidate]:
+    def _gift_candidates(self, plan: Plan, sit, ctx, budget: int, waiting: dict[str, int]) -> None:
+        """Gift window open with a free dealer: make sure a thread with it opens this tick. A deal we would open
+        anyway serves; otherwise a probe that stands on its own (a buy below our value, else a spare above it)."""
+        for d in gifts.DEALERS:
+            if d not in plan.free or not gifts.due(self.store.data, d, plan.tick):
+                continue
+            own = next((c for c in plan.candidates if c.dealer == d), None)
+            if own is not None:
+                plan.forced.append(own.id)
+                continue
+            if plan.quota_left.get(d, 1) <= waiting.get(d, 0):
+                continue                                     # the brain's pending orders keep the quota
+            tried = {t.get("item") for t in gifts.tries(self.store.data, d)}
+            free, plan.free = plan.free, [d]
+            try:
+                probes = [c for c in self._candidates(plan, sit, ctx, budget, probe=frozenset({d}))
+                          if c.item not in tried and not c.kind.endswith("pack")]
+            finally:
+                plan.free = free
+            probes.sort(key=lambda c: (not c.kind.startswith("buy"), -c.points))    # buys keep our cards at home
+            if not probes:
+                continue
+            c = probes[0]
+            c.id = f"g{len(plan.forced) + 1}"
+            plan.candidates.append(c)
+            plan.forced.append(c.id)
+
+    def _candidates(self, plan: Plan, sit, ctx, budget: int, probe: frozenset = frozenset()) -> list[Candidate]:
+        """Deals worth opening with each free dealer. For a dealer in `probe` (gift window) the profit filters
+        are off: any thread whose price stays inside our value limit will do."""
         values, out = plan.values, []
         me = _g(sit, "me") or {}
         control = _g(ctx, "control") or {}
@@ -874,17 +930,20 @@ class DealersDomain:
                 if o <= 1:
                     return
                 f = self.store.expect_limit(d, kind, o)
+                relaxed = d in probe
                 if buying:
                     lim = min(haggle.buy_max(value) if max_price is None else max_price, budget)
                     exp = f + EXPECTED_CONCESSION * (o - f)
-                    if f > lim or o - f < 1:
+                    if relaxed and lim < 1:
+                        return
+                    if not relaxed and (f > lim or o - f < 1):
                         return
                     exp = min(exp, lim)
                     gain = value - exp
                 else:
                     lim = haggle.sell_min(value)
                     exp = f - EXPECTED_CONCESSION * (f - o)
-                    if f < lim or f - o < 1:
+                    if not relaxed and (f < lim or f - o < 1):
                         return
                     exp = max(exp, lim)
                     gain = exp - value
@@ -893,7 +952,7 @@ class DealersDomain:
                     return                                   # saving for a goal: only small deals with a clear gain
                 cap = capture(int(round(o)), int(round(exp)), f, buying)
                 pts = haggle.expected_points(gain, level, ladder_gain(ladder_now, cap))
-                if pts < MIN_POINTS or gain < 0.5:
+                if not relaxed and (pts < MIN_POINTS or gain < 0.5):
                     return
                 out.append(Candidate(id=f"c{len(out) + 1}", dealer=d, topic=topic, kind=kind, item=item, name=name,
                                      value=round(value, 2), limit=int(lim), est_open=round(o, 1), est_limit=round(f, 1),
@@ -1031,7 +1090,7 @@ class DealersDomain:
                              "exp_capture": c.exp_capture, **({"value_get": c.value} if c.kind.startswith("buy") else {})},
                    priority=c.points)
         self._sent[a.id] = {"kind": "open_thread", "dealer": c.dealer, "item": c.item,
-                            "order": c.id.startswith("o"), "side": "buy" if c.kind.startswith("buy") else "sell",
+                            "order": c.id.startswith("o"), "gift": c.id.startswith("g"), "side": "buy" if c.kind.startswith("buy") else "sell",
                             "limit": c.limit, "bound": self._order_bounds_now.get((c.dealer, c.item), c.limit)}
         if c.id.startswith("o"):
             a.reason = reason or (f"brain order: {'buy' if c.kind.startswith('buy') else 'sell'} {c.item} with "
@@ -1182,6 +1241,9 @@ class DealersDomain:
                 a = self._act_close(info, "fallback", info.force_close)
             elif info.switch_hold:
                 notes.append(f"{tid}: dealer offered {info.view.switched_to}, not {info.view.item}; code repeats our bid")
+                a = self._move_action(plan, info, info.move, "fallback")
+            elif info.gift_bid and kind not in ("price", "accept"):
+                notes.append(f"{tid}: gift window open; code names our price first")
                 a = self._move_action(plan, info, info.move, "fallback")
             elif kind == "accept" and not info.can_accept:
                 notes.append(f"{tid}: accept refused by code ({info.accept_why})")

@@ -645,6 +645,7 @@ class Strategist:
             if k:
                 our_deals[k] = our_deals.get(k, 0) + 1
         from bazaar.dealers import profiles as _dq   # rolling-hour thread quota per dealer
+        from bazaar.dealers import gifts as _gifts
         personas = []
         for p in dealers.get("personas") or []:
             menu = p.get("menu") or {}
@@ -658,7 +659,11 @@ class Strategist:
                              "unlock": p.get("unlock"), "our_recorded_deals": our_deals.get(p.get("id"), 0),
                              "threads_last_hour": _dq.opens_last_hour(mem, p.get("id")),
                              "threads_left_this_hour": _dq.quota_left(
-                                 mem, p.get("id"), int(menu.get("deals_per_team_per_hour") or 6))})
+                                 mem, p.get("id"), int(menu.get("deals_per_team_per_hour") or 6)),
+                             # a free card every N ticks, in the answer to our first priced message of a thread;
+                             # the bot opens that thread by itself when the window opens: spend no orders on it
+                             **({"gift_window": _gifts.summary(mem, clock.get("tick")).get(p.get("id"))}
+                                if p.get("id") in _gifts.DEALERS else {})})
         levels = [{k: x.get(k) for k in ("id", "kind", "name", "state", "how", "active_since_hours",
                                          "opens_to_all_at_hours", "open_to_all")}
                   | ({"teaser": _wrap(x.get("teaser"), "game")} if x.get("teaser") else {})
