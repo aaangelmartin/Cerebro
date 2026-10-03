@@ -99,6 +99,25 @@ class FirstBid(unittest.TestCase):
                          [("thread_message", 10)])
         self.assertLessEqual(out[0].params["price"], info.limit)
 
+    def test_a_thread_the_code_would_close_at_once_still_gets_our_price(self):
+        # live, tick 1176: Abuela opened SAL-08 at 29, our max was 19 and she stops near 23; the thread was
+        # closed with no bid and the gift never came. With the window open the bid goes out first.
+        off = {"id": 901, "maker": "abuela", "to": "t10", "give": {"types": ["card:LAT-02"]}, "want": {"cash": 14},
+               "final": False, "status": "open", "created_tick": 341}
+        th = {"id": 10, "kind": "persona", "with": "abuela", "topic": {"buy": {"card": "LAT-02"}}, "status": "open",
+              "created_tick": 340, "messages": [{"tick": 341, "sender": "abuela", "text": "hola", "offer": off}],
+              "standing_offers": [off]}
+        closed = domain(last_gift=300)                                  # window closed: the code walks away
+        out = [a for a in closed.fallback(SIT(tick=341, threads=[th]), CTX(341)) if a.params.get("thread") == 10]
+        self.assertEqual([a.kind for a in out], ["close_thread"])
+        dom = domain()
+        plan = dom._prepare(SIT(tick=341, threads=[th]), CTX(341))
+        info = plan.infos[0]
+        self.assertTrue(info.gift_bid and not info.force_close)
+        out = [a for a in dom.fallback(SIT(tick=341, threads=[th]), CTX(341)) if a.params.get("thread") == 10]
+        self.assertEqual([a.kind for a in out], ["thread_message"])
+        self.assertTrue(0 < out[0].params["price"] <= info.limit)
+
     def test_no_flag_once_we_named_a_price_or_the_window_is_closed(self):
         dom = domain()
         th = S.thread([("d", 340, 27, S.CARD), ("u", 341, 12), ("d", 342, 26, S.CARD)])
