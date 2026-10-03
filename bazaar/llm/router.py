@@ -54,7 +54,7 @@ class KeyRouter:
     def __init__(self, keys: list[tuple[str, str]] | None = None, path: Path | str | None = None,
                  key_cap: float | None = None, day_cap: float | None = None, clock=time.time):
         self.keys = list(config.anthropic_keys() if keys is None else keys)
-        self.path = Path(path or config.LIVE / "llm_spend.json")
+        self.path = Path(path or config.SPEND_FILE)
         self.key_cap = config.KEY_CAP_USD if key_cap is None else key_cap
         self.day_cap = config.DAY_CAP_USD if day_cap is None else day_cap
         self.clock = clock

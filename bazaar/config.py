@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent          # bazaar/
@@ -22,11 +24,23 @@ def _load_env(path: Path) -> dict[str, str]:
 ENV = {**_load_env(REPO / ".env"), **os.environ}
 
 # --- paths -----------------------------------------------------------------
-DATA = Path(ENV.get("BAZAAR_DATA_DIR") or ROOT / "data")
+# Tests and simulator runs never touch the real bot's data: they get their own folder unless told otherwise.
+_TESTING = "unittest" in (sys.argv[0] if sys.argv else "")
+_SIM = "--sim" in sys.argv
+if ENV.get("BAZAAR_DATA_DIR"):
+    DATA = Path(ENV["BAZAAR_DATA_DIR"])
+elif _TESTING:
+    DATA = Path(tempfile.mkdtemp(prefix="bazaar-test-"))
+elif _SIM:
+    DATA = ROOT / "data" / "sim"
+else:
+    DATA = ROOT / "data"
 LIVE = DATA / "live"            # everything the running bot writes
-FRIDAY = DATA / "friday"        # read-only material from Friday
+FRIDAY = ROOT / "data" / "friday"   # read-only material from Friday (shared by live, sim and tests)
 LAB = DATA / "lab"              # lessons, hypotheses, backtests, shadow runs
 STOP_FILE = ROOT / "STOP"       # touch to stop every write at once
+# API money is real even in a simulation: one spend ledger for everything except unit tests.
+SPEND_FILE = (LIVE if _TESTING else ROOT / "data" / "live") / "llm_spend.json"
 for _d in (LIVE, LAB):
     _d.mkdir(parents=True, exist_ok=True)
 
