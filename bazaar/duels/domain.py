@@ -85,13 +85,16 @@ class DuelsDomain:
     name = "duels"
 
     def __init__(self, memory: OpponentMemory | None = None, llm: Any = None, model: str | None = None,
-                 max_workers: int = 6, llm_every: int = 3, use_llm: bool = True,
+                 max_workers: int = 6, llm_every: int = 1, use_llm: bool = True,
                  max_calls: int | None = None):
         self.memory = memory or OpponentMemory()
         self._llm = llm
         self.model = model
         self.use_llm = use_llm
-        self.llm_every = llm_every          # re-ask Claude at least every N ticks even if nothing moved
+        # Claude decides every move: asked each tick (llm_every=1). With a larger value the code schedule
+        # used to fill the ticks in between and conceded faster than Claude had chosen to.
+        self.llm_every = llm_every
+        self._fails: dict[int, int] = {}           # duel -> Claude failures in a row
         self.max_calls = max_calls          # hard cap on Claude calls (tournament / tests)
         self.calls = 0
         self.cost_usd = 0.0
@@ -241,6 +244,10 @@ class DuelsDomain:
         mode = claude_mode(ctx)
         if not self.use_llm or llm is None or mode == "code" or \
                 (ctx is not None and getattr(ctx, "llm_ok", True) is False):
+            why = ("duel mode is 'code'" if mode == "code" else "Claude is switched off for this tick (breaker)"
+                   if (ctx is not None and getattr(ctx, "llm_ok", True) is False) else "no Claude client")
+            for _, b in bases.values():
+                b.reason = f"[fallback: {why}] {b.reason}"
             return self._finish(views, {k: b[1] for k, b in bases.items()}, bases)
 
         futures: dict[cf.Future, DuelView] = {}
@@ -260,16 +267,29 @@ class DuelsDomain:
         done, _ = cf.wait(futures, timeout=timeout) if futures else (set(), set())
 
         claude: dict[int, Move] = {}
-        for f in done:
-            v = futures[f]
+        why: dict[int, str] = {}                    # duel -> why Claude did not decide this tick
+        for f, v in futures.items():
+            if f not in done:
+                why[v.id] = "Claude did not answer before the tick deadline"
+                continue
             try:
                 mv = f.result()
             except Exception as e:      # LLMUnavailable, LLMTimeout, network: the fallback covers it
                 log.warning("duel %s: claude failed: %s", v.id, e)
+                why[v.id] = f"Claude failed ({type(e).__name__})"
                 continue
             if mv is not None:
                 claude[v.id] = mv
                 self._last_ask[v.id] = asked[v.id]
+                self._fails.pop(v.id, None)
+            else:
+                why[v.id] = "Claude gave no usable move"
+        for v in views:
+            if v.id not in claude:
+                why.setdefault(v.id, "Claude call cap reached" if v.id not in asked and self._needs_llm(v)
+                               else "not asked this tick")
+                if v.id in asked:
+                    self._fails[v.id] = self._fails.get(v.id, 0) + 1
 
         moves: dict[int, Move] = {}
         for v in views:
@@ -289,9 +309,23 @@ class DuelsDomain:
                     log.info("duel %s: guard %s", v.id, notes)
                 mv = safe
             else:
-                mv = base
+                mv = self._without_claude(v, base, why.get(v.id, "not asked this tick"))
             moves[v.id] = mv
         return self._finish(views, moves, bases)
+
+    def _without_claude(self, v: DuelView, base: Move, why: str) -> Move:
+        """Claude did not decide this duel this tick. If Claude already set our line, the rival has not moved
+        since and there is time, hold that line for a tick instead of conceding on the code schedule; the
+        code fallback is the last resort (rival moved, deadline close, Claude failing twice in a row)."""
+        last = self._last_ask.get(v.id)
+        key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
+        hold = (last is not None and last[1:] == key and v.ticks_left > 3 and base.action == "offer"
+                and self._fails.get(v.id, 0) < 2 and v.our_offer is not None)
+        if hold:
+            return Move("wait", reason=f"[hold: {why}] keep Claude's standing offer; the rival has not moved",
+                        source="fallback")
+        base.reason = f"[fallback: {why}] {base.reason}"
+        return base
 
     def observe(self, outcome: Outcome) -> None:
         resp = outcome.response or {}
