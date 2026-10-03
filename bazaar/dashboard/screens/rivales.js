@@ -423,6 +423,7 @@
             el("span", { class: "t10-small t10-muted" }, "líder negociación: " + nm(bn) + " " + fmt(bn.negotiating, 1) + " · líder mercado: " + nm(bm) + " " + fmt(bm.market, 1))),
           compRow("Negociación", NEG_C, t.negotiating, W.negotiating, bn.negotiating, nm(bn), me.negotiating, t.team === US),
           compRow("Mercado", MKT_C, t.market, W.market, bm.market, nm(bm), me.market, t.team === US),
+          t.team === US && window.ui.negParts && window.__meScore ? window.ui.negParts(window.__meScore) : null,
           el("div", { class: "r-split-legend t10-small t10-muted" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + NEG_C }), "negociación"),
             el("span", {}, el("i", { class: "r-sq", style: "background:" + MKT_C }), "mercado"), el("span", {}, "puntos en el tiempo")),
           splitChart(t.team));

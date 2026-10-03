@@ -200,3 +200,5 @@
   .scr-coleccion .cc-kpis { grid-template-columns: repeat(3, 1fr); }
   .scr-coleccion .cc-extra-g { grid-template-columns: repeat(6, 1fr); }
 }
+.scr-coleccion .cc-vest { color: var(--ink-3); font-weight: 500; }
+.scr-coleccion .cc-dkpis .kpi-sub { white-space: normal; line-height: 1.35; }

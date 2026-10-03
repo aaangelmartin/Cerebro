@@ -78,9 +78,15 @@
   // sessions: official results when the API serves them, else what the broker heartbeat keeps (vs_stall.history)
   function sessionRows(b) {
     if (Array.isArray(S.sessions) && S.sessions.length) return S.sessions.map((r) => ({
-      run: r.run, tick: r.tick, official: num((r.score || {}).bench_efficiency), stall: num(r.stall_efficiency), ours: num(r.est_efficiency),
+      run: r.run, tick: r.tick ?? r.start_tick, official: num((r.score || {}).bench_efficiency), stall: num(r.stall_efficiency), ours: num(r.est_efficiency),
       matches: (r.stats || {}).matches, refused: (r.stats || {}).refused, probes: (r.stats || {}).probes, surplus: num((r.stats || {}).est_surplus),
-      bench_points: num((r.score || {}).bench_points), mm_points: num((r.score || {}).mm_points), profile: (r.stats || {}).profile, src: "oficial" }));
+      bench_points: num((r.score || {}).bench_points), mm_points: num((r.score || {}).mm_points), profile: (r.stats || {}).profile, src: "oficial" }))
+      .map((r) => {   // a session still running has no results yet: show the broker's live counters instead of dashes
+        if (!(b.active_runs || []).includes(r.run) || r.matches != null) return r;
+        const ss = b.session_stats || {};
+        return { ...r, live: true, tick: r.tick ?? ss.start_tick, ours: r.ours ?? num(b.efficiency_estimate), stall: r.stall ?? num(b.stall_efficiency),
+          matches: ss.matches, refused: ss.refused, probes: ss.probes, surplus: num(ss.est_surplus), profile: ss.profile };
+      });
     const hist = ((b.vs_stall || {}).history || []).map((h) => ({ run: h.run, ours: num(h.ours), stall: num(h.stall), basis: h.basis, below: h.below, src: "latido" }));
     const ss = b.session_stats;
     if ((b.active_runs || []).length && ss && !hist.some((h) => h.run === b.active_runs[0]))

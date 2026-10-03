@@ -367,7 +367,8 @@
         el("div", { class: "h-big num" }, fmt(score, 1), el("span", { class: "h-of" }, " / 60")),
         el("div", { class: "h-delta num " + (delta > 0 ? "t10-up" : delta < 0 ? "t10-down" : "") }, delta == null ? "sin cambio medido en la última hora" : (delta > 0 ? "+" : "") + fmt(delta, 1) + " en la última hora"),
         el("div", { class: "h-spark" }, D.spark(ser.slice(-120), { w: 220, h: 34 })),
-        bar("Negociación", neg, lNeg, "negotiating", NEG_C), bar("Mercado", mkt, lMkt, "market", MKT_C)),
+        bar("Negociación", neg, lNeg, "negotiating", NEG_C), bar("Mercado", mkt, lMkt, "market", MKT_C),
+        (window.ui.negParts && window.__meScore) ? window.ui.negParts(window.__meScore) : null),
       el("div", { class: "h-ladder" }, ladder.map((x) => {
         const d = num(x.score) != null && score != null ? num(x.score) - score : null;
         return el("div", { class: "h-lad" + (x.team === US ? " t10-usrow" : "") },

@@ -686,10 +686,21 @@
     return out;
   }
 
+  // our raw negotiation components (only the game's /api/me gives them, so only for us): deals with teams, duels, dealer ladder
+  function negParts(score) {
+    const sc = score || {};
+    const n = (x) => (x === null || x === undefined || isNaN(+x) ? null : +x);
+    const parts = [["Tratos", n(sc.neg_points), 1], ["Duelos", n(sc.duel_points), 2], ["Escalera", n(sc.ladder_points), 3]].filter((p) => p[1] !== null);
+    if (!parts.length) return null;
+    return el("div", { class: "negparts", title: "componentes en bruto de la negociación, antes de comparar con el mejor equipo" },
+      el("span", { class: "negparts-l" }, "en bruto"), parts.map(([l, v, d]) => el("span", { class: "negparts-i" }, l + " ", el("b", { class: "num" }, fmtNum(v, v < 1 ? 3 : d === 1 ? 1 : 2)))),
+      n(sc.bench_points) !== null ? el("span", { class: "negparts-i negparts-m" }, "Market Test ", el("b", { class: "num" }, fmtNum(sc.bench_points, 2)), n(sc.mm_points) !== null ? [" · tienda ", el("b", { class: "num" }, fmtNum(sc.mm_points, 1))] : null) : null);
+  }
+
   window.ui = {
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL, keyHealth, keyProblem, venueRanking, venueHourVolume, ALLIED_VENUES,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL, keyHealth, keyProblem, venueRanking, venueHourVolume, ALLIED_VENUES, negParts,
   };
 })();

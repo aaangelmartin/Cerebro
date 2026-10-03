@@ -85,11 +85,9 @@
       U().kpi({ label: "Último plan", value: cur.updated ? when(cur.updated) : "—", sub: cur.tick != null ? "tick " + cur.tick + (cur.reason ? " · " + cur.reason : "") : "" }),
       U().kpi({ label: "Siguiente revisión", value: nextT ? "en " + nextT + " ticks" : "—", sub: "antes si pasa algo (evento)" }),
       U().kpi({ label: "Modelo", value: (cur.model || "claude-opus-5-5").replace("claude-", "").replace(/-/g, " "), sub: "esfuerzo medio" }),
-      d.budget ? U().kpi({ label: "Intensidad", value: el("a", { href: "#bot", class: "cb-int" }, String(d.budget.level ?? "—"), el("span", { class: "cb-int-of" }, "/100")),
-        sub: (d.budget.mode === "manual" ? "manual" : "automático") + (num(d.budget.usd_per_hour_now) != null ? " · ≈ " + fmtNum(d.budget.usd_per_hour_now, 2) + " $/h" : "") }) : null,
       U().kpi({ label: "Gasto hoy", value: (d.budget && num(d.budget.spent_today) != null) ? U().fmtUsd(d.budget.spent_today) : spentStrategy != null ? U().fmtUsd(spentStrategy) : "—",
         sub: (d.budget && d.budget.cap_today) ? "tope " + U().fmtUsd(d.budget.cap_today) : st.day_cap ? "tope " + U().fmtUsd(st.day_cap) : (st.calls != null ? st.calls + " llamadas" : "") }));
-    if (d.budget) kpis.classList.add("has-6");
+
     const errs = (st.errors || []).slice(-3);
     const p = U().panel("Cerebro", { sub: "Opus piensa, investiga y decide; el consejo vota los cambios grandes", cls: "cb-status" });
     const sit = (cur.plan || {}).situation;
@@ -931,6 +929,36 @@
   const WAKE = { chat: "mensajes del equipo", external: "mensajes de WhatsApp", official: "avisos de la organización", bargain: "gangas en el mercado",
     dealer: "dealers nuevos o que abren", level: "cambios de nivel", set: "sets nuevos", schedule: "cambios de calendario", novelty: "novedades del juego",
     review: "revisión de cada hora", duel: "duelos", bench: "Market Test", score: "saltos de puntos", offer: "ofertas dirigidas a nosotros", venue: "tiendas" };
+  // the backend writes level-change reasons as short English phrases joined by ";": show them in Spanish, numbers kept
+  const REASON_RX = [
+    [/^([\d.]+) \$ left for ([\d.]+) h -> ([\d.]+) \$\/h$/i, (m) => `quedan ${es(m[1])} $ para ${es(m[2])} h → ${es(m[3])} $/h`],
+    [/^bench within (\d+) min$/i, (m) => `Market Test en ${m[1]} min`],
+    [/^bench (running|live|now)$/i, () => "Market Test en curso"],
+    [/^duels? within (\d+) min$/i, (m) => `duelos en ${m[1]} min`],
+    [/^duels? (running|live|now)$/i, () => "duelos en curso"],
+    [/^team message$/i, () => "mensaje del equipo"],
+    [/^session live$/i, () => "sesión en curso (duelos o Market Test)"],
+    [/^(external|whatsapp) message$/i, () => "mensaje de WhatsApp"],
+    [/^game paused$/i, () => "juego en pausa"],
+    [/^doors closed$/i, () => "juego cerrado"],
+    [/^behind (the )?pace$/i, () => "vamos por detrás del ritmo de gasto"],
+    [/^ahead of (the )?pace$/i, () => "vamos por delante del ritmo de gasto"],
+    [/^over (the )?pace$/i, () => "gastamos por encima del ritmo"],
+    [/^bargain.*$/i, () => "ganga en el mercado"],
+    [/^new dealer.*$/i, () => "dealer nuevo"],
+    [/^score drop.*$/i, () => "caída de nuestra puntuación"],
+    [/^quiet.*$/i, () => "sin novedades"],
+    [/^cap reached.*$/i, () => "tope de gasto alcanzado"],
+    [/^manual.*$/i, () => "puesto a mano"],
+    [/^keys? .*down.*$/i, () => "claves caídas"],
+  ];
+  const es = (x) => String(x).replace(".", ",");
+  function reasonEs(text) {
+    return String(text || "").split(/\s*;\s*/).filter(Boolean).map((p) => {
+      for (const [rx, fn] of REASON_RX) { const m = p.match(rx); if (m) return fn(m); }
+      return p;
+    }).join(" · ");
+  }
   function levelInfo(level) {
     const t = ((I.data && I.data.table) || []).slice().sort((a, b) => a.level - b.level);
     if (!t.length) return null;
@@ -993,7 +1021,7 @@
     const prev = hist.length > 1 ? hist[hist.length - 2] : null;
     const from = prev && prev.level != null ? prev.level : null;
     replace(n.why, el("span", { class: "cb-cap cb-i-cap" }, auto ? "Por qué está en " + d.level : "Último cambio"),
-      d.reason ? el("b", {}, (from != null && d.level > from ? "sube: " : from != null && d.level < from ? "baja: " : "") + d.reason) : el("span", { class: "cb-muted" }, "sin motivo registrado"),
+      d.reason ? el("b", {}, (from != null && d.level > from ? "sube: " : from != null && d.level < from ? "baja: " : "") + reasonEs(d.reason)) : el("span", { class: "cb-muted" }, "sin motivo registrado"),
       d.changed ? el("span", { class: "cb-muted num" }, (from != null ? ` · ${from} → ${d.level}` : "") + " · " + when(d.changed)) : null);
     const st = d.settings || {};
     const kinds = (st.wake_kinds || []).map((k) => WAKE[k] || k);
@@ -1007,7 +1035,7 @@
         const up = before && h.level > before.level, down = before && h.level < before.level;
         return el("div", { class: "cb-i-hrow" }, el("span", { class: "num cb-time" }, when(h.ts)),
           el("b", { class: "num " + (up ? "cb-i-up" : down ? "cb-i-down" : "") }, (before ? before.level + " → " : "") + h.level),
-          el("span", { class: "tag res tone-mute" }, h.mode === "manual" ? "manual" : "auto"), el("span", { class: "cb-i-hwhy", title: h.reason || "" }, h.reason || "")); })
+          el("span", { class: "tag res tone-mute" }, h.mode === "manual" ? "manual" : "auto"), el("span", { class: "cb-i-hwhy", title: reasonEs(h.reason) }, reasonEs(h.reason))); })
         : el("div", { class: "cb-muted" }, "Sin cambios registrados."));
   }
   function replace(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }

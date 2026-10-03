@@ -198,9 +198,29 @@
         if (x.threads.length || x.dealerOffer) states.dealer = x.dealer || (x.dealerOffer && x.dealerOffer.to) || true;
         if (!own.length && (d.goals ? !!d.goals[c.id] : (c.page && TARGET_SETS.includes(s.id) && s.released))) states.objetivo = true;
         if (prot.has(c.id)) states.protegida = true;
+        // value to us: held -> the game's your_value; else GET values; else book × affinity × marginal of the next copy (≈)
+        const marg = values.copy_marginals || [1, 0.25, 0.1];
+        const aff = (me.affinity && me.affinity[s.id]) != null ? me.affinity[s.id] : 1;
+        const est = (n) => (c.book || 0) * aff * (marg[Math.min(n, marg.length - 1)] ?? 0);
+        const av = d.apiValues && d.apiValues[c.id];
+        const heldVal = own.length ? Math.max(...own.map((a) => a.your_value || 0)) : null;
+        const val = heldVal != null ? { v: heldVal, exact: true }
+          : av && av.value != null ? { v: +av.value, exact: av.exact !== false }
+          : { v: Math.round(est(0) * 10) / 10, exact: false };
+        const nextVal = av && av.next_copy_value != null ? { v: +av.next_copy_value, exact: av.exact !== false } : { v: Math.round(est(own.length) * 10) / 10, exact: false };
+        // market: best ask (someone sells it for cash), best bid (someone pays cash for it), across every venue's book
+        let bestAsk = null, bestBid = null;
+        for (const o of x.offers || []) {
+          if (o.maker === US || (o.status && o.status !== "open")) continue;
+          const g = refsOf(o.give), w = refsOf(o.want);
+          const ga = ((o.give && o.give.assets) || []).length + ((o.give && o.give.types) || []).length;
+          const wa = ((o.want && o.want.assets) || []).length + ((o.want && o.want.types) || []).length;
+          if (g.includes(c.id) && ga === 1 && !wa && o.want && o.want.cash > 0 && (!bestAsk || o.want.cash < bestAsk.price)) bestAsk = { price: o.want.cash, venue: o.venue || "rastro", to: o.to };
+          if (w.includes(c.id) && wa === 1 && !ga && o.give && o.give.cash > 0 && (!bestBid || o.give.cash > bestBid.price)) bestBid = { price: o.give.cash, venue: o.venue || "rastro", to: o.to };
+        }
         cards[c.id] = {
           info: { ...c, set: s.id, setName: s.name },
-          own, ourValue: own.length ? Math.max(...own.map((a) => a.your_value || 0)) : null,
+          own, ourValue: val.v, valueExact: val.exact, nextValue: nextVal, bestAsk, bestBid,
           market: mk.length ? mk[mk.length - 1].price : null, marketHist: mk,
           book: c.book, states, offers: x.offers, threads: x.threads, rivalBids: x.rivalBids || 0,
         };
@@ -284,13 +304,24 @@
       class: "cc-card cc-art" + (have ? " is-owned" : " is-missing") + (c.states.objetivo ? " is-target" : "") + (frame ? " has-state" : ""),
       style: `--set:${SET_COLORS[i.set] || "#888"};--rar:${RAR_COLORS[i.rarity] || "#888"}` + (frame ? `;--frame:${frame}` : ""),
       title: `${i.id} · ${i.name}` + (have ? ` · ${serials}/${i.print_run}` : " · falta") +
-        ` · nuestro ${have ? fmtP(c.ourValue) : "—"} · mercado ${c.market != null ? fmtN(c.market, 0) : "—"} · libro ${fmtN(c.book, 0)}`,
+        ` · nuestro ${valTxt(c)} · mercado ${c.market != null ? fmtN(c.market, 0) : "—"} · libro ${fmtN(c.book, 0)}`,
       onclick: () => onOpen(i.id),
     },
       face,
-      h("div", { class: "cc-vline" }, h("span", null, i.id), have ? h("b", null, fmtN(c.ourValue, 0) + " P") : null),
+      h("div", { class: "cc-vline" }, h("span", null, i.id), h("b", { class: have ? "" : "cc-vest", title: have ? "valor para nosotros" : "lo que valdría para nosotros" }, (c.valueExact ? "" : "≈ ") + fmtN(c.ourValue, 0) + " P")),
       h("div", { class: "cc-cname" }, i.name),
     );
+  }
+  const valTxt = (c) => (c.ourValue == null ? "—" : (c.valueExact ? "" : "≈ ") + fmtP(c.ourValue));
+  const venueTxt = (v) => (v === "rastro" || !v ? "El Rastro" : v);
+  // what the market says about a card: best ask, best bid, last trade (venue and time); "sin ver" only if truly nothing
+  function marketKpi(c) {
+    const last = c.marketHist.length ? c.marketHist[c.marketHist.length - 1] : null;
+    const parts = [];
+    if (c.bestAsk) parts.push(["Se vende", fmtP(c.bestAsk.price), venueTxt(c.bestAsk.venue) + (c.bestAsk.to === US ? " · a nosotros" : "")]);
+    if (c.bestBid) parts.push(["Se busca", fmtP(c.bestBid.price), venueTxt(c.bestBid.venue)]);
+    if (last) parts.push(["Última venta", fmtP(last.price), (last.persona ? "dealer " + last.persona : venueTxt(last.venue)) + " · " + (U().fmtTime ? U().fmtTime(last.ts, false) : "")]);
+    return parts;
   }
   function renderCard(c, small, onOpen) {
     const i = c.info;
@@ -307,12 +338,12 @@
     },
       h("div", { class: "cc-card-head" }, h("span", { class: "cc-ref" }, small ? (i.rarity === "epic" ? "ÉPICA" : "LEYEND.") : i.id), h("span", { class: "cc-rdot" })),
       small
-        ? h("div", { class: "cc-card-body" }, h("div", { class: "cc-ref-s" }, i.id), h("div", { class: "cc-sub" }, have ? (serials + " · " + fmtP(c.ourValue)) : (c.own.length + "/" + (i.print_run || "?"))))
+        ? h("div", { class: "cc-card-body" }, h("div", { class: "cc-ref-s" }, i.id), h("div", { class: "cc-sub" }, have ? (serials + " · " + fmtP(c.ourValue)) : valTxt(c)))
         : h("div", { class: "cc-card-body" },
           h("div", { class: "cc-name" }, i.name),
           h("div", { class: "cc-sub" }, have ? `${serials}/${i.print_run}` : "falta"),
           h("div", { class: "cc-spacer" }),
-          h("div", { class: "cc-val" }, have ? fmtP(c.ourValue) : "—"),
+          h("div", { class: "cc-val" }, valTxt(c)),
           h("div", { class: "cc-mini" }, "m " + (c.market != null ? fmtN(c.market, 0) : "—") + " · l " + fmtN(c.book, 0))),
       small ? null : h("div", { class: "cc-chips" }, cardChips(c)),
     );
@@ -509,8 +540,10 @@
     body.appendChild(tags);
     const page = m.album[i.set] || {};
     body.appendChild(h("div", { class: "cc-dkpis" },
-      kpi("VALOR NUESTRO", c.own.length ? fmtP(c.ourValue) : "—"),
-      kpi("MERCADO", c.marketHist.length ? (Math.min(...c.marketHist.map((x) => x.price)) + "–" + Math.max(...c.marketHist.map((x) => x.price)) + " P") : "sin ventas"),
+      kpi("VALOR NUESTRO", valTxt(c), c.own.length ? (c.own.length > 1 ? `${c.own.length} copias · otra más ${(c.nextValue.exact ? "" : "≈ ") + fmtP(c.nextValue.v)}` : `otra copia ${(c.nextValue.exact ? "" : "≈ ") + fmtP(c.nextValue.v)}`)
+        : c.valueExact ? "si la conseguimos" : "estimado: libro × afinidad"),
+      (() => { const mk = marketKpi(c); const best = c.bestAsk || (c.marketHist.length ? c.marketHist[c.marketHist.length - 1] : null) || c.bestBid;
+        return kpi("MERCADO", best ? fmtP(best.price) : "sin ver", mk.length ? mk.map((p) => `${p[0]} ${p[1]} (${p[2]})`).join(" · ") : "ni ofertas ni ventas grabadas"); })(),
       kpi("LIBRO", fmtP(c.book)),
       kpi("AFINIDAD " + i.set, m.me.affinity && m.me.affinity[i.set] != null ? "×" + fmtN(m.me.affinity[i.set], 1) : "—"),
       kpi("PÁGINA", page.of ? `${page.have}/${page.of}` : "—")));
@@ -565,6 +598,21 @@
   // ---------- data ----------
   const S = { fb: null, model: null, slow: {}, slowAt: 0, opened: null };
 
+  // the API caps `tail` at 500 rows: page through the last 12000 events so prices are not "sin ver" by accident
+  const now0 = () => Date.now();
+  async function feedWindow(api) {
+    const t = await api.recStream("feed", { tail: 1 });
+    const last = t && t.last_seq != null ? t.last_seq : 0;
+    let seq = Math.max(0, last - 12000), rows = [];
+    for (let g = 0; g < 6; g++) {
+      const r = await api.recStream("feed", { since_seq: seq, limit: 5000 });
+      const got = (r && r.rows) || [];
+      rows = rows.concat(got.filter((x) => x.type === "settlement"));
+      if (got.length) seq = got[got.length - 1].seq;
+      if (got.length < 5000) break;
+    }
+    return { rows };
+  }
   async function load(data) {
     const api = window.api;
     if (!api) throw new Error("api.js no cargado");
@@ -572,6 +620,8 @@
       safe(() => api.rec("catalog")), safe(() => api.rec("me")), safe(() => api.rec("my_offers")),
       safe(() => api.status()), safe(() => api.decisions()), loadArt(), loadCromo(),
     ]);
+    // our value of every card, held or not: GET values when the API serves it ({items:{REF:{value, exact, held, next_copy_value, spare_value}}})
+    if (now0() - (S.valuesAt || 0) > 15000) { S.valuesAt = now0(); const v = await safe(() => api.get("values", {}, 10000)); S.values = v.ok && v.v ? (v.v.items || v.v) : (S.values || null); }
     const strat = api.strategy ? await safe(() => api.strategy(1)) : { ok: false };
     const plan = strat.ok && strat.v && strat.v.current ? strat.v.current.plan || {} : {};
     const goals = plan.goal_buys && Object.keys(plan.goal_buys).length ? plan.goal_buys : null;
@@ -581,7 +631,7 @@
       S.slowAt = now;
       const [venues, threads, cards, feed] = await Promise.all([
         safe(() => api.rec("venues")), safe(() => api.recThreads()), safe(() => api.rec("cards")),
-        safe(() => api.recStream("feed", { tail: 3000 })),
+        safe(() => feedWindow(api)),
       ]);
       const vids = ["rastro"].concat(arr(venues.ok ? venues.v.venues || venues.v : []).map((v) => v.venue || v.id).filter(Boolean));
       const books = await Promise.all([...new Set(vids)].map((v) => safe(() => api.rec("books/" + v))));
@@ -593,6 +643,7 @@
       };
     }
     return {
+      apiValues: S.values || null,
       catalog: catalog.v, me: me.ok ? me.v : {}, myOffers: myOffers.ok ? myOffers.v : [],
       status: status.ok ? status.v : (data && data.status) || {},
       decisions: decisions.ok ? arr(decisions.v) : [],

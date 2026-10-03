@@ -200,6 +200,7 @@
     const names = ["me", "leaderboard", "clock", "venues", "my_offers", "dealers"];
     const got = await Promise.allSettled(names.map((n) => api.rec(n)));
     got.forEach((r, i) => { if (r.status === "fulfilled") S.rec[names[i]] = r.value; });
+    if (S.rec.me && (S.rec.me.score || (S.rec.me.data || {}).score)) window.__meScore = S.rec.me.score || S.rec.me.data.score;
     if (now - S.dealerAt > 30000) {
       S.dealerAt = now;
       try {
@@ -233,7 +234,8 @@
     const me = S.rec.me || {}, lbMe = myTeam() || {};
     const cash = st.cash !== undefined && st.cash !== null ? st.cash : me.cash;
     const assets = Array.isArray(me.assets) ? me.assets : [];
-    const value = assets.reduce((a, x) => a + (Number(x.your_value) || 0), 0);
+    // the game's own figure (copies beyond the first count less, page bonuses included); the sum of the cards only as a fallback
+    const value = Number(me.collection_value) > 0 ? Number(me.collection_value) : assets.reduce((a, x) => a + (Number(x.your_value) || 0), 0);
     const hasVenue = !!(team.venue || lbMe.venue);
     const level = lbMe.level !== undefined ? lbMe.level : me.level;
     const unlocked = Array.isArray(me.unlocked) ? me.unlocked.length : null;
