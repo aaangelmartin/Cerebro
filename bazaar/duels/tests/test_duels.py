@@ -179,7 +179,7 @@ class TestOpponentMemory(unittest.TestCase):
     def test_second_leg_uses_first_leg_limit(self):
         m = mem()
         # Leg 1: we sold "Plaza" with cost 80.
-        m.observe_duel(parse_duel(duel(duel=1, role="seller", item="Plaza", your_limit=80), 100))
+        m.observe_duel(parse_duel(duel(duel=1, role="seller", item="Plaza", your_limit=80, rival="Rival Sol"), 100))
         # Leg 2: we buy "Plaza" with value 130: the rival's cost is very likely 80 -> pie 50.
         v = parse_duel(duel(duel=2, role="buyer", item="Plaza", your_limit=130, rival="Rival Sol"), 120)
         a = m.assess(v)

@@ -311,3 +311,31 @@ class VenueReserveEdges(unittest.TestCase):
         self.assertIsNone(rails.own_venue(s))
         s.venues = [{"venue": "v09", "owner": "t10", "starter": False}]
         self.assertEqual(rails.own_venue(s), "v09")
+
+
+class FreshDuelChangedOffer(unittest.TestCase):
+    """verify_fresh(duel_accept): the endpoint accepts the STANDING offer, so a changed rival offer is fine
+    when it is worth at least as much to us (duels.model.safe_utility)."""
+
+    def duel(self, rival, **kw):
+        d = {"duel": 9, "status": "live", "role": "buyer", "your_limit": 150, "issues": ["price"],
+             "rival_offer": rival, "decay_per_round": 0.06}
+        d.update(kw)
+        return d
+
+    def test_better_or_equal_changed_offer_passes(self):
+        a = Action("duel_accept", {"duel": 9, "expect": {"id": 1, "price": 130, "days": 0}}, "duels")
+        self.assertTrue(rails.verify_fresh(a, self.duel({"id": 3, "price": 126, "days": 0})).ok)    # cheaper
+        self.assertFalse(rails.verify_fresh(a, self.duel({"id": 3, "price": 131, "days": 0})).ok)   # worse
+        self.assertFalse(rails.verify_fresh(a, self.duel({"id": 3, "price": 150, "days": 0}, your_limit=150)).ok)
+
+    def test_days_weight_counts(self):
+        exp = {"id": 1, "price": 130, "days": 2}
+        a = Action("duel_accept", {"duel": 9, "expect": exp}, "duels")
+        base = dict(issues=["price", "days"], your_days_weight=2.0, days_meaning="value to you of each day")
+        # same price, more days: worth more to us (value reading) -> ok; fewer days -> worse
+        self.assertTrue(rails.verify_fresh(a, self.duel({"id": 4, "price": 130, "days": 5}, **base)).ok)
+        self.assertFalse(rails.verify_fresh(a, self.duel({"id": 4, "price": 130, "days": 0}, **base)).ok)
+        # ambiguous sign: judged under the worse reading, so more days is not obviously better
+        amb = {**base, "days_meaning": "days"}
+        self.assertFalse(rails.verify_fresh(a, self.duel({"id": 4, "price": 130, "days": 5}, **amb)).ok)

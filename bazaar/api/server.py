@@ -6,7 +6,7 @@ GET  /                (the supervisor dashboard for browsers; JSON health otherw
 GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -80,6 +80,11 @@ def apply_control(live: Path, body: dict) -> dict:
                                                          for v in body["caps"].values()):
             raise ValueError("caps must be an object of numbers")
         change["caps"] = body["caps"]
+    for key, options in (("duel_claude_mode", {"bounded", "full", "code"}), ("duel_days_sign", {"value", "cost", "auto"})):
+        if key in body:
+            if body[key] not in options:
+                raise ValueError(f"{key} must be one of {sorted(options)}")
+            change[key] = body[key]
     for key in ("protected", "paused_domains"):
         if key in body:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):

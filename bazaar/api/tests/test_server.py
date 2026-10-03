@@ -86,3 +86,13 @@ class ServerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuelSwitches(unittest.TestCase):
+    def test_duel_modes_are_accepted_and_validated(self):
+        from bazaar.api.server import apply_control
+        with tempfile.TemporaryDirectory() as d:
+            c = apply_control(Path(d), {"duel_claude_mode": "full", "duel_days_sign": "cost"})
+            self.assertEqual((c["duel_claude_mode"], c["duel_days_sign"]), ("full", "cost"))
+            with self.assertRaises(ValueError):
+                apply_control(Path(d), {"duel_claude_mode": "yolo"})

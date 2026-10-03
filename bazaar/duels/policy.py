@@ -19,6 +19,7 @@ PARAMS = {
     "STEP_PRIOR": 4.0,     # Friday steppers moved ~4 P per step
     "PROBE_UNTIL": 9,      # leave one rival offer unanswered for a tick while more ticks than this remain
     "LAST_TICKS": 2,       # in the last ticks take any offer inside our limit
+    "TOUGH_TAKE": 1.0,     # tough rival: take their offer when it is worth >= TOUGH_TAKE x q x the midpoint
 }
 
 
@@ -71,10 +72,20 @@ def rival_days_weight(v: DuelView, w: float) -> float:
     return sign * size
 
 
-def choose_days(v: DuelView) -> int | None:
+AMBIGUOUS_PAD_SHARE = 0.25   # sign unknown: give the rival its days only if the safety padding is < 25 % of pie
+
+
+def choose_days(v: DuelView, pie: float | None = None) -> int | None:
     if not v.uses_days:
         return None
     w = days_weight(v)
+    if v.days_ambiguous:
+        # We do not know if days help or hurt us, so every offer is priced safe under both readings: the
+        # padding is |w| x days. Give the rival its own last days only while that padding is small.
+        last = next((o.days for o in reversed(v.rival_offers()) if o.days is not None), None)
+        if last is not None and pie is not None and abs(w) * last < AMBIGUOUS_PAD_SHARE * pie:
+            return last
+        return 0
     wr = rival_days_weight(v, w)
     joint = w + wr
     if abs(joint) < 1e-9:
@@ -164,7 +175,8 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
     no decay because rounds only count when both sides have offered."""
     pie = max(2.0, float(opp.get("pie_estimate") or 2.0))
     w = days_weight(v)
-    d_off = choose_days(v)
+    d_off = choose_days(v, pie)
+    last_ticks = last_ticks_for(opp, p)
     days_bonus = (w * d_off) if (v.uses_days and d_off is not None and not v.days_ambiguous) else 0.0
     pie_u = pie + max(0.0, days_bonus)
     q = 1.0 - v.decay
@@ -187,7 +199,7 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
             why = f"rival gives {u_r:.0f}, our own ask {u_prev:.0f} is worth no more after a round"
         elif u_r >= p["ACCEPT_SHARE"] * pie_u:
             why = f"rival gives {u_r:.0f} >= {p['ACCEPT_SHARE']:.0%} of pie ~{pie_u:.0f}"
-        elif v.ticks_left <= p["LAST_TICKS"]:
+        elif v.ticks_left <= last_ticks:
             why = f"{v.ticks_left} ticks left: take {u_r:.0f}"
         elif u_r >= u_target:
             why = f"rival gives {u_r:.0f} >= this tick's target {u_target:.0f}"
@@ -198,8 +210,18 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
         u_r = None
 
     free = opp.get("free_steps_here", 0) > 0 or (opp.get("history") or {}).get("free_step_rate", 0) >= 0.5
+    if usable and u_prev is not None and opp.get("tough_now") and v.unanswered_rival_offer():
+        # Tough rival (< 2 P per offer after 3 offers) whose offer is inside our limit: haggling only buys
+        # decay. Take their offer when the midpoint is not worth a round, else jump to the midpoint.
+        u_mid = (u_prev + u_r) / 2.0
+        if u_r >= q * u_mid * p["TOUGH_TAKE"]:
+            return Move("accept", r.price, r.days, reason=f"tough rival (steps < 2 P): take {u_r:.0f} now",
+                        expected_points=round(points(u_r, v.decay, v.rounds), 2))
+        if u_mid < u_prev - 1:
+            price = price_for(v.role, v.limit, max(MIN_SURPLUS, u_mid - days_bonus))
+            return Move("offer", price, d_off, reason=f"tough rival (steps < 2 P): jump to the midpoint {u_mid:.0f}")
     if r is not None and u_prev is not None and v.unanswered_rival_offer():
-        if free and step and v.ticks_left > p["LAST_TICKS"] + 2:
+        if free and step and v.ticks_left > last_ticks + 2:
             return Move("wait", reason=f"rival concedes on its own (~{step:.1f}/tick): let them come for free")
         if not free and not _probed(v) and r.tick == v.tick and v.ticks_left > p["PROBE_UNTIL"]:
             return Move("wait", reason="probe: one tick of silence shows whether they move without us (free)")
@@ -218,6 +240,12 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
     price = price_for(v.role, v.limit, s_ask)
     return Move("offer", price, d_off,
                 reason=f"ask {v.utility(price, d_off):.0f} of pie ~{pie_u:.0f} ({share:.0%} schedule)")
+
+
+def last_ticks_for(opp: dict, p=PARAMS) -> int:
+    """Take-anything window: one accept per tick for the whole team, so with N duels waiting to accept the
+    last one only gets its turn N ticks later (opp["accept_queue"], set by the domain each tick)."""
+    return max(int(p["LAST_TICKS"]), min(6, int(opp.get("accept_queue") or 0)))
 
 
 # --- the guard -------------------------------------------------------------------------------------------
@@ -266,6 +294,8 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
             days = int(mv.days) if mv.days is not None else choose_days(v)
         except (TypeError, ValueError):
             days = choose_days(v)
+        if days is None:
+            days = 0
         days = max(0, min(DAYS_MAX, days))
     if v.days_ambiguous and days is not None and v.safe_utility(price, days) < MIN_SURPLUS:
         notes.append("days sign ambiguous: price raised so the offer is safe under both readings")
@@ -305,3 +335,74 @@ def _other_prices(text: str, price: int, days: int | None) -> bool:
         if int(m.group(1)) != price:
             return True
     return False
+
+
+# --- how much weight Claude's move gets (control duel_claude_mode) ------------------------------------------
+CLAUDE_MODES = ("bounded", "full", "code")
+BOUND_TOL_P = 2.0            # bounded: Claude may ask up to max(2 P, 10 % of the pie) less than code
+BOUND_TOL_SHARE = 0.10
+BOUND_ECON_PTS = 1.0         # bounded: Claude's wait/accept must agree with the economics table within 1 pt
+
+
+def claude_mode(ctx) -> str:
+    ctl = (getattr(ctx, "control", None) if ctx is not None else None) or {}
+    m = str(ctl.get("duel_claude_mode") or "bounded").lower() if isinstance(ctl, dict) else "bounded"
+    return m if m in CLAUDE_MODES else "bounded"
+
+
+def claude_full_weight(v: DuelView, opp: dict) -> bool:
+    """Where code has no better model than Claude: Duels II packages and rivals we cannot classify."""
+    return v.uses_days or (opp.get("type") or "unknown") == "unknown"
+
+
+def _code_ask_u(v: DuelView, base: Move) -> float | None:
+    if base.action == "offer" and base.price is not None:
+        return v.utility(base.price, base.days)
+    standing = v.our_offer or (v.our_offers()[-1] if v.our_offers() else None)
+    if standing is not None:
+        return v.utility(standing.price, standing.days)
+    if base.action == "accept" and v.rival_offer is not None:
+        return v.utility(v.rival_offer.price, v.rival_offer.days)
+    return None
+
+
+def bound_claude(v: DuelView, mv: Move, base: Move, opp: dict, econ: dict | None,
+                 mode: str = "bounded") -> tuple[Move, list[str]]:
+    """Claude proposes, code bounds (mode "bounded"): its price only down to code's ask minus
+    max(2 P, 10 % of the pie); its wait/accept only when the economics table agrees within 1 pt. Full weight
+    on Duels II, unknown archetypes and the text. "full" returns Claude's move as is (the guard runs after)."""
+    if mode != "bounded" or claude_full_weight(v, opp):
+        return mv, []
+    econ = econ or {}
+    acc = (econ.get("accept_now") or {}).get("points")
+    cont = (econ.get("their_next_offer_if_we_counter") or {}).get("points_est")
+    pie = float(opp.get("pie_estimate") or 0.0)
+    if mv.action == "offer":
+        ref = _code_ask_u(v, base)
+        try:
+            u = v.utility(float(mv.price), mv.days)
+        except (TypeError, ValueError):
+            return mv, []
+        if ref is None:
+            return mv, []
+        floor_u = ref - max(BOUND_TOL_P, BOUND_TOL_SHARE * pie)
+        if u < floor_u:
+            price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), floor_u))
+            note = f"bounded: claude asked {u:.0f}, code {ref:.0f}: raised to {floor_u:.0f} (price {price})"
+            return Move("offer", price, mv.days, text=mv.text, reason=f"{mv.reason} [{note}]", source=mv.source,
+                        econ=mv.econ, lesson_ids=list(mv.lesson_ids)), [note]
+        return mv, []
+    if mv.action == "accept":
+        if base.action == "accept" or acc is None or cont is None or acc >= cont - BOUND_ECON_PTS:
+            return mv, []
+        note = f"bounded: accept now {acc:.1f} pts < next offer ~{cont:.1f}: code's move"
+        return base, [note]
+    if mv.action == "wait":
+        if base.action == "accept":
+            if acc is not None and cont is not None and cont >= acc - BOUND_ECON_PTS:
+                return mv, []
+            note = f"bounded: claude waits but accepting now ({acc} pts) beats the next offer ({cont}): accept"
+            return base, [note]
+        if base.action == "offer" and v.ticks_left <= last_ticks_for(opp):
+            return base, [f"bounded: {v.ticks_left} ticks left, code's offer instead of waiting"]
+    return mv, []

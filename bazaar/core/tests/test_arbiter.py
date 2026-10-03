@@ -85,3 +85,34 @@ class AcceptScale(unittest.TestCase):
         urgent = Action("duel_accept", {"duel": 8, "expect": {}}, "duels", priority=152)
         self.assertEqual(select([calm, final], sit(), budget())[0][0].priority, 140)
         self.assertEqual(select([calm, final, urgent], sit(), budget())[0][0].priority, 152)
+
+
+class AcceptFallbackMessage(unittest.TestCase):
+    """An accept that loses the single slot is replaced by its fallback_message, not silence."""
+
+    def acc(self, duel, prio, price=100):
+        fm = {"duel": duel, "price": price, "text": f"Your terms work: {price} P."}
+        return Action("duel_accept", {"duel": duel, "expect": {"price": price}, "fallback_message": fm}, "duels",
+                      priority=prio)
+
+    def test_loser_sends_its_alternative(self):
+        a, b = self.acc(1, 160), self.acc(2, 120, price=90)
+        chosen, dropped = select([b, a], sit(), budget())
+        self.assertEqual([(x.kind, x.params["duel"]) for x in chosen], [("duel_accept", 1), ("duel_message", 2)])
+        alt = chosen[1]
+        self.assertEqual(alt.params["price"], 90)
+        self.assertEqual(alt.expected["alt_for"], b.id)
+        self.assertEqual(dropped[0][0], b)
+
+    def test_alternative_respects_one_message_per_conversation(self):
+        a, b = self.acc(1, 160), self.acc(2, 120)
+        chosen, _ = select([a, b], sit(), budget(messages={"duel:2": 1}))
+        self.assertEqual([x.kind for x in chosen], ["duel_accept"])
+        other = Action("duel_message", {"duel": 2, "price": 95}, "duels", priority=500)
+        chosen, dropped = select([a, b, other], sit(), budget())
+        self.assertEqual(sum(1 for x in chosen if x.params.get("duel") == 2), 1)
+
+    def test_no_alternative_when_accepts_are_exhausted_without_one(self):
+        x = Action("accept_offer", {"offer": 1, "expect": {}}, "market", priority=2)
+        chosen, _ = select([self.acc(1, 160), x], sit(), budget())
+        self.assertEqual([c.kind for c in chosen], ["duel_accept"])

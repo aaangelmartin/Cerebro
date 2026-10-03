@@ -124,6 +124,11 @@ class DuelView:
     rival_offer: Offer | None
     messages: list[Msg] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
+    # Whole-duel counts of priced offers (the server returns only the last 6 messages): filled from
+    # OpponentMemory, which accumulates every message it ever saw. None = use the message window.
+    n_ours_total: int | None = None
+    n_rival_total: int | None = None
+    days_sign_override: str | None = None    # operator control duel_days_sign: "value" | "cost"
 
     # --- derived -------------------------------------------------------------------------------
     @property
@@ -163,18 +168,24 @@ class DuelView:
     def surplus(self, price: float) -> float:
         return surplus(self.role, self.limit, price)
 
+    def _days_reading(self) -> tuple[float, bool, str]:
+        if self.days_sign_override in ("value", "cost"):
+            sw = self.w if self.days_sign_override == "value" else -abs(self.w)
+            return sw, False, f"operator override {self.days_sign_override}: {sw:+g}/day for us"
+        return days_interpretation(self.w, self.days_meaning)
+
     @property
     def days_w(self) -> float:
         """Signed value to us of one delivery day (see days_interpretation); 0 in price-only duels."""
-        return days_interpretation(self.w, self.days_meaning)[0] if self.uses_days else 0.0
+        return self._days_reading()[0] if self.uses_days else 0.0
 
     @property
     def days_ambiguous(self) -> bool:
-        return self.uses_days and self.w != 0 and days_interpretation(self.w, self.days_meaning)[1]
+        return self.uses_days and self.w != 0 and self._days_reading()[1]
 
     @property
     def days_label(self) -> str:
-        return days_interpretation(self.w, self.days_meaning)[2] if self.uses_days else "price only"
+        return self._days_reading()[2] if self.uses_days else "price only"
 
     def utility(self, price: float, days: int | None) -> float:
         """Our margin in points before decay: price surplus plus the value of the delivery days."""
@@ -191,9 +202,17 @@ class DuelView:
             u = min(u, self.surplus(price) - self.days_w * days)
         return u
 
+    def offer_counts(self) -> tuple[int, int]:
+        """(our priced offers, theirs) over the WHOLE duel: the memory's accumulated history when known,
+        never fewer than the window shows nor than the server's rounds imply (rounds = min of both)."""
+        n_our = max(len(self.our_msgs()), self.n_ours_total or 0, self.rounds)
+        n_riv = max(len(self.rival_msgs()), self.n_rival_total or 0, self.rounds)
+        return n_our, n_riv
+
     def rounds_if_we_send(self) -> int:
-        """Rounds after a new priced message from us (no change while they owe us an answer)."""
-        n_our, n_riv = len(self.our_msgs()), len(self.rival_msgs())
+        """Rounds after a new priced message from us (no change while they owe us an answer). The base is
+        the server's `rounds`; the counts come from the whole history, not the 6-message window."""
+        n_our, n_riv = self.offer_counts()
         return self.rounds + (1 if n_our < n_riv else 0)
 
     def unanswered_rival_offer(self) -> bool:

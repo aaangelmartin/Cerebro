@@ -22,6 +22,7 @@ from statistics import mean
 from .model import DuelView, surplus
 
 PIE_PRIOR_FRAC = 0.35       # Friday: final margins 20-37 P on limits of ~90-150 P
+TOUGH_STEP = 2.0            # a rival moving less than this per offer (after 3 offers) is tough
 REMAINING_Q = 0.65          # a stepper's next steps shrink geometrically by this factor
 
 
@@ -75,6 +76,7 @@ class OpponentMemory:
             rec["free_steps"] = max(int(rec.get("free_steps", 0)), free)
             if not v.messages and v.rival_offer and not rec["offers"]:
                 rec["offers"].append([v.rival_offer.tick, v.rival_offer.price, v.rival_offer.days])
+            v.n_ours_total, v.n_rival_total = len(rec["ours"]), len(rec["offers"])
             item = self.data["items"].setdefault(v.item, {"seller": {}, "buyer": {}})
             item[v.role][str(v.id)] = {"limit": v.limit, "session": v.session, "rival": v.rival}
             self.data["updated"] = time.time()
@@ -176,12 +178,14 @@ class OpponentMemory:
             "silent_accepts": len(silent_acc),
         }
 
-    def leg_candidates(self, v: DuelView) -> list[int]:
-        """Rival limits suggested by the other leg of the same item (our limit there, other role)."""
+    def leg_candidates(self, v: DuelView, same_alias: bool | None = None) -> list[int]:
+        """Rival limits suggested by the other leg of the same item (our limit there, other role).
+        same_alias=True keeps only legs played against this same rival alias, False only the others."""
         with self._lock:
             item = self.data["items"].get(v.item) or {}
             rows = (item.get(other(v.role)) or {})
-            cands = sorted({r["limit"] for k, r in rows.items() if int(k) != v.id})
+            cands = sorted({r["limit"] for k, r in rows.items() if int(k) != v.id
+                            and (same_alias is None or (r.get("rival") == v.rival) == same_alias)})
         # Keep only those that leave a positive pie and that the rival's own offers do not contradict
         # (a seller never offers below cost, a buyer never above value).
         offers = [o.price for o in v.rival_offers()]
@@ -219,7 +223,11 @@ class OpponentMemory:
         cands = self.leg_candidates(v)
         # Only a single consistent candidate counts as known: on Friday one item had several scenarios
         # (Taxi Blanco: seller limits 100 and 61), so several candidates are only a hint for Claude.
-        known_limit = cands[0] if len(cands) == 1 else None
+        # And only a leg against the SAME alias is the mirror of this duel; a leg of the same item against
+        # another team may be another scenario, so it can at most raise the offer-based pie by 50 %.
+        same = self.leg_candidates(v, same_alias=True)
+        known_limit = same[0] if len(same) == 1 else None
+        weak_limit = cands[0] if (known_limit is None and len(cands) == 1) else None
 
         prior = PIE_PRIOR_FRAC * v.limit
         step = here.get("avg_step") or hist.get("avg_step")
@@ -243,6 +251,11 @@ class OpponentMemory:
             pie = (n * pie + prior) / (n + 1) if pie < prior else pie
             pie = max(pie, s_best + 1)
             source = "offers"
+        if weak_limit is not None:
+            leg_pie = surplus(v.role, v.limit, weak_limit)
+            pie, source = min(leg_pie, 1.5 * pie), "other_leg_other_alias(capped)"
+            if s_best is not None:
+                pie = max(pie, s_best + 1)
         next_s = None
         if s_offers:
             if typ == "fixed":
@@ -257,4 +270,8 @@ class OpponentMemory:
             "pie_estimate": round(max(1.0, pie), 1), "pie_source": source,
             "next_rival_surplus_estimate": None if next_s is None else round(next_s, 1),
             "rival_days": [o.days for o in offers if o.days is not None][-6:],
+            "n_offers_total": here["n_offers"],
+            "avg_step_total": round(mean(here["steps"]), 2) if here["steps"] else None,
+            # Tough: after 3+ offers (whole duel, from memory) they move < 2 P per offer on average.
+            "tough_now": here["n_offers"] >= 3 and bool(here["steps"]) and mean(here["steps"]) < TOUGH_STEP,
         }

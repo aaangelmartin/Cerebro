@@ -210,8 +210,12 @@ def make_scenario(rng: random.Random, days: bool = False) -> Scenario:
     return sc
 
 
+MSG_WINDOW = 6               # the server returns only the last 6 messages of a duel
+
+
 def run_duel(domain, sc: Scenario, rival: Rival, duel_id: int, alias: str, start_tick: int = 1000,
-             use_llm: bool = False, ctx_factory=None, injected_text: str | None = None) -> DuelResult:
+             use_llm: bool = False, ctx_factory=None, injected_text: str | None = None,
+             window: int | None = MSG_WINDOW) -> DuelResult:
     """Play one duel to the end. `domain` is a DuelsDomain (fallback() or decide())."""
     T = TICKS_PER_DUEL
     deadline = start_tick + T
@@ -249,7 +253,7 @@ def run_duel(domain, sc: Scenario, rival: Rival, duel_id: int, alias: str, start
                            "days": ours[-1][1] if ours[-1][1] is not None else 0} if ours else None,
             "rival_offer": {"id": 10_000 + len(theirs), "price": theirs[-1][0], "tick": start_tick + theirs[-1][2],
                             "days": theirs[-1][1] if theirs[-1][1] is not None else 0} if theirs else None,
-            "messages": list(msgs), "result": None, "price": None, "days": None,
+            "messages": list(msgs[-window:] if window else msgs), "result": None, "price": None, "days": None,
         }
         if not sc.uses_days:
             for key in ("your_offer", "rival_offer"):

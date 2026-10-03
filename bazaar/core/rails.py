@@ -464,6 +464,24 @@ def _norm_side(d: dict | None) -> tuple:
     return s["cash"], tuple(sorted(str(a) for a in s["assets"])), tuple(sorted(str(t) for t in s["types"]))
 
 
+def _fresh_duel_offer_at_least_as_good(fresh: dict, exp: dict, rival: dict) -> Verdict:
+    """A changed rival offer is still OK when its utility for us (duels.model.safe_utility: our role, limit
+    and signed days weight, worse sign reading when ambiguous) is >= the evaluated one and >= MIN_SURPLUS."""
+    from ..duels.model import MIN_SURPLUS as DUEL_MIN, parse_duel, parse_offer
+    v = parse_duel({**fresh, "status": "live", "result": None}, 0)
+    new, old = parse_offer(rival), parse_offer(exp)
+    if v is None or new is None or old is None:
+        return Verdict(False, "fresh", "cannot value the changed offer")
+    if v.uses_days and (new.days is None or old.days is None):
+        return Verdict(False, "fresh", "changed offer without days")
+    u_new, u_old = v.safe_utility(new.price, new.days), v.safe_utility(old.price, old.days)
+    if v.surplus(new.price) < max(DUEL_MIN, MIN_SURPLUS):
+        return Verdict(False, "fresh", f"changed price {new.price} is outside our limit")
+    if u_new >= u_old and u_new >= DUEL_MIN:
+        return Verdict(True, "fresh", f"rival offer changed but worth {u_new:g} >= evaluated {u_old:g}")
+    return Verdict(False, "fresh", f"worth {u_new:g} < evaluated {u_old:g}")
+
+
 def verify_fresh(action: Action, fresh: dict | None) -> Verdict:
     """The offer (or duel) read just before accepting must be exactly what we evaluated."""
     exp = (action.params or {}).get("expect") or {}
@@ -490,6 +508,11 @@ def verify_fresh(action: Action, fresh: dict | None) -> Verdict:
             return Verdict(False, "fresh", "no rival offer")
         for k in ("id", "price", "days"):
             if k in exp and exp[k] is not None and str(exp[k]) != str(rival.get(k)):
-                return Verdict(False, "fresh", f"rival offer {k} changed: {exp[k]} -> {rival.get(k)}")
+                # The endpoint accepts whatever offer stands now: take it if it is worth at least as much.
+                better = _fresh_duel_offer_at_least_as_good(fresh, exp, rival)
+                if better.ok:
+                    return better
+                return Verdict(False, "fresh", f"rival offer {k} changed: {exp[k]} -> {rival.get(k)}"
+                                               f" ({better.detail})")
         return OK                                                # the rival's offer stands after our counters
     return Verdict(False, "fresh", f"{action.kind} is not an accept")

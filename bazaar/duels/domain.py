@@ -18,9 +18,9 @@ from typing import Any
 from ..core.context import conv_key
 from ..core.types import Action, Outcome
 from ..lab import feedback
-from .model import DuelView, parse_duel, points
+from .model import MIN_SURPLUS, DuelView, parse_duel, points
 from .opponent import OpponentMemory
-from .policy import Move, economics, guard, plan
+from .policy import Move, bound_claude, claude_mode, economics, guard, plan
 from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
 log = logging.getLogger("bazaar.duels")
@@ -37,12 +37,22 @@ URGENT_SPAN = 49.0
 URGENT_TICKS = 2
 
 
-def accept_priority(pts: float, ticks_left: int) -> float:
+def urgent_ticks(n_accepting: int = 1) -> int:
+    """One accept per tick for the team: with N duels wanting to accept, the last waits N ticks."""
+    return max(URGENT_TICKS, int(n_accepting or 0))
+
+
+def accept_priority(pts: float, ticks_left: int, n_accepting: int = 1) -> float:
     pts = max(0.0, float(pts))
-    if ticks_left <= URGENT_TICKS:
-        return round(URGENT_PRIORITY + min(pts, URGENT_SPAN), 2)
+    if ticks_left <= urgent_ticks(n_accepting):
+        # The duel closest to its deadline goes first among the urgent ones (still within 150-199).
+        return round(URGENT_PRIORITY + min(pts, URGENT_SPAN - 10) + max(0, 10 - ticks_left), 2)
     return round(ACCEPT_PRIORITY + min(pts, ACCEPT_SPAN), 2)
+
+
 SAFETY_S = 0.25              # stop waiting for Claude this long before the tick deadline
+SHORT_TICK_S = 20.0          # Sunday's 15 s ticks: race Opus against Sonnet
+SONNET_ONLY_S = 5.0          # less time than this left: Sonnet alone
 
 
 def _lazy_llm():
@@ -77,11 +87,15 @@ class DuelsDomain:
     def _views(self, sit, ctx) -> list[DuelView]:
         tick = int(getattr(sit, "tick", 0) or 0)
         used = (getattr(ctx, "budget", None) or {}).get("messages", {}) if ctx is not None else {}
+        ctl = getattr(ctx, "control", None) if ctx is not None else None
         out = []
         for d in getattr(sit, "duels", None) or []:
             v = parse_duel(d, tick)
             if v is None or v.ticks_left <= 0:
                 continue
+            ds = ctl.get("duel_days_sign") if isinstance(ctl, dict) else None
+            if ds in ("value", "cost"):
+                v.days_sign_override = ds
             if self.memory.note_days_reading(v):
                 log.info("duels II session %s: days sign reading = %s", v.session, v.days_label)
             if v.sent_this_tick() or used.get(conv_key(Action(kind="duel_message", params={"duel": v.id}, domain=self.name))):
@@ -89,15 +103,29 @@ class DuelsDomain:
             out.append(v)
         return out
 
-    def _action(self, v: DuelView, mv: Move, opp: dict) -> Action | None:
+    @staticmethod
+    def _fallback_message(v: DuelView) -> dict:
+        """What to send instead if the arbiter gives the team's single accept to another action: an offer
+        of exactly the rival's standing price/days (they can take it; the core arbiter substitutes it)."""
+        r = v.rival_offer
+        d = f" with delivery in {r.days} days" if v.uses_days and r.days is not None else ""
+        fm = {"duel": v.id, "price": int(r.price),
+              "text": f"Your terms work for me: {r.price} P{d}. Take it and we close now."}
+        if v.uses_days:
+            fm["days"] = int(r.days if r.days is not None else 0)
+        return fm
+
+    def _action(self, v: DuelView, mv: Move, opp: dict, n_accepting: int = 1) -> Action | None:
         if mv.action == "wait":
             return None
         if mv.action == "accept":
             r = v.rival_offer
             margin = v.safe_utility(r.price, r.days)
             pts = points(margin, v.decay, v.rounds)
-            return Action(kind="duel_accept", params={"duel": v.id, "expect": self._expect(v)}, domain=self.name,
-                          reason=mv.reason, big=True, priority=accept_priority(pts, v.ticks_left), source=mv.source,
+            params = {"duel": v.id, "expect": self._expect(v), "fallback_message": self._fallback_message(v)}
+            return Action(kind="duel_accept", params=params, domain=self.name,
+                          reason=mv.reason, big=True, priority=accept_priority(pts, v.ticks_left, n_accepting),
+                          source=mv.source,
                           lesson_ids=list(mv.lesson_ids),
                           expected={"points": round(pts, 2), "margin": round(margin, 1), "rounds": v.rounds,
                                     "price": r.price, "days": r.days, "rival_type": opp.get("type"),
@@ -118,28 +146,39 @@ class DuelsDomain:
         raw = v.raw.get("rival_offer")
         return dict(raw) if isinstance(raw, dict) else v.rival_offer.as_expect()
 
-    def _base(self, v: DuelView) -> tuple[dict, Move]:
+    @staticmethod
+    def _accept_queue(views: list[DuelView]) -> int:
+        """Duels with a rival offer we could take right now (they compete for one accept per tick)."""
+        n = 0
+        for v in views:
+            r = v.rival_offer
+            if r is not None and v.surplus(r.price) >= MIN_SURPLUS and (not v.uses_days or r.days is not None) \
+                    and v.safe_utility(r.price, r.days) >= MIN_SURPLUS:
+                n += 1
+        return n
+
+    def _base(self, v: DuelView, queue: int = 0) -> tuple[dict, Move]:
         opp = self.memory.assess(v)
+        opp["accept_queue"] = queue
         mv = plan(v, opp)
         mv, notes = guard(v, mv)
         mv.source = "fallback"
         self.last_notes[v.id] = notes
         return opp, mv
 
-    def _finish(self, actions: list[Action]) -> list[Action]:
+    def _finish(self, views: list[DuelView], moves: dict, bases: dict) -> list[Action]:
+        n_acc = sum(1 for mv in moves.values() if mv.action == "accept")
+        actions = [a for v in views if (a := self._action(v, moves[v.id], bases[v.id][0], n_acc))]
         self.memory.save()
         return actions
 
     # --- Domain protocol -----------------------------------------------------------------------------
     def fallback(self, sit, ctx) -> list[Action]:
         self._ledger = getattr(ctx, "ledger", None) or self._ledger
-        actions = []
-        for v in self._views(sit, ctx):
-            opp, mv = self._base(v)
-            a = self._action(v, mv, opp)
-            if a:
-                actions.append(a)
-        return self._finish(actions)
+        views = self._views(sit, ctx)
+        q = self._accept_queue(views)
+        bases = {v.id: self._base(v, q) for v in views}
+        return self._finish(views, {k: b[1] for k, b in bases.items()}, bases)
 
     def _needs_llm(self, v: DuelView) -> bool:
         key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
@@ -153,10 +192,22 @@ class DuelsDomain:
     def _ask(self, llm, v: DuelView, opp: dict, base: Move, ctx) -> Move | None:
         econ = economics(v, opp, (base.price, base.days) if base.action == "offer" else None)
         deadline = getattr(ctx, "deadline", None)
-        res = llm.ask(purpose="duels", system=system_blocks(ctx),
-                      messages=[{"role": "user", "content": user_message(v, opp, econ, base)}],
-                      tools=[DUEL_MOVE_TOOL], tool_choice={"type": "auto"}, model=self.model,
-                      max_tokens=2000, deadline=(deadline - SAFETY_S) if deadline else None)
+        kw = dict(purpose="duels", system=system_blocks(ctx),
+                  messages=[{"role": "user", "content": user_message(v, opp, econ, base)}],
+                  tools=[DUEL_MOVE_TOOL], tool_choice={"type": "auto"},
+                  max_tokens=2000, deadline=(deadline - SAFETY_S) if deadline else None)
+        tick_s = getattr(ctx, "tick_seconds", None) if ctx is not None else None
+        if isinstance(tick_s, (int, float)) and 0 < tick_s <= SHORT_TICK_S:
+            from .. import config
+            left = (deadline - SAFETY_S - time.time()) if deadline else None
+            if left is not None and left < SONNET_ONLY_S:
+                res = llm.ask(model=config.SONNET, **kw)
+            elif hasattr(llm, "race"):
+                res = llm.race(models=[config.OPUS, config.SONNET], **kw)
+            else:
+                res = llm.ask(model=self.model, **kw)
+        else:
+            res = llm.ask(model=self.model, **kw)
         self.cost_usd += float(getattr(res, "cost_usd", 0.0) or 0.0)
         mv = parse_tool(res)
         if mv is not None:
@@ -166,19 +217,24 @@ class DuelsDomain:
     def decide(self, sit, ctx) -> list[Action]:
         self._ledger = getattr(ctx, "ledger", None) or self._ledger
         views = self._views(sit, ctx)
-        bases = {v.id: self._base(v) for v in views}
+        q = self._accept_queue(views)
+        bases = {v.id: self._base(v, q) for v in views}
         llm = self._llm or (getattr(ctx, "llm", None) if ctx is not None else None) or _lazy_llm()
-        if not self.use_llm or llm is None or (ctx is not None and getattr(ctx, "llm_ok", True) is False):
-            return self._finish([a for v in views if (a := self._action(v, bases[v.id][1], bases[v.id][0]))])
+        mode = claude_mode(ctx)
+        if not self.use_llm or llm is None or mode == "code" or \
+                (ctx is not None and getattr(ctx, "llm_ok", True) is False):
+            return self._finish(views, {k: b[1] for k, b in bases.items()}, bases)
 
         futures: dict[cf.Future, DuelView] = {}
+        asked: dict[int, tuple] = {}
         for v in views:
             if not self._needs_llm(v):
                 continue
             if self.max_calls is not None and self.calls >= self.max_calls:
                 break
             self.calls += 1
-            self._last_ask[v.id] = (v.tick, len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
+            # _last_ask is stamped only when the call succeeds: a timed-out call is retried next tick.
+            asked[v.id] = (v.tick, len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
             opp, base = bases[v.id]
             futures[self._pool.submit(self._ask, llm, v, opp, base, ctx)] = v
         deadline = getattr(ctx, "deadline", None) if ctx is not None else None
@@ -195,14 +251,19 @@ class DuelsDomain:
                 continue
             if mv is not None:
                 claude[v.id] = mv
+                self._last_ask[v.id] = asked[v.id]
 
-        actions = []
+        moves: dict[int, Move] = {}
         for v in views:
             opp, base = bases[v.id]
             mv = claude.get(v.id)
             if mv is not None:
                 mv.lesson_ids = feedback.cited(ctx, mv.lesson_ids)
+                mv, bnotes = bound_claude(v, mv, base, opp, mv.econ, mode)
+                if bnotes:
+                    log.info("duel %s: %s", v.id, bnotes)
                 safe, notes = guard(v, mv, fallback=base)
+                notes = bnotes + notes
                 if safe is not base and safe.source == mv.source and not safe.lesson_ids:
                     safe.lesson_ids = list(mv.lesson_ids)
                 if notes:
@@ -211,10 +272,8 @@ class DuelsDomain:
                 mv = safe
             else:
                 mv = base
-            a = self._action(v, mv, opp)
-            if a:
-                actions.append(a)
-        return self._finish(actions)
+            moves[v.id] = mv
+        return self._finish(views, moves, bases)
 
     def observe(self, outcome: Outcome) -> None:
         resp = outcome.response or {}

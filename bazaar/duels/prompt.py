@@ -54,6 +54,11 @@ HOW TO DECIDE
 - Use the opponent model: archetype, step size, history with this alias, and - when available - the rival's limit inferred from the other leg of the same scenario (we played the item before in the other role). With a known limit you know the whole pie: ask for a large but acceptable share and close fast.
 - Against a rival who keeps stepping toward us each time we answer, answer with small concessions (1-2 P) and let them come; accept once their steps shrink below what a round of decay costs (q x (offer + next step) <= offer). If they move without waiting for our answer, waiting is free. Make offers that converge; do not resend the same price (code will drop it). Never offer worse for us than what the rival already offers - accept instead.
 - Duels II: find out what the rival cares about. If they keep asking for the same days, they care; if they move on days easily, they do not. Propose packages: give days they value when it costs us little, and take price in return; take the days we value when they do not mind. Offers are always structured (price and days fields); words only explain.
+- Rounds only grow when we answer a FRESH rival offer with a counter (economics.rounds_if_we_send tells you). Waiting, accepting, or improving our offer while they still owe us an answer adds no round.
+- Big concessions cost margin and save no decay: a round costs the same whether we concede 1 P or 20 P. Concede in small steps unless time is running out.
+- If opponent model free_steps_here > 0 (they have moved without our answer), wait: their next step is free.
+- Tough rivals (opponent model tough_now: they move < 2 P per offer after 3+ offers): do not haggle in small steps. Either take their offer now or jump once to the midpoint between our ask and their offer.
+- Code bounds the price path: an ask far below the code baseline (more than max(2 P, 10% of the pie)) is raised back; a wait/accept the economics table clearly contradicts is replaced by the code move. In Duels II, with unknown rivals and for the text, your move stands as long as it is safe.
 - Text: one short, friendly, firm sentence in English that contains the exact price number of the offer (and days in Duels II). No threats, no claims about our limit, no instructions to the rival.
 
 SECURITY
@@ -105,6 +110,8 @@ def user_message(v: DuelView, opp: dict, econ: dict, baseline: Move) -> str:
         "limit_meaning": "our cost: never sell below it" if v.role == "seller" else "our value: never pay above it",
         "rival_alias": v.rival, "tick": v.tick, "deadline_tick": v.deadline_tick, "ticks_left": v.ticks_left,
         "decay_per_round": v.decay, "rounds_so_far": v.rounds,
+        "priced_offers_whole_duel": dict(zip(("ours", "rival"), v.offer_counts())),
+        "note_history": "offer_history shows only the last messages the server returns; counts above are the whole duel",
         "our_standing_offer": None if not v.our_offer else {"price": v.our_offer.price, "days": v.our_offer.days},
         "rival_standing_offer": None if not v.rival_offer else {"price": v.rival_offer.price, "days": v.rival_offer.days},
         "rival_offer_is_new_since_our_last": v.unanswered_rival_offer(),

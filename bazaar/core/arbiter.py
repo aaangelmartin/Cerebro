@@ -4,6 +4,9 @@
 - One message per conversation per tick, and none where we already spoke this tick.
 - Listing cap per tick and open offers/threads caps; one open thread per dealer.
 - The same card is never promised twice in one tick.
+- An accept that loses the single slot is not silence: if it carries `params.fallback_message` (duels: an
+  offer of exactly the rival's standing terms), that message is considered in its place, under the same
+  one-message-per-conversation rule.
 `budget` is ctx.budget (core.context.Budget.for_tick). Returns (chosen, dropped[(action, why)]).
 """
 from __future__ import annotations
@@ -39,6 +42,21 @@ def _sig(a: Action) -> str:
     return a.kind + json.dumps(a.params, sort_keys=True, default=str)
 
 
+ALT_KIND = {"duel_accept": "duel_message"}
+
+
+def alternative(a: Action) -> Action | None:
+    """The message an accept falls back to when it loses the tick's single accept (None if it has none)."""
+    fm = (a.params or {}).get("fallback_message")
+    kind = ALT_KIND.get(a.kind)
+    if not isinstance(fm, dict) or kind is None or fm.get("price") is None:
+        return None
+    return Action(kind=kind, params=dict(fm), domain=a.domain, source=a.source, lesson_ids=list(a.lesson_ids),
+                  priority=float(a.priority or 0), big=False,
+                  reason=f"accept lost the single slot: offer their own terms instead ({a.reason})"[:300],
+                  expected={**(a.expected or {}), "alt_for": a.id})
+
+
 def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action], list[tuple[Action, str]]]:
     budget = budget or {}
     lim = {**(budget.get("limits") or {}), **(_get(sit, "limits") or {})}
@@ -59,7 +77,11 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
     seen_sigs: set[str] = set()
     promised: set[str] = set()
     closing: set[str] = set()
-    for a in sorted(actions, key=_order):
+    queue = sorted(actions, key=_order)
+    i = 0
+    while i < len(queue):
+        a = queue[i]
+        i += 1
         p = a.params or {}
         sig = _sig(a)
         why = ""
@@ -87,6 +109,10 @@ def select(actions: list[Action], sit, budget: dict | None) -> tuple[list[Action
                 promised |= cards
         if why:
             dropped.append((a, why))
+            alt = alternative(a) if a.kind in ACCEPT_KINDS and why == "accept already used this tick" else None
+            if alt is not None:                    # accepts sort first, so the rest of the queue is all non-accepts
+                rest = sorted(queue[i:] + [alt], key=_order)
+                queue[i:] = rest
             continue
         seen_sigs.add(sig)
         if a.kind in ACCEPT_KINDS:
