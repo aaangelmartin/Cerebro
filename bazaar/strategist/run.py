@@ -939,9 +939,12 @@ class Strategist:
             from bazaar.market import bargain
             for r in bargain.recent(self.live, since=self.bargain_seen_ts):
                 self.bargain_seen_ts = max(self.bargain_seen_ts, float(r.get("ts") or 0))
-                new.append(_e("bargain", bargain.event_text(r), {k: r.get(k) for k in
-                                                                 ("offer", "refs", "seller", "price", "cost", "value",
-                                                                  "gain", "cash", "gap", "status", "counter")}))
+                # a bargain we cannot fund in time is a note to watch, not an alarm that wakes a plan
+                kind = "bargain_watch" if r.get("status") == "short" and r.get("feasible") is False else "bargain"
+                new.append(_e(kind, bargain.event_text(r), {k: r.get(k) for k in
+                                                            ("offer", "refs", "seller", "price", "cost", "value",
+                                                             "gain", "cash", "gap", "status", "counter", "page_bonus",
+                                                             "liquid", "ticks_left", "feasible")}))
         except Exception:  # noqa: BLE001
             pass
         try:                                        # what other teams' agents wrote to us (bazaar.teamtalk)

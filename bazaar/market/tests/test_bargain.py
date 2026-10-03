@@ -71,6 +71,46 @@ class BargainCase(unittest.TestCase):
         self.assertEqual((row["status"], row["price"]), ("short", 125))
         self.assertEqual(row["gap"], row["cost"] - 99)
 
+    def test_bargain_we_cannot_fund_is_a_watch_note_not_an_alarm(self):
+        """Outbox request code-3fd35e4c: no spares to sell, so the alert must not wake a plan."""
+        self.run_tick(cash=104, control={"cash_reserve": 5})
+        row = bargain.recent(since=0)[-1]
+        self.assertIs(row["feasible"], False)
+        self.assertEqual(row["liquid"], 0)
+        text = bargain.event_text(row)
+        self.assertIn("Watch only", text)
+        self.assertNotIn("FUND IT NOW", text)
+
+    def test_feasible_needs_spares_and_time(self):
+        self.assertTrue(bargain.feasible(40, 60, None))
+        self.assertTrue(bargain.feasible(40, 60, 5))
+        self.assertFalse(bargain.feasible(40, 60, 3))              # expires before we can sell anything
+        self.assertFalse(bargain.feasible(112, 60, 30))            # the spares do not cover the shortfall
+
+    def test_gain_does_not_add_the_page_bonus_to_an_exact_value(self):
+        """MAL-09 on Saturday: exact value 177.1 (91 + 86.1 of page bonus) at 148 all-in is +29.1, not +115.2."""
+        from bazaar.dealers.values import Values
+        d = dom()
+        o = lav11(price=80)
+
+        def gain(exact):
+            v = Values(sit().me, d.catalog(None), {})
+            if exact:
+                v.remember_exact("LAV-11", {"your_value": 200.0})
+            with mock.patch("bazaar.market.domain.page_delta", return_value=50.0):
+                c = d._evaluate(o, RASTRO, v, {}, lambda a, left: True)
+            return c.gain, c.value_in, c.fee
+
+        g, value, fee = gain(exact=True)
+        self.assertEqual((value, g), (200.0, round(200.0 - 80 - fee, 2)))
+        g, value, fee = gain(exact=False)                              # an estimate has no bonus inside: add it
+        self.assertEqual(g, round(value - 80 - fee + 50.0, 2))
+
+    def test_exact_value_that_holds_the_page_bonus_is_not_counted_twice(self):
+        row = {"refs": ["MAL-09"], "seller": "t13", "venue": "rastro", "offer": 13680, "price": 140, "cost": 148,
+               "value": 177.1, "gain": 29.1, "page_bonus": 86.1, "status": "accepting"}
+        self.assertIn("page bonus of 86.1 P included", bargain.event_text(row))
+
     def test_listing_disappears_when_the_card_is_sold(self):
         f = bargain.FeedOffers()
         f.ingest([listed(lav11())], 10)

@@ -27,6 +27,7 @@ COUNTER_MAX_FRAC = 0.6          # a counter-offer never gives more than this sha
 COUNTER_EXPIRES = 20            # ticks
 COUNTER_MAX_CARDS = 3
 FUNDING_TTL_TICKS = 15          # the funding goal ends this long after the offer was last seen
+FEASIBLE_MIN_TICKS = 5         # an offer that expires sooner cannot be funded in time: watch it, no alarm
 FILE = "bargains.jsonl"
 GOAL_FILE = "bargain_goal.json"
 
@@ -90,6 +91,12 @@ def counter_give(cash_room: int, ask_price: int, value_in: float, pool: list[tup
             "covers": cash + book >= ask_price}
 
 
+def feasible(gap: float, liquid: float, ticks_left: int | None) -> bool:
+    """Can a bargain we cannot pay yet still be funded? The cash missing must fit in what our sellable spares
+    are worth on the market, and the offer must stay open long enough to sell them."""
+    return float(gap) <= float(liquid) and (ticks_left is None or int(ticks_left) >= FEASIBLE_MIN_TICKS)
+
+
 # --------------------------------------------------------------------------- the brain's side
 def log(row: dict, live: Path | None = None) -> None:
     """Append a bargain row (the brain reads them as events). One row per offer and status."""
@@ -121,9 +128,18 @@ def recent(live: Path | None = None, since: float = 0.0, limit: int = 50) -> lis
 
 def event_text(r: dict) -> str:
     refs = ", ".join(r.get("refs") or [])
+    worth = f"worth {r.get('value')} P to us"
+    if r.get("page_bonus"):
+        worth += f" (page bonus of {r.get('page_bonus')} P included)"
     base = (f"BARGAIN {refs} from {r.get('seller') or '?'} on {r.get('venue')}: offer #{r.get('offer')} asks "
-            f"{r.get('price')} P ({r.get('cost')} with the fee), worth {r.get('value')} P to us, gain +{r.get('gain')} P")
+            f"{r.get('price')} P ({r.get('cost')} with the fee), {worth}, gain +{r.get('gain')} P")
     st = r.get("status")
+    if st == "short" and r.get("feasible") is False:
+        left = r.get("ticks_left")
+        return ("Watch only, not fundable: " + base[len("BARGAIN "):]
+                + f". Short by {r.get('gap')} P; our sellable spares raise about {r.get('liquid')} P"
+                + (f" and the offer expires in {left} ticks" if left is not None else "")
+                + ". Do not re-plan around it; compare its cost with what a dealer asks for the card.")
     if st == "accepting":
         return base + ". The bot is accepting it this tick (fast path)."
     if st == "short":

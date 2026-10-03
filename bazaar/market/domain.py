@@ -1003,6 +1003,10 @@ class MarketDomain:
         page = page_delta(values, counts, in_refs, out_refs)
         fee = fee_for(venue, max(cash_in, cash_out), len(in_refs) + len(out_refs))
         gain = value_in + cash_in - cash_out - fee - loss + page
+        if any(values.is_exact(r) for r in in_refs):
+            # the game's exact value of a card that completes a page already holds the page bonus (MAL-09: 91 +
+            # 86.1 = 177.1): do not count that bonus a second time
+            gain -= max(0.0, page_delta(values, counts, in_refs, []))
         cost = cash_out + fee + loss - min(0.0, page)
         return AcceptCand(id="", offer=o, venue=str(o.get("venue") or venue_id(venue) or "rastro"),
                           team=self.rivals.team_of(o), in_refs=in_refs, in_assets=in_assets, out_ids=out_ids,
@@ -1149,15 +1153,16 @@ class MarketDomain:
 
     # ------------------------------------------------------------------ bargains we cannot pay yet
     def _log_bargain(self, c: AcceptCand, status: str, cash: int, gap: int, tick: int, counter: Any = None,
-                     can_spend: int | None = None) -> None:
+                     can_spend: int | None = None, **more) -> None:
         oid = c.offer.get("id")
         if self._bargain_logged.get(oid) == status:
             return
         self._bargain_logged[oid] = status
+        more = {"page_bonus": c.page if c.page > 0 else 0, **more}
         bargain.log({"tick": tick, "kind": "bargain", "status": status, "offer": oid, "refs": list(c.in_refs),
                      "seller": c.team or c.offer.get("maker"), "venue": c.venue, "price": c.cash_out,
                      "cost": c.cash_out + c.fee, "value": c.value_in, "gain": c.gain, "cash": cash, "gap": gap,
-                     "can_spend": can_spend, "counter": counter})
+                     "can_spend": can_spend, "counter": counter, **more})
 
     def _bargains_short(self, shorts: list[AcceptCand], live: set, values: Values, counts: dict, can_give, kept,
                         venues: list[dict], own_market: list[dict], cash: int, fast_cap: int, tick: int) -> None:
@@ -1208,7 +1213,13 @@ class MarketDomain:
                 self._sent[act.id] = {"kind": "post_offer", "team": seller}
                 self._bargain_actions.append(act)
                 self._counter_tick[key] = tick
-        self._log_bargain(best, "short", cash, gap, tick, counter, can_spend=fast_cap)
+        liquid = sum(float(values.book(a.get("ref"))) for a in values.assets.values()      # spares we could sell
+                     if a.get("kind", "card") == "card" and a.get("ref")
+                     and values.set_of(a["ref"]) not in kept and can_give(a, counts))
+        exp = best.offer.get("expires_tick")
+        left = int(exp) - tick if exp is not None else None
+        self._log_bargain(best, "short", cash, gap, tick, counter, can_spend=fast_cap, liquid=round(liquid, 1),
+                          ticks_left=left, feasible=bargain.feasible(gap, liquid, left))
         self._funding = {"offer": best.offer.get("id"), "refs": list(best.in_refs), "seller": seller,
                          "venue": best.venue, "price": best.cash_out, "cost": best.cash_out + best.fee,
                          "value": best.value_in, "gain": best.gain, "gap": gap, "last_seen_tick": tick,
