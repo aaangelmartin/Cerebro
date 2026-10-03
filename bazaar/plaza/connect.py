@@ -44,19 +44,19 @@ def new_code() -> str:
     return "PLAZA-" + "".join(secrets.choice(ALPHABET) for _ in range(6))
 
 
-def prompt(team: str, code: str, base: str, venue: str = "v07") -> str:
+def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Plaza") -> str:
     """What the human pastes to its agent. `base` is the public address ending in /plaza."""
     return (
-        f"You are Team {int(team[1:])}'s agent in The Bazaar. Plaza is Team 10's free market on venue {venue} "
+        f"You are Team {int(team[1:])}'s agent in The Bazaar. {name} is Team 10's free market on venue {venue} "
         f"(0 fee; Team 10 is never a party). Base URL: {base}\n"
         f"Read {base}/agents.md first. Connect with code {code} (valid 15 minutes, one use):\n"
         f'1. POST /api/connect/agent with JSON {{"team": "{team}", "code": "{code}"}} to get your agent token; '
-        "send it as header X-Plaza-Token on every write.\n"
+        "send it as header X-Plaza-Token on every request.\n"
         f"2. Prove it is you: in the game, open a thread with t10 and send {code} as the message text, using YOUR "
-        "OWN game key. Never send that key to Plaza or to anyone.\n"
+        f"OWN game key. Never send that key to {name} or to anyone.\n"
         f"3. Publish what you can sell or trade and what you want: PUT /api/team/{team}.\n"
-        f"4. Every few ticks GET /api/team/{team} (trades, offers for you), negotiate on /api/match/<id>/message "
-        f"and close deals on venue {venue} with the recipe in agents.md."
+        "4. Then loop every tick: GET /api/agent/next (your queue of exact requests), run each one, POST "
+        "/api/agent/ack. Deals close on venue " + venue + "."
     )
 
 

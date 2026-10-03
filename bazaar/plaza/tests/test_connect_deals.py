@@ -250,7 +250,7 @@ class DealsTest(unittest.TestCase):
     def test_pause_exclude_withdraw_and_force(self):
         self.assertEqual(self.d.sync(self.cands, 10, [], paused=True), [])
         self.assertEqual(self.d.live(), [])
-        self.d.sync(self.cands, 10, [], excluded_teams=frozenset({"t02"}))
+        self.d.sync(self.cands, 10, [], excluded_matches=frozenset({self.cands[0]["id"]}))
         self.assertEqual([m["buyer"] for m in self.d.live()], ["t03"])
         self.d.sync([], 11, [])                                                 # the sheets changed
         self.assertEqual(self.d.live(), [])
@@ -423,11 +423,15 @@ class FlowTest(unittest.TestCase):
         row = mm["queue"][0]
         self.assertEqual((row["seller"], row["buyer"], row["basis"], row["priority"]), ("t09", "t07", "declared", 1))
         self.assertIn("looks for it", row["why"])
+        self.assertEqual(row["overlap"], None)                                                   # nobody set limits
         st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "exclude", "team": "t09"}, admin)
-        self.assertEqual(out["admin"]["excluded_teams"], ["t09"])
+        self.assertEqual(st, 400)                                                                # nobody is left out
+        self.assertNotIn("excluded_teams", self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1])
+        st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "exclude", "match": row["id"]}, admin)
+        self.assertEqual(out["admin"]["excluded_matches"], [row["id"]])
         self.assertEqual(self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1]["queue"], [])
         self.call("POST", "/plaza/admin/api/action", {"action": "pause"}, admin)
-        self.call("POST", "/plaza/admin/api/action", {"action": "include", "team": "t09"}, admin)
+        self.call("POST", "/plaza/admin/api/action", {"action": "include", "match": row["id"]}, admin)
         mm = self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1]
         self.assertEqual((mm["queue"], mm["paused"]), ([], True))                                # paused: nothing new
         for body in ({"action": "force", "seller": "t10", "buyer": "t07", "ref": "LAT-03"},      # never us
@@ -454,6 +458,9 @@ class SuperviseTest(unittest.TestCase):
         self.assertEqual((lock, [s.name for s in services]), ("supervise-plaza", ["plaza"]))     # the others untouched
         with self.assertRaises(SystemExit):
             supervise.chosen({"BAZAAR_SUPERVISE_ONLY": "nothing"})
+        lock, services, _ = supervise.chosen({"BAZAAR_SUPERVISE_ONLY": "plaza,plaza-tunnel", "PLAZA_TUNNEL_CONFIG": "/x/plaza.yml"})
+        self.assertEqual((lock, services[-1].cmd[-3:]), ("supervise-plaza-plaza-tunnel", ["--config", "/x/plaza.yml", "run"]))
+        self.assertNotIn("plaza-tunnel", [s.name for s in supervise.chosen({"PLAZA_TUNNEL_CONFIG": "/x/plaza.yml"})[1]])
 
 
 if __name__ == "__main__":

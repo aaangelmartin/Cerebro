@@ -88,7 +88,7 @@ class ServerTest(unittest.TestCase):
         self.assertIn("Never send your game key", md)
 
     def test_only_whitelisted_routes_answer(self):
-        for path in ("/", "/control", "/brain/chat", "/outbox", "/plaza/static/../server.py", "/plaza/static/x.js",
+        for path in ("/control", "/brain/chat", "/outbox", "/plaza/static/../server.py", "/plaza/static/x.js",
                      "/plaza/api/team/t99x", "/plaza/api/nope", "/plaza/../etc/passwd", "/plaza/api/team/t77",
                      "/plaza/web/index.html", "/plaza/api/control"):
             self.assertEqual(self.call("GET", path)[0], 404, path)
@@ -303,7 +303,7 @@ class ServerTest(unittest.TestCase):
             self.assertIn("/plaza/static/plaza.js", html)
         self.assertEqual(self.call("GET", "/plaza/team/t2")[0], 404)
         md = self.call("GET", "/plaza/agents.md")[1]
-        for needle in ("/api/floor", "/api/offers", "/api/card/", "offers_for_you", "PLAZA-1A2B3C", "curl -X PUT"):
+        for needle in ("/api/floor", "/api/offers", "/api/card/", "offers_for_you", "PLAZA-7K2Q9M", "curl -X PUT"):
             self.assertIn(needle, md)
 
     def test_public_url(self):
