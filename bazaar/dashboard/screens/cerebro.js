@@ -409,7 +409,9 @@
   function renderChat() {
     const list = C.list; if (!list) return;
     const st = C.host.querySelector(".cb-chat-st");
-    if (st) st.textContent = C.state === "off" ? "inactivo" : C.waiting ? "pensando…" : "";
+    const since = thinkingSince();
+    C.waiting = since != null;
+    if (st) st.textContent = C.state === "off" ? "inactivo" : since != null ? "pensando…" : "";
     const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 12;
     const kids = [];
     if (C.state === "off") kids.push(U().empty("El chat del cerebro aún no está activo."));
@@ -428,9 +430,56 @@
         el("div", { class: "cb-msg-t" }, m.text || ""),
         Array.isArray(m.refs) && m.refs.length ? el("div", { class: "cb-msg-refs num" }, m.refs.map((x) => typeof x === "string" ? x : (x.id || x.ref || JSON.stringify(x))).join(" · ")) : null));
     }
-    if (C.waiting) kids.push(el("div", { class: "cb-msg is-brain is-thinking" }, U().icon("cerebro", 13), "El cerebro está pensando…"));
+    C.thinkEl = null;
+    if (since != null) {
+      C.thinkEl = el("div", { class: "cb-msg is-brain is-thinking" },
+        el("div", { class: "cb-think-h" }, U().icon("cerebro", 13), el("span", {}, "El cerebro está pensando… "), el("span", { class: "num cb-think-since" }, "(desde " + when(since) + ")")),
+        el("div", { class: "cb-think-sub" }));
+      kids.push(C.thinkEl);
+      updateThinking();
+    }
     U().keepScroll(list.parentNode, () => list.replaceChildren(...kids));
     if (atEnd || C.forceEnd) { list.scrollTop = list.scrollHeight; C.forceEnd = false; }
+  }
+  // Thinking = the last message is ours (anyone's, also after a reload) and no brain reply came after it.
+  function thinkingSince() {
+    if (C.state === "off" || C.state === "error") return null;
+    let lastUser = null, lastBrain = 0;
+    for (const m of C.msgs) {
+      const ts = +m.ts || 0;
+      if (m.role === "brain") lastBrain = Math.max(lastBrain, ts);
+      else if (lastUser == null || ts > lastUser) lastUser = ts;
+    }
+    return lastUser != null && lastUser > lastBrain ? lastUser : null;
+  }
+  // brain status from its heartbeat (GET strategy -> status {updated, last_call, last_reason}): working now or queued
+  function updateThinking() {
+    const n = C.thinkEl; if (!n) return;
+    const since = thinkingSince(); if (since == null) return;
+    const now = Date.now() / 1000, st = C.brainSt || {};
+    const age = now - since;
+    const beat = +st.updated || 0, beatAge = beat ? now - beat : null;
+    // the brain writes its heartbeat every ~5 s between runs and not during an Opus call, so a heartbeat that is
+    // 12 s-5 min old means it is planning right now; an explicit thinking_since (if the backend adds it) wins
+    const busySince = +st.thinking_since || +st.planning_since || 0;
+    let sub;
+    if (busySince) sub = ["ok", "pensando ahora · desde " + when(busySince)];
+    else if (beatAge == null) sub = ["mute", "esperando al cerebro"];
+    else if (beatAge > 300) sub = ["bad", "el cerebro no da señales de vida desde " + when(beat)];
+    else if (beatAge > 12 && beat < since - 1) sub = ["mute", "terminando una revisión anterior (desde " + when(beat) + "); tu mensaje va justo después"];
+    else if (beatAge > 12) sub = ["ok", "pensando ahora · desde " + when(beat)];
+    else sub = ["mute", "en cola · lo leerá en su próxima revisión (unos segundos)"];
+    const slow = age > 180;
+    const box = n.querySelector(".cb-think-sub");
+    const kids = [el("span", { class: "cb-think-" + sub[0] }, sub[1]), " · ", el("span", { class: "num" }, U().fmtDur(age))];
+    if (slow) kids.push(el("span", { class: "cb-think-slow" }, " · tarda más de lo normal"));
+    box.replaceChildren(...kids);
+  }
+  async function brainStatus() {
+    if (C.stBusy || Date.now() - (C.stAt || 0) < 3000) return;
+    C.stBusy = true; C.stAt = Date.now();
+    try { const r = await A().strategy(1); C.brainSt = (r && r.status) || null; } catch (e) { /* optional */ }
+    finally { C.stBusy = false; updateThinking(); }
   }
   async function chatPull() {
     if (C.busy || !C.list) return;
@@ -449,7 +498,7 @@
           // the server copy of our own message replaces the local pending one
           if (m.role !== "brain") { const i = C.msgs.findIndex((x) => x.local && x.text === m.text); if (i >= 0) C.msgs.splice(i, 1); }
           C.msgs.push(m);
-          if (m.role === "brain") C.waiting = false;
+
         }
         C.msgs.sort((a, b) => (a.ts || 0) - (b.ts || 0));
         C.since = Math.max(C.since || 0, ...got.map((m) => +m.ts || 0));
@@ -472,14 +521,14 @@
     C.sending = true; C.lastSent = { text, at: now };
     C.send.disabled = true; C.input.disabled = true;
     const mine = { ts: now / 1000, role: "user", by, text, pending: true, local: true };
-    C.msgs.push(mine); C.waiting = true; C.forceEnd = true;
+    C.msgs.push(mine); C.forceEnd = true;
     renderChat();
     try {
       await A().brainSay(text, by);
       mine.pending = false;
       if ((C.input.value || "").trim() === text) C.input.value = "";
     } catch (e) {
-      C.waiting = false; C.lastSent = null;
+      C.lastSent = null;
       const i = C.msgs.indexOf(mine); if (i >= 0) C.msgs.splice(i, 1);
       U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "El chat del cerebro aún no está activo." : (e && e.message) || "Error" });
     } finally {
@@ -488,7 +537,10 @@
     }
   }
   // poll faster than the 2 s screen refresh while waiting for a reply
-  setInterval(() => { if (C.list && C.list.isConnected && C.waiting) chatPull(); }, 1500);
+  setInterval(() => {
+    if (!(C.list && C.list.isConnected) || thinkingSince() == null) return;
+    chatPull(); brainStatus(); updateThinking();
+  }, 1500);
 
 
   // ---------- "Para el equipo": what the brain decided but people must do (outbox) ----------
@@ -715,7 +767,21 @@
     for (const t of en.ticks || []) out.push(el("span", { class: "tag res tone-mute num" }, "tick " + t));
     return out;
   }
+  // "Team 5: …", "Hi Team 5", "¡Gracias, Team 5!", "Hola equipo 5", "@Daniel …" at the start of a draft
+  function guessAddressee(text) {
+    const t = String(text || "").slice(0, 160);
+    const m = t.match(/^[\s¡!¿]*(?:(?:hi|hey|hello|hola|thanks|thank you|gracias|buenas|ok|vale)[\s,!]*)?(?:team|equipo)\s*(\d{1,2})\b/i);
+    const team = m ? "t" + m[1].padStart(2, "0") : null;
+    const p = t.match(/(?:^|\s)@([A-ZÁÉÍÓÚÑa-záéíóúñ][\wÁÉÍÓÚÑáéíóúñ.-]{1,30}(?:\s[A-ZÁÉÍÓÚÑ][\wáéíóúñ]+)?)/);
+    return { team, person: p ? p[1] : null };
+  }
   function recipientWho(o) {
+    // explicit recipient fields (to_team, to_person, audience) win for replies and proactive drafts alike
+    const pre = isReply(o) ? "Respuesta para" : "Para";
+    if (o.audience === "team" && o.to_team) return whoLine(o.to_team, o.to_person || null, pre);
+    if (o.audience === "person" && (o.to_person || o.to_team)) return whoLine(o.to_team || null, o.to_person || null, pre);
+    if (o.audience === "group") return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, pre),
+      el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? "Todos (en el juego)" : "Todo el grupo de WhatsApp"));
     const rt = o.reply_to || {};
     const ctxRec = extById(replyKey(o));
     if (isReply(o)) {
@@ -723,9 +789,14 @@
       const person = rt.author && rt.author !== "equipo" && rt.author !== (ctxRec && ctxRec.by) ? rt.author : null;
       return whoLine(team, person, "Respuesta para");
     }
-    const who = o.to || o.recipient;
-    if (who && /^t\d+$/.test(who)) return whoLine(who, null, "Para");
-    if (who) return whoLine(null, who, "Para");
+    // explicit fields first (to_team, to_person, audience), then older to/recipient, then a guess from the text
+    const toTeam = o.to_team || (/^t\d+$/.test(o.to || "") ? o.to : null) || (/^t\d+$/.test(o.recipient || "") ? o.recipient : null);
+    const toPerson = o.to_person || (o.to && !/^t\d+$/.test(o.to) ? o.to : null) || (o.recipient && !/^t\d+$/.test(o.recipient) ? o.recipient : null);
+    if (o.audience !== "group") {
+      if (toTeam || toPerson) return whoLine(toTeam, toPerson, "Para");
+      const g = guessAddressee(o.text);
+      if (g.team || g.person) return whoLine(g.team, g.person, "Para");
+    }
     return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, "Para"), el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? "Todos (en el juego)" : "Todo el grupo de WhatsApp"));
   }
   function recipient(o) {
@@ -749,7 +820,7 @@
     const n = el("div", { class: "cb-m-card" + (compact ? " is-compact" : "") },
       recipientWho(o),
       el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+o.updated || +o.ts)), channelChip(o),
-        el("span", { class: "cb-muted" }, isReply(o) ? "respuesta en el grupo" : o.channel === "in_game" ? "mensaje en el juego" : "mensaje al grupo"), el("span", { class: "cb-sp" }), obStatus(o.status)),
+        el("span", { class: "cb-muted" }, o.channel === "in_game" ? "se envía en el juego" : "se envía en el grupo de WhatsApp"), el("span", { class: "cb-sp" }), obStatus(o.status)),
       ctx ? el("div", { class: "cb-m-ctx" }, el("div", { class: "cb-cap" }, "Su mensaje · " + when(+ctx.received_at || +ctx.ts)), el("div", {}, short(ctx.text, 400))) : null,
       el("pre", { class: "cb-m-text" }, o.text || ""),
       o.why && !compact ? el("div", { class: "cb-rows" }, "Por qué: " + o.why) : null,
