@@ -195,3 +195,7 @@
 .scr-bot .bot-limits[open] > summary { color: var(--bx-ink); border-bottom: 1px solid var(--bx-line); }
 .scr-bot .bot-limits-b { padding: 10px 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 24px; }
 @media (max-width: 1300px) { .scr-bot .bot-limits-b { grid-template-columns: minmax(0, 1fr); } }
+.scr-bot .bot-bkwrap { display: flex; flex-direction: column; gap: 8px; }
+.scr-bot .bot-verdict { display: flex; gap: 8px; align-items: center; padding: 8px 12px; font-size: 13px; border: 1px solid var(--bx-ok); border-left-width: 3px; color: var(--bx-ink); background: color-mix(in srgb, var(--bx-ok) 8%, transparent); }
+.scr-bot .bot-verdict.tone-warn { border-color: var(--warn); background: var(--warn-soft); }
+.scr-bot .bot-verdict.tone-bad { border-color: var(--bx-bad); background: var(--bad-soft); }

@@ -536,28 +536,55 @@
       if (document.activeElement !== n[k]) n[k].value = v == null ? "" : String(v);
     }
   }
-  // the four figures that answer "how are we doing with money"
+  // real $/h of the last hour (spend comes in bursts around duels and Market Tests, so a short window misleads), from the LLM call log (all purposes, or only the brain's planning calls)
+  function measuredRate(purposes, span) {
+    const rows = Array.isArray(S.llm) ? S.llm : [];
+    const now = Date.now() / 1000;
+    const first = rows.length ? Math.min(...rows.map((r) => r.ts || now)) : now;
+    const win = Math.min(span || 3600, now - first);
+    if (win < 300) return null;
+    let sum = 0;
+    for (const r of rows) if (now - (r.ts || 0) <= win && (!purposes || purposes.includes(r.purpose))) sum += num(r.cost_usd) || 0;
+    return sum / (win / 3600);
+  }
+  // the four figures that answer "how are we doing with money", and a one-line verdict
   function budgetKpis(sp) {
     const d = B.data || {}, plan = d.plan || {};
-    const tone = (v, ref) => (ref > 0 ? (v >= ref ? "bad" : v >= ref * 0.8 ? "warn" : "ok") : "");
-    const k = (label, value, sub, t, pct) => el("div", { class: "bot-bk" + (t ? " tone-" + t : "") }, el("div", { class: "bot-cap" }, label), el("div", { class: "bot-bk-v bot-mono" }, value),
-      el("div", { class: "bot-bar bot-bar-" + (t || "plain") }, el("span", { style: `width:${Math.max(1, Math.min(100, Math.round(pct || 0)))}%` })), el("div", { class: "bot-muted bot-small" }, sub));
+    const tone = (v, ref) => (ref > 0 ? (v > ref ? "bad" : v >= ref * 0.9 ? "warn" : "ok") : "");
+    const k = (label, value, sub, t, pct, sub2) => el("div", { class: "bot-bk" + (t ? " tone-" + t : "") }, el("div", { class: "bot-cap" }, label), el("div", { class: "bot-bk-v bot-mono" }, value),
+      el("div", { class: "bot-bar bot-bar-" + (t || "plain") }, el("span", { style: `width:${Math.max(1, Math.min(100, Math.round(pct || 0)))}%` })), el("div", { class: "bot-muted bot-small" }, sub),
+      sub2 ? el("div", { class: "bot-muted bot-small" }, sub2) : null);
     const bt = num(d.budget_total), stt = num(d.spent_total);
     const today = num(d.day_total_spent) ?? num(sp.usd) ?? 0;
     const teamDay = num((d.caps_set_by_team || {}).day_cap) != null ? num(d.day_cap) : null;
-    const ref = teamDay ?? num(plan.plan_today) ?? num(d.plan_today) ?? num(sp.cap);
-    const target = num(d.usd_per_hour_target), rate = num(plan.day_usd_per_hour) ?? num(d.usd_per_hour_now);
-    const proj = num(d.projected_day_spend) ?? (rate != null && num(d.hours_left) != null ? today + rate * d.hours_left : null);
-    return el("div", { class: "bot-bks" },
+    const ref = teamDay ?? num(plan.plan_today) ?? num(d.plan_today) ?? num(sp.cap);          // today's cap (team) or plan
+    const hours = num(d.hours_left) ?? num(plan.hours_today);
+    // like with like: what we really spend per hour (all calls) against what the day's plan allows per hour from now
+    const rate = measuredRate(null, 3600), rate30 = measuredRate(null, 1800);
+    const allowed = ref != null && hours > 0 ? Math.max(0, ref - today) / hours : num(plan.day_usd_per_hour);
+    const brainNow = num(d.usd_per_hour_now), brainTarget = num(d.usd_per_hour_target) ?? num(plan.usd_per_hour_target);
+    const proj = rate != null && hours != null ? today + rate * hours : null;
+    const verdictTone = proj != null && ref ? tone(proj, ref) : "";
+    const tomorrow = bt != null && proj != null ? bt - ((stt ?? today) - today) - proj : num(d.plan_tomorrow);
+    const kp = el("div", { class: "bot-bks" },
       k("Evento", bt != null ? [usd(stt ?? 0), el("span", { class: "bot-muted" }, " / " + fmt(bt, 0) + " $")] : usd(stt ?? today),
         bt != null ? "quedan " + usd(Math.max(0, num(d.remaining_total) ?? bt - (stt || 0))) + " para hoy y mañana" : "sin presupuesto total", tone(stt || 0, bt), bt ? ((stt || 0) / bt) * 100 : 0),
       k("Hoy", [usd(today), ref != null ? el("span", { class: "bot-muted" }, " / " + fmt(ref, 0) + " $") : null],
-        (teamDay != null ? "tope del equipo" : "plan de hoy") + (num(d.plan_tomorrow) != null ? " · mañana ≈ " + fmt(d.plan_tomorrow, 0) + " $" : ""), tone(today, ref), ref ? (today / ref) * 100 : 0),
-      k("Ritmo ahora", rate != null ? "≈ " + fmt(rate, 2) + " $/h" : "—",
-        target != null ? "objetivo ≈ " + fmt(target, 2) + " $/h" + (rate != null ? (rate <= target ? " · dentro" : " · " + fmt(rate - target, 2) + " por encima") : "") : "sin objetivo",
-        target != null && rate != null ? (rate <= target ? "ok" : rate <= target * 1.25 ? "warn" : "bad") : "", target ? Math.min(100, ((rate || 0) / (target * 1.5)) * 100) : 0),
+        (teamDay != null ? "tope del equipo" : "plan de hoy") + (num(plan.plan_today) != null && teamDay != null ? " · plan " + fmt(plan.plan_today, 0) + " $" : ""), tone(today, ref), ref ? (today / ref) * 100 : 0),
+      k("Ritmo total ahora", rate != null ? "≈ " + fmt(rate, 2) + " $/h" : "midiendo…",
+        "media de la última hora" + (rate30 != null ? " · últimos 30 min ≈ " + fmt(rate30, 1) : "") + (allowed != null ? " · el día permite ≈ " + fmt(allowed, 2) + " $/h" : ""), verdictTone, allowed ? Math.min(100, ((rate || 0) / allowed) * 100) : 0,
+        brainNow != null ? "Cerebro ≈ " + fmt(brainNow, 2) + " $/h" + (brainTarget != null ? " · objetivo " + fmt(brainTarget, 2) + " $/h" : "") : null),
       k("Previsión al cierre", proj != null ? "≈ " + usd(proj) : "—",
-        num(d.hours_left) != null ? "quedan " + fmt(d.hours_left, 1) + " h de juego hoy" : "", proj != null && ref ? tone(proj, ref) : "", proj != null && ref ? (proj / ref) * 100 : 0));
+        (ref != null ? "de " + fmt(ref, 0) + " $ de hoy" : "") + (hours != null ? " · quedan " + fmt(hours, 1) + " h" : ""), verdictTone, proj != null && ref ? (proj / ref) * 100 : 0));
+    let verdict = null;
+    if (proj != null && ref != null) {
+      const over = proj - ref;
+      verdict = el("div", { class: "bot-verdict tone-" + (over > 0 ? "bad" : verdictTone === "warn" ? "warn" : "ok") }, ic(over > 0 ? "warn" : "wallet", 14),
+        el("span", {}, el("b", {}, over > 0 ? "Nos pasamos: " : verdictTone === "warn" ? "Vamos justos: " : "Vamos bien: "),
+          `al ritmo actual hoy acabamos en ≈ ${fmt(proj, 0)} $ de ${fmt(ref, 0)} $` +
+          (over > 0 ? ` (${fmt(over, 0)} $ de más)` : "") + (tomorrow != null ? ` y quedan ≈ ${fmt(Math.max(0, tomorrow), 0)} $ para mañana` : "") + "."));
+    }
+    return el("div", { class: "bot-bkwrap" }, kp, verdict);
   }
   async function brainPull(force) {
     if (!S.root || B.busy || (!force && Date.now() - B.at < 4000)) return;
