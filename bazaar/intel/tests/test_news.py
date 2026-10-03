@@ -121,6 +121,8 @@ class ListenerTest(NewsBase):
         items = news.load_items(self.live)
         self.assertEqual(items["3"]["status"], "confirmed")
         self.assertEqual(items["3"]["active_window"], [5.18, 6.18])
+        self.assertAlmostEqual(items["3"]["lag_hours"], 0.5)           # how late the source's news takes effect
+        self.assertEqual(news.reliability(items)["radio"]["lag_hours"], [0.5, 0.5])
         self.assertEqual(items["4"]["status"], "false")                # the end of rumour 3 does not confirm rumour 4
         rel = news.reliability(items)
         self.assertEqual((rel["radio"]["confirmed"], rel["tablon"]["false"]), (1, 1))
@@ -138,6 +140,88 @@ class ListenerTest(NewsBase):
                        actor="abuela") for i in range(1, 9)])
         self.clock(7.75)
         self.assertEqual([i["status"] for i in l.step()["changed"]], ["confirmed"])
+
+    def _pack_news(self):
+        return news_row(1, 6.68, 6, "boletin", "Abuela Carmen gives out packs for her saint's day",
+                        "A neighbourhood pack for every team in one hour.")
+
+    def test_free_packs_opened_by_many_teams_confirm_the_grant(self):
+        # the game emits no gift.given for a granted pack: twelve teams just open one they never bought
+        self.add(self._pack_news(),
+                 *[row(10 + i, 7.68 + 0.005 * (i % 4), "pack.opened", {"team": f"t{i:02d}", "pack": "sobre_barrio"})
+                   for i in range(1, 13)])
+        self.clock(7.8)
+        l = self.listener()
+        self.assertEqual([i["status"] for i in l.step()["changed"]], ["confirmed"])
+        it = news.load_items(self.live)["6"]
+        self.assertIn("12 teams opened a pack they did not buy", it["evidence"])
+        self.assertAlmostEqual(it["lag_hours"], 1.0, places=2)
+        rel = news.reliability(news.load_items(self.live))["boletin"]
+        self.assertEqual((rel["confirmed"], rel["false"]), (1, 0))
+        self.assertGreater(rel["reliability"], 0.5)
+        self.assertEqual(rel["lag_hours"], [it["lag_hours"], it["lag_hours"]])
+
+    def test_bought_packs_and_other_packs_do_not_confirm(self):
+        buys = [row(20 + i, 7.6, "settlement", {"persona": "abuela", "items": [
+            {"kind": "pack", "ref": "sobre_barrio", "frm": "abuela", "to": f"t{i:02d}"}], "price": 26}) for i in range(1, 9)]
+        self.add(self._pack_news(), *buys,
+                 *[row(40 + i, 7.7, "pack.opened", {"team": f"t{i:02d}", "pack": "sobre_barrio"}) for i in range(1, 9)],
+                 *[row(60 + i, 7.7, "pack.opened", {"team": f"t{i:02d}", "pack": "sobre_plata"}) for i in range(9, 18)])
+        self.clock(9.3)
+        l = self.listener()
+        l.step()
+        self.assertEqual(news.load_items(self.live)["6"]["status"], "false")
+
+    def test_scattered_openings_are_not_a_grant(self):
+        self.add(self._pack_news(),
+                 *[row(10 + i, 7.7 + 0.21 * i, "pack.opened", {"team": f"t{i:02d}", "pack": "sobre_barrio"})
+                   for i in range(0, 7)])
+        self.clock(9.3)
+        l = self.listener()
+        l.step()
+        self.assertEqual(news.load_items(self.live)["6"]["status"], "false")
+
+    def test_item_wrongly_marked_false_is_corrected_on_the_next_start(self):
+        self.add(self._pack_news(),
+                 *[row(10 + i, 7.69, "pack.opened", {"team": f"t{i:02d}", "pack": "sobre_barrio"}) for i in range(1, 13)])
+        self.clock(9.3)
+        l = self.listener()
+        l.ingest_feed()
+        l.items["6"].update(status="false", evidence="nothing seen by h9.18")       # what the old verifier stored
+        l._save()
+        l2 = self.listener()
+        self.assertEqual([i["status"] for i in l2.step()["changed"]], ["confirmed"])
+        self.assertEqual(news.reliability(news.load_items(self.live))["boletin"]["false"], 0)
+
+    def test_stops_buying_rumour_is_false_when_the_dealer_keeps_buying(self):
+        sale = {"persona": "abuela", "items": [{"kind": "card", "ref": "MAL-01", "rarity": "common", "set": "MAL",
+                                                "frm": "t07", "to": "abuela"}], "price": 5}
+        self.add(news_row(1, 7.68, 7, "tablon", "Abuela stops buying common cards from today", "So they say."),
+                 row(2, 7.9, "settlement", sale))
+        self.clock(8.0)
+        l = self.listener()
+        l.step()
+        it = news.load_items(self.live)["7"]
+        self.assertEqual((it["claim"], it["prediction"]["kind"], it["status"]), ("dealer_change", "dealer_stop", "false"))
+        self.assertIn("still bought", it["evidence"])
+
+    def test_stops_buying_rumour_holds_when_no_purchase_follows(self):
+        sale = {"persona": "abuela", "items": [{"kind": "card", "ref": "MAL-06", "rarity": "uncommon", "set": "MAL",
+                                                "frm": "t07", "to": "abuela"}], "price": 14}
+        self.add(news_row(1, 7.68, 7, "tablon", "Abuela stops buying common cards from today", "So they say."),
+                 row(2, 7.9, "settlement", sale))                        # an uncommon is not what the rumour is about
+        self.clock(9.3)
+        l = self.listener()
+        l.step()
+        self.assertEqual(news.load_items(self.live)["7"]["status"], "confirmed")
+
+    def test_old_flavour_item_is_structured_again(self):
+        self.add(news_row(1, 7.68, 7, "tablon", "Abuela stops buying common cards from today", "So they say."))
+        l = self.listener()
+        l.ingest_feed()
+        l.items["7"].update(status="flavour", prediction=None, claim="mention")     # as the older parser left it
+        l.verify()
+        self.assertEqual((l.items["7"]["status"], l.items["7"]["prediction"]["kind"]), ("open", "dealer_stop"))
 
     def test_brain_event_only_for_fresh_actionable_news(self):
         self.add(news_row(1, 4.08, 2, "radio", "Atleti win 2-1"),

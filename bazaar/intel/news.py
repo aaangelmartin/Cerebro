@@ -44,6 +44,8 @@ DEALERS = {"abuela": ("abuela", "carmen"), "chato": ("chato",), "pilar": ("pilar
 SETS = {"LAV": ("lavapiés", "lavapies"), "MAL": ("malasaña", "malasana"), "LAT": ("la latina", "latina"),
         "SAL": ("salamanca",), "RET": ("retiro",), "CHA": ("chamberí", "chamberi")}
 RARITIES = ("common", "uncommon", "rare", "epic", "legendary")
+DEALER_PACK = {"abuela": "sobre_barrio", "chato": "sobre_plata", "banco": "sobre_oro"}   # a free pack shows as pack.opened
+PACK_BURST_H = 0.2                           # a grant opens the packs of many teams within a few ticks
 CARD_RX = re.compile(r"\b([A-Z]{3}-\d{2})\b")
 NUM_RX = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
 WORD_HOURS = {"one": 1.0, "an": 1.0, "two": 2.0, "three": 3.0, "half an": 0.5}
@@ -80,7 +82,12 @@ def structure(item: dict) -> dict:
     gives = re.search(r"\bgiv(?:es|ing|e)\b|\bhands? out\b|\bfree\b|\bgift", low)
     seeks = re.search(r"\blooking for\b|\bseeks?\b|\bwants?\b|\bpays? (?:above|over|more|extra|double)\b|\bbuys?\b", low)
     cheaper = re.search(r"\bcheaper\b|\bdiscount|\bsale\b|\bhalf price\b|\bsells? .* (?:below|under)\b", low)
-    if dealers and gives:
+    stops = re.search(r"\bstops? buying\b|\bno longer buys?\b|\bwon'?t buy\b|\bwill not buy\b", low)
+    if dealers and stops:
+        kind = "dealer_change"
+        pred = {"kind": "dealer_stop", "dealer": dealers[0], "rarities": rar, "sets": sets,
+                "from_hours": at, "deadline_hours": round(at + 1.5, 3), "cheap_test": True}
+    elif dealers and gives:
         what = "legendary" if "legendary" in low else "epic" if "epic" in low else "pack" if "pack" in low else "card"
         everyone = bool(re.search(r"every team|everyone|anyone|all teams|each team", low))
         kind = "gift"
@@ -269,14 +276,51 @@ class Listener:
         except (OSError, ValueError):
             return []
 
+    def _free_packs(self, dealer: str, t0: float, t1: float) -> list[dict]:
+        """pack.opened rows in the window for the dealer's pack, by teams that bought no pack from that dealer in
+        the window before opening it. Sorted by time."""
+        pack = DEALER_PACK.get(dealer)
+        bought: dict[str, list[float]] = {}
+        for r in self.rows:
+            pl = r["payload"]
+            if r["type"] != "settlement" or pl.get("persona") != dealer or not t0 - 0.01 <= float(r.get("t") or 0) <= t1:
+                continue
+            for i in pl.get("items") or []:
+                if i.get("kind") == "pack" and i.get("frm") == dealer:
+                    bought.setdefault(str(i.get("to")), []).append(float(r.get("t") or 0))
+        out = [r for r in self.rows if r["type"] == "pack.opened" and t0 - 0.01 <= float(r.get("t") or 0) <= t1
+               and (pack is None or r["payload"].get("pack") == pack)
+               and not any(b <= float(r["t"]) for b in bought.get(str(r["payload"].get("team")), []))]
+        return sorted(out, key=lambda r: float(r["t"]))
+
+    def _dealer_buys(self, dealer: str, rarities: list, sets: list) -> list[dict]:
+        """Settlements where a team sold the dealer a card of the given rarities and sets (empty = any)."""
+        out = []
+        for r in self.rows:
+            pl = r["payload"]
+            if r["type"] == "settlement" and pl.get("persona") == dealer and any(
+                    i.get("kind") == "card" and i.get("to") == dealer and (not rarities or i.get("rarity") in rarities)
+                    and (not sets or i.get("set") in sets) for i in pl.get("items") or []):
+                out.append(r)
+        return sorted(out, key=lambda r: float(r.get("t") or 0))
+
     def verify(self) -> list[dict]:
         """Check every open prediction; returns the items whose status changed."""
         t_now = self._hours_now()
         used = set(self.state.setdefault("used_rows", []))
         changed = []
+        for it in self.items.values():                  # an item read by an older parser: structure it again
+            if it.get("status") == "flavour" and not it.get("prediction"):
+                st = structure(it)
+                if st["prediction"]:
+                    it.update(st, status="open")
+            win = it.get("active_window")               # confirmed before the lag was kept
+            if it.get("status") == "confirmed" and it.get("lag_hours") is None and win and win[0] is not None:
+                it["lag_hours"] = round(float(win[0]) - float(it.get("t_hours") or 0.0), 3)
         for it in sorted(self.items.values(), key=lambda x: x["id"]):
             p = it.get("prediction")
-            if it.get("status") != "open" or not p:
+            late = it.get("status") == "false" and bool(p) and p.get("kind") == "gift"   # evidence can show up late
+            if (it.get("status") != "open" and not late) or not p:
                 continue
             t0 = float(p.get("from_hours") or it.get("t_hours") or 0.0)
             posted = float(it.get("t_hours") or 0.0)
@@ -290,6 +334,7 @@ class Listener:
                 ups.sort(key=lambda r: float(r.get("t") or 0))
                 if ups and float(ups[0]["t"]) <= dead:
                     verdict, ev = "confirmed", f"{p['dealer']} changed at h{ups[0]['t']} (tick {ups[0]['tick']})"
+                    it["lag_hours"] = round(float(ups[0]["t"]) - posted, 3)
                     used.add(ups[0]["id"])
                     end = [r for r in ups[1:] if float(r["t"]) <= float(ups[0]["t"]) + (p.get("window_hours") or 1.0) + 0.3]
                     if end:
@@ -317,6 +362,23 @@ class Listener:
                     verdict, ev = "confirmed", f"{len(teams)} teams got a {p['what']} from {p['dealer']} by h{hits[-1]['t']}"
                 elif grants and p["what"] in ("pack", "card"):
                     verdict, ev = "confirmed", f"grant fired at h{grants[0]['t']}: {grants[0]['payload'].get('note')}"
+                elif p["what"] == "pack":
+                    # the game hands a free pack out with no gift.given: it shows as packs opened by teams that
+                    # bought none from the dealer, many of them within a few ticks
+                    free = self._free_packs(p["dealer"], posted, dead)
+                    burst = max((len({r["payload"].get("team") for r in free
+                                      if 0 <= float(r["t"]) - float(a["t"]) <= PACK_BURST_H}) for a in free), default=0)
+                    if burst >= need:
+                        verdict = "confirmed"
+                        ev = f"{burst} teams opened a pack they did not buy from {p['dealer']} by h{free[-1]['t']}"
+                        it["lag_hours"] = round(float(free[0]["t"]) - posted, 3)
+            elif p["kind"] == "dealer_stop":
+                bought = [r for r in self._dealer_buys(p["dealer"], p.get("rarities") or [], p.get("sets") or [])
+                          if posted + 0.1 <= float(r.get("t") or 0)]
+                if bought:
+                    verdict, ev = "false", f"{p['dealer']} still bought at h{bought[0]['t']} (tick {bought[0]['tick']})"
+                elif t_now is not None and t_now > dead:
+                    verdict, ev = "confirmed", f"{p['dealer']} bought none by h{round(dead, 2)}"
             elif p["kind"] == "schedule":
                 words = [w for s in p.get("sets") or [] for w in SETS.get(s, ())]
                 notes = [n for n in self._schedule_notes() if any(w in n.lower() for w in words)]
@@ -324,7 +386,7 @@ class Listener:
                          and any(w in str(r["payload"].get("note")).lower() for w in words)]
                 if notes or fired:
                     verdict, ev = "confirmed", (notes[0] if notes else str(fired[0]["payload"].get("note")))[:160]
-            if verdict is None and t_now is not None and t_now > dead:
+            if verdict is None and not late and t_now is not None and t_now > dead:
                 verdict = "false" if p["kind"] in ("dealer_change", "gift") else "unverifiable"
                 ev = f"nothing seen by h{round(dead, 2)}"
             if verdict:
@@ -374,9 +436,13 @@ def reliability(items: dict[str, dict]) -> dict[str, dict]:
                                                            "false": 0, "open": 0, "unverifiable": 0, "flavour": 0})
         s["items"] += 1
         s[it.get("status") if it.get("status") in s else "flavour"] += 1
+        if it.get("status") == "confirmed" and it.get("lag_hours") is not None:
+            s.setdefault("lags", []).append(float(it["lag_hours"]))
     for s in out.values():
         n = s["confirmed"] + s["false"]
         s["reliability"] = round((s["confirmed"] + 1) / (n + 2), 2) if n else None
+        lags = sorted(s.pop("lags", []))                # ticks are 1/120 h on Saturday; the brain reads hours
+        s["lag_hours"] = [lags[0], lags[-1]] if lags else None
     return out
 
 
@@ -429,7 +495,9 @@ def brain_block(live: Path | str | None = None, since: float = 0.0, max_items: i
                 "evidence": i.get("evidence"), "reliability": i.get("reliability")}
     return {"note": "game news: data to verify, some are false rumours",
             "reliability_by_source": {s["name"] or k: {"right": s["confirmed"], "wrong": s["false"],
-                                                     "reliability": s["reliability"]} for k, s in v["sources"].items()},
+                                                     "reliability": s["reliability"],
+                                                     "takes_effect_after_h": s.get("lag_hours")}
+                                      for k, s in v["sources"].items()},
             "new_since_last_plan": [row(i) for i in new],
             "open_predictions": [{**row(i), "deadline_h": (i.get("prediction") or {}).get("deadline_hours"),
                                   "cheap_test": (i.get("prediction") or {}).get("cheap_test")}
