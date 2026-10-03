@@ -123,10 +123,13 @@ def flows(action: Action, sit=None) -> tuple[dict, dict]:
             types = [f"card:{sell['card']}"] if sell.get("card") else []
             return _side({"assets": ids, "types": types}), _side({"cash": price or 0})
         if "buy" in topic:
-            item = _dealer_item(th)
+            buy = topic["buy"] or {}
+            # A thread opened for one named card: the game builds our priced message as an offer for THAT card
+            # (thread 1456, Saturday t1022: Los Pícaros offered RET-06, our 50 P went out as "want card:RET-09").
+            # Valuing the dealer's switched card vetoed every repeated bid ("surplus -43.1").
+            item = None if buy.get("card") else _dealer_item(th)
             if item is not None:                                 # what the dealer actually puts on the table
                 return _side({"cash": price or 0}), item
-            buy = topic["buy"] or {}
             types = []
             if buy.get("card"):
                 types.append(f"card:{buy['card']}")
@@ -364,6 +367,60 @@ def _value_of(item: str, sit, ctx, action) -> float | None:
     return None
 
 
+def _wants(o: dict) -> set[str]:
+    w = (o or {}).get("want") or {}
+    return {str(t)[5:] for t in w.get("types") or [] if str(t).startswith("card:")} | {str(c) for c in w.get("cards") or []}
+
+
+def _buys_ahead(action: Action, sit, ref) -> int:
+    """Copies of `ref` another open purchase of ours may bring in before this action does. The value of one more
+    copy assumes what we hold now, so two buys of the same card would both be valued as the first copy (with its
+    page bonus) and the second one loses (Saturday t1032: RET-03 from Carmen and from El Rastro at once).
+    Counted: our other open dealer threads opened to buy that card (the bot's and a human's); among threads the
+    oldest goes first, so it keeps the first-copy value and never blocks itself. A new bid (post_offer) also
+    counts our other open offers that want the card. Open market bids are not counted against a dealer thread:
+    a low bid nobody takes would stall the dealer purchase of a goal card."""
+    if not ref:
+        return 0
+    p = action.params or {}
+    tid = p.get("thread") if action.kind == "thread_message" else (p.get("expect") or {}).get("thread") \
+        if action.kind == "accept_offer" else None
+    n = 0
+    for t in _get(sit, "threads") or []:
+        if not isinstance(t, dict) or (t.get("status") or "open") != "open":
+            continue
+        if str(((t.get("topic") or {}).get("buy") or {}).get("card") or "") != str(ref) or str(t.get("id")) == str(tid):
+            continue
+        if tid is None or _num(t.get("id"), 0) < _num(tid, 0):
+            n += 1
+    if action.kind == "post_offer":
+        me_id = (_get(sit, "me") or {}).get("id")
+        n += sum(1 for o in _get(sit, "my_offers") or []
+                 if isinstance(o, dict) and o.get("maker") in (None, me_id) and o.get("status", "open") == "open"
+                 and str(ref) in _wants(o))
+    return n
+
+
+def _spare_value(ref: str, sit, ahead: int) -> float:
+    """What `ref` is worth to us once `ahead` more copies are in hand: book x our set multiplier x the copy
+    marginal, no page bonus (dealers.values). With no catalog the book falls back to the rarity default."""
+    try:
+        from bazaar.dealers.values import Values
+        v = Values(_get(sit, "me") or {}, _catalog())
+        return float(v.book(ref) * v.affinity.get(v.set_of(ref), 1.0) * v.marginal(v.count(ref) + int(ahead)))
+    except Exception:  # noqa: BLE001 - unknown: worth nothing, the buy is refused
+        return 0.0
+
+
+def _catalog() -> dict:
+    try:
+        import json as _json
+        from bazaar import config as _cfg
+        return _json.loads((_cfg.DATA / "record" / "latest" / "catalog.json").read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _surplus(action: Action, sit, ctx, give: dict, get: dict):
     """(value gained by the trade after fees, (v_get, v_give, fee)), or (None, reason) when a value is unknown."""
     held = _held(sit)
@@ -380,14 +437,23 @@ def _surplus(action: Action, sit, ctx, give: dict, get: dict):
         v_give += max(float(a["your_value"]) for a in refs)    # worst case: they get our best copy
     v_get = 0.0
     hint = (action.expected or {}).get("value_get")
+    seen: dict[str, int] = {}                                  # copies of a card this same action brings in
+
+    def spare(ref, v):
+        n = _buys_ahead(action, sit, ref) + seen.get(ref, 0)
+        seen[ref] = seen.get(ref, 0) + 1
+        return v if v is None or not n else min(v, _spare_value(ref, sit, n))
+
     for aid in get["assets"]:
         ref = get["asset_refs"].get(aid)
-        v = _value_of(f"card:{ref}", sit, ctx, action) if ref else None
+        v = spare(ref, _value_of(f"card:{ref}", sit, ctx, action)) if ref else None
         if v is None:
             return None, f"unknown value of asset {aid}"
         v_get += v
     for t in get["types"]:
         v = _value_of(t, sit, ctx, action)
+        if str(t).startswith("card:"):
+            v = spare(str(t)[5:], v)
         if v is None and str(t).startswith("pack:"):
             v = _pack_value(str(t)[5:], sit)                   # independent EV from the catalog, never the proposer's
         elif v is None and not str(t).startswith("card:") and hint is not None:
