@@ -4,8 +4,12 @@
   --m-line: var(--line, #262b33); --m-ink: var(--ink, #e8ebf0); --m-muted: var(--ink-3, #7d8696);
   --m-mono: var(--font-num, "Geist Mono", ui-monospace, monospace);
   --tc-compra: var(--t-compra, #3DDC97); --tc-venta: var(--t-venta, #FF6B6B); --tc-cambio: var(--t-cambio, #4C8DFF); --tc-puja: var(--t-puja, #F2A541); --tc-duelo: var(--t-duelo, #B061FF); --tc-dealer: var(--t-dealer, #2EC4B6); --tc-anuncio: var(--t-anuncio, #9AA4B8);
-  color: var(--m-ink); display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 14px; min-width: 0;
+  color: var(--m-ink); min-width: 0;
 }
+/* #screen also carries .scr-mercado (app.js); the 2/3 + 1/3 grid lives only on the inner div */
+.screen.scr-mercado { display: block; }
+.scr-mercado:not(.screen):not(.is-hist) { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; height: 100%; min-height: 0; }
+.scr-mercado .mk-main { min-width: 0; min-height: 0; overflow: auto; }
 .scr-mercado * { border-radius: 0; box-sizing: border-box; }
 .scr-mercado.is-hist { display: flex; flex-direction: column; }
 .scr-mercado .mk-muted { color: var(--m-muted); font-size: 12px; }
@@ -58,7 +62,7 @@
 .scr-mercado .mk-src { font: 10px var(--m-mono); padding: 1px 5px; background: var(--m-s2); }
 
 /* side */
-.scr-mercado .mk-side { display: flex; flex-direction: column; gap: 8px; background: var(--m-s1); border: 1px solid var(--m-line); padding: 10px; min-width: 0; max-height: calc(100vh - 110px); overflow: auto; position: sticky; top: 0; }
+.scr-mercado .mk-side { display: flex; flex-direction: column; gap: 8px; background: var(--m-s1); border: 1px solid var(--m-line); padding: 10px; min-width: 0; min-height: 0; overflow: auto; }
 .scr-mercado .mk-seg-row { display: flex; justify-content: space-between; gap: 8px; }
 .scr-mercado .mk-seg { display: inline-flex; border: 1px solid var(--m-line); }
 .scr-mercado .mk-seg button, .scr-mercado .mk-btn, .scr-mercado .mk-pager button { background: transparent; color: var(--m-muted); border: 0; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; text-decoration: none; }
@@ -88,8 +92,8 @@
 .scr-mercado .mk-pager button { border: 1px solid var(--m-line); }
 .scr-mercado .mk-pager button[disabled] { opacity: .35; cursor: default; }
 
-@media (max-width: 1100px) {
-  .scr-mercado { grid-template-columns: 1fr; }
-  .scr-mercado .mk-chats { grid-template-columns: 1fr; }
-  .scr-mercado .mk-side { position: static; max-height: none; }
+@media (max-width: 999px) {
+  .scr-mercado:not(.screen):not(.is-hist) { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .scr-mercado .mk-main, .scr-mercado .mk-side { overflow: visible; }
 }
+@media (max-width: 760px) { .scr-mercado .mk-chats { grid-template-columns: minmax(0, 1fr); } }

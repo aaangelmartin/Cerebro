@@ -1,6 +1,7 @@
 /* DUELOS · prefijo .scr-duelos / .dl-* · esquinas rectas */
 .scr-duelos { --dl-violet: var(--t-duelo, #9b7bff); --dl-ok: var(--ok, #3ddc97); --dl-bad: var(--bad, #ff5c6c); --dl-muted: var(--muted, #8a8f98); --dl-line: var(--line, #24262c); --dl-s1: var(--s1, #111316); --dl-s2: var(--s2, #181a1f); }
-.scr-duelos .dl-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+.scr-duelos .dl-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; height: 100%; min-height: 0; }
+.scr-duelos .dl-main { min-width: 0; min-height: 0; overflow: auto; }
 .scr-duelos .dl-title { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
 .scr-duelos .dl-title h1 { font-size: 20px; margin: 0; }
 .scr-duelos .dl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -38,7 +39,7 @@
 .scr-duelos .dl-why { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--dl-line); font-size: 12px; color: var(--dl-muted); }
 .scr-duelos .dl-pane-f { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--dl-line); font-size: 12px; }
 .scr-duelos .dl-next { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
-.scr-duelos .dl-side { background: var(--dl-s1); border: 1px solid var(--dl-line); position: sticky; top: 0; max-height: calc(100vh - 100px); overflow-y: auto; }
+.scr-duelos .dl-side { background: var(--dl-s1); border: 1px solid var(--dl-line); min-width: 0; min-height: 0; overflow-y: auto; }
 .scr-duelos .dl-segs { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-bottom: 1px solid var(--dl-line); }
 .scr-duelos .dl-seg { display: inline-flex; border: 1px solid var(--dl-line); }
 .scr-duelos .dl-seg button, .scr-duelos .dl-btn { background: transparent; color: var(--dl-muted); border: 0; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 0; }
@@ -80,5 +81,5 @@
 .dl-drawer .dl-out { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--line, #24262c); padding-top: 8px; }
 .dl-drawer .dl-out small { display: block; font-size: 11px; color: var(--muted, #8a8f98); text-transform: uppercase; letter-spacing: .06em; }
 .dl-drawer .dl-out b { font-size: 18px; }
-@media (max-width: 1100px) { .scr-duelos .dl-layout { grid-template-columns: 1fr; } .scr-duelos .dl-side { position: static; max-height: none; } }
+@media (max-width: 999px) { .scr-duelos .dl-layout { grid-template-columns: minmax(0, 1fr); height: auto; } .scr-duelos .dl-main, .scr-duelos .dl-side { overflow: visible; } }
 @media (max-width: 760px) { .scr-duelos .dl-grid { grid-template-columns: 1fr; } }
