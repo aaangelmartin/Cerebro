@@ -344,3 +344,12 @@ class FreshDuelChangedOffer(unittest.TestCase):
         # ambiguous sign: judged under the worse reading, so more days is not obviously better
         amb = {**base, "days_meaning": "days"}
         self.assertFalse(rails.verify_fresh(a, self.duel({"id": 4, "price": 130, "days": 5}, **amb)).ok)
+
+
+class PromisedCopies(unittest.TestCase):
+    def test_last_copy_counts_copies_promised_elsewhere(self):
+        s = sit()
+        s.me = {**s.me, "id": "t10", "assets": [card(10, "LAV-04", 16.0), card(11, "LAV-04", 4.0)]}
+        s.my_offers = [{"id": 70, "maker": "t10", "status": "open", "give": {"assets": [10]}, "want": {"cash": 30}}]
+        a = Action("post_offer", {"venue": "rastro", "give": {"assets": [11]}, "want": {"cash": 30}}, "market")
+        self.assertEqual(rails.rail_cards(a, s, ctx()).rail, "cards")

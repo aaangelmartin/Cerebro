@@ -177,12 +177,25 @@ def _is_buy(a: Action) -> bool:
     return a.kind == "open_thread" and isinstance(topic, dict) and "buy" in topic
 
 
+def _is_team(who) -> bool:
+    try:
+        from .core.rails import is_team
+        return is_team(who)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _texts_from_others(sit: Situation) -> list[str]:
+    """Texts that reach our prompts this tick, one per counterparty. Team threads are closed unread (no prompt
+    sees them), so a rival flooding them cannot push us into code-only mode."""
     me = (sit.me or {}).get("id")
-    out = []
+    out, seen = [], set()
     for t in sit.threads:
+        if _is_team(t.get("with")):
+            continue
         for m in t.get("messages") or []:
-            if m.get("tick") == sit.tick and m.get("sender") != me:
+            if m.get("tick") == sit.tick and m.get("sender") != me and m.get("sender") not in seen:
+                seen.add(m.get("sender"))
                 out.append(m.get("text") or "")
     for d in sit.duels:
         for m in d.get("messages") or []:
@@ -212,6 +225,7 @@ class Runner:
                  rails=None, executor=None, arbiter=None, council=None, control_defaults: dict | None = None,
                  clock_fn: Callable[[], float] = time.time):
         self.gw = gw
+        self.closed_team_threads: set = set()
         self.pack_backoff: dict = {}
         self.last_announce = -99.0
         self.domains = domains
@@ -360,7 +374,15 @@ class Runner:
 
     def review_big(self, actions: list[Action], sit: Situation, ctx: TickContext) -> list[Action]:
         council = self.council
-        if council is None or not ctx.llm_ok:
+        if not ctx.llm_ok:
+            # No council while the LLM is off: big non-duel buys and accepts wait instead of going unreviewed.
+            keep = [a for a in actions if not a.big or a.kind == "duel_accept"]
+            for a in actions:
+                if a not in keep:
+                    self._ledger("decision", a, Verdict(False, "council", "LLM off: big action held"),
+                                 tick=sit.tick, dry_run=not self.can_write(ctx.control or {}))
+            return keep
+        if council is None:
             return actions
         cdead = sit.tick_start + COUNCIL_SHARE * sit.tick_seconds
         out = []
@@ -559,6 +581,14 @@ class Runner:
                 out.append(venue.open_action(sit))
         except Exception as e:  # noqa: BLE001
             self._err("venue.should_open", e)
+        for t in sit.threads or []:
+            tid = t.get("id") or t.get("thread")
+            if (tid is not None and _is_team(t.get("with")) and (t.get("status") or "open") == "open"
+                    and tid not in self.closed_team_threads):
+                self.closed_team_threads.add(tid)
+                out.append(Action(kind="close_thread", params={"thread": tid}, domain="market", source="code",
+                                  reason=f"Close the thread {t.get('with')} opened with us: it holds one of our 6 "
+                                         "thread slots and the bot trades with teams through offers."))
         vid = _own_venue(sit)
         if vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H:
             try:

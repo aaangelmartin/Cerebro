@@ -46,6 +46,9 @@ def venue_id(v: dict | None) -> str | None:
     return v.get("venue") or v.get("id")
 
 
+MAX_FEE_BPS, MAX_FEE_PER_CARD = 1000.0, 5.0     # RULES: fees are capped at 10 % and 5 P per card
+
+
 def _fee_parts(v: dict | None) -> tuple[float, float]:
     """(bps, per card) a taker pays: the worse of the fee in force and any announced change."""
     v = v or {}
@@ -56,6 +59,10 @@ def _fee_parts(v: dict | None) -> tuple[float, float]:
     if isinstance(pend, dict):
         bps = max(bps, float(pend.get("fee_bps") or 0))
         per = max(per, float(pend.get("fee_per_card") or 0))
+    if not house:
+        # A team venue may announce a fee rise that applies after we accept (red team: -226 P), and the API may
+        # not show it: price every team venue at the legal maximum, 10 % + 5 P per card.
+        bps, per = max(bps, MAX_FEE_BPS), max(per, MAX_FEE_PER_CARD)
     return bps, per
 
 
@@ -297,7 +304,8 @@ def broker_pitch(venue: dict | str | None) -> str | None:
     vid = venue_id(venue) if venue else None
     if not vid:
         return None
-    bps, per = _fee_parts(venue if isinstance(venue, dict) else {"venue": vid, "fee_bps": 0, "fee_per_card": 0})
+    v = venue if isinstance(venue, dict) else {}
+    bps, per = float(v.get("fee_bps") or 0), float(v.get("fee_per_card") or 0)    # our own listed fee
     fee = "no fee" if not bps and not per else f"fee {bps / 100:g} % + {per:g} P per card"
     return (f"Team 10 venue {vid}: {fee}, board market with a broker pairing crossing offers every tick. "
             f"Want-to-buy bids (give cash, want {{\"cards\": [...]}}) and card-for-card swaps welcome here, "

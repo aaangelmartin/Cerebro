@@ -91,7 +91,7 @@ class FillBids(unittest.TestCase):
         acc = kinds(acts, "accept_offer")
         self.assertEqual(len(acc), 1)
         self.assertEqual(acc[0].params["assets"], [1])
-        self.assertAlmostEqual(acc[0].expected["value_gain"], 20 - 5.6)            # v02: no fee
+        self.assertAlmostEqual(acc[0].expected["value_gain"], 20 - 5.6 - 7)        # team venue priced at the max fee
         self.assertEqual(acc[0].expected["kind"], "bid")
         self.assertEqual(gw.calls, ["/api/venues/v02/offers"])
 
@@ -111,7 +111,7 @@ class FillSwaps(unittest.TestCase):
         acc = kinds(acts, "accept_offer")
         self.assertEqual(len(acc), 1)
         self.assertIn(acc[0].params["assets"][0], (1, 2))
-        self.assertAlmostEqual(acc[0].expected["value_gain"], 16 - 1.25)            # v03: 1 % of 0 cash, no per card
+        self.assertAlmostEqual(acc[0].expected["value_gain"], 16 - 1.25 - 10)       # max fee: 5 P x 2 cards
         self.assertEqual(acc[0].expected["kind"], "swap")
         s.values = {"LAV-03": 16.0}
         self.assertTrue(rails.rail_cards(acc[0], s, make_ctx(10)).ok)
@@ -144,7 +144,7 @@ class FillSwaps(unittest.TestCase):
         self.assertAlmostEqual(bonus, 0.25 * 1.6 * (5 * 10 + 3 * 25 + 2 * 70))
         venue = dict(V03, offers=[offer(44, {"assets": [theirs(904, "LAV-10")]}, {"types": ["card:LAT-09"]}, venue="v03")])
         acc = kinds(d.fallback(sit(assets=assets, venues=[venue]), make_ctx(10)), "accept_offer")
-        self.assertAlmostEqual(acc[0].expected["value_gain"], 112 - 35 + bonus)
+        self.assertAlmostEqual(acc[0].expected["value_gain"], 112 - 35 + bonus - 10)   # max fee: 5 P x 2 cards
 
 
 class Addressed(unittest.TestCase):
@@ -158,7 +158,7 @@ class Addressed(unittest.TestCase):
         acc = kinds(acts, "accept_offer")
         self.assertEqual([a.params["offer"] for a in acc], [900])
         self.assertTrue(acc[0].expected["addressed"])
-        self.assertAlmostEqual(acc[0].expected["value_gain"], 20 - 5.6 - 1)          # v03 1 % of 20 -> 1 P
+        self.assertAlmostEqual(acc[0].expected["value_gain"], 20 - 5.6 - 7)          # team venue priced at the max: 10 % + 5 P
 
     def test_addressed_offer_for_a_specific_copy_of_ours(self):
         assets = [card(1, "SAL-07", 5.6), card(2, "SAL-07", 5.6)]

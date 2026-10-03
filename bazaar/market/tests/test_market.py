@@ -82,8 +82,8 @@ class Accepts(unittest.TestCase):
                  "offers": [ask_offer(2, "LAV-10", "rare", 80, venue="v03")]}
         acts = dom().fallback(sit(venues=[venue]), make_ctx(10))
         acc = [a for a in acts if a.kind == "accept_offer"]
-        self.assertEqual(len(acc), 1)
-        self.assertAlmostEqual(acc[0].expected["value_gain"], 112 - 80 - 1)
+        # team venues are priced at the legal maximum (10 % + 5 P): 112 - 80 - 8 - 5 = 19 < 25 % of 80 -> declined
+        self.assertEqual(acc, [])
 
     def test_fair_play_cap(self):
         d = dom()

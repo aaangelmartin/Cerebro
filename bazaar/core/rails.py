@@ -208,10 +208,30 @@ def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
             return Verdict(False, "cards", f"{ref} is protected")
         out[ref] = out.get(ref, 0) + 1
     if not human:
+        promised = _promised_refs(sit, held, exclude=set(give["assets"]))
         for ref, n in out.items():
-            if str(ref)[:3] in SCARCE_SETS and counts.get(ref, 0) - n < 1:
-                return Verdict(False, "cards", f"last copy of {ref}")
+            if str(ref)[:3] in SCARCE_SETS and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
+                return Verdict(False, "cards", f"last copy of {ref} (counting copies already promised)")
     return OK
+
+
+def _promised_refs(sit, held: dict, exclude: set) -> dict:
+    """ref -> copies of ours already promised elsewhere: our open offers that give assets, and dealer sell threads."""
+    ids = set()
+    me_id = (_get(sit, "me") or {}).get("id")
+    for o in _get(sit, "my_offers") or []:
+        if isinstance(o, dict) and (o.get("maker") in (None, me_id)) and o.get("status", "open") == "open":
+            ids.update(_asset_id(a) for a in ((o.get("give") or {}).get("assets") or []))
+    for t in _get(sit, "threads") or []:
+        if isinstance(t, dict) and (t.get("status") or "open") == "open":
+            sell = ((t.get("topic") or {}).get("sell") or {})
+            ids.update(sell.get("assets") or ([sell["asset"]] if "asset" in sell else []))
+    out: dict = {}
+    for aid in ids - set(exclude):
+        a = held.get(aid) or held.get(int(aid) if str(aid).isdigit() else aid)
+        if a:
+            out[a.get("ref")] = out.get(a.get("ref"), 0) + 1
+    return out
 
 
 def rail_duel(action: Action, sit=None, ctx=None) -> Verdict:
