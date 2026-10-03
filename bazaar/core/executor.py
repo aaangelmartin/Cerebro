@@ -93,7 +93,8 @@ def _call(action: Action, gw):
     if k == "close_thread":
         return "post", f"/api/threads/{p['thread']}/close", {}, None
     if k == "accept_offer":
-        return "post", f"/api/offers/{p['offer']}/accept", {}, None
+        # When the offer asks for a card type, `assets` names which of our copies we hand over.
+        return "post", f"/api/offers/{p['offer']}/accept", ({"assets": list(p["assets"])} if p.get("assets") else {}), None
     if k == "post_offer":
         body = {"venue": p.get("venue", "rastro"), "give": p["give"], "want": p["want"]}
         for f in ("to", "expires_in_ticks"):

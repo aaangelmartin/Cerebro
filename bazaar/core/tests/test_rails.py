@@ -256,3 +256,11 @@ class VenueReserve(unittest.TestCase):
         self.assertEqual(rails.rail_cash(buy, s, ctx()).rail, "cash")          # 336 - 30 < 40 + 270
         opening = Action("venue_open", {"name": "x"}, "broker")
         self.assertTrue(rails.rail_cash(opening, s, ctx()).ok)                 # 336 - 270 >= 40
+
+
+class AcceptWithChosenCopy(unittest.TestCase):
+    def test_chosen_copy_counts_as_given(self):
+        a = Action("accept_offer", {"offer": 7, "assets": [1],
+                                    "expect": offer({"cash": 200}, {"types": ["card:LAV-03"]})}, "market")
+        give, _ = rails.flows(a, sit())
+        self.assertIn(1, give["assets"])

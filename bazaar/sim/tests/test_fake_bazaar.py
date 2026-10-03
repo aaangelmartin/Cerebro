@@ -196,7 +196,7 @@ class FakeBazaarTest(unittest.TestCase):
         self.assertTrue(any(e["action"] == "level" for e in sch["upcoming"]))
         self.c.tick(5)
         lb = self.c.get("/api/leaderboard")[1]
-        self.assertIn("t10", lb["teams"])
+        self.assertIn("t10", [t["team"] for t in lb["teams"]])
         self.assertEqual(len(lb["teams"]), 18)
 
 

@@ -1066,7 +1066,8 @@ class World:
         for rank, t in enumerate(sorted(teams, key=lambda k: -teams[k]["score"]), 1):
             teams[t]["rank"] = rank
         self.lb_snapshot = {"tick": self.tick, "t_hours": self.t_hours(), "round": 1,
-                            "rounds": [{"round": 1, "name": "Simulated", "weight": 1, "status": "active"}], "teams": teams}
+                            "rounds": [{"round": 1, "name": "Simulated", "weight": 1, "status": "active"}],
+                            "teams": [{"team": t, **teams[t]} for t in sorted(teams, key=lambda k: teams[k]["rank"])]}
 
     def state(self) -> dict:
         return {"tick": self.tick, "cash": self.cash, "settled": self.settled, "collection_value": self.collection_value(),

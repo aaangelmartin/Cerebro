@@ -284,6 +284,13 @@ def _error_codes(row: Any, depth: int = 0) -> list[str]:
 
 # --------------------------------------------------------------------------- perceive
 
+def _team_rows(teams) -> list[dict]:
+    """Leaderboard teams as a list of dicts (the API sends a list; tolerate a {team: row} map too)."""
+    if isinstance(teams, dict):
+        return [{"team": k, **(v or {})} for k, v in teams.items()]
+    return [t for t in (teams or []) if isinstance(t, dict)]
+
+
 def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every: int = SLOW_EVERY,
              now: float | None = None, clock: dict | None = None) -> Situation:
     """Read the game once and return the Situation for this tick (see module docstring)."""
@@ -389,7 +396,7 @@ def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every
                 "teams": {t.get("team"): {k: t.get(k) for k in
                                           ("score", "negotiating", "market", "level", "album_filled",
                                            "pages_complete", "deals", "rank", "venue", "luck")}
-                          for t in lb.get("teams", [])}}])
+                          for t in _team_rows(lb.get("teams"))}}])
             known["last_lb"] = lb_key
 
     novelty = detect_novelty(known, sit, slow, live)

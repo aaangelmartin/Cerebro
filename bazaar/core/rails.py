@@ -94,7 +94,10 @@ def flows(action: Action, sit=None) -> tuple[dict, dict]:
         return _side(p["give"]), _side(p["want"])                # explicit override from the domain
     if action.kind == "accept_offer":
         exp = p.get("expect") or {}
-        return _side(exp.get("want")), _side(exp.get("give"))   # we hand over what the maker wants
+        give = _side(exp.get("want"))                            # we hand over what the maker wants
+        if p.get("assets"):                                      # ...as these copies of ours (sent in the body)
+            give["assets"] = list(dict.fromkeys([*give["assets"], *p["assets"]]))
+        return give, _side(exp.get("give"))
     if action.kind == "post_offer":
         return _side(p.get("give")), _side(p.get("want"))
     if action.kind in ("thread_message", "open_thread"):
