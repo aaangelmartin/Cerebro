@@ -262,3 +262,29 @@
 .scr-cerebro .cb-kpis.has-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .scr-cerebro .cb-kpis.has-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .scr-cerebro .cb-int { color: inherit; text-decoration: none; } .scr-cerebro .cb-int-of { font-size: 12px; color: var(--ink-3); }
+
+/* Intensidad del cerebro */
+.scr-cerebro .cb-i-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.scr-cerebro .cb-i-body.is-off { opacity: .45; pointer-events: none; }
+.scr-cerebro .cb-i-off { padding: 0 16px 14px; }
+.scr-cerebro .cb-i-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+@media (max-width: 1100px) { .scr-cerebro .cb-i-top { grid-template-columns: minmax(0, 1fr); } }
+.scr-cerebro .cb-i-mode { display: flex; }
+.scr-cerebro .cb-i-mode .cb-seg { padding: 7px 16px; font-size: 13px; }
+.scr-cerebro .cb-i-mode .cb-seg.on { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.scr-cerebro .cb-i-slide { display: flex; align-items: center; gap: 10px; }
+.scr-cerebro .cb-range { flex: 1; appearance: none; -webkit-appearance: none; height: 6px; background: var(--line-2); border-radius: 0; outline: none; }
+.scr-cerebro .cb-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 22px; background: var(--signal); border: 0; border-radius: 0; cursor: pointer; }
+.scr-cerebro .cb-range::-moz-range-thumb { width: 14px; height: 22px; background: var(--signal); border: 0; border-radius: 0; cursor: pointer; }
+.scr-cerebro .cb-i-level { font-size: 22px; min-width: 40px; text-align: right; }
+.scr-cerebro .cb-i-est { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.scr-cerebro .cb-i-rate { font-size: 22px; }
+.scr-cerebro .cb-i-why { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 1.45; }
+.scr-cerebro .cb-i-cap { margin: 0; }
+.scr-cerebro .cb-i-two { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 20px; border-top: 1px solid var(--line); padding-top: 12px; }
+@media (max-width: 1100px) { .scr-cerebro .cb-i-two { grid-template-columns: minmax(0, 1fr); } }
+.scr-cerebro .cb-i-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.scr-cerebro .cb-i-hrow { display: grid; grid-template-columns: 70px 76px 58px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12.5px; padding: 3px 0; }
+.scr-cerebro .cb-i-hwhy { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-cerebro .cb-i-up { color: var(--ok); } .scr-cerebro .cb-i-down { color: var(--warn); }
+.scr-cerebro .cb-link { background: none; border: 0; color: var(--ink-3); text-decoration: underline; font-size: 12px; }

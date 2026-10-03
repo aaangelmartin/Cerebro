@@ -922,19 +922,124 @@
     });
   }
 
+
+  // ---------- Intensidad del cerebro (the user asked for this control here, not on Bot) ----------
+  // GET brain/budget -> {mode, level, reason, changed, usd_per_hour_now, table:[{level, interval_ticks, usd_per_hour}],
+  //   settings:{interval_ticks, wake_kinds, wake_on_score_drop, min_gap_s}, history:[{ts, level, mode, reason}]}
+  // POST control {brain_intensity, brain_intensity_mode:"manual"} | {brain_intensity_mode:"auto"}
+  const I = { host: null, data: null, state: "idle", err: null, dragging: false, busy: false, at: 0, n: {} };
+  const WAKE = { chat: "mensajes del equipo", external: "mensajes de WhatsApp", official: "avisos de la organización", bargain: "gangas en el mercado",
+    dealer: "dealers nuevos o que abren", level: "cambios de nivel", set: "sets nuevos", schedule: "cambios de calendario", novelty: "novedades del juego",
+    review: "revisión de cada hora", duel: "duelos", bench: "Market Test", score: "saltos de puntos", offer: "ofertas dirigidas a nosotros", venue: "tiendas" };
+  function levelInfo(level) {
+    const t = ((I.data && I.data.table) || []).slice().sort((a, b) => a.level - b.level);
+    if (!t.length) return null;
+    if (level <= t[0].level) return t[0];
+    for (let i = 1; i < t.length; i++) if (level <= t[i].level) {
+      const a = t[i - 1], b = t[i], k = (level - a.level) / Math.max(1, b.level - a.level);
+      return { usd_per_hour: a.usd_per_hour + (b.usd_per_hour - a.usd_per_hour) * k, interval_ticks: Math.max(1, Math.round(a.interval_ticks + (b.interval_ticks - a.interval_ticks) * k)) };
+    }
+    return t[t.length - 1];
+  }
+  function intensityMount() {
+    const n = I.n = {};
+    n.auto = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity_mode: "auto" }, "Cerebro en automático") }, "Auto");
+    n.manual = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Cerebro en manual · nivel " + n.slider.value) }, "Manual");
+    n.slider = el("input", { type: "range", min: "0", max: "100", step: "1", class: "cb-range", "aria-label": "Intensidad del cerebro" });
+    n.slider.addEventListener("input", () => { I.dragging = true; estimate(+n.slider.value); });
+    n.slider.addEventListener("change", () => { I.dragging = false; setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Intensidad del cerebro: " + n.slider.value); });
+    n.level = el("b", { class: "num cb-i-level" }, "—");
+    n.rate = el("b", { class: "num cb-i-rate" }, "—");
+    n.every = el("span", { class: "cb-muted num" }, "");
+    n.why = el("div", { class: "cb-i-why" });
+    n.wake = el("div", { class: "cb-i-wake" });
+    n.hist = el("div", { class: "cb-i-hist" });
+    n.sub = el("span", { class: "panel-sub" }, "");
+    n.body = el("div", { class: "cb-i-body" },
+      el("div", { class: "cb-i-top" }, el("div", { class: "cb-i-mode" }, n.auto, n.manual),
+        el("div", { class: "cb-i-slide" }, el("span", { class: "cb-muted num" }, "0"), n.slider, el("span", { class: "cb-muted num" }, "100"), n.level),
+        el("div", { class: "cb-i-est" }, el("span", { class: "cb-muted" }, "≈"), n.rate, n.every)),
+      n.why, el("div", { class: "cb-i-two" }, n.wake, n.hist));
+    n.off = el("div", { class: "cb-i-off cb-muted", hidden: true }, "");
+    I.host = el("section", { class: "panel cb-intensity" }, el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Intensidad del cerebro"), n.sub,
+      el("div", { class: "panel-actions" }, el("a", { class: "cb-link", href: "#bot" }, "presupuesto en Bot"))), n.body, n.off);
+    intensityPaint();
+    return I.host;
+  }
+  function estimate(level) {
+    const n = I.n, li = levelInfo(level);
+    n.level.textContent = String(level);
+    n.rate.textContent = li ? fmtNum(li.usd_per_hour, 2) + " $/h" : "—";
+    n.every.textContent = li ? `planifica cada ${li.interval_ticks} tick${li.interval_ticks === 1 ? "" : "s"}` : "";
+  }
+  function intensityPaint() {
+    const n = I.n, d = I.data; if (!I.host) return;
+    const off = !d;
+    n.off.hidden = !(I.state === "off" || I.state === "error");
+    n.off.textContent = I.state === "error" ? "No se pudo leer la intensidad: " + ((I.err && I.err.message) || "") : "El control de intensidad aún no está activo.";
+    n.body.classList.toggle("is-off", off);
+    for (const x of [n.slider, n.auto, n.manual]) x.disabled = off || I.busy;
+    if (!d) { n.sub.textContent = I.state === "idle" ? "cargando…" : ""; return; }
+    const auto = d.mode !== "manual";
+    n.auto.classList.toggle("on", auto); n.manual.classList.toggle("on", !auto);
+    n.sub.textContent = (auto ? "automático: sube con los eventos y baja cuando no pasa nada" : "manual: se queda donde lo pongas") + " · nivel " + d.level;
+    if (!I.dragging && document.activeElement !== n.slider) {
+      n.slider.value = String(d.level ?? 0); estimate(+n.slider.value);
+      if (num(d.usd_per_hour_now) != null) n.rate.textContent = fmtNum(d.usd_per_hour_now, 2) + " $/h";
+      const st = d.settings || {};
+      if (st.interval_ticks) n.every.textContent = `planifica cada ${st.interval_ticks} ticks`;
+    }
+    const hist = (Array.isArray(d.history) ? d.history : []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const prev = hist.length > 1 ? hist[hist.length - 2] : null;
+    const from = prev && prev.level != null ? prev.level : null;
+    replace(n.why, el("span", { class: "cb-cap cb-i-cap" }, auto ? "Por qué está en " + d.level : "Último cambio"),
+      d.reason ? el("b", {}, (from != null && d.level > from ? "sube: " : from != null && d.level < from ? "baja: " : "") + d.reason) : el("span", { class: "cb-muted" }, "sin motivo registrado"),
+      d.changed ? el("span", { class: "cb-muted num" }, (from != null ? ` · ${from} → ${d.level}` : "") + " · " + when(d.changed)) : null);
+    const st = d.settings || {};
+    const kinds = (st.wake_kinds || []).map((k) => WAKE[k] || k);
+    if (st.wake_on_score_drop) kinds.push("caída de nuestra puntuación");
+    replace(n.wake, el("div", { class: "cb-cap" }, "Qué lo despierta a este nivel"),
+      kinds.length ? el("div", { class: "cb-i-chips" }, kinds.map((k) => el("span", { class: "tag res tone-mute" }, k))) : el("div", { class: "cb-muted" }, "Solo el intervalo fijo."),
+      st.min_gap_s ? el("div", { class: "cb-rows" }, `Como mucho un plan cada ${Math.round(st.min_gap_s)} s.`) : null);
+    const rows = hist.slice(-8).reverse();
+    replace(n.hist, el("div", { class: "cb-cap" }, "Últimos cambios de nivel"),
+      rows.length ? rows.map((h, i) => { const before = hist[hist.indexOf(h) - 1];
+        const up = before && h.level > before.level, down = before && h.level < before.level;
+        return el("div", { class: "cb-i-hrow" }, el("span", { class: "num cb-time" }, when(h.ts)),
+          el("b", { class: "num " + (up ? "cb-i-up" : down ? "cb-i-down" : "") }, (before ? before.level + " → " : "") + h.level),
+          el("span", { class: "tag res tone-mute" }, h.mode === "manual" ? "manual" : "auto"), el("span", { class: "cb-i-hwhy", title: h.reason || "" }, h.reason || "")); })
+        : el("div", { class: "cb-muted" }, "Sin cambios registrados."));
+  }
+  function replace(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
+  async function intensityPull(force) {
+    if (!I.host || I.busy || (!force && Date.now() - I.at < 4000)) return;
+    I.at = Date.now();
+    try { I.data = await A().brainBudget(); I.state = "on"; }
+    catch (e) { I.state = e && e.status === 404 ? "off" : "error"; I.err = e; if (e && e.status === 404) I.data = null; }
+    intensityPaint();
+  }
+  async function setIntensity(body, done) {
+    if (I.busy) return;
+    I.busy = true; intensityPaint();
+    try { await A().control(body); U().toast({ type: "deal", title: done }); }
+    catch (e) { U().toast({ type: "error", title: "No se pudo aplicar", text: (e && e.message) || String(e) }); }
+    finally { I.busy = false; I.at = 0; await intensityPull(true); }
+  }
+
   window.Screens.cerebro = {
     title: "Cerebro",
     mount(root) {
       S.root = root;
       root.replaceChildren(el("div", { class: "cb-layout" },
         el("div", { class: "scr-cerebro" },
-          el("div", { class: "cb-top" }, U().loading()), outboxMount(), externalMount(), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })),
+          intensityMount(), el("div", { class: "cb-top" }, U().loading()), outboxMount(), externalMount(), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })),
         chatMount()));
     },
     async refresh(root, data, params, opts) {
       S.root = root;
       chatPull();
       outboxPull(opts && opts.force);
+      intensityPull(opts && opts.force);
       extPull(opts && opts.force);
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
@@ -944,6 +1049,6 @@
       S.sig = sig; S.data = d;
       render();
     },
-    unmount() { S.root = null; S.sig = null; S.findHost = null; C.host = null; O.host = null; X.host = null; },
+    unmount() { S.root = null; S.sig = null; S.findHost = null; C.host = null; O.host = null; X.host = null; I.host = null; },
   };
 })();

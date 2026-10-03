@@ -266,6 +266,49 @@
         : kh.bad.map((k) => `Clave ${k.label} ${k.chip.toLowerCase()}`).join(" · ") + ": el bot sigue con " + (okL.length ? okL.join(", ") : "ninguna") + "."),
         ...kh.bad.map((k) => el("div", { class: "bot-small" }, `Clave ${k.label}: ${k.text}` + (k.since ? ` (desde ${window.ui.fmtTime(k.since)})` : "")))));
   }
+  // "Por propósito": spent today against that purpose's budget for today (GET brain/budget -> plan.purpose_caps);
+  // the caps the team set by hand win for Cerebro (cap_today) and for the whole day (day_cap)
+  function purposeList(sp) {
+    const bd = B.data || {}, plan = bd.plan || {};
+    const caps = { ...(plan.purpose_caps || {}) };
+    const team = bd.caps_set_by_team || {};
+    if (num(team.brain_day_cap) != null && num(bd.cap_today) != null) caps.strategy = bd.cap_today;
+    const spent = { ...(sp.by_purpose || {}) };
+    for (const [k, v] of Object.entries(plan.spent_by_purpose || {})) if (spent[k] == null) spent[k] = v;
+    const keys = Object.keys(spent).filter((k) => num(spent[k]) != null).sort((a, b) => (num(caps[b]) != null) - (num(caps[a]) != null) || spent[b] - spent[a]);
+    const max = Math.max(0.0001, ...keys.map((k) => spent[k]));
+    const rows = keys.map((k) => {
+      const v = spent[k], cap = num(caps[k]);
+      const pct = cap > 0 ? (v / cap) * 100 : null;
+      const tone = pct == null ? "" : pct >= 100 ? "bad" : pct >= 80 ? "warn" : "ok";
+      return el("div", { class: "bot-brow" },
+        el("div", { class: "bot-brow-h" }, el("span", {}, PURPOSE[k] || k),
+          k === "strategy" && num(team.brain_day_cap) != null ? el("span", { class: "bot-mono bot-muted bot-small" }, "tope del equipo") : el("span", {}),
+          el("span", { class: "bot-mono" }, usd(v), cap != null ? el("span", { class: "bot-muted" }, " / " + usd(cap)) : null,
+            pct != null ? el("span", { class: "bot-small bot-pp bot-pp-" + tone }, " " + Math.round(pct) + " %") : null)),
+        el("div", { class: "bot-bar" + (tone ? " bot-bar-" + tone : " bot-bar-plain") }, el("span", { style: `width:${Math.max(1, Math.min(100, Math.round(pct != null ? pct : (v / max) * 100)))}%` })));
+    });
+    const dayCap = num(team.day_cap) != null && num(bd.day_cap) != null ? bd.day_cap : null;
+    const planToday = num(plan.plan_today), spentDay = num(bd.day_total_spent) ?? num(sp.usd);
+    const res = plan.reserves || {};
+    const foot = [];
+    if (planToday != null || dayCap != null) {
+      const ref = dayCap != null ? dayCap : planToday;
+      const pct = ref > 0 ? (spentDay / ref) * 100 : 0;
+      const tone = pct >= 100 ? "bad" : pct >= 80 ? "warn" : "ok";
+      foot.push(el("div", { class: "bot-brow bot-ptotal" },
+        el("div", { class: "bot-brow-h" }, el("b", {}, "Total hoy"), el("span", { class: "bot-mono bot-muted bot-small" }, dayCap != null ? "tope del equipo" + (planToday != null ? " · plan " + usd(planToday) : "") : "plan"),
+          el("span", { class: "bot-mono" }, usd(spentDay), el("span", { class: "bot-muted" }, " / " + usd(ref)), el("span", { class: "bot-small bot-pp bot-pp-" + tone }, " " + Math.round(pct) + " %"))),
+        el("div", { class: "bot-bar bot-bar-" + tone }, el("span", { style: `width:${Math.max(1, Math.min(100, Math.round(pct)))}%` }))));
+    }
+    if (num(res.today) != null || num(res.tomorrow) != null) {
+      const ss = plan.sessions || {};
+      foot.push(el("div", { class: "bot-muted bot-small bot-pres" }, `Reservado para duelos y Market Test: hoy ${num(res.today) != null ? usd(res.today) : "—"} · mañana ${num(res.tomorrow) != null ? usd(res.tomorrow) : "—"}`,
+        ss.duels_today != null ? ` (hoy ${ss.duels_today} de duelos y ${ss.bench_today ?? 0} tests; mañana ${ss.duels_tomorrow ?? 0} y ${ss.bench_tomorrow ?? 0})` : ""));
+    }
+    return el("div", { class: "bot-blist" }, el("div", { class: "bot-cap" }, "Por propósito · gastado / presupuesto de hoy"),
+      ...(rows.length ? rows : [el("div", { class: "bot-muted bot-small" }, "sin gasto")]), ...foot);
+  }
   function paintSpend() {
     const box = S.root.querySelector(".bot-spend");
     const sp = S.spend || (S.ov && S.ov.spend);
@@ -285,7 +328,7 @@
           el("div", { class: "bot-mono bot-small bot-muted" }, cap ? `${Math.round(((sp.usd || 0) / cap) * 100)} % del tope` : ""))),
       el("div", { class: "bot-spend-cols" },
         keyList(sp),
-        barList("Por propósito", sp.by_purpose, null, { label: (k) => PURPOSE[k] || k }),
+        purposeList(sp),
         barList("Por modelo", sp.by_model, null, { label: modelName })));
     // ladder
     const lad = S.root.querySelector(".bot-ladder");
@@ -460,29 +503,10 @@
   //   day_total_spent, day_cap, projected_spend_by_close, hours_left, keys_headroom, last_change:{ts, from, to, reason}}
   // POST control {brain_intensity, brain_intensity_mode} / {brain_day_cap} / {day_cap}
   const B = { host: null, data: null, state: "idle", err: null, dragging: false, busy: false, at: 0, n: {} };
-  // $/h and interval for any level, interpolated from the backend's table
-  function levelInfo(level) {
-    const t = ((B.data && B.data.table) || []).slice().sort((a, b) => a.level - b.level);
-    if (!t.length) return null;
-    if (level <= t[0].level) return t[0];
-    for (let i = 1; i < t.length; i++) if (level <= t[i].level) {
-      const a = t[i - 1], b = t[i], k = (level - a.level) / Math.max(1, b.level - a.level);
-      return { level, usd_per_hour: a.usd_per_hour + (b.usd_per_hour - a.usd_per_hour) * k,
-        interval_ticks: Math.max(1, Math.round(a.interval_ticks + (b.interval_ticks - a.interval_ticks) * k)) };
-    }
-    return t[t.length - 1];
-  }
   function brainMount() {
     const n = B.n = {};
-    n.auto = el("button", { type: "button", class: "bot-seg-b", onclick: () => setBrain({ brain_intensity_mode: "auto" }, "Cerebro en automático") }, "Auto");
-    n.manual = el("button", { type: "button", class: "bot-seg-b", onclick: () => setBrain({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Cerebro en manual · nivel " + n.slider.value) }, "Manual");
-    n.slider = el("input", { type: "range", min: "0", max: "100", step: "1", class: "bot-range", "aria-label": "Intensidad del cerebro" });
-    n.slider.addEventListener("input", () => { B.dragging = true; brainEstimate(+n.slider.value); });
-    n.slider.addEventListener("change", () => { B.dragging = false; setBrain({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Intensidad del cerebro: " + n.slider.value); });
-    n.level = el("b", { class: "bot-mono bot-brain-level" }, "—");
-    n.rate = el("b", { class: "bot-mono bot-brain-rate" }, "—");
-    n.every = el("span", { class: "bot-muted bot-small bot-mono" }, "");
-    n.why = el("div", { class: "bot-brain-why bot-small" });
+    // intensity is controlled on the Cerebro screen; here only a read-only line that links there
+    n.line = el("a", { class: "bot-brain-line", href: "#cerebro" }, "Intensidad del cerebro: —");
     n.proj = el("b", { class: "bot-mono" }, "—"); n.hours = el("b", { class: "bot-mono" }, "—"); n.head = el("b", { class: "bot-mono" }, "—");
     n.barBrain = el("div", { class: "bot-brain-bar" }); n.barDay = el("div", { class: "bot-brain-bar" });
     const capIn = (name, label) => {
@@ -505,11 +529,7 @@
       el("div", { class: "bot-brain-caps bot-brain-caps-1" }, capIn("budget_total_usd", "Presupuesto total del evento")));
     n.body = el("div", { class: "bot-pb bot-brain-body" },
       n.total,
-      el("div", { class: "bot-brain-top" },
-        el("div", { class: "bot-seg bot-brain-mode" }, n.auto, n.manual),
-        el("div", { class: "bot-brain-slide" }, el("span", { class: "bot-muted bot-small" }, "0"), n.slider, el("span", { class: "bot-muted bot-small" }, "100"), n.level),
-        el("div", { class: "bot-brain-est" }, el("span", { class: "bot-muted bot-small" }, "≈"), n.rate, n.every)),
-      n.why,
+      n.line,
       el("div", { class: "bot-brain-grid" },
         el("div", {}, el("div", { class: "bot-cap" }, "Cerebro hoy"), n.barBrain),
         el("div", {}, el("div", { class: "bot-cap" }, "Todo el día (todas las llamadas)"), n.barDay)),
@@ -520,15 +540,9 @@
       el("div", { class: "bot-brain-caps" }, capIn("brain_day_cap", "Tope del cerebro hoy"), capIn("day_cap", "Tope de todo el día")));
     n.off = el("div", { class: "bot-pb bot-muted", hidden: true }, "El presupuesto del cerebro aún no está activo.");
     n.sub = el("span", { class: "bot-muted bot-mono bot-small" }, "");
-    B.host = el("section", { class: "bot-panel bot-brain" }, el("div", { class: "bot-ph" }, el("h2", {}, "Cerebro · intensidad y presupuesto"), n.sub), n.body, n.off);
+    B.host = el("section", { class: "bot-panel bot-brain" }, el("div", { class: "bot-ph" }, el("h2", {}, "Presupuesto"), n.sub), n.body, n.off);
     brainPaint();
     return B.host;
-  }
-  function brainEstimate(level) {
-    const n = B.n, li = levelInfo(level);
-    n.level.textContent = String(level);
-    n.rate.textContent = li ? fmt(li.usd_per_hour, 2) + " $/h" : "—";
-    n.every.textContent = li ? `planifica cada ${li.interval_ticks} tick${li.interval_ticks === 1 ? "" : "s"}` : "";
   }
   function bar(host, spent, cap) {
     const pct = cap > 0 ? Math.min(100, (spent / cap) * 100) : 0;
@@ -542,16 +556,13 @@
     n.off.hidden = !(B.state === "off" || B.state === "error");
     n.off.textContent = B.state === "error" ? "No se pudo leer el presupuesto del cerebro: " + ((B.err && B.err.message) || "") : "El presupuesto del cerebro aún no está activo.";
     n.body.classList.toggle("is-off", off);
-    for (const x of [n.slider, n.auto, n.manual, n.brain_day_cap, n.day_cap, n.budget_total_usd]) x.disabled = off || B.busy;
+    for (const x of [n.brain_day_cap, n.day_cap, n.budget_total_usd]) x.disabled = off || B.busy;
     if (!d) { n.sub.textContent = B.state === "idle" ? "cargando…" : ""; return; }
     const auto = d.mode !== "manual";
-    n.auto.classList.toggle("is-on", auto); n.manual.classList.toggle("is-on", !auto);
-    n.sub.textContent = (auto ? "automático" : "manual") + " · nivel " + d.level;
-    if (!B.dragging && document.activeElement !== n.slider) { n.slider.value = String(d.level ?? 0); brainEstimate(+n.slider.value); if (num(d.usd_per_hour_now) != null) n.rate.textContent = fmt(d.usd_per_hour_now, 2) + " $/h"; }
-    const lc = d.last_change;
-    n.why.replaceChildren(...(lc && lc.reason ? [el("span", { class: "bot-muted" }, auto ? "Último cambio automático: " : "Último cambio: "),
-      el("b", {}, (lc.to > lc.from ? "sube" : lc.to < lc.from ? "baja" : "se mantiene") + ": " + lc.reason), el("span", { class: "bot-muted bot-mono" }, ` · ${lc.from} → ${lc.to} · ${window.ui.fmtTime(lc.ts)}`)]
-      : [el("span", { class: "bot-muted" }, auto ? "En automático el cerebro sube cuando hay eventos (duelos, Market Test) y baja cuando el juego está parado." : "En manual el nivel se queda donde lo pongas.")]));
+    n.sub.textContent = "total del evento, topes de hoy y reservas";
+    n.line.replaceChildren(el("span", { class: "bot-muted" }, "Intensidad del cerebro: "), el("b", { class: "bot-mono" }, String(d.level ?? "—")),
+      el("span", { class: "bot-muted" }, " · " + (auto ? "auto" : "manual") + (num(d.usd_per_hour_now) != null ? " · ≈ " + fmt(d.usd_per_hour_now, 2) + " $/h" : "")),
+      el("span", { class: "bot-brain-go" }, " → ver en Cerebro"));
     // event total: shown only when the backend sends it
     const bt = num(d.budget_total), st = num(d.spent_total);
     n.total.hidden = bt == null && st == null;
@@ -585,7 +596,7 @@
   async function brainPull(force) {
     if (!B.host || B.busy || (!force && Date.now() - B.at < 4000)) return;
     B.at = Date.now();
-    try { B.data = await A().brainBudget(); B.state = "on"; }
+    try { B.data = await A().brainBudget(); B.state = "on"; if (S.root) paintSpend(); }
     catch (e) { B.state = e && e.status === 404 ? "off" : "error"; B.err = e; if (e && e.status === 404) B.data = null; }
     brainPaint();
   }
