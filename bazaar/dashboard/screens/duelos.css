@@ -94,3 +94,6 @@
 .scr-duelos .dl-sc.tone-bad { border-left-color: var(--dl-bad); } .scr-duelos .dl-sc.tone-bad .dl-sc-v { color: var(--dl-bad); }
 .scr-duelos .dl-sc.tone-warn { border-left-color: var(--pause, #F08A3E); } .scr-duelos .dl-sc.tone-warn .dl-sc-v { color: var(--pause, #F08A3E); }
 .scr-duelos .dl-sc.tone-live { border-left-color: var(--dl-violet); } .scr-duelos .dl-sc.tone-live .dl-sc-v { color: var(--dl-violet); }
+.scr-duelos .dl-livemark { color: var(--ok); border: 1px solid var(--ok); background: var(--ok-soft); font-size: 11px; padding: 0 6px; white-space: nowrap; }
+.scr-duelos .dl-pane.is-ended { opacity: .9; }
+.scr-duelos .dl-endwhen { margin-left: 8px; font-size: 11px; }

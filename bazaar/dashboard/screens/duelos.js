@@ -597,6 +597,11 @@
       }
       // recorder may know live duels the bot snapshot lacks (bot stopped)
       if (!liveDuels.length) for (const hd of heads.filter((x) => x.status === "live")) shown.push(await getTranscript(hd));
+      // never an empty grid: fill up to 6 with our latest finished duels (each pane shows how it ended)
+      const have = new Set(shown.map((d) => +(d.duel ?? d.id)));
+      const recent = heads.filter((x) => x.status && x.status !== "live" && !have.has(+(x.duel ?? x.id)))
+        .sort((a, b) => (b.last_change_tick ?? 0) - (a.last_change_tick ?? 0) || (b.duel ?? b.id) - (a.duel ?? a.id)).slice(0, Math.max(0, 6 - shown.length));
+      for (const hd of recent) shown.push({ ...(await getTranscript(hd)), _recent: true });
     } else {
       const closed = heads.filter((x) => x.status && x.status !== "live")
         .sort((a, b) => (b.last_change_tick ?? 0) - (a.last_change_tick ?? 0) || (b.duel ?? b.id) - (a.duel ?? a.id));
@@ -619,11 +624,24 @@
     return true;
   }
 
+  // live grid: "● en vivo" on live duels; finished ones show when they ended (their result chip is already there)
+  function markPane(pane, d) {
+    const row = pane.querySelector(".dl-pane-h .dl-row");
+    if (!row) return pane;
+    if (d._recent) {
+      pane.classList.add("is-ended");
+      const msgs = d.messages || []; const last = msgs[msgs.length - 1];
+      const t = last && last.tick != null ? last.tick : d.last_change_tick;
+      if (t != null && U().tickClock) row.append(h("span", { class: "dl-mono dl-muted dl-endwhen" }, U().tickClock(t)));
+    } else row.insertBefore(h("span", { class: "dl-livemark" }, "● en vivo"), row.querySelector(".dl-sp"));
+    return pane;
+  }
   function render(root, ctx, params) {
     const grid = root.querySelector(".dl-grid");
     if (S.fb && S.fb.setCounts) { const c = { compra: 0, venta: 0 }; for (const d of ctx.shown) c[roleType(d)]++; S.fb.setCounts(c); }
     const list = ctx.shown.filter(matches);
-    root.querySelector(".dl-sub").textContent = `${ctx.liveCount} en vivo · ${ctx.closedOurs.length} cerrados${ctx.tick !== null ? " · tick " + ctx.tick : ""}`;
+    const nRecent = S.view === "vivo" ? ctx.shown.filter((d) => d._recent).length : 0;
+    root.querySelector(".dl-sub").textContent = `${ctx.liveCount} en vivo` + (nRecent ? ` · últimos ${nRecent} duelos` : "") + ` · ${ctx.closedOurs.length} cerrados${ctx.tick !== null ? " · tick " + ctx.tick : ""}`;
     const tail = [];
     if (!list.length) {
       const msg = S.view === "vivo" ? (ctx.liveErr ? null : "No hay duelos en vivo ahora. El juego está cerrado o no hay sesión de duelos.") : "No hay duelos cerrados que mostrar.";
@@ -635,7 +653,7 @@
       key: (d) => d.duel ?? d.id,
       sig: (d) => { const id = d.duel ?? d.id, decs = ctx.decsByDuel[id] || [], last = decs[decs.length - 1];
         return JSON.stringify([(d.messages || []).length, d.status, d.rounds, d.your_offer, d.rival_offer, last && last.id, ctx.tick]); },
-      render: (d) => paneFor(d, ctx), inner: ".dl-chat", stickEnd: true, tail });
+      render: (d) => markPane(paneFor(d, ctx), d), inner: ".dl-chat", stickEnd: true, tail });
     const sc = root.querySelector(".dl-scorehost");
     if (sc) U().keepScroll(sc, () => sc.replaceChildren(scoreboard(ctx)));
     const side = root.querySelector(".dl-side-body");

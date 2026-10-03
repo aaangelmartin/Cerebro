@@ -118,3 +118,12 @@
 .scr-mercado .mk-chat-hist.mk-st-open .mk-status { color: var(--tc-duelo); background: color-mix(in srgb, var(--tc-duelo) 15%, transparent); }
 .scr-duelos .dl-hist .dl-score { margin: 0; }
 .scr-mercado .mk-duel .pb-nodeal { display: none; } /* the status chip already says it */
+/* live grid: how each conversation stands or ended */
+.scr-mercado .mk-end { border: 1px solid currentColor; padding: 0 6px; font-size: 11px; white-space: nowrap; }
+.scr-mercado .mk-end.is-live { color: var(--ok); background: var(--ok-soft); }
+.scr-mercado .mk-end.is-deal { color: var(--ok); }
+.scr-mercado .mk-end.is-walked { color: var(--bad); }
+.scr-mercado .mk-end.is-closed { color: var(--ink-3); }
+.scr-mercado .mk-end-when { font-family: var(--font-num); font-size: 11px; margin-left: 6px; white-space: nowrap; }
+.scr-mercado .mk-chat.is-ended { opacity: .88; }
+.scr-mercado .mk-chat.is-ended .mk-chat-f { display: none; }

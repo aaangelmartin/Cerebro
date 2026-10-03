@@ -25,6 +25,7 @@
   const U = () => window.ui || {};
   const fmtP = (n) => (n == null || !isFinite(n) ? "—" : U().fmtP ? U().fmtP(n) : (Math.round(n * 10) / 10).toLocaleString("es-ES") + " P");
   const pad = (n) => String(n).padStart(2, "0");
+  const num = (x) => (x === null || x === undefined || x === "" || isNaN(+x) ? null : +x);
   const tclock = (tick) => (U().tickClock ? U().tickClock(tick) : "t" + (tick != null ? tick : "?"));
   const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   function fmtTs(ts, withDay) {
@@ -257,6 +258,29 @@
     return card;
   }
 
+  // final state on a live-grid card: "● en vivo" for open threads, else how it ended, at what price and when
+  function threadEnd(t) {
+    const msgs = arr(t.messages).slice().sort((a, b) => (a.tick || 0) - (b.tick || 0) || (a.id || 0) - (b.id || 0));
+    const last = msgs[msgs.length - 1];
+    const when = last ? tclock(last.tick) : t.last_change_tick != null ? tclock(t.last_change_tick) : "";
+    if (!t.status || t.status === "open") return { cls: "is-live", text: "● en vivo", when };
+    if (t.status === "deal") {
+      const acc = msgs.filter((m) => m.offer && /accept|deal|settled|filled/.test(String(m.offer.status))).pop() || msgs.filter((m) => m.offer).pop();
+      const p = acc ? offerCash(acc.offer) : null;
+      return { cls: "is-deal", text: p != null ? "Acuerdo a " + fmtP(p) : "Acuerdo", when };
+    }
+    if (t.status === "walked") return { cls: "is-walked", text: "Se levantó", when };
+    if (t.status === "expired") return { cls: "is-closed", text: "Caducada", when };
+    return { cls: "is-closed", text: "Cerrada", when };
+  }
+  function markState(card, t) {
+    const e = threadEnd(t);
+    const st = card.querySelector(".mk-status");
+    if (st) { st.textContent = e.text; st.className = "mk-status mk-end " + e.cls; st.after(h("span", { class: "mk-end-when mk-muted" }, e.when)); }
+    if (e.cls !== "is-live") card.classList.add("is-ended");
+    return card;
+  }
+
   // ---------- live: side ----------
   function tapeRow(e) {
     const row = h("div", { class: "mk-tape-row mk-t-" + e.type + (e.us ? " is-us" : "") },
@@ -346,16 +370,30 @@
     if (!threads.ok) {
       chatsHost.replaceChildren(stateBox("error", threads.err));
     } else {
-      const open = arr(threads.v).filter((t) => !t.status || t.status === "open");
-      const details = await Promise.all(open.map((t) => safe(() => api.recThread(t.id))));
-      const full = details.map((d, i) => (d.ok ? { ...open[i], ...(d.v.thread || d.v) } : open[i]));
-      const nd = full.filter((t) => t.kind !== "team").length;
-      if (head) head.textContent = `${full.length} conversaciones abiertas · ${nd} con dealers y ${full.length - nd} con equipos`;
+      // The live grid never looks empty: open conversations first, then the most recent finished ones up to 6.
+      const all = arr(threads.v.items || threads.v);
+      const open = all.filter((t) => !t.status || t.status === "open");
+      const act = (t) => num(t.updated) || (U().tickWall && U().tickWall(t.last_change_tick)) || num(t.last_change_tick) || 0;
+      const recent = all.filter((t) => t.status && t.status !== "open").sort((a, b) => act(b) - act(a)).slice(0, Math.max(0, 6 - open.length));
+      S.thCache = S.thCache || {};
+      const detail = async (t, cache) => {
+        const c = S.thCache[t.id];
+        if (cache && c && c.n === t.message_count && c.st === t.status) return c.v;
+        const d = await safe(() => api.recThread(t.id));
+        const v = d.ok ? { ...t, ...(d.v.thread || d.v) } : t;
+        if (cache && d.ok) S.thCache[t.id] = { n: t.message_count, st: t.status, v };
+        return v;
+      };
+      const full = (await Promise.all(open.map((t) => detail(t, false)))).concat(await Promise.all(recent.map((t) => detail(t, true))));
+      const nd = open.filter((t) => t.kind !== "team").length;
+      if (head) head.textContent = open.length
+        ? `${open.length} abiertas · ${nd} con dealers y ${open.length - nd} con equipos` + (recent.length ? ` · últimas ${recent.length} conversaciones` : "")
+        : `0 abiertas · últimas ${recent.length} conversaciones`;
       U().keyedList(chatsHost, full, {
         key: (t) => t.id,
         sig: (t) => JSON.stringify([arr(t.messages).length, t.status, arr(t.messages).map((m) => m.offer && m.offer.status), arr(t.standing_offers).map((o) => [o.id, o.status]), decisionsFor(decs, t).length]),
-        render: (t) => renderChat(t, decs, dealerNames), inner: ".mk-msgs", stickEnd: true,
-        tail: full.length ? [] : [stateBox("empty", "No hay conversaciones abiertas ahora mismo. El mercado puede estar cerrado.")] });
+        render: (t) => markState(renderChat(t, decs, dealerNames), t), inner: ".mk-msgs", stickEnd: true,
+        tail: full.length ? [] : [stateBox("empty", "Todavía no hemos tenido ninguna conversación.")] });
     }
     renderSide(root, ctx);
   }
