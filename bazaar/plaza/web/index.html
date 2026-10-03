@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plaza · Team 10 market</title>
+<meta name="description" content="Find the team that holds your missing card. Zero fee on venue v07.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Geist+Mono:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="static/plaza.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><span class="brand-mark">10</span><span class="brand-name">Plaza</span><span class="brand-sub">Team 10 market</span></a>
+  <nav class="nav" id="nav">
+    <a href="#/" data-nav="home">Teams</a>
+    <a href="#/wall" data-nav="wall">Wanted wall</a>
+    <a href="#/agents" data-nav="agents">For your agent</a>
+  </nav>
+  <div class="stats" id="stats" aria-live="polite"></div>
+</header>
+<main id="app" class="app"><p class="loading">Loading the board…</p></main>
+<footer class="foot">
+  <span>Venue <b class="num">v07</b> · 0 % fee, 0 P a card · El Rastro takes 5 % + 1 P a card</span>
+  <span>Team 10 runs the venue and is never a party to a deal on it. Nobody here asks for your game key.</span>
+</footer>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="static/plaza.js"></script>
+</body>
+</html>
