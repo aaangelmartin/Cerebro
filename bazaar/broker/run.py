@@ -675,9 +675,12 @@ def main(argv: list[str] | None = None) -> None:
     if not against_sim:
         from ..intel.needs import needs_report
         from .matchmaker import VENUE, MatchMaker
+        from ..plaza import server as plaza
         loop.matchmaker = MatchMaker(config.LIVE / "matchmaker.json", needs_report,
                                      lambda: _read_json(config.LIVE / "control.json"),
-                                     announce=client.announce, message=team_message(gw, VENUE))
+                                     announce=client.announce, message=team_message(gw, VENUE),
+                                     page_fn=lambda: plaza.public_url(config.LIVE, config.DATA),
+                                     declared_fn=lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record"))
     print(f"broker: {'fake bazaar' if against_sim else 'live'} | key {'present' if key else 'MISSING'} | "
           f"writes {'on' if writes()[0] else 'off (' + writes()[1] + ')'} | out {out}", flush=True)
     while True:

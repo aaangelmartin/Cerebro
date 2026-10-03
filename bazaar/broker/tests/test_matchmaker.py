@@ -211,6 +211,38 @@ class BigTicketsAndWording(unittest.TestCase):
         self.assertEqual([p["ref"] for p in M.mix([], tickets[:2])], ["X0", "X1"])
 
 
+class PlazaLinkTest(unittest.TestCase):
+    """The venue's announcements point at the plaza, and pairs both agents declared there go first."""
+
+    def test_announcement_carries_the_page_and_fits(self):
+        pair = {"kind": "wanted", "seller": "t09", "buyer": "t07", "ref": "LAT-06", "rarity": "uncommon",
+                "price": 20, "ask": 20.0, "bid": 0, "saves": 2}
+        text = M.announcement([pair], page="https://example.org/plaza")
+        self.assertTrue(text.endswith("https://example.org/plaza/"))
+        self.assertLessEqual(len(text), M.MAX_TEXT)
+        self.assertNotIn("example.org", M.announcement([pair]))
+        long = M.announcement([dict(pair, ref=f"LAT-{i:02d}") for i in range(1, 9)], limit=8, page="https://example.org/plaza")
+        self.assertLessEqual(len(long), M.MAX_TEXT)
+        self.assertTrue(long.endswith("https://example.org/plaza/"))
+
+    def test_declared_pairs_lead_and_respect_the_exclusions(self):
+        with tempfile.TemporaryDirectory() as d:
+            said = []
+            declared = [{"kind": "wanted", "seller": "t03", "buyer": "t04", "ref": "LAT-03", "rarity": "common",
+                         "price": 8, "ask": 8.0, "bid": 0.0, "saves": 1, "maybe_last": False, "score": 9.0, "why": "x"},
+                        {"kind": "wanted", "seller": "t06", "buyer": "t04", "ref": "RET-03", "rarity": "common",
+                         "price": 8, "ask": 8.0, "bid": 0.0, "saves": 1, "maybe_last": False, "score": 9.0, "why": "x"}]
+            mm = M.MatchMaker(Path(d) / "mm.json", lambda: report(), lambda: {"matchmaker_exclude": ["t06"]},
+                              announce=said.append, rarity_fn=lambda: RARITY,
+                              page_fn=lambda: "https://example.org/plaza", declared_fn=lambda: declared)
+            done = mm.step(100)
+            self.assertEqual(done["pairs"], 1)                      # the pair with the excluded team is dropped
+            self.assertTrue(done["announced"])
+            self.assertIn("LAT-03", said[0])
+            self.assertNotIn("RET-03", said[0])
+            self.assertIn("https://example.org/plaza/", said[0])
+
+
 if __name__ == "__main__":
     unittest.main()
 

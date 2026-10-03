@@ -128,6 +128,7 @@ def default_services() -> list[Service]:
         Service("strategist", [PY, "-u", "-m", "bazaar.strategist.run"], heartbeat="strategist_status.json",
                 stale_ticks=4),
         Service("official", [PY, "-u", "-m", "bazaar.intel.official"]),
+        Service("plaza", [PY, "-u", "-m", "bazaar.plaza.server"]),      # the public market board (127.0.0.1:8793)
         Service("recorder", [PY, "-u", "-m", "bazaar.recorder.run"], heartbeat="recorder_status.json",
                 stale_ticks=3),
     ]

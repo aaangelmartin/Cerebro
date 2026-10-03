@@ -195,7 +195,8 @@ def one_per_card(pairs: list[dict]) -> list[dict]:
     return out
 
 
-def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len: int = MAX_TEXT) -> str | None:
+def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len: int = MAX_TEXT,
+                 page: str | None = None) -> str | None:
     """One public line per card, with who, what and at which price. The recipe is the one that settled every
     team-venue deal on Saturday: one side posts the offer ADDRESSED to the other on a 0-fee venue and the
     other accepts it; no broker wait and nobody can snipe it."""
@@ -226,10 +227,11 @@ def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len:
     head = (f"{venue} (Team 10) matches cards to the team that needs them. 0 % fee, 0 P a card: post your "
             f"offer here addressed to the other team and they accept it. Open now: ")
     text = head + " | ".join(lines)
-    while len(text) > max_len and len(lines) > 1:
+    tail = f" Every team's wants, spares and matches: {page}/" if page else ""   # the plaza (bazaar.plaza)
+    while len(text) + len(tail) > max_len and len(lines) > 1:
         lines.pop()
         text = head + " | ".join(lines)
-    return text[:max_len]
+    return text[:max_len - len(tail)] + tail
 
 
 def thread_texts(p: dict, venue: str = VENUE) -> dict[str, str]:
@@ -261,8 +263,11 @@ class MatchMaker:
 
     def __init__(self, state_file: Path, report_fn: Callable[[], dict], control_fn: Callable[[], dict],
                  announce: Callable[[str], Any] | None = None, message: Callable[[str, str], Any] | None = None,
-                 rarity_fn: Callable[[], dict] = _rarities, venue: str = VENUE, us: str = US):
+                 rarity_fn: Callable[[], dict] = _rarities, venue: str = VENUE, us: str = US,
+                 page_fn: Callable[[], str | None] | None = None,
+                 declared_fn: Callable[[], list[dict]] | None = None):
         self.state_file, self.report_fn, self.control_fn = Path(state_file), report_fn, control_fn
+        self.page_fn, self.declared_fn = page_fn, declared_fn      # the plaza: its address, and what agents declared
         self._announce, self._message, self.rarity_fn = announce, message, rarity_fn
         self.venue, self.us = venue, us
         self.state: dict = {"announced_tick": None, "sent": {}, "threads": [], "pairs": [], "log": []}
@@ -321,6 +326,13 @@ class MatchMaker:
         rar = self.rarity_fn()
         pairs = find_pairs(report, rar, us=self.us, venue=self.venue, exclude=exclude)
         pairs = mix(pairs, big_tickets(report, rar, us=self.us, venue=self.venue, exclude=exclude))
+        try:                                                   # pairs both agents declared on the plaza go first
+            declared = [p for p in (self.declared_fn() if self.declared_fn else [])
+                        if p.get("seller") not in exclude and p.get("buyer") not in exclude]
+        except Exception:  # noqa: BLE001 - the plaza is optional
+            declared = []
+        seen_keys = {pair_key(p) for p in declared}
+        pairs = declared + [p for p in pairs if pair_key(p) not in seen_keys]
         done = {"pairs": len(pairs), "announced": False, "messages": 0}
         old = {pair_key(p): p for p in self.state.get("pairs", [])}
         kept = []
@@ -336,7 +348,11 @@ class MatchMaker:
 
         ann_at = max([x for x in (self.state.get("announced_tick"), last_venue_announce) if x is not None], default=None)
         new = [p for p in pairs if self._fresh(tick, "ann:" + pair_key(p))] or pairs
-        text = announcement(new, self.venue)
+        try:
+            page = self.page_fn() if self.page_fn else None
+        except Exception:  # noqa: BLE001
+            page = None
+        text = announcement(new, self.venue, page=page)
         if text and self._announce and (ann_at is None or tick - ann_at >= ANNOUNCE_EVERY):
             try:
                 self._announce(text)

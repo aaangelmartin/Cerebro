@@ -227,6 +227,15 @@ def apply_control(live: Path, body: dict) -> dict:
         if body["matchmaker"] not in ("on", "off"):
             raise ValueError("matchmaker must be \"on\" or \"off\"")
         change["matchmaker"] = body["matchmaker"]
+    if "plaza" in body:                                 # bazaar.plaza: the public market board
+        if body["plaza"] not in ("on", "off"):
+            raise ValueError("plaza must be \"on\" or \"off\"")
+        change["plaza"] = body["plaza"]
+    if "plaza_url" in body:                             # where other teams reach it (the tunnel address + /plaza)
+        u = body["plaza_url"]
+        if u is not None and not (isinstance(u, str) and u.startswith("https://") and len(u) < 200):
+            raise ValueError("plaza_url must be an https URL or null")
+        change["plaza_url"] = u
     if "matchmaker_threads" in body:
         if not isinstance(body["matchmaker_threads"], bool):
             raise ValueError("matchmaker_threads must be true or false")
