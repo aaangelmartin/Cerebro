@@ -654,8 +654,8 @@ class MarketDomain:
         self._kept = kept
 
         try:                                       # cards the brain ordered sold to a dealer: not ours to list
-            from bazaar.brain.strategy import ordered_sell_refs
-            ordered = ordered_sell_refs()
+            from bazaar.brain.strategy import ordered_sell_refs, reserved_refs
+            ordered = ordered_sell_refs() | reserved_refs()    # ... and the cards the plan holds back
         except Exception:  # noqa: BLE001 - no plan, nothing ordered
             ordered = set()
 
@@ -666,7 +666,7 @@ class MarketDomain:
             if a.get("id") in reserved or str(a.get("id")) in protected or str(ref) in protected:
                 return False
             if str(ref) in ordered:
-                return False                               # an active dealer order holds this card
+                return False                               # a dealer order or the plan's reserved_refs holds it
             if values.set_of(ref) in kept and left.get(ref, 0) - reserved_n.get(ref, 0) <= 1:
                 return False                               # if every promise fills, one copy must remain
             return True
@@ -1243,7 +1243,8 @@ class MarketDomain:
         if to:
             params["to"] = to
         a = Action(kind="post_offer", params=params, domain=self.name, source=source,
-                   reason=reason or f"swap {s.asset.get('ref')} ({s.loss} to us) for {s.want} ({s.value} to us)",
+                   reason=reason or f"swap {s.asset.get('ref')} ({s.loss} to us) for {s.want} "
+                                    f"({s.value} to us with any page bonus it wins)",
                    expected={"value_gain": s.gain, "points": 0.0, "value_get": s.value, "kind": "swap"}, priority=0.0)
         self._sent[a.id] = {"kind": "post_offer", "team": to}
         return a

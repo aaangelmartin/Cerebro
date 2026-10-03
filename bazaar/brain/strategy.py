@@ -131,8 +131,12 @@ def sanitize(raw: Any) -> dict:
         p = _int(price, 1, 500)
         if REF_RX.match(ref) and p is not None:
             min_asks[ref] = p
+    held_back = sorted({str(x).upper().strip() for x in raw.get("reserved_refs") or []
+                        if REF_RX.match(str(x).upper().strip())})[:30] \
+        if isinstance(raw.get("reserved_refs"), list) else None
     return {
         **({"min_asks": min_asks} if isinstance(raw.get("min_asks"), dict) else {}),
+        **({"reserved_refs": held_back} if held_back is not None else {}),
         **({"venue_announcement": _clean(raw.get("venue_announcement"), 280)}
            if _clean(raw.get("venue_announcement"), 280) else {}),
         "situation": _clean(raw.get("situation"), 900),
@@ -351,6 +355,12 @@ def arbitrage_mode(live: Path | None = None) -> str:
 
 def dealer_orders(live: Path | None = None) -> list[dict]:
     return list(_plan(live).get("dealer_orders") or [])
+
+
+def reserved_refs(live: Path | None = None) -> set[str]:
+    """Card refs the plan in force holds back from every team offer (kept for a dealer sale or a later deal):
+    the market's code and Opus posters neither list, swap nor hand them over."""
+    return {str(r) for r in _plan(live).get("reserved_refs") or []}
 
 
 def ordered_sell_refs(live: Path | None = None) -> set[str]:

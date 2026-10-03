@@ -246,6 +246,28 @@ class OrderedCardsTest(unittest.TestCase):
         self.assertIn("LAV-04", given([]))
         self.assertNotIn("LAV-04", given([self.ORDER]))
 
+    def test_the_market_does_not_post_a_card_the_plan_reserves(self):
+        """reserved_refs keeps a card out of every team offer (outbox request code-fc46e966)."""
+        from types import SimpleNamespace
+        self.assertEqual(S.sanitize({"reserved_refs": ["sal-10", "nope", "SAL-08"]})["reserved_refs"],
+                         ["SAL-08", "SAL-10"])
+        self.assertNotIn("reserved_refs", S.sanitize({}))                # omitted = keep the previous list
+        me = {"id": "t10", "cash": 30, "affinity": {"LAV": 1.6}, "assets": [
+            {"id": 1, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 16},
+            {"id": 2, "kind": "card", "ref": "LAV-04", "rarity": "common", "set": "LAV", "your_value": 4}]}
+        sit = SimpleNamespace(tick=10, me=me, my_offers=[], threads=[], venues=[], feed_new=[], limits={}, books={})
+        ctx = SimpleNamespace(control={}, budget={}, cautious=False, llm_ok=False)
+
+        def given(held):
+            with mock.patch.object(S, "dealer_orders", return_value=[]), \
+                    mock.patch.object(S, "post_offers", return_value=[]), \
+                    mock.patch.object(S, "reserved_refs", return_value=set(held)):
+                _, posts, state = domain()._prepare(sit, ctx)
+            return {p.asset.get("ref") for p in posts} | {s.asset.get("ref") for s in state.get("_swaps") or []}
+
+        self.assertIn("LAV-04", given([]))
+        self.assertNotIn("LAV-04", given(["LAV-04"]))
+
 
 class BrainReservedSpareTest(unittest.TestCase):
     """The fallback does not relist a spare the brain's plan gives in a post (outbox request code-4136c8c6)."""

@@ -297,6 +297,11 @@ STRATEGY_TOOL = {
                          "{\"SAL-08\": 27}: the code poster (fallback) raises its price to it or does not list; "
                          "use it instead of a text policy when you set a price floor. {} clears them. The code also "
                          "never offers the same card to the same team twice within 60 ticks."},
+            "reserved_refs": {"type": "array", "items": {"type": "string"},
+                              "description": "card refs no team offer may give (e.g. [\"SAL-10\"] kept for a dealer "
+                                             "sale): the code and Opus posters neither list, swap nor hand them "
+                                             "over; your own post_offers of them are skipped too. Omit to keep; "
+                                             "[] frees them."},
             "avoid_post_venues": {"type": "array", "items": {"type": "string"},
                                   "description": "venues where we stop posting and accepting (e.g. an ally that does "
                                                  "not reciprocate: research.alliances_today); [] to allow all"},
@@ -1393,6 +1398,8 @@ class Strategist:
         plan = S.merge_accepted(self.plan, new, ok)
         if "min_asks" not in plan and (self.plan or {}).get("min_asks"):
             plan["min_asks"] = dict(self.plan["min_asks"])     # price floors stay until the brain changes them ({} clears)
+        if "reserved_refs" not in plan and (self.plan or {}).get("reserved_refs"):
+            plan["reserved_refs"] = list(self.plan["reserved_refs"])   # held back until the brain frees them ([] clears)
         events, self.pending_events = self.pending_events, []
         us_now = ((pic.get("research") or {}).get("scoreboard") or {}).get("us_now") or {}
         meta = {"reason": reason, "events": events, "model": got.get("model"),
