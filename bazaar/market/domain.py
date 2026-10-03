@@ -522,7 +522,7 @@ class MarketDomain:
                    domain=self.name, reason=reason or f"gain {c.gain} P at private values", source=source,
                    expected={"points": c.gain, "value_gain": c.gain, "value_get": c.value_in, "spend": c.cash_out + c.fee,
                              "counterparty": c.team, "kind": c.kind, "addressed": c.addressed},
-                   big=(c.cash_out + c.fee) > config.BIG_DEAL_P, priority=c.gain)
+                   big=(c.cash_out + c.fee) > config.BIG_DEAL_P, priority=min(float(c.gain), 99.0))
         self._sent[a.id] = {"kind": "accept_offer", "team": c.team or o.get("maker")}
         return a
 

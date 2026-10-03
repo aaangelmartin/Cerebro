@@ -76,3 +76,12 @@ class ArbiterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AcceptScale(unittest.TestCase):
+    def test_dealer_final_beats_a_duel_that_can_wait_but_not_an_urgent_one(self):
+        final = Action("accept_offer", {"offer": 5, "expect": {}}, "dealers", priority=140)
+        calm = Action("duel_accept", {"duel": 9, "expect": {}}, "duels", priority=110)
+        urgent = Action("duel_accept", {"duel": 8, "expect": {}}, "duels", priority=152)
+        self.assertEqual(select([calm, final], sit(), budget())[0][0].priority, 140)
+        self.assertEqual(select([calm, final, urgent], sit(), budget())[0][0].priority, 152)

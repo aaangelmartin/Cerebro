@@ -21,9 +21,16 @@ def _get(obj, name, default=None):
 
 
 def _order(a: Action) -> tuple:
-    """Accepts first (duel_accept, then most expected points); the rest by domain rank, then priority."""
+    """Accepts first, by priority alone; the rest by domain rank, then priority.
+
+    Accept priority scale (set by the domains): urgent duel accept (<= 2 ticks left) >= 150 > dealer final offer 140
+    (it walks away if not taken) > other duel accepts 100-130 > other accepts < 100. Team decision 2026-10-03:
+    duels first, except that a dealer's final offer beats a duel accept that can still wait."""
     if a.kind in ACCEPT_KINDS:
-        return (0, 0 if a.kind == "duel_accept" else 1, -float(a.priority or 0), a.created)
+        p = float(a.priority or 0)
+        if a.kind == "duel_accept":
+            p = max(p, 100.0)                                 # a duel accept never ranks below the 100 floor
+        return (0, -p, a.created)
     return (1, DOMAIN_RANK.get(a.domain, 9), -float(a.priority or 0), a.created)
 
 
