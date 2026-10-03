@@ -285,7 +285,11 @@
 /* ---- RIVALES ---- */
 (function () {
   const D = window.T10D;
-  const { el, fmt, fmtP, num, hhmm, hhmmss, TYPES, TYPE_LABEL, TYPE_COLOR, US } = D;
+  const { el, fmt, fmtP, num, hhmm, hhmmss, TYPES, TYPE_COLOR, US } = D;
+  const tr = (k, v) => window.I18N.t(k, v);
+  const typeLabel = (x) => (window.ui && ui.TYPE_LABEL && ui.TYPE_LABEL[x]) || D.TYPE_LABEL[x] || x;
+  const rarLabel = (r) => (window.I18N.has("common.rarity." + r, "es") ? tr("common.rarity." + r).toLowerCase() : r);
+  const usName = () => tr("common.team10us");
   const SET_COLORS = ["var(--t-dealer,#2bb3a3)", "#e0457b", "var(--t-venta,#e5534b)", "var(--t-puja,#e8a33d)", "#7b83eb", "#9acd32", "#c77dff"];
   let S = null;
   const NEG_C = "var(--t-dealer,#2bb3a3)", MKT_C = "var(--t-cambio,#4c8dff)";
@@ -303,17 +307,17 @@
     S = { sel: null, types: new Set(), lastKey: null };
     root.innerHTML = "";
     root.append(el("div", { class: "scr-rivales" },
-      el("section", { class: "t10-panel r-list" }, el("div", { class: "t10-head" }, el("h2", {}, "Rivales"), el("span", { class: "t10-sub t10-right r-count" }, "")), el("div", { class: "r-list-body" }, D.state("loading"))),
+      el("section", { class: "t10-panel r-list" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.title")), el("span", { class: "t10-sub t10-right r-count" }, "")), el("div", { class: "r-list-body" }, D.state("loading"))),
       el("div", { class: "r-main" },
         el("section", { class: "t10-panel r-head" }, D.state("loading")),
         el("div", { class: "r-mid" },
-          el("section", { class: "t10-panel r-aff" }, el("div", { class: "t10-head" }, el("h2", {}, "Afinidades inferidas"), el("span", { class: "t10-sub t10-right r-aff-sub" }, "de sus pujas y compras")), el("div", { class: "r-aff-body" })),
-          el("section", { class: "t10-panel r-types" }, el("div", { class: "t10-head" }, el("h2", {}, "Actividad por tipo · hoy")), el("div", { class: "r-types-body" }))),
+          el("section", { class: "t10-panel r-aff" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.aff.title")), el("span", { class: "t10-sub t10-right r-aff-sub" }, tr("rivales.aff.sub"))), el("div", { class: "r-aff-body" })),
+          el("section", { class: "t10-panel r-types" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.types.title"))), el("div", { class: "r-types-body" }))),
         el("div", { class: "r-mid" },
-          el("section", { class: "t10-panel r-offers" }, el("div", { class: "t10-head" }, el("h2", {}, "Sus ofertas en los libros")), el("div", { class: "r-offers-body" })),
-          el("section", { class: "t10-panel r-cards" }, el("div", { class: "t10-head" }, el("h2", {}, "Cartas que ha movido")), el("div", { class: "r-cards-body" }))),
+          el("section", { class: "t10-panel r-offers" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.offers.title"))), el("div", { class: "r-offers-body" })),
+          el("section", { class: "t10-panel r-cards" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.cards.title"))), el("div", { class: "r-cards-body" }))),
         el("section", { class: "t10-panel r-acts" },
-          el("div", { class: "t10-head" }, el("h2", { class: "r-acts-title" }, "Lo que hace"), el("span", { class: "t10-right r-acts-filter" }, TYPES.map((t) => {
+          el("div", { class: "t10-head" }, el("h2", { class: "r-acts-title" }, tr("rivales.acts.title")), el("span", { class: "t10-right r-acts-filter" }, TYPES.map((t) => {
             const b = el("button", { class: "t10-chipbtn", "data-t": t }, D.chip(t));
             b.addEventListener("click", () => { S.types.has(t) ? S.types.delete(t) : S.types.add(t); b.classList.toggle("on", S.types.has(t)); S.lastKey = null; refresh(root, S.data, S.params); });
             return b;
@@ -339,30 +343,30 @@
   }
   function tags(t, p, avg) {
     const out = [];
-    if (p.aff[0] && p.signals >= 2) out.push("valora " + p.aff.slice(0, p.aff[1] && p.aff[1].v > 0.7 ? 2 : 1).map((a) => a.set).join(" · "));
-    if (p.dealerN >= 6 && p.dealerN >= 1.8 * (S.avgDealer || 0)) out.push("muy activo con dealers");
-    if (t.venue) out.push("mercado propio " + t.venue);
-    if (p.bidN >= 8) out.push("puja mucho · " + p.bidN + " pujas");
-    if (p.total && p.total < avg * 0.3) out.push("pocas operaciones");
-    if (!p.total) out.push("sin actividad grabada");
-    else if (S.today && p.last && Date.now() / 1000 - p.last > 3600) out.push("sin actividad 1 h");
+    if (p.aff[0] && p.signals >= 2) out.push(tr("rivales.tag.values", { sets: p.aff.slice(0, p.aff[1] && p.aff[1].v > 0.7 ? 2 : 1).map((a) => a.set).join(" · ") }));
+    if (p.dealerN >= 6 && p.dealerN >= 1.8 * (S.avgDealer || 0)) out.push(tr("rivales.tag.dealers"));
+    if (t.venue) out.push(tr("rivales.tag.ownVenue", { venue: t.venue }));
+    if (p.bidN >= 8) out.push(tr("rivales.tag.bids", { n: p.bidN }));
+    if (p.total && p.total < avg * 0.3) out.push(tr("rivales.tag.fewTrades"));
+    if (!p.total) out.push(tr("rivales.tag.noActivity"));
+    else if (S.today && p.last && Date.now() / 1000 - p.last > 3600) out.push(tr("rivales.tag.idleHour"));
     return out;
   }
 
   function renderList(root, teams, profs, avg) {
     const box = root.querySelector(".r-list-body");
     root.querySelector(".r-count").textContent = teams.length ? String(teams.length - 1) : "";
-    if (!teams.length) { const e = D.recErr("leaderboard"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : "Sin clasificación todavía.")); }
+    if (!teams.length) { const e = D.recErr("leaderboard"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : tr("rivales.noStandings"))); }
     D.replace(box, teams.map((t) => {
-      const p = profs[t.team]; const tg = t.team === US ? ["tú"] : tags(t, p, avg).slice(0, 2);
-      const stats = [t.deals != null ? t.deals + " tratos" : null, t.album_filled != null ? "álbum " + t.album_filled + "/" + t.album_slots : null,
-        t.pages_complete != null ? t.pages_complete + " pág." : null, num(t.luck) != null ? "suerte " + (t.luck > 0 ? "+" : "") + fmt(t.luck, 1) : null,
-        t.venue ? "tienda " + t.venue : null].filter(Boolean).join(" · ");
+      const p = profs[t.team]; const tg = t.team === US ? [tr("rivales.you")] : tags(t, p, avg).slice(0, 2);
+      const stats = [t.deals != null ? tr("rivales.stat.deals", { n: t.deals }) : null, t.album_filled != null ? tr("rivales.stat.album", { a: t.album_filled, b: t.album_slots }) : null,
+        t.pages_complete != null ? tr("rivales.stat.pages", { n: t.pages_complete }) : null, num(t.luck) != null ? tr("rivales.stat.luck", { x: (t.luck > 0 ? "+" : "") + fmt(t.luck, 1) }) : null,
+        t.venue ? tr("rivales.stat.venue", { venue: t.venue }) : null].filter(Boolean).join(" · ");
       return el("a", { class: "r-item" + (t.team === S.sel ? " on" : "") + (t.team === US ? " t10-usrow" : ""), href: "#rivales/" + t.team },
-        el("span", { class: "num t10-muted" }, (t.rank || "") + ".º"),
-        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)),
+        el("span", { class: "num t10-muted" }, t.rank ? window.I18N.ordinal(t.rank) : ""),
+        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? usName() : D.teamName(t.team)),
           el("span", { class: "t10-small t10-muted" }, tg.join(" · ")), el("span", { class: "t10-small t10-muted r-item-stats" }, stats)),
-        el("span", { class: "r-split" }, splitBar("Neg.", t.negotiating, W.negotiating, NEG_C), splitBar("Merc.", t.market, W.market, MKT_C)),
+        el("span", { class: "r-split" }, splitBar(tr("rivales.negShort"), t.negotiating, W.negotiating, NEG_C), splitBar(tr("rivales.mktShort"), t.market, W.market, MKT_C)),
         el("span", { class: "num r-item-total" }, fmt(t.score, 1)));
     }));
   }
@@ -378,7 +382,7 @@
   function splitChart(tid) {
     const rows = split.rows.filter((r) => r.neg[tid] != null || r.mkt[tid] != null);
     const w = 520, h = 120, L = 26, B = 14;
-    if (rows.length < 2) return D.state("empty", "Aún no hay historia suficiente.");
+    if (rows.length < 2) return D.state("empty", tr("rivales.noHistory"));
     const t0 = rows[0].ts, t1 = rows[rows.length - 1].ts || t0 + 1;
     const hi = Math.max(5, ...rows.map((r) => Math.max(r.neg[tid] || 0, r.mkt[tid] || 0)));
     const x = (ts) => L + ((ts - t0) / Math.max(1, t1 - t0)) * (w - L - 4), y = (v) => h - B - (v / hi) * (h - B - 6);
@@ -395,8 +399,8 @@
       el("span", { class: "r-comp-l" }, el("i", { class: "r-sq", style: "background:" + col }), label),
       el("span", { class: "num r-comp-v" }, v == null ? "—" : fmt(v, 1), el("small", { class: "t10-muted" }, " / " + max)),
       el("span", { class: "r-sb-t r-comp-t" }, el("span", { style: `width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${col}` })),
-      el("span", { class: "num t10-small", title: "frente al líder en este apartado (" + leadName + ")" }, "vs líder " + gap(v, lead)),
-      isUs ? el("span", {}) : el("span", { class: "num t10-small " + (v != null && us != null && v > us ? "t10-down" : "t10-up"), title: "frente a Team 10" }, "vs nos. " + gap(v, us)));
+      el("span", { class: "num t10-small", title: tr("rivales.vsLeader.title", { name: leadName }) }, tr("rivales.vsLeader") + " " + gap(v, lead)),
+      isUs ? el("span", {}) : el("span", { class: "num t10-small " + (v != null && us != null && v > us ? "t10-down" : "t10-up"), title: tr("rivales.vsUs.title") }, tr("rivales.vsUsShort") + " " + gap(v, us)));
   }
 
   function renderProfile(root, t, teams, p, profs, avg, booksAll) {
@@ -405,47 +409,47 @@
     const tg = t.team === US ? [] : tags(t, p, avg);
     const vsUs = p.mine.filter((r) => r.type === "duelo" && D.involves(r, US)).length;
     D.replace(root.querySelector(".r-head"),
-      el("div", { class: "r-head-l" }, el("h1", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)),
+      el("div", { class: "r-head-l" }, el("h1", {}, t.team === US ? usName() : D.teamName(t.team)),
         el("div", { class: "r-tags" }, tg.map((x) => el("span", { class: "r-tag" }, x)))),
       el("div", { class: "r-kpis" },
-        kpi("Puesto", (t.rank || "—") + ".º"), kpi("Puntos", fmt(t.score, 1)),
-        t.team === US ? null : kpi("vs Nosotros", diff == null ? "—" : (diff > 0 ? "+" : "") + fmt(diff, 1), diff > 0 ? "t10-down" : "t10-up"),
-        kpi("Tratos", t.deals != null ? String(t.deals) : "—"), kpi("Nivel", t.level != null ? String(t.level) : "—"),
-        kpi("Álbum", t.album_filled != null ? t.album_filled + "/" + t.album_slots : "—"),
-        kpi("Tienda", t.venue || "—"), vsUs ? kpi("Duelos con nos.", String(vsUs)) : null),
-      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, "Puntos en el tiempo"), D.spark(D.series(t.team), { w: 300, h: 34 })),
+        kpi(tr("rivales.kpi.rank"), t.rank ? window.I18N.ordinal(t.rank) : "—"), kpi(tr("rivales.kpi.points"), fmt(t.score, 1)),
+        t.team === US ? null : kpi(tr("rivales.kpi.vsUs"), diff == null ? "—" : (diff > 0 ? "+" : "") + fmt(diff, 1), diff > 0 ? "t10-down" : "t10-up"),
+        kpi(tr("rivales.kpi.deals"), t.deals != null ? String(t.deals) : "—"), kpi(tr("common.level"), t.level != null ? String(t.level) : "—"),
+        kpi(tr("common.album"), t.album_filled != null ? t.album_filled + "/" + t.album_slots : "—"),
+        kpi(tr("common.venue"), t.venue || "—"), vsUs ? kpi(tr("rivales.kpi.duelsWithUs"), String(vsUs)) : null),
+      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, tr("rivales.pointsOverTime")), D.spark(D.series(t.team), { w: 300, h: 34 })),
       (() => {
         const best = (k) => teams.reduce((b, x) => (num(x[k]) != null && (b == null || num(x[k]) > num(b[k])) ? x : b), null) || {};
         const bn = best("negotiating"), bm = best("market");
         const nm = (x) => (x.team === US ? "Team 10" : D.teamName(x.team) || "—");
         return el("div", { class: "r-splitbox" },
-          el("div", { class: "r-split-h" }, el("span", { class: "t10-cap" }, "De dónde salen los puntos"),
-            el("span", { class: "t10-small t10-muted" }, "líder negociación: " + nm(bn) + " " + fmt(bn.negotiating, 1) + " · líder mercado: " + nm(bm) + " " + fmt(bm.market, 1))),
-          compRow("Negociación", NEG_C, t.negotiating, W.negotiating, bn.negotiating, nm(bn), me.negotiating, t.team === US),
-          compRow("Mercado", MKT_C, t.market, W.market, bm.market, nm(bm), me.market, t.team === US),
+          el("div", { class: "r-split-h" }, el("span", { class: "t10-cap" }, tr("rivales.split.title")),
+            el("span", { class: "t10-small t10-muted" }, tr("rivales.split.leaders", { neg: nm(bn) + " " + fmt(bn.negotiating, 1), mkt: nm(bm) + " " + fmt(bm.market, 1) }))),
+          compRow(tr("rivales.negotiation"), NEG_C, t.negotiating, W.negotiating, bn.negotiating, nm(bn), me.negotiating, t.team === US),
+          compRow(tr("rivales.market"), MKT_C, t.market, W.market, bm.market, nm(bm), me.market, t.team === US),
           t.team === US && window.ui.negParts && window.__meScore ? window.ui.negParts(window.__meScore) : null,
-          el("div", { class: "r-split-legend t10-small t10-muted" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + NEG_C }), "negociación"),
-            el("span", {}, el("i", { class: "r-sq", style: "background:" + MKT_C }), "mercado"), el("span", {}, "puntos en el tiempo")),
+          el("div", { class: "r-split-legend t10-small t10-muted" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + NEG_C }), tr("rivales.negotiation").toLowerCase()),
+            el("span", {}, el("i", { class: "r-sq", style: "background:" + MKT_C }), tr("rivales.market").toLowerCase()), el("span", {}, tr("rivales.pointsOverTime").toLowerCase())),
           splitChart(t.team));
       })());
     // affinities with our marker
     const ours = profs[US] ? Object.fromEntries(profs[US].aff.map((a) => [a.set, a.v])) : {};
-    root.querySelector(".r-aff-sub").textContent = "de sus pujas y compras · " + p.signals + " señales";
+    root.querySelector(".r-aff-sub").textContent = tr("rivales.aff.subN", { n: p.signals });
     D.replace(root.querySelector(".r-aff-body"), p.aff.length ? [
       ...p.aff.slice(0, 7).map((a, i) => el("div", { class: "r-aff-row" },
         el("span", { class: "r-aff-set", style: "border-left-color:" + SET_COLORS[i % SET_COLORS.length] }, a.set),
         el("span", { class: "r-aff-track" }, el("span", { style: `width:${a.v * 100}%;background:${SET_COLORS[i % SET_COLORS.length]}` }),
-          ours[a.set] != null && t.team !== US ? el("i", { class: "r-aff-us", style: `left:${ours[a.set] * 100}%`, title: "la nuestra" }) : null),
+          ours[a.set] != null && t.team !== US ? el("i", { class: "r-aff-us", style: `left:${ours[a.set] * 100}%`, title: tr("rivales.aff.ours") }) : null),
         el("span", { class: "num" }, fmt(a.v * 100, 0) + " %"),
-        ours[a.set] > 0.5 && a.v > 0.5 && t.team !== US ? el("span", { class: "t10-small t10-warn" }, "compite con nosotros") : el("span", {}))),
-      el("div", { class: "t10-small t10-muted" }, "barra: su afinidad · marca blanca: la nuestra")]
-      : D.state("empty", "Sin pujas ni compras grabadas."));
+        ours[a.set] > 0.5 && a.v > 0.5 && t.team !== US ? el("span", { class: "t10-small t10-warn" }, tr("rivales.aff.competes")) : el("span", {}))),
+      el("div", { class: "t10-small t10-muted" }, tr("rivales.aff.legend"))]
+      : D.state("empty", tr("rivales.aff.none")));
     // activity by type
     const tot = TYPES.reduce((s, x) => s + (p.counts[x] || 0), 0);
     D.replace(root.querySelector(".r-types-body"), tot ? [
-      el("div", { class: "r-stack" }, TYPES.filter((x) => p.counts[x]).map((x) => el("span", { style: `flex:${p.counts[x]};background:${TYPE_COLOR[x]}`, title: TYPE_LABEL[x] + ": " + p.counts[x] }))),
-      ...TYPES.map((x) => el("div", { class: "t10-kv" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + TYPE_COLOR[x] }), TYPE_LABEL[x]), el("span", { class: "num" }, String(p.counts[x] || 0))))]
-      : D.state("empty", "Sin actividad grabada hoy."));
+      el("div", { class: "r-stack" }, TYPES.filter((x) => p.counts[x]).map((x) => el("span", { style: `flex:${p.counts[x]};background:${TYPE_COLOR[x]}`, title: typeLabel(x) + ": " + p.counts[x] }))),
+      ...TYPES.map((x) => el("div", { class: "t10-kv" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + TYPE_COLOR[x] }), typeLabel(x)), el("span", { class: "num" }, String(p.counts[x] || 0))))]
+      : D.state("empty", tr("rivales.types.none")));
     // offers in books
     const offers = [];
     for (const [venue, book] of Object.entries(booksAll)) for (const o of (book && book.offers) || []) if (o.maker === t.team) offers.push({ venue, o });
@@ -455,25 +459,25 @@
       const ref = sell ? (g.assets || []).map((a) => a.ref).join(", ") : ((w.assets || []).map((a) => a.ref).join(", ") || (g.assets || []).map((a) => a.ref).join(", "));
       const price = sell ? fmtP(w.cash) : typ === "puja" ? "≤ " + fmtP(g.cash) : "";
       return el("div", { class: "r-off t10-bar-" + typ }, D.chip(typ), el("span", {}, ref), el("span", { class: "t10-muted t10-small" }, D.venueName(venue)), el("span", { class: "num t10-right" }, price));
-    }) : D.state("empty", "No tiene ofertas abiertas en los libros grabados."));
+    }) : D.state("empty", tr("rivales.offers.none")));
     // cards moved
     const moved = [];
     for (const r of p.mine) if (r.kind === "settle") for (const i of r.items || []) if (i.kind === "card" && (i.to === t.team || i.frm === t.team)) moved.push({ r, i, inn: i.to === t.team });
     D.replace(root.querySelector(".r-cards-body"), moved.length ? moved.slice(-30).reverse().map(({ r, i, inn }) => el("div", { class: "r-off" },
-      el("span", { class: "num t10-muted" }, hhmm(r.ts)), el("span", {}, (inn ? "← " : "→ ") + (i.ref || i.name) + (i.rarity ? " · " + i.rarity : "")),
-      el("span", { class: "t10-small t10-muted" }, inn ? "de " + D.teamName(i.frm) : "a " + D.teamName(i.to)), el("span", { class: "num t10-right" }, r.value || "")))
-      : D.state("empty", "No ha movido cartas en el feed grabado."));
+      el("span", { class: "num t10-muted" }, hhmm(r.ts)), el("span", {}, (inn ? "← " : "→ ") + (i.ref || i.name) + (i.rarity ? " · " + rarLabel(i.rarity) : "")),
+      el("span", { class: "t10-small t10-muted" }, inn ? tr("rivales.cards.from", { team: D.teamName(i.frm) }) : tr("rivales.cards.to", { team: D.teamName(i.to) })), el("span", { class: "num t10-right" }, r.value || "")))
+      : D.state("empty", tr("rivales.cards.none")));
     // actions
-    root.querySelector(".r-acts-title").textContent = "Lo que hace " + (t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team));
+    root.querySelector(".r-acts-title").textContent = tr("rivales.acts.titleOf", { team: t.team === US ? usName() : D.teamName(t.team) });
     const acts = p.mine.filter((r) => !S.types.size || S.types.has(r.type)).slice(-120).reverse();
     D.replace(root.querySelector(".r-acts-body"), acts.length ? acts.map((r) => {
       const cells = [el("span", { class: "num t10-muted" }, hhmmss(r.ts)), D.chip(r.type), el("span", {}, r.text), el("span", { class: "num t10-right" }, r.value || "")];
       return window.ui && ui.row ? ui.row({ type: r.type, cells, cols: "74px 104px minmax(0,1fr) 84px", onClick: () => openEvent(r) }) : el("div", { class: "t10-row" }, cells);
-    }) : D.state("empty", "Sin acciones con estos filtros."));
+    }) : D.state("empty", tr("rivales.acts.none")));
   }
   const kpi = (label, value, cls) => el("div", { class: "r-kpi" }, el("span", { class: "t10-cap" }, label), el("span", { class: "num r-kpi-v " + (cls || "") }, value));
   function openEvent(r) {
-    if (window.ui && ui.drawer) ui.drawer({ title: TYPE_LABEL[r.type] + " · " + hhmm(r.ts), body: el("div", { class: "scr-rivales" }, el("p", {}, r.text), el("pre", { class: "t10-pre" }, JSON.stringify(r.raw, null, 2))) });
+    if (window.ui && ui.drawer) ui.drawer({ title: typeLabel(r.type) + " · " + hhmm(r.ts), body: el("div", { class: "scr-rivales" }, el("p", {}, r.text), el("pre", { class: "t10-pre" }, JSON.stringify(r.raw, null, 2))) });
   }
 
   async function refresh(root, data, params) {
@@ -498,13 +502,13 @@
     const safe = (f) => { try { f(); } catch (e) { console.error("rivales", e); } };
     safe(() => renderList(root, teams, profs, avg));
     const t = teams.find((x) => x.team === sel);
-    if (!t) { D.replace(root.querySelector(".r-head"), D.state("empty", "Elige un equipo de la lista.")); return; }
+    if (!t) { D.replace(root.querySelector(".r-head"), D.state("empty", tr("rivales.pick"))); return; }
     safe(() => renderProfile(root, t, teams, profs[sel], profs, avg, booksAll));
   }
 
   window.Screens = window.Screens || {};
   window.Screens["rivales"] = {
-    title: "Rivales",
+    get title() { return tr("rivales.title"); },
     mount(root, params) { mount(root); S.params = params; },
     onParams(root, params) { if (S) S.params = params; },
     async refresh(root, data, params) { return refresh(root, data, params); },

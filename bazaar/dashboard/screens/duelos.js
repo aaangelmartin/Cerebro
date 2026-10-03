@@ -7,6 +7,9 @@
   // ---------- helpers ----------
   const U = () => window.ui || {};
   const A = () => window.api || {};
+  const tr = (k, v) => window.I18N.t(k, v);
+  const roleLabel = (d) => tr("duelos.role." + roleType(d));
+  const duelChip = () => comp("typeChip", "duelo", tr("duelos.chip.duel"));
   function h(tag, attrs, ...kids) {
     if (U().el) return U().el(tag, attrs || {}, ...kids.filter((k) => k !== null && k !== undefined && k !== false));
     const e = document.createElement(tag);
@@ -67,9 +70,9 @@
     const p = a.params || {};
     if (a.kind === "duel_accept") {
       const e = p.expect || {};
-      return `Aceptar ${fmtP(e.price)}${e.days != null ? " · " + e.days + " d" : ""}`;
+      return tr("duelos.move.accept", { price: fmtP(e.price) }) + (e.days != null ? " · " + e.days + " d" : "");
     }
-    if (a.kind === "duel_message") return `Ofrecer ${fmtP(p.price)}${p.days != null ? " · " + p.days + " d" : ""}`;
+    if (a.kind === "duel_message") return tr("duelos.move.offer", { price: fmtP(p.price) }) + (p.days != null ? " · " + p.days + " d" : "");
     return a.kind || "—";
   }
 
@@ -95,7 +98,7 @@
   }
   const priceBar = (d, compact) => {
     const cfg = barCfg(d, compact);
-    return cfg ? comp("priceBar", cfg) || h("div", { class: "dl-muted" }, `Límite ${fmtP(cfg.limit)} · Nosotros ${fmtP(cfg.ours)} · Ellos ${fmtP(cfg.theirs)}`) : h("div", { class: "dl-muted" }, "Sin precios todavía");
+    return cfg ? comp("priceBar", cfg) || h("div", { class: "dl-muted" }, tr("duelos.bar.fallback", { limit: fmtP(cfg.limit), ours: fmtP(cfg.ours), theirs: fmtP(cfg.theirs) })) : h("div", { class: "dl-muted" }, tr("duelos.noPricesYet"));
   };
 
   // rounds strip + decay lost
@@ -106,7 +109,7 @@
     const boxes = h("span", { class: "dl-rounds" });
     const n = Math.max(5, r + 1);
     for (let i = 0; i < Math.min(n, 10); i++) boxes.append(h("i", { class: i < r ? "on" : i === r ? "cur" : "" }));
-    return h("span", { class: "dl-roundwrap", title: `Ronda ${r}: cada ronda pierde ${Math.round(decay * 100)} %` },
+    return h("span", { class: "dl-roundwrap", title: tr("duelos.round.title", { r, pct: Math.round(decay * 100) }) },
       boxes, h("span", { class: "dl-mono dl-muted" }, `r${r} · ×${fmtNum(mult, 2)}`),
       r > 0 ? h("span", { class: "dl-mono dl-bad" }, ` −${fmtNum((1 - mult) * 100, 0)} %`) : null);
   }
@@ -115,14 +118,14 @@
   function transcript(d, decsForDuel, councilByAction, withReason) {
     const box = h("div", { class: "dl-chat" });
     const msgs = d.messages || [];
-    if (!msgs.length) { box.append(h("div", { class: "dl-muted dl-pad" }, "Sin mensajes todavía.")); return box; }
+    if (!msgs.length) { box.append(h("div", { class: "dl-muted dl-pad" }, tr("duelos.noMessagesYet"))); return box; }
     let nOurs = 0, nTheirs = 0;
     for (const m of msgs) {
       const ours = isOurs(m);
       const priced = num(m.price) !== null;
       if (priced) ours ? nOurs++ : nTheirs++;
       const round = priced ? (ours ? nOurs : nTheirs) : null;
-      const who = ours ? "Team 10 · Nosotros" : (d.rival || "Rival");
+      const who = ours ? tr("duelos.usFull") : (d.rival || tr("duelos.rival"));
       const fig = [num(m.price) !== null ? fmtP(m.price) : null, num(m.days) !== null ? m.days + " d" : null].filter(Boolean).join(" · ");
       const head = h("div", { class: "dl-msg-h" },
         h("span", { class: "dl-who" }, who), h("span", { class: "dl-fig" }, fig, round ? h("small", {}, " r" + round) : null, h("small", { class: "dl-muted", title: "tick " + (m.tick ?? "?") }, " " + tclock(m.tick))));
@@ -176,9 +179,9 @@
     const live = d.status === "live" || !d.status;
     const head = h("div", { class: "dl-pane-h" },
       h("div", { class: "dl-row" },
-        comp("typeChip", "duelo", "Duelo") || h("b", {}, "Duelo"),
-        comp("typeChip", roleType(d), roleType(d)) || h("span", {}, roleType(d)),
-        h("b", { class: "dl-rival" }, d.rival || "Rival"),
+        duelChip() || h("b", {}, tr("duelos.chip.duel")),
+        comp("typeChip", roleType(d), roleLabel(d)) || h("span", {}, roleLabel(d)),
+        h("b", { class: "dl-rival" }, d.rival || tr("duelos.rival")),
         h("span", { class: "dl-sp" }),
         live ? h("span", { class: "dl-mono dl-muted" }, ticksLeft !== null ? `${Math.max(0, ticksLeft)} ticks` : "")
           : comp("resultChip", d.status === "deal" ? "cerrado" : "sin_acuerdo") || h("span", {}, d.status)),
@@ -187,12 +190,12 @@
     chat.dataset.duel = id;
     let foot;
     if (live) {
-      foot = h("div", { class: "dl-pane-f" }, h("span", { class: "dl-muted" }, "Siguiente: "),
-        h("span", { class: "dl-next" }, last ? moveText(last) + (last.action && last.action.reason ? " — " + last.action.reason : "") : "esperando decisión del bot"),
+      foot = h("div", { class: "dl-pane-f" }, h("span", { class: "dl-muted" }, tr("duelos.next")),
+        h("span", { class: "dl-next" }, last ? moveText(last) + (last.action && last.action.reason ? " — " + last.action.reason : "") : tr("duelos.waitingBot")),
         h("span", { class: "dl-sp" }), last ? srcTag(sourceOf(last, ctx.councilByAction)) : null);
     } else {
       foot = h("div", { class: "dl-pane-f" },
-        h("span", {}, d.status === "deal" ? `Cerrado a ${fmtP(d.price)}${num(d.days) ? " · " + d.days + " d" : ""}` : "Sin acuerdo"),
+        h("span", {}, d.status === "deal" ? tr("duelos.closedAt", { price: fmtP(d.price) }) + (num(d.days) ? " · " + d.days + " d" : "") : tr("duelos.noDeal")),
         h("span", { class: "dl-sp" }), h("b", { class: "dl-mono " + ((num(d.result) || 0) > 0 ? "dl-ok" : "dl-muted") }, pts(num(d.result)) + " pts"));
     }
     return h("div", { class: "dl-pane", onclick: (e) => { if (!e.target.closest("a,button")) location.hash = "#duelos/" + id; } },
@@ -218,15 +221,15 @@
     const donut = `<svg viewBox="0 0 64 64" width="72" height="72" class="dl-donut"><circle cx="32" cy="32" r="${R}" class="bg"/><circle cx="32" cy="32" r="${R}" class="fg" stroke-dasharray="${(C * rate).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 32 32)"/><text x="32" y="36" text-anchor="middle">${Math.round(rate * 100)} %</text></svg>`;
     const d = h("div", { class: "dl-donutwrap" }); d.innerHTML = donut;
     const line = (k, v, cls) => h("div", { class: "dl-kv" }, h("span", {}, k), h("b", { class: "dl-mono " + (cls || "") }, v));
-    return h("div", { class: "dl-results" }, h("div", { class: "dl-sec" }, "Resultado · nuestros duelos"),
+    return h("div", { class: "dl-results" }, h("div", { class: "dl-sec" }, tr("duelos.res.title")),
       done.length ? h("div", { class: "dl-row dl-top" }, d, h("div", { class: "dl-grow" },
-        line("Puntos de duelo", fmtNum(points, 1)),
-        line("Cerrados · con acuerdo", `${done.length} · ${deals.length}`),
-        line("Media por duelo", pts(done.length ? points / done.length : null), "dl-ok"),
-        line("Cuota del pastel (vs. 1.ª oferta)", share === null ? "—" : Math.round(share * 100) + " %"),
-        line("Sin acuerdo", String(done.length - deals.length), "dl-bad"),
-        neg ? line("Fuera de límite", String(neg), "dl-bad") : null))
-        : comp("empty", "Aún no hay duelos cerrados.") || h("div", { class: "dl-muted" }, "Aún no hay duelos cerrados."));
+        line(tr("duelos.res.points"), fmtNum(points, 1)),
+        line(tr("duelos.res.closedDeals"), `${done.length} · ${deals.length}`),
+        line(tr("duelos.res.avg"), pts(done.length ? points / done.length : null), "dl-ok"),
+        line(tr("duelos.res.share"), share === null ? "—" : Math.round(share * 100) + " %"),
+        line(tr("duelos.noDeal"), String(done.length - deals.length), "dl-bad"),
+        neg ? line(tr("duelos.res.outside"), String(neg), "dl-bad") : null))
+        : comp("empty", tr("duelos.res.none")) || h("div", { class: "dl-muted" }, tr("duelos.res.none")));
   }
 
   // big scoreboard over every duel we have played (all sessions, from the recorder)
@@ -244,30 +247,30 @@
       h("span", { class: "dl-sc-l" }, label), h("b", { class: "dl-sc-v dl-mono" }, value), sub ? h("span", { class: "dl-sc-s" }, sub) : null);
     const pct = (n) => (done.length ? Math.round((n / done.length) * 100) + " %" : "");
     return h("div", { class: "dl-score" },
-      cell("Jugados", String(all.length), "", `${done.length} terminados`),
-      cell("Ganados", String(won.length), "ok", pct(won.length)),
-      cell("Perdidos", String(lost.length), "bad", lost.length ? pct(lost.length) : "fuera de límite"),
-      cell("Sin acuerdo", String(noDeal.length), "warn", pct(noDeal.length)),
-      even.length ? cell("Acuerdo a 0", String(even.length), "", pct(even.length)) : null,
-      cell("En juego", String(live.length), "live", live.length ? "ahora" : "ninguno"),
-      cell("Puntos", pts(points), points > 0 ? "ok" : points < 0 ? "bad" : "", "de duelos"),
-      cell("Media", pts(done.length ? points / done.length : null), "", "por duelo"));
+      cell(tr("duelos.sc.played"), String(all.length), "", tr("duelos.sc.finished", { n: done.length })),
+      cell(tr("duelos.sc.won"), String(won.length), "ok", pct(won.length)),
+      cell(tr("duelos.sc.lost"), String(lost.length), "bad", lost.length ? pct(lost.length) : tr("duelos.sc.outside")),
+      cell(tr("duelos.noDeal"), String(noDeal.length), "warn", pct(noDeal.length)),
+      even.length ? cell(tr("duelos.sc.even"), String(even.length), "", pct(even.length)) : null,
+      cell(tr("duelos.sc.live"), String(live.length), "live", live.length ? tr("duelos.sc.now") : tr("duelos.sc.none")),
+      cell(tr("duelos.points"), pts(points), points > 0 ? "ok" : points < 0 ? "bad" : "", tr("duelos.sc.fromDuels")),
+      cell(tr("duelos.sc.avg"), pts(done.length ? points / done.length : null), "", tr("duelos.sc.perDuel")));
   }
 
   function tapePanel(ctx) {
     const rows = ctx.tape.filter((e) => S.team !== "nosotros" || ctx.ourIds.has(+e.payload.duel));
-    const box = h("div", { class: "dl-tape" }, h("div", { class: "dl-sec" }, "Cierres de duelo · todo el juego"));
-    if (ctx.tapeErr) { box.append(comp("error", ctx.tapeErr) || h("div", {}, "Error al leer el feed")); return box; }
-    if (!rows.length) { box.append(comp("empty", "Sin cierres de duelo todavía.") || h("div", { class: "dl-muted" }, "Sin cierres")); return box; }
+    const box = h("div", { class: "dl-tape" }, h("div", { class: "dl-sec" }, tr("duelos.tape.title")));
+    if (ctx.tapeErr) { box.append(comp("error", ctx.tapeErr) || h("div", {}, tr("duelos.tape.error"))); return box; }
+    if (!rows.length) { box.append(comp("empty", tr("duelos.tape.none")) || h("div", { class: "dl-muted" }, tr("duelos.tape.noneShort"))); return box; }
     for (const e of rows.slice(0, 80)) {
       const p = e.payload || {};
       const ours = ctx.ourIds.has(+p.duel);
       const rec = ours ? ctx.byId[+p.duel] : null;
       const cells = [
-        h("div", { class: "dl-row" }, comp("typeChip", "duelo", "Duelo") || "Duelo", ours ? comp("teamTag", "t10", { us: true }) || h("b", {}, "Team 10 · Nosotros") : h("span", { class: "dl-muted" }, "#" + p.duel),
+        h("div", { class: "dl-row" }, duelChip() || tr("duelos.chip.duel"), ours ? comp("teamTag", "t10", { us: true }) || h("b", {}, tr("duelos.usFull")) : h("span", { class: "dl-muted" }, "#" + p.duel),
           h("span", { class: "dl-sp" }), rec ? h("b", { class: "dl-mono " + ((num(rec.result) || 0) > 0 ? "dl-ok" : "dl-muted") }, pts(num(rec.result))) : null),
         h("div", { class: "dl-row" }, h("span", {}, (p.item || "") + (rec ? " · vs " + (rec.rival || "") : "")), h("span", { class: "dl-sp" }),
-          h("span", { class: "dl-mono dl-muted" }, (p.status === "deal" ? (rec && rec.price != null ? fmtP(rec.price) : "acuerdo") : "sin acuerdo") + " · " + tclock(e.tick))),
+          h("span", { class: "dl-mono dl-muted" }, (p.status === "deal" ? (rec && rec.price != null ? fmtP(rec.price) : tr("duelos.st.deal")) : tr("duelos.st.no_deal")) + " · " + tclock(e.tick))),
       ];
       const onClick = ours ? () => { location.hash = "#duelos/" + p.duel; } : null;
       const r = comp("row", { type: "duelo", cells: [h("div", {}, ...cells)], cols: "1fr", onClick, us: ours }) || h("div", { class: "dl-trow" }, ...cells);
@@ -286,7 +289,7 @@
   function priceTrack(d) {
     const msgs = (d.messages || []).filter((m) => num(m.price) !== null);
     const lim = num(d.your_limit);
-    if (!msgs.length) return h("div", { class: "dl-muted" }, "Sin precios.");
+    if (!msgs.length) return h("div", { class: "dl-muted" }, tr("duelos.noPrices"));
     const ticks = msgs.map((m) => +m.tick || 0), prices = msgs.map((m) => +m.price).concat(lim !== null ? [lim] : []);
     const t0 = Math.min(...ticks), t1 = Math.max(...ticks, t0 + 1);
     const p0 = Math.min(...prices), p1 = Math.max(...prices, p0 + 1);
@@ -296,13 +299,13 @@
     const ours = msgs.filter(isOurs), theirs = msgs.filter((m) => !isOurs(m));
     const dots = (arr, cls) => arr.map((m) => `<circle class="${cls}" cx="${x(+m.tick).toFixed(1)}" cy="${y(+m.price).toFixed(1)}" r="3.5"/>`).join("");
     const svg = `<svg viewBox="0 0 ${W} ${H}" class="dl-track">
-      ${lim !== null ? `<line class="lim" x1="${P}" x2="${W - P}" y1="${y(lim)}" y2="${y(lim)}"/><text class="lbl" x="${W - P}" y="${y(lim) - 4}" text-anchor="end">Límite ${lim}</text>` : ""}
+      ${lim !== null ? `<line class="lim" x1="${P}" x2="${W - P}" y1="${y(lim)}" y2="${y(lim)}"/><text class="lbl" x="${W - P}" y="${y(lim) - 4}" text-anchor="end">${tr("duelos.limitN", { n: lim })}</text>` : ""}
       ${d.status === "deal" && num(d.price) !== null ? `<line class="deal" x1="${P}" x2="${W - P}" y1="${y(+d.price)}" y2="${y(+d.price)}"/>` : ""}
       <path class="us" d="${path(ours)}"/><path class="them" d="${path(theirs)}"/>${dots(ours, "us")}${dots(theirs, "them")}
       <text class="lbl" x="${P}" y="${H - 6}">t${t0}</text><text class="lbl" x="${W - P}" y="${H - 6}" text-anchor="end">t${t1}</text>
       <text class="lbl" x="2" y="${y(p1) + 4}">${p1}</text><text class="lbl" x="2" y="${y(p0)}">${p0}</text></svg>`;
     const wrap = h("div", {}); wrap.innerHTML = svg;
-    wrap.append(h("div", { class: "dl-legend" }, h("span", { class: "us" }, "● Nosotros"), h("span", { class: "them" }, "○ Ellos"), h("span", {}, "— Límite")));
+    wrap.append(h("div", { class: "dl-legend" }, h("span", { class: "us" }, "● " + tr("duelos.us")), h("span", { class: "them" }, "○ " + tr("duelos.them")), h("span", {}, "— " + tr("duelos.limit"))));
     return wrap;
   }
 
@@ -310,19 +313,19 @@
     const id = d.duel ?? d.id;
     const decs = ctx.decsByDuel[id] || [];
     const body = h("div", { class: "scr-duelos dl-drawer" });
-    body.append(h("div", { class: "dl-row" }, comp("typeChip", "duelo", "Duelo") || "Duelo", comp("typeChip", roleType(d), roleType(d)) || "",
-      h("span", { class: "dl-muted dl-mono" }, `sesión ${d.session ?? "?"} · #${id}`), h("span", { class: "dl-sp" }),
+    body.append(h("div", { class: "dl-row" }, duelChip() || tr("duelos.chip.duel"), comp("typeChip", roleType(d), roleLabel(d)) || "",
+      h("span", { class: "dl-muted dl-mono" }, `${tr("duelos.sessionN", { s: d.session ?? "?" })} · #${id}`), h("span", { class: "dl-sp" }),
       comp("resultChip", d.status === "deal" ? "cerrado" : d.status === "no_deal" ? "sin_acuerdo" : "pendiente") || d.status));
-    body.append(h("h3", { class: "dl-dtitle" }, `${d.rival || "Rival"} · ${d.item || ""}`));
+    body.append(h("h3", { class: "dl-dtitle" }, `${d.rival || tr("duelos.rival")} · ${d.item || ""}`));
     body.append(h("div", { class: "dl-row" }, roundsStrip(d), h("span", { class: "dl-sp" }),
-      h("span", { class: "dl-mono dl-muted" }, `límite ${fmtP(d.your_limit)} · ${d.limit_meaning || ""}`)));
-    if (d.your_days_weight != null) body.append(h("div", { class: "dl-muted" }, `Días: peso ${d.your_days_weight} · ${d.days_meaning || ""}`));
+      h("span", { class: "dl-mono dl-muted" }, `${tr("duelos.limitLower", { n: fmtP(d.your_limit) })} · ${d.limit_meaning || ""}`)));
+    if (d.your_days_weight != null) body.append(h("div", { class: "dl-muted" }, `${tr("duelos.daysWeight", { w: d.your_days_weight })} · ${d.days_meaning || ""}`));
     body.append(h("div", { class: "dl-bar" }, priceBar(d, false)));
-    body.append(h("div", { class: "dl-sec" }, "Precio por mensaje"), priceTrack(d));
-    body.append(h("div", { class: "dl-sec" }, `Conversación · ${(d.messages || []).length} mensajes`), transcript(d, decs, ctx.councilByAction, true));
+    body.append(h("div", { class: "dl-sec" }, tr("duelos.dr.pricePerMsg")), priceTrack(d));
+    body.append(h("div", { class: "dl-sec" }, tr("duelos.dr.conversation", { n: (d.messages || []).length })), transcript(d, decs, ctx.councilByAction, true));
     // reasoning per move
-    body.append(h("div", { class: "dl-sec" }, `Decisiones del bot · ${decs.length}`));
-    if (!decs.length) body.append(h("div", { class: "dl-muted" }, "No hay decisiones registradas para este duelo."));
+    body.append(h("div", { class: "dl-sec" }, tr("duelos.dr.decisions", { n: decs.length })));
+    if (!decs.length) body.append(h("div", { class: "dl-muted" }, tr("duelos.dr.noDecisions")));
     for (const dec of decs.slice().reverse()) {
       const a = dec.action || {};
       const c = ctx.councilByAction[a.id];
@@ -335,32 +338,32 @@
         h("div", {}, a.reason || ""),
         !v.ok && (v.rail || v.detail) ? h("div", { class: "dl-bad" }, `Rail ${v.rail}: ${v.detail}`) : null,
         a.expected && Object.keys(a.expected).length ? h("div", { class: "dl-mono dl-muted dl-small" }, Object.entries(a.expected).map(([k, x]) => `${k} ${typeof x === "number" ? fmtNum(x, 2) : x}`).join(" · ")) : null,
-        c ? h("div", { class: "dl-council" }, h("span", { class: "dl-muted" }, `Consejo: ${c.result || ""} — ${c.why || ""}`),
+        c ? h("div", { class: "dl-council" }, h("span", { class: "dl-muted" }, `${tr("duelos.dr.council")}: ${c.result || ""} — ${c.why || ""}`),
           ...(c.votes || []).map((vt) => h("div", { class: "dl-vote" }, h("b", {}, vt.role || "?"), h("span", { class: "dl-vv " + vt.verdict }, vt.verdict || ""), h("span", { class: "dl-muted" }, vt.reason || (vt.params && Object.keys(vt.params).length ? JSON.stringify(vt.params) : ""))))) : null,
-        dec.id != null ? h("a", { href: "#supervision/" + dec.id, class: "dl-link" }, "Ver en Supervisión →") : null);
+        dec.id != null ? h("a", { href: "#supervision/" + dec.id, class: "dl-link" }, tr("duelos.dr.seeSupervision")) : null);
       body.append(card);
     }
     // outcome
     const r = num(d.result);
-    body.append(h("div", { class: "dl-sec" }, "Resultado"));
+    body.append(h("div", { class: "dl-sec" }, tr("duelos.result")));
     if (d.status === "live" || !d.status) {
       const lim = num(d.your_limit), th = num(d.rival_offer && d.rival_offer.price), dec = num(d.decay_per_round) ?? 0.06, rr = num(d.rounds) || 0;
       const marg = lim !== null && th !== null ? (d.role === "seller" ? th - lim : lim - th) : null;
       body.append(h("div", { class: "dl-out" },
-        h("div", {}, h("small", {}, `Si aceptamos ${fmtP(th)}`), h("b", { class: "dl-mono " + ((marg || 0) > 0 ? "dl-ok" : "dl-bad") }, marg === null ? "—" : pts(marg * Math.pow(1 - dec, rr)) + " pts")),
-        h("div", {}, h("small", {}, "Otra ronda"), h("b", { class: "dl-mono" }, `r${rr + 1} · ×${fmtNum(Math.pow(1 - dec, rr + 1), 2)}`)),
-        h("div", {}, h("small", {}, `Sin acuerdo (${tclock(d.deadline_tick)})`), h("b", { class: "dl-mono dl-bad" }, "0 pts"))));
+        h("div", {}, h("small", {}, tr("duelos.dr.ifAccept", { price: fmtP(th) })), h("b", { class: "dl-mono " + ((marg || 0) > 0 ? "dl-ok" : "dl-bad") }, marg === null ? "—" : pts(marg * Math.pow(1 - dec, rr)) + " pts")),
+        h("div", {}, h("small", {}, tr("duelos.dr.anotherRound")), h("b", { class: "dl-mono" }, `r${rr + 1} · ×${fmtNum(Math.pow(1 - dec, rr + 1), 2)}`)),
+        h("div", {}, h("small", {}, `${tr("duelos.noDeal")} (${tclock(d.deadline_tick)})`), h("b", { class: "dl-mono dl-bad" }, "0 pts"))));
     } else {
       body.append(h("div", { class: "dl-out" },
-        h("div", {}, h("small", {}, "Estado"), h("b", {}, d.status === "deal" ? "Acuerdo" : "Sin acuerdo")),
-        h("div", {}, h("small", {}, "Precio"), h("b", { class: "dl-mono" }, d.price != null ? fmtP(d.price) + (num(d.days) ? " · " + d.days + " d" : "") : "—")),
-        h("div", {}, h("small", {}, "Puntos"), h("b", { class: "dl-mono " + ((r || 0) > 0 ? "dl-ok" : (r || 0) < 0 ? "dl-bad" : "dl-muted") }, pts(r)))));
+        h("div", {}, h("small", {}, tr("duelos.dr.status")), h("b", {}, d.status === "deal" ? tr("duelos.deal") : tr("duelos.noDeal"))),
+        h("div", {}, h("small", {}, tr("duelos.price")), h("b", { class: "dl-mono" }, d.price != null ? fmtP(d.price) + (num(d.days) ? " · " + d.days + " d" : "") : "—")),
+        h("div", {}, h("small", {}, tr("duelos.points")), h("b", { class: "dl-mono " + ((r || 0) > 0 ? "dl-ok" : (r || 0) < 0 ? "dl-bad" : "dl-muted") }, pts(r)))));
     }
     return body;
   }
 
   // ---------- historial: same cards as Mercado · Historial (shared .scr-mercado mk- styles) ----------
-  const ST_TXT = { deal: "acuerdo", no_deal: "sin acuerdo", live: "en juego" };
+  const stTxt = (k) => (window.I18N.has("duelos.st." + k, "es") ? tr("duelos.st." + k) : k);
   function histFiltered(heads) {
     const f = S.hist, q = f.q.trim().toLowerCase();
     return heads.filter((d) => {
@@ -376,31 +379,32 @@
     const id = d.duel ?? d.id, st = d.status || "live";
     const msgs = (d.messages || []).slice().sort((a, b) => (a.tick || 0) - (b.tick || 0) || (a.id || 0) - (b.id || 0));
     const r = num(d.result);
-    const lims = [num(d.your_limit) !== null ? `lím ${d.your_limit}` : null, st === "deal" && d.price != null ? `cerrado ${fmtP(d.price)}` : null].filter(Boolean).join(" · ");
+    const lims = [num(d.your_limit) !== null ? tr("duelos.card.lim", { n: d.your_limit }) : null, st === "deal" && d.price != null ? tr("duelos.card.closed", { price: fmtP(d.price) }) : null].filter(Boolean).join(" · ");
     const card = h("article", { class: `mk-chat mk-chat-hist mk-duel mk-st-${st === "deal" ? "deal" : st === "no_deal" ? "closed" : "open"}`, onclick: (e) => { if (!e.target.closest("a,button,select,input")) location.hash = "#duelos/" + id; } },
       h("header", { class: "mk-chat-h" },
-        comp("typeChip", "duelo", "Duelo") || h("span", {}, "Duelo"),
-        comp("typeChip", roleType(d), d.role === "buyer" ? "Compramos" : "Vendemos") || h("span", {}, roleType(d)),
-        h("b", { class: "mk-chat-who" }, d.rival || "Rival"),
-        h("span", { class: "mk-status" }, ST_TXT[st] || st)),
+        duelChip() || h("span", {}, tr("duelos.chip.duel")),
+        comp("typeChip", roleType(d), d.role === "buyer" ? tr("duelos.weBuy") : tr("duelos.weSell")) || h("span", {}, roleLabel(d)),
+        h("b", { class: "mk-chat-who" }, d.rival || tr("duelos.rival")),
+        h("span", { class: "mk-status" }, stTxt(st))),
       h("div", { class: "mk-chat-sub" },
         h("span", null, d.item || ""),
-        h("span", { class: "mk-muted" }, `#${id} · sesión ${d.session ?? "?"} · ${msgs.length} mensajes` + (msgs.length ? ` · ${tclock(msgs[0].tick)}–${tclock(msgs[msgs.length - 1].tick)}` : ""))),
+        h("span", { class: "mk-muted" }, `#${id} · ${tr("duelos.sessionN", { s: d.session ?? "?" })} · ${tr("duelos.nMessages", { n: msgs.length })}` + (msgs.length ? ` · ${tclock(msgs[0].tick)}–${tclock(msgs[msgs.length - 1].tick)}` : ""))),
       h("div", { class: "mk-chat-bar" }, priceBar(d, true), h("span", { class: "mk-lims" }, lims)),
       h("div", { class: "mk-msgs" }, msgs.length ? msgs.map((m) => {
         const us = isOurs(m);
         const fig = [num(m.price) !== null ? fmtP(m.price) : null, num(m.days) !== null ? m.days + " d" : null].filter(Boolean).join(" · ");
         return h("div", { class: "mk-msg" + (us ? " is-us" : "") },
-          h("div", { class: "mk-msg-h" }, h("span", null, us ? "Nosotros" : d.rival || "Rival"), h("b", null, fig),
+          h("div", { class: "mk-msg-h" }, h("span", null, us ? tr("duelos.us") : d.rival || tr("duelos.rival")), h("b", null, fig),
             h("span", { class: "mk-muted", title: "tick " + (m.tick ?? "?") }, tclock(m.tick))),
           h("div", { class: "mk-msg-t" }, m.text || ""));
-      }) : comp("empty", "Sin mensajes.") || h("div", { class: "mk-muted" }, "Sin mensajes.")),
+      }) : comp("empty", tr("duelos.noMessages")) || h("div", { class: "mk-muted" }, tr("duelos.noMessages"))),
       h("footer", { class: "mk-duel-f" }, roundsStrip(d), h("span", { class: "mk-grow" }),
-        h("b", { class: "mk-mono " + ((r || 0) > 0 ? "dl-ok" : (r || 0) < 0 ? "dl-bad" : "dl-muted") }, st === "live" ? "en juego" : pts(r) + " pts")));
+        h("b", { class: "mk-mono " + ((r || 0) > 0 ? "dl-ok" : (r || 0) < 0 ? "dl-bad" : "dl-muted") }, st === "live" ? tr("duelos.st.live") : pts(r) + " pts")));
     return card;
   }
   // ---------- historial · eventos: every duel event (our transcripts + the whole feed) ----------
-  const EV_LABEL = { open: "Abierto", msg: "Mensaje", deal: "Acuerdo", no_deal: "Sin acuerdo", session: "Sesión" };
+  const EV_KINDS = ["open", "msg", "deal", "no_deal", "session"];
+  const evLabel = (k) => tr("duelos.ev.kind." + k);
   function duelEvents(ctx) {
     const out = [];
     for (const hd of ctx.heads) {
@@ -409,10 +413,10 @@
       const msgs = d.messages || [];
       const first = msgs.length ? Math.min(...msgs.map((m) => +m.tick || 0)) : null;
       if (first !== null) out.push({ ts: U().tickWall ? U().tickWall(first) : null, tick: first, kind: "open", who: "t10", duel: id, rival: d.rival, us: true,
-        text: `${d.role === "buyer" ? "Compramos" : "Vendemos"} ${d.item || ""} a ${d.rival || "rival"} · sesión ${d.session ?? "?"} · límite ${d.your_limit ?? "?"}`, price: null });
+        text: tr(d.role === "buyer" ? "duelos.ev.openBuy" : "duelos.ev.openSell", { item: d.item || "", rival: d.rival || tr("duelos.rivalLower"), session: d.session ?? "?", limit: d.your_limit ?? "?" }), price: null });
       for (const m of msgs) {
         const ours = isOurs(m);
-        out.push({ ts: U().tickWall ? U().tickWall(m.tick) : null, tick: m.tick, kind: "msg", who: ours ? "t10" : d.rival || "Rival", duel: id, rival: d.rival, us: true,
+        out.push({ ts: U().tickWall ? U().tickWall(m.tick) : null, tick: m.tick, kind: "msg", who: ours ? "t10" : d.rival || tr("duelos.rival"), duel: id, rival: d.rival, us: true,
           text: (m.text || "") + (num(m.days) !== null ? ` · ${m.days} d` : ""), price: num(m.price) });
       }
     }
@@ -421,8 +425,8 @@
       if (e.type === "duel.closed") {
         const id = +p.duel, ours = ctx.ourIds.has(id), hd = ctx.byId[id];
         out.push({ ts: num(e.seen_at) || num(e.ts), tick: e.tick, kind: p.status === "deal" ? "deal" : "no_deal", who: ours ? "t10" : "", duel: id, rival: hd && hd.rival, us: ours,
-          text: `${p.item || ""}${hd ? " · vs " + (hd.rival || "") : ""}${hd && num(hd.result) !== null ? " · " + pts(num(hd.result)) + " pts" : ""} · sesión ${p.session ?? "?"}`, price: hd && p.status === "deal" ? num(hd.price) : null });
-      } else out.push({ ts: num(e.seen_at) || num(e.ts), tick: e.tick, kind: "session", who: "", duel: null, us: false, text: `${p.name || e.type} · ${e.type === "duels.finished" ? "termina" : "empieza"}`, price: null });
+          text: `${p.item || ""}${hd ? " · vs " + (hd.rival || "") : ""}${hd && num(hd.result) !== null ? " · " + pts(num(hd.result)) + " pts" : ""} · ${tr("duelos.sessionN", { s: p.session ?? "?" })}`, price: hd && p.status === "deal" ? num(hd.price) : null });
+      } else out.push({ ts: num(e.seen_at) || num(e.ts), tick: e.tick, kind: "session", who: "", duel: null, us: false, text: `${p.name || e.type} · ${e.type === "duels.finished" ? tr("duelos.ev.ends") : tr("duelos.ev.starts")}`, price: null });
     }
     return out.sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.tick || 0) - (a.tick || 0));
   }
@@ -442,32 +446,31 @@
     const all = duelEvents(ctx), rows = evFiltered(all), f = S.ev;
     const whoSel = host.querySelector("[data-f=who]");
     const whos = [...new Set(all.map((r) => r.rival).filter(Boolean))].sort();
-    if (whoSel.options.length - 1 !== whos.length) { const cur = whoSel.value; whoSel.replaceChildren(h("option", { value: "" }, "Rival: todos"), ...whos.map((w) => h("option", { value: w }, w))); whoSel.value = cur; }
+    if (whoSel.options.length - 1 !== whos.length) { const cur = whoSel.value; whoSel.replaceChildren(h("option", { value: "" }, tr("duelos.f.rivalAll")), ...whos.map((w) => h("option", { value: w }, w))); whoSel.value = cur; }
     const per = 50, pages = Math.max(1, Math.ceil(rows.length / per)); f.page = Math.min(f.page, pages - 1);
     const slice = rows.slice(f.page * per, f.page * per + per);
     const nUs = rows.filter((r) => r.us).length;
-    host.querySelector(".mk-hist-sum").textContent = `${rows.length} de ${all.length} eventos · Nosotros: ${nUs}` + (DF.busy ? " · cargando…" : "");
-    const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-    const fmtTs = (ts) => (ts ? DAYS[new Date(ts * 1000).getDay()] + " " + (U().fmtTime ? U().fmtTime(ts) : new Date(ts * 1000).toLocaleTimeString("es-ES")) : "—");
+    host.querySelector(".mk-hist-sum").textContent = tr("duelos.ev.summary", { n: rows.length, total: all.length, us: nUs }) + (DF.busy ? " · " + tr("duelos.loading") : "");
+    const fmtTs = (ts) => (ts ? tr("duelos.day." + new Date(ts * 1000).getDay()) + " " + (U().fmtTime ? U().fmtTime(ts) : new Date(ts * 1000).toLocaleTimeString(window.I18N.locale)) : "—");
     const table = h("table", { class: "mk-table" },
-      h("thead", null, h("tr", null, ["Fecha", "Tick", "Tipo", "Quién", "Detalle", "Duelo", "Precio"].map((x) => h("th", null, x)))),
+      h("thead", null, h("tr", null, ["date", "tick", "type", "who", "detail", "duel", "price"].map((x) => h("th", null, tr("duelos.th." + x))))),
       h("tbody", null, slice.map((r) => h("tr", { class: "mk-t-duelo" + (r.us ? " is-us" : ""), onclick: r.duel != null && r.us ? () => { location.hash = "#duelos/" + r.duel; } : null },
         h("td", { class: "mk-mono" }, fmtTs(r.ts)), h("td", { class: "mk-mono" }, r.tick != null ? "t" + r.tick : ""),
-        h("td", null, comp("typeChip", "duelo", EV_LABEL[r.kind]) || EV_LABEL[r.kind]),
-        h("td", null, r.who === "t10" ? comp("teamTag", "t10", { us: true }) || "Nosotros" : h("span", { class: "mk-team" }, r.who || "—")),
+        h("td", null, comp("typeChip", "duelo", evLabel(r.kind)) || evLabel(r.kind)),
+        h("td", null, r.who === "t10" ? comp("teamTag", "t10", { us: true }) || tr("duelos.us") : h("span", { class: "mk-team" }, r.who || "—")),
         h("td", { class: "mk-det" }, r.text), h("td", { class: "mk-mono" }, r.duel != null ? "#" + r.duel : ""),
         h("td", { class: "mk-mono mk-r" }, r.price != null ? fmtP(r.price) : "")))));
     const tHost = host.querySelector(".mk-hist-table");
-    U().keepScroll(tHost, () => tHost.replaceChildren(slice.length ? table : comp("empty", "Ningún evento coincide con los filtros.") || h("div", {}, "Nada")));
+    U().keepScroll(tHost, () => tHost.replaceChildren(slice.length ? table : comp("empty", tr("duelos.ev.noMatch")) || h("div", {}, tr("duelos.nothing"))));
     const pg = host.querySelector(".mk-pager");
     const btn = (label, p, on) => h("button", { class: on ? "on" : "", disabled: p < 0 || p >= pages ? "disabled" : null, onclick: () => { f.page = p; renderEvents(root, ctx); } }, label);
     const list = [...new Set([0, pages - 1, f.page - 1, f.page, f.page + 1].filter((p) => p >= 0 && p < pages))].sort((a, b) => a - b);
     const parts = [btn("‹", f.page - 1)];
     list.forEach((p, i) => { if (i && p - list[i - 1] > 1) parts.push(h("span", null, "…")); parts.push(btn(String(p + 1), p, p === f.page)); });
     parts.push(btn("›", f.page + 1));
-    pg.replaceChildren(h("span", { class: "mk-muted" }, `${rows.length ? f.page * per + 1 : 0}–${Math.min(rows.length, (f.page + 1) * per)} de ${rows.length}`), h("span", { class: "mk-grow" }), ...parts);
-    const lines = [["fecha", "tick", "tipo", "quien", "rival", "duelo", "detalle", "precio", "nosotros"].join(",")];
-    for (const r of rows) lines.push([r.ts ? new Date(r.ts * 1000).toISOString() : "", r.tick, EV_LABEL[r.kind], r.who, r.rival, r.duel, r.text, r.price, r.us ? "sí" : ""].map(csvCell).join(","));
+    pg.replaceChildren(h("span", { class: "mk-muted" }, tr("duelos.pager", { from: rows.length ? f.page * per + 1 : 0, to: Math.min(rows.length, (f.page + 1) * per), total: rows.length })), h("span", { class: "mk-grow" }), ...parts);
+    const lines = [tr("duelos.csv.header")];
+    for (const r of rows) lines.push([r.ts ? new Date(r.ts * 1000).toISOString() : "", r.tick, evLabel(r.kind), r.who, r.rival, r.duel, r.text, r.price, r.us ? tr("duelos.csv.yes") : ""].map(csvCell).join(","));
     f.csv = lines.join("\n");
     const a = host.querySelector(".mk-export");
     a.setAttribute("href", "data:text/csv;charset=utf-8," + encodeURIComponent("\ufeff" + f.csv));
@@ -477,19 +480,19 @@
     const upd = (k) => (e) => { f[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value; f.page = 0; refreshNow(); };
     const copyBtn = h("button", { class: "mk-btn", type: "button", onclick: async (ev) => {
       let ok = false; try { await navigator.clipboard.writeText(f.csv || ""); ok = true; } catch (e) { ok = false; }
-      ev.target.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { ev.target.textContent = "Copiar CSV"; }, 1800);
-    } }, "Copiar CSV");
+      ev.target.textContent = ok ? tr("duelos.csv.copied") : tr("duelos.csv.copyFailed"); setTimeout(() => { ev.target.textContent = tr("duelos.csv.copy"); }, 1800);
+    } }, tr("duelos.csv.copy"));
     return h("div", { class: "mk-hist" },
       h("div", { class: "mk-hfilters" },
-        h("select", { class: "mk-input", onchange: upd("kind") }, h("option", { value: "" }, "Tipo: todos"), Object.entries(EV_LABEL).map(([k, l]) => h("option", { value: k, selected: f.kind === k ? "selected" : null }, l))),
-        h("select", { class: "mk-input", "data-f": "who", onchange: upd("who") }, h("option", { value: "" }, "Rival: todos")),
-        h("input", { class: "mk-input", placeholder: "Duelo (#291)", value: f.duel, onchange: upd("duel") }),
-        h("label", { class: "mk-muted" }, "desde ", h("input", { class: "mk-input", type: "datetime-local", value: f.from, onchange: upd("from") })),
-        h("label", { class: "mk-muted" }, "hasta ", h("input", { class: "mk-input", type: "datetime-local", value: f.to, onchange: upd("to") })),
-        h("label", { class: "mk-muted" }, h("input", { type: "checkbox", checked: f.us ? "checked" : null, onchange: upd("us") }), " solo nosotros"),
-        h("input", { class: "mk-input mk-q", placeholder: "Buscar texto…", value: f.q, onchange: upd("q") }),
+        h("select", { class: "mk-input", onchange: upd("kind") }, h("option", { value: "" }, tr("duelos.f.typeAll")), EV_KINDS.map((k) => h("option", { value: k, selected: f.kind === k ? "selected" : null }, evLabel(k)))),
+        h("select", { class: "mk-input", "data-f": "who", onchange: upd("who") }, h("option", { value: "" }, tr("duelos.f.rivalAll"))),
+        h("input", { class: "mk-input", placeholder: tr("duelos.f.duelPh"), value: f.duel, onchange: upd("duel") }),
+        h("label", { class: "mk-muted" }, tr("duelos.f.from") + " ", h("input", { class: "mk-input", type: "datetime-local", value: f.from, onchange: upd("from") })),
+        h("label", { class: "mk-muted" }, tr("duelos.f.to") + " ", h("input", { class: "mk-input", type: "datetime-local", value: f.to, onchange: upd("to") })),
+        h("label", { class: "mk-muted" }, h("input", { type: "checkbox", checked: f.us ? "checked" : null, onchange: upd("us") }), " " + tr("duelos.f.onlyUs")),
+        h("input", { class: "mk-input mk-q", placeholder: tr("duelos.f.searchText"), value: f.q, onchange: upd("q") }),
         h("span", { class: "mk-grow" }),
-        h("a", { class: "mk-btn mk-export", href: "#", download: "bazaar-duelos.csv" }, "Exportar CSV"), copyBtn),
+        h("a", { class: "mk-btn mk-export", href: "#", download: "bazaar-duelos.csv" }, tr("duelos.csv.export")), copyBtn),
       h("div", { class: "mk-hist-sum mk-muted" }),
       h("div", { class: "mk-hist-table" }, window.ui.loading()),
       h("div", { class: "mk-pager" }));
@@ -501,18 +504,18 @@
     const sel = (key, opts) => h("select", { class: "mk-input", onchange: (e) => { f[key] = e.target.value; f.limit = 24; rerender(); } },
       opts.map(([v, l]) => h("option", { value: v, selected: f[key] === v ? "selected" : null }, l)));
     root.replaceChildren(h("div", { class: "scr-mercado is-hist dl-hist" },
-      h("div", { class: "mk-head" }, h("h1", null, "Duelos · Historial"),
-        h("span", { class: "mk-muted" }, S.hist.sub === "conv" ? "todos nuestros duelos, completos" : "todos los eventos de duelos desde el viernes"),
+      h("div", { class: "mk-head" }, h("h1", null, tr("duelos.hist.title")),
+        h("span", { class: "mk-muted" }, S.hist.sub === "conv" ? tr("duelos.hist.subConv") : tr("duelos.hist.subEvents")),
         h("span", { class: "mk-grow" }),
-        h("div", { class: "mk-seg mk-histview" }, [["conv", "Conversaciones"], ["eventos", "Eventos"]].map(([v, l]) =>
+        h("div", { class: "mk-seg mk-histview" }, [["conv", tr("duelos.hist.conversations")], ["eventos", tr("duelos.hist.events")]].map(([v, l]) =>
           h("button", { type: "button", class: S.hist.sub === v ? "on" : "", onclick: () => { if (S.hist.sub === v) return; S.hist.sub = v; buildHist(root); refreshNow(); } }, l))),
         viewSeg()),
       h("div", { class: "dl-scorehost" }),
       S.hist.sub === "eventos" ? buildEvents() : h("div", { class: "mk-conv" },
       h("div", { class: "mk-hfilters" },
-        sel("role", [["", "Rol: todos"], ["compra", "Compramos"], ["venta", "Vendemos"]]),
-        sel("status", [["", "Resultado: todos"], ["won", "Ganados"], ["deal", "Con acuerdo"], ["no_deal", "Sin acuerdo"], ["live", "En juego"]]),
-        h("input", { class: "mk-input mk-q", placeholder: "Buscar rival, carta o #id…", value: f.q, onchange: (e) => { f.q = e.target.value; f.limit = 24; rerender(); } })),
+        sel("role", [["", tr("duelos.f.roleAll")], ["compra", tr("duelos.weBuy")], ["venta", tr("duelos.weSell")]]),
+        sel("status", [["", tr("duelos.f.resultAll")], ["won", tr("duelos.sc.won")], ["deal", tr("duelos.f.withDeal")], ["no_deal", tr("duelos.noDeal")], ["live", tr("duelos.sc.live")]]),
+        h("input", { class: "mk-input mk-q", placeholder: tr("duelos.f.searchDuel"), value: f.q, onchange: (e) => { f.q = e.target.value; f.limit = 24; rerender(); } })),
       h("div", { class: "mk-conv-sum mk-muted" }),
       h("div", { class: "mk-conv-list" }, window.ui.loading()))));
   }
@@ -523,21 +526,21 @@
     if (ctx.listErr && !ctx.heads.length) { host.replaceChildren(comp("error", ctx.listErr) || h("div", {}, "Error")); return; }
     const rows = histFiltered(ctx.heads);
     const counts = {}; for (const d of ctx.heads) { const k = d.status || "live"; counts[k] = (counts[k] || 0) + 1; }
-    root.querySelector(".mk-conv-sum").textContent = `${rows.length} de ${ctx.heads.length} duelos · ` + Object.entries(counts).map(([k, v]) => `${v} ${ST_TXT[k] || k}`).join(" · ");
+    root.querySelector(".mk-conv-sum").textContent = tr("duelos.hist.summary", { n: rows.length, total: ctx.heads.length }) + " · " + Object.entries(counts).map(([k, v]) => `${v} ${stTxt(k)}`).join(" · ");
     const shown = await Promise.all(rows.slice(0, S.hist.limit).map((hd) => getTranscript(hd)));
     if (!root.isConnected || S.view !== "historial") return;
     U().keyedList(host, shown, {
       key: (d) => d.duel ?? d.id,
       sig: (d) => [(d.messages || []).length, d.status, d.result, d.price].join("|"),
       render: duelCard, inner: ".mk-msgs",
-      tail: [shown.length ? null : comp("empty", "Ningún duelo coincide con los filtros.") || h("div", {}, "Nada"),
-        rows.length > S.hist.limit ? h("button", { class: "mk-btn mk-more", type: "button", onclick: () => { S.hist.limit += 24; refreshNow(); } }, `Mostrar más (${rows.length - S.hist.limit})`) : null] });
+      tail: [shown.length ? null : comp("empty", tr("duelos.hist.noMatch")) || h("div", {}, tr("duelos.nothing")),
+        rows.length > S.hist.limit ? h("button", { class: "mk-btn mk-more", type: "button", onclick: () => { S.hist.limit += 24; refreshNow(); } }, tr("duelos.showMore", { n: rows.length - S.hist.limit })) : null] });
     const p = S.params ? String(S.params).split("/")[0] : "";
     if (p && p !== S.drawerFor) openDrawer(p, ctx).catch((e) => console.error("duelos drawer", e));
     if (!p) S.drawerFor = null;
   }
   function viewSeg() {
-    return h("div", { class: "mk-seg" }, [["vivo", "● En vivo"], ["historial", "Historial"]].map(([id, label]) =>
+    return h("div", { class: "mk-seg" }, [["vivo", "● " + tr("duelos.view.live")], ["historial", tr("duelos.view.history")]].map(([id, label]) =>
       h("button", { type: "button", class: S.view === id ? "on" : "", onclick: () => setView(id) }, label)));
   }
   let setView = () => {};
@@ -633,7 +636,7 @@
       const msgs = d.messages || []; const last = msgs[msgs.length - 1];
       const t = last && last.tick != null ? last.tick : d.last_change_tick;
       if (t != null && U().tickClock) row.append(h("span", { class: "dl-mono dl-muted dl-endwhen" }, U().tickClock(t)));
-    } else row.insertBefore(h("span", { class: "dl-livemark" }, "● en vivo"), row.querySelector(".dl-sp"));
+    } else row.insertBefore(h("span", { class: "dl-livemark" }, "● " + tr("duelos.liveMark")), row.querySelector(".dl-sp"));
     return pane;
   }
   function render(root, ctx, params) {
@@ -641,12 +644,12 @@
     if (S.fb && S.fb.setCounts) { const c = { compra: 0, venta: 0 }; for (const d of ctx.shown) c[roleType(d)]++; S.fb.setCounts(c); }
     const list = ctx.shown.filter(matches);
     const nRecent = S.view === "vivo" ? ctx.shown.filter((d) => d._recent).length : 0;
-    root.querySelector(".dl-sub").textContent = `${ctx.liveCount} en vivo` + (nRecent ? ` · últimos ${nRecent} duelos` : "") + ` · ${ctx.closedOurs.length} cerrados${ctx.tick !== null ? " · tick " + ctx.tick : ""}`;
+    root.querySelector(".dl-sub").textContent = tr("duelos.sub.live", { n: ctx.liveCount }) + (nRecent ? " · " + tr("duelos.sub.recent", { n: nRecent }) : "") + " · " + tr("duelos.sub.closed", { n: ctx.closedOurs.length }) + (ctx.tick !== null ? " · tick " + ctx.tick : "");
     const tail = [];
     if (!list.length) {
-      const msg = S.view === "vivo" ? (ctx.liveErr ? null : "No hay duelos en vivo ahora. El juego está cerrado o no hay sesión de duelos.") : "No hay duelos cerrados que mostrar.";
+      const msg = S.view === "vivo" ? (ctx.liveErr ? null : tr("duelos.empty.live")) : tr("duelos.empty.closed");
       tail.push(msg ? comp("empty", msg) || h("div", { class: "dl-muted" }, msg) : comp("error", ctx.liveErr) || h("div", {}, "Error"));
-      if (S.view === "vivo" && ctx.closedOurs.length) tail.push(h("button", { class: "dl-btn", type: "button", onclick: () => setView("historial") }, "Ver historial →"));
+      if (S.view === "vivo" && ctx.closedOurs.length) tail.push(h("button", { class: "dl-btn", type: "button", onclick: () => setView("historial") }, tr("duelos.seeHistory")));
     }
     // panes keyed by duel: unchanged ones stay, changed ones keep their chat scroll (stuck to the end when it was there)
     U().keyedList(grid, list, {
@@ -672,15 +675,15 @@
       const live = items({ duels: ctx.shown }).find((x) => String(x.duel ?? x.id) === id);
       d = merge(live, val(r)) || d;
     }
-    if (!d) { comp("drawer", { onClose: closeHash, title: "Duelo #" + id, body: comp("empty", "No encuentro ese duelo en la grabadora.") || h("div", {}, "No encontrado") }); return; }
-    comp("drawer", { title: `Duelo #${id} · ${roleType(d)}`, body: drawerBody(d, ctx), wide: true, onClose: closeHash });
+    if (!d) { comp("drawer", { onClose: closeHash, title: tr("duelos.dr.title", { id }), body: comp("empty", tr("duelos.dr.notFound")) || h("div", {}, tr("duelos.dr.notFoundShort")) }); return; }
+    comp("drawer", { title: `${tr("duelos.dr.title", { id })} · ${roleLabel(d)}`, body: drawerBody(d, ctx), wide: true, onClose: closeHash });
   }
 
   let refreshNow = () => {};
   const closeHash = () => { S.drawerFor = null; if (/^#duelos\//.test(location.hash)) location.hash = "#duelos"; };
 
   window.Screens["duelos"] = {
-    title: "Duelos",
+    get title() { return tr("duelos.title"); },
     mount(root, params) {
       if (params === "eventos" || params === "conversaciones") { S.hist.sub = params === "eventos" ? "eventos" : "conv"; params = "historial"; }
       if (params === "historial" || params === "vivo") { S.view = params; params = ""; }
@@ -694,12 +697,12 @@
     },
     _build(root) {
       if (S.view === "historial") { buildHist(root); return; }
-      const titleBar = h("div", { class: "dl-title" }, h("h1", {}, "Duelos"), h("span", { class: "dl-sub dl-mono dl-muted" }, ""));
+      const titleBar = h("div", { class: "dl-title" }, h("h1", {}, tr("duelos.title")), h("span", { class: "dl-sub dl-mono dl-muted" }, ""));
       const grid = h("div", { class: "dl-grid" }, window.ui.loading());
       const segs = h("div", { class: "dl-segs" });
       const drawSegs = () => segs.replaceChildren(
-        segmented([["todos", "Todos"], ["nosotros", "Nosotros"]], S.team, (v) => { S.team = v; drawSegs(); refreshNow(); }),
-        segmented([["vivo", "● En vivo"], ["historial", "Historial"]], S.view, (v) => setView(v)));
+        segmented([["todos", tr("duelos.all")], ["nosotros", tr("duelos.us")]], S.team, (v) => { S.team = v; drawSegs(); refreshNow(); }),
+        segmented([["vivo", "● " + tr("duelos.view.live")], ["historial", tr("duelos.view.history")]], S.view, (v) => setView(v)));
       drawSegs();
       const fb = S.fb = comp("filterBar", { types: ["compra", "venta"], team: false, search: true, onChange: (st) => { S.filter = st; refreshNow(); } });
       const side = h("aside", { class: "dl-side" }, segs, fb ? h("div", { class: "dl-fb" }, fb) : null, h("div", { class: "dl-side-body" }, window.ui.loading()));

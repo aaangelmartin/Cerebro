@@ -286,7 +286,8 @@
 (function () {
   const D = window.T10D;
   const { el, fmt, fmtP, num, hhmm, TYPES, US } = D;
-  const RAR = [["legendary", "Legendaria", "var(--ink,#f2f2f2)"], ["epic", "Épica", "#c9c9c9"], ["rare", "Rara", "#9a9a9a"], ["uncommon", "Poco común", "#737373"], ["common", "Común", "#555"]];
+  const tr = (k, v) => window.I18N.t(k, v);
+  const RAR = [["legendary", "common.rarity.legendary", "var(--ink,#f2f2f2)"], ["epic", "common.rarity.epic", "#c9c9c9"], ["rare", "common.rarity.rare", "#9a9a9a"], ["uncommon", "competicion.rarity.uncommon", "#737373"], ["common", "common.rarity.common", "#555"]];
   const REF_COLORS = ["var(--ink,#f2f2f2)", "var(--t-cambio,#4c8dff)", "var(--t-puja,#e8a33d)", "var(--t-dealer,#2bb3a3)"];
   let S = null;
 
@@ -297,27 +298,27 @@
     try { tab = localStorage.getItem("t10.comp.tab") || "precios"; } catch (e) { /* storage blocked */ }
     root.append(el("div", { class: "scr-competicion c-tab-" + tab },
       el("div", { class: "c-tabs" },
-        el("button", { class: "t10-seg" + (tab === "precios" ? " on" : ""), "data-tab": "precios" }, "Precios y sedes"),
-        el("button", { class: "t10-seg" + (tab === "mercados" ? " on" : ""), "data-tab": "mercados" }, "Todos los mercados")),
+        el("button", { class: "t10-seg" + (tab === "precios" ? " on" : ""), "data-tab": "precios" }, tr("competicion.tab.prices")),
+        el("button", { class: "t10-seg" + (tab === "mercados" ? " on" : ""), "data-tab": "mercados" }, tr("competicion.allMarkets"))),
       el("div", { class: "c-top" },
         el("section", { class: "t10-panel c-chart" },
-          el("div", { class: "t10-head" }, el("h2", {}, "Competición · precios y volumen"),
+          el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.chart.title")),
             el("span", { class: "t10-right c-toggle" },
-              el("button", { class: "t10-seg on", "data-m": "rareza" }, "Por rareza"), el("button", { class: "t10-seg", "data-m": "carta" }, "Por carta")),
+              el("button", { class: "t10-seg on", "data-m": "rareza" }, tr("competicion.chart.byRarity")), el("button", { class: "t10-seg", "data-m": "carta" }, tr("competicion.chart.byCard"))),
             el("span", { class: "t10-sub c-win" }, "")),
           el("div", { class: "c-legend" }), el("div", { class: "c-lines" }, D.state("loading")),
-          el("div", { class: "t10-cap c-volcap" }, "Volumen por tipo"), el("div", { class: "c-vol" })),
+          el("div", { class: "t10-cap c-volcap" }, tr("competicion.chart.volByType")), el("div", { class: "c-vol" })),
         el("section", { class: "t10-panel c-venues" },
-          el("div", { class: "t10-head" }, el("h2", {}, "Sedes"), el("span", { class: "t10-sub t10-right" }, "cuota de volumen")),
+          el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.venues")), el("span", { class: "t10-sub t10-right" }, tr("competicion.volShareLower"))),
           el("div", { class: "c-venue-list" }, D.state("loading")))),
       el("div", { class: "c-bottom" },
         el("section", { class: "t10-panel c-book c-book-a" }, D.state("loading")),
         el("section", { class: "t10-panel c-book c-book-b" }, D.state("loading")),
         el("section", { class: "t10-panel c-mt" },
-          el("div", { class: "t10-head" }, el("h2", {}, "Market Test · nuestra sede"), el("span", { class: "t10-sub t10-right" }, "eficiencia vs puesto gratis")),
+          el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.mt.title")), el("span", { class: "t10-sub t10-right" }, tr("competicion.mt.sub"))),
           el("div", { class: "c-mt-body" }, D.state("loading")))),
       el("section", { class: "t10-panel c-markets" },
-        el("div", { class: "t10-head" }, el("h2", {}, "Todos los mercados"), el("span", { class: "t10-sub t10-right" }, "libros, operaciones y conversaciones de cada tienda")),
+        el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.allMarkets")), el("span", { class: "t10-sub t10-right" }, tr("competicion.allMarkets.sub"))),
         el("div", { class: "c-markets-body" }))));
     if (window.T10Markets) window.T10Markets.mount(root.querySelector(".c-markets-body"));
     root.querySelectorAll(".c-tabs button").forEach((b) => b.addEventListener("click", () => {
@@ -339,14 +340,14 @@
   function renderChart(root, day) {
     const rows = day.rows; const box = root.querySelector(".c-lines");
     const st = settles(rows).filter((r) => unitPrice(r) != null && r.type !== "dealer" || (r.type === "dealer" && unitPrice(r) != null));
-    if (!rows.length) { D.replace(root.querySelector(".c-legend")); D.replace(root.querySelector(".c-vol")); return D.replace(box, D.state(D.feed.err ? "error" : "empty", D.feed.err ? D.errText(D.feed.err) : "Sin operaciones grabadas todavía.")); }
+    if (!rows.length) { D.replace(root.querySelector(".c-legend")); D.replace(root.querySelector(".c-vol")); return D.replace(box, D.state(D.feed.err ? "error" : "empty", D.feed.err ? D.errText(D.feed.err) : tr("competicion.chart.noTrades"))); }
     const t0 = rows[0].ts, t1 = day.today ? Date.now() / 1000 : rows[rows.length - 1].ts;
-    root.querySelector(".c-win").textContent = (day.today ? "Hoy · " : day.day + " · ") + hhmm(t0) + "–" + hhmm(t1);
+    root.querySelector(".c-win").textContent = (day.today ? tr("common.today") + " · " : day.day + " · ") + hhmm(t0) + "–" + hhmm(t1);
     let groups;
     if (S.mode === "carta") {
       const cnt = {}; for (const r of st) for (const i of r.items || []) if (i.kind === "card") cnt[i.ref] = (cnt[i.ref] || 0) + 1;
       groups = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([ref], k) => [ref, ref, REF_COLORS[k], (r) => (r.items || []).some((i) => i.ref === ref)]);
-    } else groups = RAR.map(([id, label, col]) => [id, label, col, (r) => (r.items || []).some((i) => i.rarity === id)]);
+    } else groups = RAR.map(([id, key, col]) => [id, tr(key), col, (r) => (r.items || []).some((i) => i.rarity === id)]);
     const N = 16, span = Math.max(60, t1 - t0);
     const series = groups.map(([id, label, col, fn]) => {
       const b = Array.from({ length: N }, () => []);
@@ -356,7 +357,7 @@
       return { id, label, col, vals, last };
     }).filter((s) => s.last != null);
     D.replace(root.querySelector(".c-legend"), series.map((s) => el("span", { class: "c-leg" }, el("i", { style: "background:" + s.col }), s.label + " ", el("b", { class: "num" }, fmtP(Math.round(s.last))))));
-    if (!series.length) D.replace(box, D.state("empty", "Sin ventas con precio en este periodo."));
+    if (!series.length) D.replace(box, D.state("empty", tr("competicion.chart.noSales")));
     else {
       const W = 640, H = 200, L = 30, max = Math.max(1, ...series.flatMap((s) => s.vals.filter((v) => v != null))) * 1.1;
       const x = (i) => L + (i / (N - 1)) * (W - L - 4), y = (v) => H - 18 - (v / max) * (H - 26);
@@ -404,34 +405,34 @@
     return list.map((v) => ({ ...v, opsToday: ops[v.venue] || 0, volToday: vol[v.venue] || 0, share: tot ? (vol[v.venue] || 0) / tot : (num(v.volume) || 0) / Math.max(1, list.reduce((s, x) => s + (num(x.volume) || 0), 0)) }))
       .sort((a, b) => b.share - a.share || (num(b.trades) || 0) - (num(a.trades) || 0));
   }
-  const feeText = (v) => fmt((num(v.fee_bps) || 0) / 100, (num(v.fee_bps) || 0) % 100 ? 1 : 0) + " %" + (num(v.fee_per_card) ? " + " + v.fee_per_card + " P/carta" : "");
+  const feeText = (v) => fmt((num(v.fee_bps) || 0) / 100, (num(v.fee_bps) || 0) % 100 ? 1 : 0) + " %" + (num(v.fee_per_card) ? " + " + v.fee_per_card + " " + tr("competicion.perCard") : "");
   function renderVenues(root, rows, books, ourVenue) {
     const box = root.querySelector(".c-venue-list");
-    if (!rows.length) { const e = D.recErr("venues"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : "No hay sedes abiertas.")); }
+    if (!rows.length) { const e = D.recErr("venues"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : tr("competicion.noVenues"))); }
     D.replace(box, rows.map((v) => {
       const bs = bookStats(books[v.venue]); const ours = v.venue === ourVenue || v.owner === US;
       return el("a", { class: "c-venue" + (ours ? " t10-usrow" : ""), href: "#competicion/" + v.venue },
-        el("div", { class: "t10-split" }, el("b", {}, v.name || v.venue), el("span", { class: "t10-small " + (ours ? "" : "t10-muted") }, ours ? "Team 10 · Nosotros" : (v.house ? "La casa" : v.owner_name || D.teamName(v.owner)))),
-        el("div", { class: "c-meter" }, el("span", { class: "t10-cap" }, "Cuota de volumen"), el("span", { class: "c-meter-track" }, el("span", { style: `width:${(v.share * 100).toFixed(1)}%` })), el("span", { class: "num" }, fmt(v.share * 100, 0) + " %")),
+        el("div", { class: "t10-split" }, el("b", {}, v.name || v.venue), el("span", { class: "t10-small " + (ours ? "" : "t10-muted") }, ours ? tr("common.team10us") : (v.house ? tr("competicion.house") : v.owner_name || D.teamName(v.owner)))),
+        el("div", { class: "c-meter" }, el("span", { class: "t10-cap" }, tr("competicion.volShare")), el("span", { class: "c-meter-track" }, el("span", { style: `width:${(v.share * 100).toFixed(1)}%` })), el("span", { class: "num" }, fmt(v.share * 100, 0) + " %")),
         el("div", { class: "c-stats" },
-          el("div", {}, el("span", { class: "t10-cap" }, "Comisión"), el("span", { class: "num" }, feeText(v))),
-          el("div", {}, el("span", { class: "t10-cap" }, "Operaciones hoy"), el("span", { class: "num" }, String(v.opsToday || num(v.trades) || 0))),
-          el("div", {}, el("span", { class: "t10-cap" }, "Diferencial medio"), el("span", { class: "num" }, bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)))),
-        v.status && v.status !== "open" ? el("div", { class: "t10-small t10-down" }, "Estado: " + v.status) : null);
+          el("div", {}, el("span", { class: "t10-cap" }, tr("common.fee")), el("span", { class: "num" }, feeText(v))),
+          el("div", {}, el("span", { class: "t10-cap" }, tr("competicion.tradesToday")), el("span", { class: "num" }, String(v.opsToday || num(v.trades) || 0))),
+          el("div", {}, el("span", { class: "t10-cap" }, tr("competicion.avgSpread")), el("span", { class: "num" }, bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)))),
+        v.status && v.status !== "open" ? el("div", { class: "t10-small t10-down" }, tr("competicion.status") + ": " + v.status) : null);
     }));
   }
   function bookPanel(v, book, ourVenue) {
-    const panel = [el("div", { class: "t10-head" }, el("h2", {}, v ? v.name || v.venue : "Libro"), el("span", { class: "t10-sub t10-right" }, v ? "libro · " + feeText(v) : ""))];
-    if (!v) return panel.concat(D.state("empty", "Sin sede."));
-    if (!book) { const e = D.recErr("books") || D.recErr("books/" + v.venue); return panel.concat(D.state(e ? "error" : "empty", e ? D.errText(e) : "Libro vacío.")); }
+    const panel = [el("div", { class: "t10-head" }, el("h2", {}, v ? v.name || v.venue : tr("competicion.book")), el("span", { class: "t10-sub t10-right" }, v ? tr("competicion.bookLower") + " · " + feeText(v) : ""))];
+    if (!v) return panel.concat(D.state("empty", tr("competicion.book.noVenue")));
+    if (!book) { const e = D.recErr("books") || D.recErr("books/" + v.venue); return panel.concat(D.state(e ? "error" : "empty", e ? D.errText(e) : tr("competicion.book.empty"))); }
     const bs = bookStats(book);
     const line = (x, bid) => el("div", { class: "c-bk" + (bid ? " c-bid" : "") },
       el("span", { class: "c-ref" }, x.ref), el("span", { class: "num " + (bid ? "c-bidp" : "c-askp") }, (bid ? "≤ " : "") + fmtP(x.price)),
-      el("span", { class: x.maker === US ? "t10-us" : "t10-muted" }, x.maker === US ? "Nosotros" : D.teamName(x.maker)));
-    panel.push(el("div", { class: "c-bk c-bkh t10-cap" }, el("span", {}, "Carta"), el("span", {}, "Precio"), el("span", {}, "Equipo")));
-    if (!bs.asks.length && !bs.bids.length) return panel.concat(D.state("empty", "Sin ofertas abiertas."));
+      el("span", { class: x.maker === US ? "t10-us" : "t10-muted" }, x.maker === US ? tr("common.us") : D.teamName(x.maker)));
+    panel.push(el("div", { class: "c-bk c-bkh t10-cap" }, el("span", {}, tr("competicion.th.card")), el("span", {}, tr("competicion.th.price")), el("span", {}, tr("common.team"))));
+    if (!bs.asks.length && !bs.bids.length) return panel.concat(D.state("empty", tr("competicion.book.noOffers")));
     panel.push(...bs.asks.slice(0, 6).map((x) => line(x, false)));
-    panel.push(el("div", { class: "c-spread t10-cap" }, "Diferencial medio ", el("b", { class: "num" }, bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)), " · " + bs.asks.length + " ventas · " + bs.bids.length + " pujas"));
+    panel.push(el("div", { class: "c-spread t10-cap" }, tr("competicion.avgSpread") + " ", el("b", { class: "num" }, bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)), " · " + tr("competicion.book.counts", { asks: bs.asks.length, bids: bs.bids.length })));
     panel.push(...bs.bids.slice(0, 6).map((x) => line(x, true)));
     return panel;
   }
@@ -439,12 +440,12 @@
   // ---------------------------------------------------------------- market test
   function renderMT(root, broker, ourRow) {
     const box = root.querySelector(".c-mt-body");
-    if (!broker) return D.replace(box, D.state("empty", "Sin datos del broker."));
+    if (!broker) return D.replace(box, D.state("empty", tr("competicion.mt.noBroker")));
     const hist = ((broker.vs_stall || {}).history || []).slice();
     const lr = broker.last_result;
     if (lr && lr.vs_stall && lr.vs_stall.ours != null && !hist.some((h) => h.run === lr.session)) hist.push({ run: lr.session, ours: lr.vs_stall.ours, stall: lr.vs_stall.stall, basis: lr.vs_stall.basis });
     let chart;
-    if (!hist.length) chart = D.state("empty", "Aún no hay sesiones de Market Test con resultado.");
+    if (!hist.length) chart = D.state("empty", tr("competicion.mt.noSessions"));
     else {
       const W = 420, H = 150, n = hist.length, bw = Math.min(40, (W - 20) / n - 16);
       let s = "";
@@ -459,15 +460,15 @@
     }
     const ss = broker.session_stats || {};
     D.replace(box, chart,
-      el("div", { class: "c-leg-row t10-small" }, el("span", { class: "c-leg" }, el("i", { style: "background:var(--t-compra,#3fbf7f)" }), "nuestra eficiencia"), el("span", { class: "c-leg" }, el("i", { style: "background:var(--t-puja,#e8a33d)" }), "puesto gratis"),
-        el("span", { class: "t10-muted" }, " · modo " + (broker.mode || "—") + (broker.session ? " · sesión " + broker.session : ""))),
-      el("div", { class: "t10-cap" }, "Actividad de nuestra sede · hoy"),
+      el("div", { class: "c-leg-row t10-small" }, el("span", { class: "c-leg" }, el("i", { style: "background:var(--t-compra,#3fbf7f)" }), tr("competicion.mt.ours")), el("span", { class: "c-leg" }, el("i", { style: "background:var(--t-puja,#e8a33d)" }), tr("competicion.mt.stall")),
+        el("span", { class: "t10-muted" }, " · " + tr("competicion.mt.mode", { mode: broker.mode || "—" }) + (broker.session ? " · " + tr("competicion.mt.session", { s: broker.session }) : ""))),
+      el("div", { class: "t10-cap" }, tr("competicion.mt.activity")),
       el("div", { class: "c-stats c-stats4" },
-        el("div", {}, el("span", { class: "t10-cap" }, "Operaciones"), el("span", { class: "num c-bignum" }, String(ourRow ? ourRow.opsToday || num(ourRow.trades) || 0 : "—"))),
-        el("div", {}, el("span", { class: "t10-cap" }, "Volumen"), el("span", { class: "num c-bignum" }, ourRow ? fmtP(ourRow.volToday || num(ourRow.volume) || 0) : "—")),
-        el("div", {}, el("span", { class: "t10-cap" }, "Cruces del broker"), el("span", { class: "num c-bignum" }, String(num(broker.matches_total) ?? num(ss.matches) ?? 0))),
-        el("div", {}, el("span", { class: "t10-cap" }, "Comisión"), el("span", { class: "num c-bignum" }, ourRow ? feeText(ourRow) : "—"))),
-      ourRow ? null : el("div", { class: "t10-muted t10-small" }, "No tenemos tienda propia abierta."));
+        el("div", {}, el("span", { class: "t10-cap" }, tr("competicion.trades")), el("span", { class: "num c-bignum" }, String(ourRow ? ourRow.opsToday || num(ourRow.trades) || 0 : "—"))),
+        el("div", {}, el("span", { class: "t10-cap" }, tr("competicion.volume")), el("span", { class: "num c-bignum" }, ourRow ? fmtP(ourRow.volToday || num(ourRow.volume) || 0) : "—")),
+        el("div", {}, el("span", { class: "t10-cap" }, tr("competicion.mt.matches")), el("span", { class: "num c-bignum" }, String(num(broker.matches_total) ?? num(ss.matches) ?? 0))),
+        el("div", {}, el("span", { class: "t10-cap" }, tr("common.fee")), el("span", { class: "num c-bignum" }, ourRow ? feeText(ourRow) : "—"))),
+      ourRow ? null : el("div", { class: "t10-muted t10-small" }, tr("competicion.mt.noVenue")));
   }
 
   // ---------------------------------------------------------------- venue drawer
@@ -478,17 +479,17 @@
     const kv = (k, val) => el("div", { class: "t10-kv" }, el("span", { class: "t10-muted" }, k), el("span", { class: "num" }, val == null ? "—" : String(val)));
     const body = el("div", { class: "scr-competicion c-drawer" },
       v.description ? el("p", { class: "t10-muted" }, v.description) : null,
-      kv("Dueño", v.house ? "La casa" : v.owner === US ? "Team 10 · Nosotros" : v.owner_name || D.teamName(v.owner)),
-      kv("Estado", v.status), kv("Comisión", feeText(v)),
-      v.pending_fee ? kv("Comisión anunciada", fmt((v.pending_fee.fee_bps || 0) / 100, 1) + " % desde tick " + v.pending_fee.effective_tick) : null,
-      kv("Mecanismo", (v.rules || {}).mechanism), kv("Abierta en tick", v.opened_tick),
-      kv("Operaciones (total)", v.trades), kv("Volumen (total)", v.volume != null ? fmtP(v.volume) : null), kv("Comisiones cobradas", v.fees != null ? fmtP(v.fees) : null),
-      kv("Equipos que operan", v.traders), kv("Operaciones hoy (feed)", v.opsToday), kv("Cuota de volumen hoy", fmt(v.share * 100, 1) + " %"),
-      kv("Diferencial medio", bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)),
-      el("div", { class: "t10-cap" }, "Libro (" + bs.asks.length + " ventas · " + bs.bids.length + " pujas)"),
+      kv(tr("competicion.owner"), v.house ? tr("competicion.house") : v.owner === US ? tr("common.team10us") : v.owner_name || D.teamName(v.owner)),
+      kv(tr("competicion.status"), v.status), kv(tr("common.fee"), feeText(v)),
+      v.pending_fee ? kv(tr("competicion.dr.pendingFee"), tr("competicion.dr.pendingFeeVal", { pct: fmt((v.pending_fee.fee_bps || 0) / 100, 1), tick: v.pending_fee.effective_tick })) : null,
+      kv(tr("competicion.dr.mechanism"), (v.rules || {}).mechanism), kv(tr("competicion.dr.openedTick"), v.opened_tick),
+      kv(tr("competicion.dr.tradesTotal"), v.trades), kv(tr("competicion.dr.volumeTotal"), v.volume != null ? fmtP(v.volume) : null), kv(tr("competicion.dr.feesCollected"), v.fees != null ? fmtP(v.fees) : null),
+      kv(tr("competicion.dr.traders"), v.traders), kv(tr("competicion.dr.tradesTodayFeed"), v.opsToday), kv(tr("competicion.dr.shareToday"), fmt(v.share * 100, 1) + " %"),
+      kv(tr("competicion.avgSpread"), bs.spread == null ? "—" : fmtP(Math.round(bs.spread * 10) / 10)),
+      el("div", { class: "t10-cap" }, tr("competicion.book") + " (" + tr("competicion.book.counts", { asks: bs.asks.length, bids: bs.bids.length }) + ")"),
       ...bookPanel(v, book).slice(1),
-      el("div", { class: "t10-cap" }, "Últimas operaciones"),
-      st.length ? st.map((r) => el("div", { class: "t10-kv" }, el("span", {}, hhmm(r.ts) + " · " + r.text), el("span", { class: "num" }, r.value))) : D.state("empty", "Sin operaciones en el feed."));
+      el("div", { class: "t10-cap" }, tr("competicion.dr.latest")),
+      st.length ? st.map((r) => el("div", { class: "t10-kv" }, el("span", {}, hhmm(r.ts) + " · " + r.text), el("span", { class: "num" }, r.value))) : D.state("empty", tr("competicion.dr.noTrades")));
     ui.drawer({ title: v.name || v.venue, body, wide: true, onClose: () => { if (/^#competicion\//.test(location.hash)) location.hash = "#competicion"; } });
   }
 
@@ -518,7 +519,7 @@
 
   window.Screens = window.Screens || {};
   window.Screens["competicion"] = {
-    title: "Competición",
+    get title() { return tr("competicion.title"); },
     mount(root, params) { mount(root); S.params = params; },
     onParams(root, params) { if (S) S.params = params; },
     async refresh(root, data, params) { if (window.T10Markets) window.T10Markets.refresh(); return refresh(root, data, params); },
@@ -533,6 +534,7 @@
   "use strict";
   const US = "t10", OUR_VENUE_FALLBACK = "v07";
   const U = () => window.ui;
+  const tr = (k, v) => window.I18N.t(k, v);
   const el = (...a) => U().el(...a);
   const num = (x) => (x === null || x === undefined || x === "" || isNaN(+x) ? null : +x);
   const fmtP = (n) => (n == null ? "—" : U().fmtP(n));
@@ -596,8 +598,8 @@
 
   // ---------- helpers ----------
   const refs = (side) => [
-    ...((side && side.assets) || []).map((a) => a.ref || (a.kind === "pack" ? "sobre" : "#" + a.id)),
-    ...((side && side.types) || []).map((t) => String(t).replace(/^card:/, "").replace(/^pack:/, "sobre ")),
+    ...((side && side.assets) || []).map((a) => a.ref || (a.kind === "pack" ? tr("competicion.pack") : "#" + a.id)),
+    ...((side && side.types) || []).map((t) => String(t).replace(/^card:/, "").replace(/^pack:/, tr("competicion.pack") + " ")),
   ];
   function offerKind(o) {
     const gc = num(o.give && o.give.cash) || 0, wc = num(o.want && o.want.cash) || 0;
@@ -608,10 +610,10 @@
     return gi ? "venta" : "puja";
   }
   function who(id) {
-    if (!id) return el("span", { class: "ms-muted" }, "anónimo");
+    if (!id) return el("span", { class: "ms-muted" }, tr("competicion.anon"));
     if (isTeam(id)) return U().teamTag(id, { us: id === US });
     if (S.dealers[id]) return el("span", { class: "ms-dealer" }, S.dealers[id]);
-    return el("span", { class: "ms-muted", title: "creador anónimo en el libro público" }, "anónimo");
+    return el("span", { class: "ms-muted", title: tr("competicion.anon.title") }, tr("competicion.anon"));
   }
   const matchQ = (texts) => { const q = S.q.trim().toUpperCase(); return !q || texts.some((t) => String(t || "").toUpperCase().includes(q)); };
 
@@ -625,32 +627,32 @@
     const item = (id, title, sub, extra, cls) => el("button", { type: "button", class: ["ms-item", S.sel === id ? "on" : "", cls || ""], onclick: () => { S.sel = id; S.q = ""; render(S.host); T10Markets.refresh(); } },
       el("div", { class: "ms-item-h" }, title, el("span", { class: "ms-grow" }), extra || null), el("div", { class: "ms-item-s" }, sub));
     const rows = vs.map((v) => {
-      const fee = v.venue === "rastro" ? "5 % + 1 P/carta" : feeText(v);
-      const tag = v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US });
+      const fee = v.venue === "rastro" ? "5 % + 1 " + tr("competicion.perCard") : feeText(v);
+      const tag = v.venue === "rastro" ? el("span", { class: "ms-muted" }, tr("common.organisers")) : U().teamTag(v.owner, { us: v.owner === US });
       return item(v.venue, el("span", {}, v.name || v.venue),
-        el("span", { class: "ms-mono" }, `${v.venue} · ${fee} · ${fmtP(v.volume || 0)} · ${v.trades || 0} op. · ${v.traders || 0} eq. · ${v.pairs || 0} par.` + (openOffers(v.venue) != null ? ` · ${openOffers(v.venue).length} ofertas` : "")),
+        el("span", { class: "ms-mono" }, `${v.venue} · ${fee} · ${fmtP(v.volume || 0)} · ` + tr("competicion.mk.venueLine", { trades: v.trades || 0, teams: v.traders || 0, pairs: v.pairs || 0 }) + (openOffers(v.venue) != null ? " · " + tr("competicion.mk.nOffers", { n: openOffers(v.venue).length }) : "")),
         el("div", { class: "ms-item-t" }, tag, v.status && v.status !== "open" ? el("span", { class: "ms-bad" }, v.status) : null),
         v.venue === ours ? "is-us" : v.venue === "rastro" ? "is-rastro" : "");
     });
     host.replaceChildren(
-      el("div", { class: "ms-cap" }, "Vista general"),
-      item("resumen", el("span", {}, "Todos los mercados"), el("span", { class: "ms-mono" }, `${vs.length} tiendas · ${vs.reduce((a, v) => a + (num(v.trades) || 0), 0)} op. · ${fmtP(vs.reduce((a, v) => a + (num(v.volume) || 0), 0))}`), null, "is-sum"),
+      el("div", { class: "ms-cap" }, tr("competicion.mk.overview")),
+      item("resumen", el("span", {}, tr("competicion.allMarkets")), el("span", { class: "ms-mono" }, tr("competicion.mk.sumLine", { n: vs.length, trades: vs.reduce((a, v) => a + (num(v.trades) || 0), 0) }) + " · " + fmtP(vs.reduce((a, v) => a + (num(v.volume) || 0), 0))), null, "is-sum"),
       el("div", { class: "ms-cap" }, "Dealers"),
-      item("conversaciones", el("span", {}, U().icon("dealer", 13), " Conversaciones de todos"), el("span", { class: "ms-mono" }, `${nTh} hilos públicos en la grabación`), null, "is-conv"),
-      el("div", { class: "ms-cap" }, `Tiendas · ${vs.length}`),
+      item("conversaciones", el("span", {}, U().icon("dealer", 13), " " + tr("competicion.mk.convAll")), el("span", { class: "ms-mono" }, tr("competicion.mk.threads", { n: nTh })), null, "is-conv"),
+      el("div", { class: "ms-cap" }, tr("competicion.mk.venuesN", { n: vs.length })),
       ...(rows.length ? rows : [S.venuesErr ? U().error(S.venuesErr) : U().loading()]));
   }
   function feeText(v) {
     const bps = num(v.fee_bps) || 0, per = num(v.fee_per_card) || 0;
-    if (!bps && !per) return "0 % comisión";
-    return `${(bps / 100).toLocaleString("es-ES")} %` + (per ? ` + ${per} P/carta` : "");
+    if (!bps && !per) return tr("competicion.zeroFee");
+    return `${(bps / 100).toLocaleString(window.I18N.locale)} %` + (per ? ` + ${per} ` + tr("competicion.perCard") : "");
   }
 
   // ---------- render: one venue ----------
   function venueView(root) {
     const host = root.querySelector(".ms-detail");
     const v = S.venues.find((x) => x.venue === S.sel);
-    if (!v) { host.replaceChildren(S.venues.length ? U().empty("Esa tienda no está en la lista.") : U().loading()); return; }
+    if (!v) { host.replaceChildren(S.venues.length ? U().empty(tr("competicion.mk.notListed")) : U().loading()); return; }
     const book = S.books[S.sel];
     const makers = makerIndex();
     const offers = book && book.offers ? book.offers.filter((o) => !o.status || o.status === "open") : null;
@@ -660,19 +662,19 @@
     const kpi = (l, val, sub) => el("div", { class: "ms-kpi" }, el("span", { class: "ms-kpi-l" }, l), el("b", { class: "ms-mono" }, val), sub ? el("span", { class: "ms-kpi-s" }, sub) : null);
     const head = el("div", { class: ["ms-head", ours ? "is-us" : ""] },
       el("div", { class: "ms-title" }, el("h1", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, v.venue),
-        v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US })),
+        v.venue === "rastro" ? el("span", { class: "ms-muted" }, tr("common.organisers")) : U().teamTag(v.owner, { us: v.owner === US })),
       v.description ? el("div", { class: "ms-desc" }, v.description) : null,
       el("div", { class: "ms-kpis" },
-        kpi("Comisión", v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
-        kpi("Ofertas abiertas", offers ? String(offers.length) : "—"),
-        kpi("Operaciones", String(v.trades || 0), fmtP(v.volume || 0)),
-        kpi("Equipos", String(v.traders || 0), (v.pairs || 0) + " parejas"),
-        kpi("Comisiones", fmtP(v.fees || 0)),
-        kpi("Abierta", v.opened_tick != null ? tclock(v.opened_tick) : "—", (v.rules && v.rules.mechanism) || "")));
+        kpi(tr("common.fee"), v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
+        kpi(tr("competicion.openOffers"), offers ? String(offers.length) : "—"),
+        kpi(tr("competicion.trades"), String(v.trades || 0), fmtP(v.volume || 0)),
+        kpi(tr("common.teams"), String(v.traders || 0), tr("competicion.mk.nPairs", { n: v.pairs || 0 })),
+        kpi(tr("competicion.fees"), fmtP(v.fees || 0)),
+        kpi(tr("competicion.mk.opened"), v.opened_tick != null ? tclock(v.opened_tick) : "—", (v.rules && v.rules.mechanism) || "")));
 
     const filt = el("div", { class: "ms-filters" },
-      el("input", { class: "ms-input", placeholder: "Carta o set (RET, MAL-04)…", value: S.q, oninput: (e) => { S.q = e.target.value; venueView(root); const i = root.querySelector(".ms-input"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } }),
-      el("div", { class: "ms-seg" }, [["todo", "Todo"], ["venta", "En venta"], ["puja", "Se busca"], ["cambio", "Cambios"]].map(([k, l]) =>
+      el("input", { class: "ms-input", placeholder: tr("competicion.mk.cardPh"), value: S.q, oninput: (e) => { S.q = e.target.value; venueView(root); const i = root.querySelector(".ms-input"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } }),
+      el("div", { class: "ms-seg" }, [["todo", tr("competicion.mk.everything")], ["venta", tr("competicion.forSale")], ["puja", tr("competicion.wanted")], ["cambio", tr("competicion.swaps")]].map(([k, l]) =>
         el("button", { type: "button", class: S.side === k ? "on" : "", onclick: () => { S.side = k; venueView(root); } }, l))));
 
     let bookBox;
@@ -684,9 +686,9 @@
         .sort((a, b) => a.kind.localeCompare(b.kind) || String(a.give[0] || a.want[0]).localeCompare(String(b.give[0] || b.want[0])) || (offerPrice(a.o) - offerPrice(b.o)));
       const counts = { venta: 0, puja: 0, cambio: 0 }; for (const o of offers) counts[offerKind(o)]++;
       bookBox = el("div", { class: "ms-book" },
-        el("div", { class: "ms-sec" }, `Libro · ${counts.venta} en venta · ${counts.puja} se busca · ${counts.cambio} cambios`, book.tick != null ? el("span", { class: "ms-muted" }, " · leído " + tclock(book.tick)) : null),
+        el("div", { class: "ms-sec" }, tr("competicion.mk.bookLine", { sale: counts.venta, wanted: counts.puja, swaps: counts.cambio }), book.tick != null ? el("span", { class: "ms-muted" }, " · " + tr("competicion.mk.read") + " " + tclock(book.tick)) : null),
         rows.length ? el("table", { class: "ms-table" },
-          el("thead", {}, el("tr", {}, ["Tipo", "Da", "Pide", "Precio", "Quién", "Puesta", "Caduca"].map((x) => el("th", {}, x)))),
+          el("thead", {}, el("tr", {}, ["type", "gives", "wants", "price", "who", "listed", "expires"].map((x) => el("th", {}, tr("competicion.th." + x))))),
           el("tbody", {}, rows.map(({ o, kind, give, want }) => {
             const mk = makers[o.id] || o.maker;
             return el("tr", { class: ["ms-t-" + kind, mk === US ? "is-us" : ""] },
@@ -697,7 +699,7 @@
               el("td", {}, who(mk)),
               el("td", { class: "ms-mono ms-muted" }, o.created_tick != null ? tclock(o.created_tick) : "—"),
               el("td", { class: "ms-mono ms-muted" }, o.expires_tick != null ? tclock(o.expires_tick) + (tick != null ? ` · ${Math.max(0, o.expires_tick - tick)} t` : "") : "—"));
-          }))) : U().empty(offers.length ? "Nada coincide con el filtro." : "Libro vacío: nadie tiene ofertas abiertas aquí."));
+          }))) : U().empty(offers.length ? tr("competicion.mk.noMatch") : tr("competicion.mk.emptyBook")));
     }
 
     // activity on this venue from the feed: trades, listings, cancellations, announcements
@@ -706,8 +708,8 @@
       .filter((e) => matchQ([JSON.stringify(e.payload)])).slice(-150).reverse();
     const trades = act.filter((e) => e.type === "settlement");
     const actBox = el("div", { class: "ms-act" },
-      el("div", { class: "ms-sec" }, `Actividad · ${trades.length} operaciones · ${act.length - trades.length} anuncios y ofertas`),
-      act.length ? act.map(activityRow) : U().empty("Sin actividad grabada en esta tienda."));
+      el("div", { class: "ms-sec" }, tr("competicion.mk.activity", { trades: trades.length, other: act.length - trades.length })),
+      act.length ? act.map(activityRow) : U().empty(tr("competicion.mk.noActivity")));
     host.replaceChildren(head, filt, el("div", { class: "ms-cols" }, bookBox, actBox));
   }
   function openOffers(venue) {
@@ -741,24 +743,24 @@
     const tot = rows.reduce((a, r) => ({ t: a.t + (num(r.v.trades) || 0), vol: a.vol + (num(r.v.volume) || 0), o: a.o + (r.offs ? r.offs.length : 0) }), { t: 0, vol: 0, o: 0 });
     const kpi = (l, val) => el("div", { class: "ms-kpi" }, el("span", { class: "ms-kpi-l" }, l), el("b", { class: "ms-mono" }, val));
     const head = el("div", { class: "ms-head" },
-      el("div", { class: "ms-title" }, el("h1", {}, "Todos los mercados"), el("span", { class: "ms-muted" }, "cada tienda del juego · pulsa una columna para ordenar")),
-      el("div", { class: "ms-kpis" }, kpi("Tiendas", String(rows.length)), kpi("Operaciones", String(tot.t)), kpi("Volumen", fmtP(tot.vol)), kpi("Ofertas abiertas", String(tot.o))));
+      el("div", { class: "ms-title" }, el("h1", {}, tr("competicion.allMarkets")), el("span", { class: "ms-muted" }, tr("competicion.mk.sumSub"))),
+      el("div", { class: "ms-kpis" }, kpi(tr("common.venues"), String(rows.length)), kpi(tr("competicion.trades"), String(tot.t)), kpi(tr("competicion.volume"), fmtP(tot.vol)), kpi(tr("competicion.openOffers"), String(tot.o))));
     const n = (x) => el("td", { class: "ms-mono ms-r" }, x);
-    const COLS = [["#", null], ["Tienda", null], ["Dueño", null], ["Comisión", null], ["Volumen", "volume"], ["Vol. últ. hora", "hvol"], ["Operaciones", "trades"], ["Op. últ. hora", "hour"],
-      ["Equipos", "traders"], ["Parejas", "pairs"], ["Comisiones", "fees"], ["En venta", "venta"], ["Se busca", "puja"], ["Cambios", "cambio"]];
+    const COLS = [["#", null], [tr("common.venue"), null], [tr("competicion.owner"), null], [tr("common.fee"), null], [tr("competicion.volume"), "volume"], [tr("competicion.mk.volHour"), "hvol"], [tr("competicion.trades"), "trades"], [tr("competicion.mk.tradesHour"), "hour"],
+      [tr("common.teams"), "traders"], [tr("competicion.mk.pairs"), "pairs"], [tr("competicion.fees"), "fees"], [tr("competicion.forSale"), "venta"], [tr("competicion.wanted"), "puja"], [tr("competicion.swaps"), "cambio"]];
     const th = ([label, key], i) => el("th", { class: [i >= 4 ? "ms-r" : "", key ? "ms-sortable" : "", key === sk ? "is-sorted" : ""],
       onclick: key ? () => { if (S.sumSort === key) S.sumDir = S.sumDir === 1 ? -1 : 1; else { S.sumSort = key; S.sumDir = -1; } summaryView(root); } : null },
       label, key === sk ? (dir === -1 ? " ↓" : " ↑") : "");
-    const chart = el("div", { class: "ms-volchart" }, el("div", { class: "ms-cap" }, "Volumen por tienda · hoy (barra) y última hora (tramo claro)"),
+    const chart = el("div", { class: "ms-volchart" }, el("div", { class: "ms-cap" }, tr("competicion.mk.volChart")),
       U().venueRanking({ venues: S.venues, hourVol, ours, onPick: (id) => { S.sel = id; render(root); T10Markets.refresh(); } }));
     const table = el("table", { class: "ms-table ms-sum" },
       el("thead", {}, el("tr", {}, COLS.map(th))),
       el("tbody", {}, rows.map(({ v, offs, c, h, hv }) => el("tr", { class: ["ms-click", v.venue === ours ? "is-us" : ""], onclick: () => { S.sel = v.venue; render(root); T10Markets.refresh(); } },
         el("td", { class: "ms-mono ms-muted" }, volRank(v) + "."),
         el("td", {}, el("b", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, " " + v.venue),
-          U().ALLIED_VENUES[v.venue] ? el("span", { class: "tag vrank-tag ally" }, "Aliado") : null,
+          U().ALLIED_VENUES[v.venue] ? el("span", { class: "tag vrank-tag ally" }, tr("common.ally")) : null,
           v.status && v.status !== "open" ? el("span", { class: "ms-bad" }, " " + v.status) : null),
-        el("td", {}, v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US })),
+        el("td", {}, v.venue === "rastro" ? el("span", { class: "ms-muted" }, tr("common.organisers")) : U().teamTag(v.owner, { us: v.owner === US })),
         el("td", { class: "ms-mono" }, v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
         n(el("b", {}, fmtP(v.volume || 0))), n(hv ? "+" + fmtP(hv) : "—"), n(String(v.trades || 0)), n(h ? "+" + h : "—"),
         n(String(v.traders || 0)), n(String(v.pairs || 0)), n(v.fees ? fmtP(v.fees) : "—"),
@@ -772,10 +774,10 @@
     if (e.type === "settlement") {
       type = "compra"; price = num(p.price);
       const items = (p.items || []).map((i) => `${i.ref || "#" + i.id} ${i.frm || "?"}→${i.to || "?"}`).join(", ");
-      text = `Operación: ${items}${p.fee ? ` · comisión ${fmtP(p.fee)}` : ""}`; team = (p.parties || []).find(isTeam) || e.actor;
+      text = tr("competicion.mk.trade", { items }) + (p.fee ? " · " + tr("competicion.mk.feeN", { fee: fmtP(p.fee) }) : ""); team = (p.parties || []).find(isTeam) || e.actor;
     } else if (e.type === "offer.listed") {
       const o = p.offer || {}; type = offerKind(o); price = offerPrice(o);
-      text = `${type === "venta" ? "Vende" : type === "puja" ? "Busca" : "Cambia"} ${[...refs(o.give)].join(", ") || fmtP(o.give && o.give.cash)} por ${[...refs(o.want)].join(", ") || fmtP(o.want && o.want.cash)}`;
+      text = tr("competicion.mk.listed." + type, { give: [...refs(o.give)].join(", ") || fmtP(o.give && o.give.cash), want: [...refs(o.want)].join(", ") || fmtP(o.want && o.want.cash) });
     } else { text = p.text || p.name || e.type; team = null; }
     return U().row({ type, cells: [
       el("span", { class: "ms-mono ms-muted", title: "tick " + e.tick }, hhmmss(wallOf(e))),
@@ -809,17 +811,17 @@
       .sort((a, b) => b.last - a.last);
     const rerender = () => convView(root);
     const filters = el("div", { class: "ms-filters" },
-      el("select", { class: "ms-input", onchange: (e) => { f.team = e.target.value; rerender(); } }, el("option", { value: "" }, "Equipo: todos"),
-        teams.map((t) => el("option", { value: t, selected: f.team === t ? "selected" : null }, t === US ? "Nosotros (t10)" : U().teamName(t)))),
-      el("select", { class: "ms-input", onchange: (e) => { f.dealer = e.target.value; rerender(); } }, el("option", { value: "" }, "Dealer: todos"),
+      el("select", { class: "ms-input", onchange: (e) => { f.team = e.target.value; rerender(); } }, el("option", { value: "" }, tr("competicion.conv.teamAll")),
+        teams.map((t) => el("option", { value: t, selected: f.team === t ? "selected" : null }, t === US ? tr("common.us") + " (t10)" : U().teamName(t)))),
+      el("select", { class: "ms-input", onchange: (e) => { f.dealer = e.target.value; rerender(); } }, el("option", { value: "" }, tr("competicion.conv.dealerAll")),
         dealers.map((d) => el("option", { value: d, selected: f.dealer === d ? "selected" : null }, S.dealers[d] || d))),
-      el("input", { class: "ms-input", placeholder: "Buscar carta o texto…", value: f.q, onchange: (e) => { f.q = e.target.value; rerender(); } }));
+      el("input", { class: "ms-input", placeholder: tr("competicion.conv.searchPh"), value: f.q, onchange: (e) => { f.q = e.target.value; rerender(); } }));
     const cards = list.slice(0, f.limit).map((t) => {
       const msgs = t.msgs.slice().sort((a, b) => (a.payload.message || 0) - (b.payload.message || 0));
-      const topic = t.topic ? (t.topic.buy ? "Compra " + (t.topic.buy.card || t.topic.buy.pack || JSON.stringify(t.topic.buy)) : t.topic.sell ? "Vende" : "") : "";
+      const topic = t.topic ? (t.topic.buy ? tr("competicion.conv.buys") + " " + (t.topic.buy.card || t.topic.buy.pack || JSON.stringify(t.topic.buy)) : t.topic.sell ? tr("competicion.conv.sells") : "") : "";
       return el("article", { class: ["ms-chat", t.team === US ? "is-us" : ""] },
         el("header", { class: "ms-chat-h" }, U().typeChip("dealer", S.dealers[t.with] || t.with || "Dealer"), who(t.team),
-          el("span", { class: "ms-grow" }), el("span", { class: "ms-mono ms-muted" }, `#${t.id} · ${msgs.length} msj · ${hhmmss(t.last)}`)),
+          el("span", { class: "ms-grow" }), el("span", { class: "ms-mono ms-muted" }, `#${t.id} · ${tr("competicion.conv.nMsg", { n: msgs.length })} · ${hhmmss(t.last)}`)),
         topic ? el("div", { class: "ms-chat-s ms-mono" }, topic) : null,
         el("div", { class: "ms-msgs" }, msgs.map((m) => {
           const p = m.payload, o = p.offer, fromTeam = isTeam(p.sender);
@@ -828,15 +830,15 @@
             el("div", { class: "ms-msg-h" }, el("span", {}, fromTeam ? U().teamName(p.sender) : S.dealers[p.sender] || p.sender),
               price ? el("b", { class: "ms-mono" }, fmtP(price) + (o.final ? " · final" : "")) : null,
               el("span", { class: "ms-mono ms-muted", title: "tick " + m.tick }, hhmmss(wallOf(m)))),
-            p.text ? el("div", { class: "ms-msg-t" }, p.text) : o ? el("div", { class: "ms-msg-t ms-muted" }, `oferta: da ${refs(o.give).join(", ") || fmtP(o.give && o.give.cash)} · pide ${refs(o.want).join(", ") || fmtP(o.want && o.want.cash)}`) : null);
+            p.text ? el("div", { class: "ms-msg-t" }, p.text) : o ? el("div", { class: "ms-msg-t ms-muted" }, tr("competicion.conv.offer", { give: refs(o.give).join(", ") || fmtP(o.give && o.give.cash), want: refs(o.want).join(", ") || fmtP(o.want && o.want.cash) })) : null);
         })));
     });
     host.replaceChildren(
-      el("div", { class: "ms-head" }, el("div", { class: "ms-title" }, el("h1", {}, "Conversaciones con dealers"), el("span", { class: "ms-muted" }, "de todos los equipos · públicas en el feed")),
-        el("div", { class: "ms-desc" }, `${list.length} de ${all.length} hilos · ${S.feedErr ? "error leyendo el feed" : "se actualiza solo"}`)),
+      el("div", { class: "ms-head" }, el("div", { class: "ms-title" }, el("h1", {}, tr("competicion.conv.title")), el("span", { class: "ms-muted" }, tr("competicion.conv.sub"))),
+        el("div", { class: "ms-desc" }, tr("competicion.conv.count", { n: list.length, total: all.length }) + " · " + (S.feedErr ? tr("competicion.conv.feedError") : tr("competicion.conv.auto")))),
       filters,
-      el("div", { class: "ms-chats" }, ...(cards.length ? cards : [S.feed.length ? U().empty("Ninguna conversación coincide.") : U().loading()])),
-      list.length > f.limit ? el("button", { type: "button", class: "ms-more", onclick: () => { f.limit += 30; rerender(); } }, `Mostrar más (${list.length - f.limit})`) : null);
+      el("div", { class: "ms-chats" }, ...(cards.length ? cards : [S.feed.length ? U().empty(tr("competicion.conv.noMatch")) : U().loading()])),
+      list.length > f.limit ? el("button", { type: "button", class: "ms-more", onclick: () => { f.limit += 30; rerender(); } }, tr("competicion.showMore", { n: list.length - f.limit })) : null);
   }
 
   function render(root) {
