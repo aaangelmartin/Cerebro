@@ -646,6 +646,135 @@
         h("div", { class: "mk-pager" }))));
   }
 
+  // ---------- hablar con un dealer (a human's own thread; the bot leaves it alone) ----------
+  const TALK = { dealer: "banco", st: null, busy: false, err: null, sig: "" };
+  function sideText(side) {
+    const parts = [];
+    if (side && side.cash) parts.push(fmtP(side.cash));
+    for (const t of arr(side && side.types)) parts.push(String(t).replace(/^card:|^pack:/, ""));
+    for (const a of arr(side && side.assets)) parts.push(a && a.ref ? a.ref : "#" + (a && a.id != null ? a.id : a));
+    return parts.join(" + ") || "nada";
+  }
+  function talkCheck(c) {
+    if (!c) return h("span", { class: "mk-muted" }, "ninguna");
+    return [h("span", null, "recibimos ", h("b", null, sideText({ cash: c.receive_cash, types: c.we_get })), " · damos ", h("b", null, sideText({ cash: c.pay, types: c.we_give }))),
+      h("span", { class: "mk-talk-val" }, `nuestro valor ${c.known ? fmtP(c.value_get) : "desconocido"} frente a ${fmtP(c.value_give)}`),
+      h("b", { class: "mk-talk-gain " + (c.gain >= 0 && c.known ? "is-up" : "is-down") }, c.known ? (c.gain >= 0 ? "+" : "") + fmtP(c.gain) : "?"),
+      c.final ? h("span", { class: "mk-final" }, "final: true") : null,
+      c.blocked ? h("span", { class: "mk-talk-block" }, "No se puede aceptar: " + c.blocked) : null];
+  }
+  function renderTalk(root) {
+    const box = root.querySelector(".mk-talk");
+    if (!box) return;
+    const st = TALK.st, th = st && st.thread;
+    const sel = box.querySelector(".mk-talk-dealer");
+    if (st && sel && sel.options.length !== arr(st.dealers).length) {
+      sel.replaceChildren(...arr(st.dealers).map((d) => h("option", { value: d.id, selected: d.id === TALK.dealer ? "selected" : null },
+        `${d.name} · nivel ${d.level}` + (d.unlocked ? "" : " · bloqueado"))));
+    }
+    const cards = box.querySelector("#mk-talk-items");
+    if (st && cards && !cards.children.length) {
+      const d = arr(st.dealers).find((x) => x.id === TALK.dealer);
+      const packs = arr(d && d.menu && d.menu.sells).filter((x) => x.pack).map((x) => x.pack);
+      cards.replaceChildren(...packs.concat(arr(st.cards).map((c) => c.ref)).map((v) => h("option", { value: v })));
+    }
+    box.querySelector(".mk-talk-sub").textContent = TALK.err ? "Error: " + TALK.err : !st ? "cargando…" :
+      `caja ${fmtP(st.cash)} · ` + (th ? `hilo #${th.id} · ${th.manual ? "lo llevas tú, el bot no lo toca" : "lo lleva el bot hasta que escribas"}` : "sin hilo abierto con este dealer");
+    const sig = JSON.stringify([th && th.id, th && arr(th.messages).map((m) => [m.id, m.offer && m.offer.status]), st && st.check]);
+    if (sig !== TALK.sig) {
+      TALK.sig = sig;
+      const msgs = box.querySelector(".mk-msgs");
+      const atEnd = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40;
+      msgs.replaceChildren(...(th && arr(th.messages).length ? arr(th.messages).map((m) => {
+        const us = m.sender === US;
+        return h("div", { class: "mk-msg" + (us ? " is-us" : "") + (m.offer && m.offer.final ? " is-final" : "") },
+          h("div", { class: "mk-msg-h" }, h("span", null, us ? "Nosotros" : DEALER_NAMES[m.sender] || m.sender),
+            h("b", null, m.offer ? sideText(m.offer.give) + " por " + sideText(m.offer.want) : ""),
+            h("span", { class: "mk-muted" }, tclock(m.tick) + (m.offer && m.offer.status && m.offer.status !== "open" ? " · " + m.offer.status : ""))),
+          h("div", { class: "mk-msg-t" }, m.text || ""));
+      }) : [stateBox("empty", th ? "Sin mensajes todavía." : "Elige comprar o vender, la carta o el sobre, y escribe para abrir el hilo.")]));
+      if (atEnd) msgs.scrollTop = msgs.scrollHeight;
+      box.querySelector(".mk-talk-standing").replaceChildren(h("span", { class: "mk-k" }, "SU OFERTA EN PIE"), ...[talkCheck(st && st.check)].flat());
+    }
+    const open = !!th;
+    for (const n of box.querySelectorAll(".mk-talk-open")) n.disabled = open;
+    box.querySelector(".mk-talk-accept").disabled = TALK.busy || !(st && st.check) || !!(st.check && st.check.blocked);
+    box.querySelector(".mk-talk-close").disabled = TALK.busy || !open;
+    box.querySelector(".mk-talk-release").disabled = TALK.busy || !(open && th.manual);
+    box.querySelector(".mk-talk-send").disabled = TALK.busy;
+  }
+  async function pullTalk(root, force) {
+    if (!root.querySelector(".mk-talk") || !window.api.dealerChat) return;
+    if (!force && Date.now() - (TALK.at || 0) < 5000) return;      // each pull reads the game: every 5 s is enough
+    TALK.at = Date.now();
+    const r = await safe(() => window.api.dealerChat(TALK.dealer));
+    if (r.ok) { TALK.st = r.v; TALK.err = null; for (const d of arr(r.v.dealers)) DEALER_NAMES[d.id] = d.name; }
+    else TALK.err = r.err && r.err.message ? r.err.message : String(r.err);
+    renderTalk(root);
+  }
+  async function talkDo(root, what, body, okText) {
+    if (TALK.busy) return null;
+    TALK.busy = true; renderTalk(root);
+    let out = null;
+    try {
+      out = await window.api.dealerChatDo(what, Object.assign({ dealer: TALK.dealer }, body));
+      if (okText && U().toast) U().toast({ type: "dealer", title: okText });
+    } catch (e) {
+      if (U().toast) U().toast({ type: "error", title: "Dealer", text: e.message || String(e) });
+    }
+    TALK.busy = false;
+    await pullTalk(root, true);
+    return out;
+  }
+  function talkPanel(root) {
+    const text = h("textarea", { class: "mk-input mk-talk-text", rows: "2", placeholder: "Escribe al dealer (en inglés)…" });
+    const side = h("select", { class: "mk-input mk-talk-open mk-talk-side" }, [["buy", "Comprar"], ["sell", "Vender"]].map(([v, l]) => h("option", { value: v }, l)));
+    const item = h("input", { class: "mk-input mk-talk-open mk-talk-item", list: "mk-talk-items", placeholder: "carta o sobre (LAV-11, sobre_oro)" });
+    const price = h("input", { class: "mk-input mk-talk-price", type: "number", min: "1", step: "1", placeholder: "precio P (opcional)" });
+    const send = async () => {
+      const p = price.value === "" ? null : +price.value;
+      if (!text.value.trim() && p == null) return;
+      const out = await talkDo(root, "send", { text: text.value, price: p, side: side.value, item: item.value.trim() });
+      if (out) { text.value = ""; price.value = ""; }
+    };
+    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } });
+    const accept = async () => {
+      const st = TALK.st;
+      if (!st || !st.standing) return;
+      const pre = await talkDo(root, "accept", { offer: st.standing.id });
+      const c = pre && pre.check;
+      if (!pre || !pre.needs_confirm || !c) { if (c && c.blocked && U().toast) U().toast({ type: "error", title: "No aceptado", text: c.blocked }); return; }
+      const msg = `Recibimos ${sideText({ cash: c.receive_cash, types: c.we_get })} (nuestro valor ${fmtP(c.value_get)}) y damos ${sideText({ cash: c.pay, types: c.we_give })} (${fmtP(c.value_give)}). Ganancia de valor ${c.gain >= 0 ? "+" : ""}${fmtP(c.gain)}. Caja ${fmtP(c.cash)} → ${fmtP(c.cash - c.pay + c.receive_cash)}.`;
+      const ok = U().confirm ? await U().confirm({ title: "¿Aceptar la oferta del dealer?", text: msg, confirmLabel: "Aceptar oferta" }) : window.confirm(msg);
+      if (ok) await talkDo(root, "accept", { offer: st.standing.id, confirm: true }, "Oferta aceptada");
+    };
+    const closeIt = async () => {
+      const th = TALK.st && TALK.st.thread;
+      if (!th) return;
+      const ok = U().confirm ? await U().confirm({ title: "¿Cerrar el hilo?", text: "Se cierra la conversación con el dealer sin trato.", confirmLabel: "Cerrar hilo", danger: true }) : true;
+      if (ok) await talkDo(root, "close", { thread: th.id }, "Hilo cerrado");
+    };
+    TALK.sig = ""; TALK.at = 0;
+    return h("section", { class: "mk-talk" },
+      h("div", { class: "mk-head mk-teams-h" }, h("h2", null, "Hablar con un dealer"),
+        h("select", { class: "mk-input mk-talk-dealer", onchange: (e) => { TALK.dealer = e.target.value; TALK.st = null; TALK.sig = ""; const dl = root.querySelector("#mk-talk-items"); if (dl) dl.replaceChildren(); pullTalk(root, true); } },
+          h("option", { value: "banco" }, "Don Ernesto")),
+        h("span", { class: "mk-muted mk-talk-sub" }, "cargando…")),
+      h("div", { class: "mk-talk-box" },
+        h("div", { class: "mk-msgs" }, stateBox("loading")),
+        h("div", { class: "mk-standing mk-talk-standing" }, h("span", { class: "mk-k" }, "SU OFERTA EN PIE")),
+        h("div", { class: "mk-talk-form" },
+          h("div", { class: "mk-talk-row" }, side, item, price, h("datalist", { id: "mk-talk-items" }),
+            h("span", { class: "mk-muted mk-talk-hint" }, "Comprar o vender y la carta solo hacen falta para abrir el hilo.")),
+          text,
+          h("div", { class: "mk-talk-row" },
+            h("button", { type: "button", class: "mk-btn mk-talk-send", onclick: send }, "Enviar"),
+            h("button", { type: "button", class: "mk-btn mk-talk-accept", onclick: accept }, "Aceptar su oferta"),
+            h("span", { class: "mk-grow" }),
+            h("button", { type: "button", class: "mk-btn mk-talk-release", title: "El bot vuelve a llevar este hilo", onclick: () => { const th = TALK.st && TALK.st.thread; if (th) talkDo(root, "release", { thread: th.id }, "Hilo devuelto al bot"); } }, "Devolver al bot"),
+            h("button", { type: "button", class: "mk-btn mk-talk-close", onclick: closeIt }, "Cerrar hilo")))));
+  }
+
   // ---------- screen ----------
   function mountLive(root) {
     root.replaceChildren(h("div", { class: "scr-mercado" },
@@ -654,6 +783,7 @@
         h("section", { class: "mk-teams" },
           h("div", { class: "mk-head mk-teams-h" }, h("h2", null, "Conversaciones con equipos"), h("span", { class: "mk-muted mk-teams-sub" }, "")),
           h("div", { class: "mk-teams-list" }, stateBox("loading"))),
+        talkPanel(root),
         h("div", { class: "mk-head mk-teams-h mk-dealers-h" }, h("h2", null, "Conversaciones con dealers")),
         h("div", { class: "mk-chats" }, stateBox("loading"))),
       h("aside", { class: "mk-side" }, stateBox("loading"))));
@@ -680,7 +810,7 @@
           if (dr.ok) S.conv.decs = arr(dr.v).map(normDec);
           await pullConversations(); renderConversations(root, DEALER_NAMES);
         } else if (S.mode === "hist") { await pullHistory(); renderHistory(root); }
-        else await refreshLive(root, data);
+        else { pullTalk(root); await refreshLive(root, data); }
       } catch (e) {
         const host = root.querySelector(S.mode === "hist" ? ".mk-hist-table, .mk-conv-list" : ".mk-chats");
         if (host) host.replaceChildren(stateBox("error", e));

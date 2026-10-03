@@ -140,3 +140,22 @@
 .scr-mercado .mk-team .mk-msgs { max-height: 320px; }
 .scr-mercado .mk-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--line-2); border-left: 3px solid var(--tc, var(--line-2)); background: var(--bg); font-size: 12.5px; }
 .scr-mercado .mk-teams-list > .mk-more { grid-column: 1 / -1; text-align: center; text-decoration: none; }
+
+/* hablar con un dealer */
+.scr-mercado .mk-talk { margin-bottom: 14px; }
+.scr-mercado .mk-talk-box { background: var(--m-s1); border: 1px solid var(--m-line); border-top: 2px solid var(--tc-dealer); }
+.scr-mercado .mk-talk .mk-msgs { max-height: 300px; min-height: 80px; }
+.scr-mercado .mk-talk-standing { border-top: 1px solid var(--m-line); }
+.scr-mercado .mk-talk-val { font-family: var(--m-mono); color: var(--m-muted); }
+.scr-mercado .mk-talk-gain { font-family: var(--m-mono); }
+.scr-mercado .mk-talk-gain.is-up { color: var(--tc-compra); }
+.scr-mercado .mk-talk-gain.is-down, .scr-mercado .mk-talk-block { color: var(--tc-venta); }
+.scr-mercado .mk-talk-block { flex-basis: 100%; }
+.scr-mercado .mk-talk-form { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.scr-mercado .mk-talk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scr-mercado .mk-talk-text { width: 100%; resize: vertical; box-sizing: border-box; }
+.scr-mercado .mk-talk-item { width: 220px; }
+.scr-mercado .mk-talk-price { width: 150px; }
+.scr-mercado .mk-talk-hint { font-size: 11px; }
+.scr-mercado .mk-talk button:disabled, .scr-mercado .mk-talk .mk-input:disabled { opacity: .45; cursor: default; }
+.scr-mercado .mk-talk .mk-grow { flex: 1; }

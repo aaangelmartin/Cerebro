@@ -704,6 +704,11 @@ class DealersDomain:
         views = [v for v in (parse_thread(t, assets_by_id, self._asked(t)) for t in _g(sit, "threads") or [])
                  if v is not None and v.status == "open"]
         self._sync(sit, views, dealers)
+        # threads a human is writing in from the dashboard (control.manual_threads): never answer, accept or
+        # close them, and open no second thread with that dealer
+        manual = {int(x) for x in (_g(ctx, "control") or {}).get("manual_threads") or [] if str(x).isdigit()}
+        manual_dealers = {v.dealer for v in views if v.id in manual}
+        views = [v for v in views if v.id not in manual]
         plan = Plan(tick=tick, cash=int(me.get("cash") or 0), values=values, dealers=dealers)
         plan.orders = self._brain_orders()
         self._order_bounds_now = {(o["dealer"], o["ref"]): int(o["bound"]) for o in plan.orders}
@@ -816,7 +821,7 @@ class DealersDomain:
                 t = self.store.data["threads"].get(str(v.id))
                 if t is not None:
                     t.update(kind=kind, value=round(value, 2), limit_est=round(limit_est, 2), level=level)
-        busy = {i.view.dealer for i in plan.infos} | {v.dealer for v in views}
+        busy = {i.view.dealer for i in plan.infos} | {v.dealer for v in views} | manual_dealers
         limits = _g(sit, "limits") or {}
         open_threads = len([t for t in _g(sit, "threads") or [] if t.get("status", "open") == "open"])
         plan.slots = max(0, int(limits.get("max_open_threads_per_team", 6)) - open_threads - 1)  # keep one for teammates/market

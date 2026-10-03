@@ -17,7 +17,8 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+GET  /dealer-chat?dealer=banco   our own thread with a dealer; POST /dealer-chat/{send,accept,close,release}  (api/dealerchat.py)
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -212,7 +213,7 @@ def apply_control(live: Path, body: dict) -> dict:
                                               for v in g.values()):
             raise ValueError("goal_buys must be an object of card -> max price")
         change["goal_buys"] = {str(k).upper(): int(v) for k, v in g.items()}
-    for key in ("protected", "paused_domains", "protected_offers"):
+    for key in ("protected", "paused_domains", "protected_offers", "manual_threads"):
         if key in body:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):
                 raise ValueError(f"{key} must be a list")
@@ -247,6 +248,7 @@ class Handler(BaseHTTPRequestHandler):
     record: Path = config.DATA / "record"
     stop_file: Path = config.STOP_FILE
     dashboard: Path = DASHBOARD_DIR
+    dealer_gw = None                       # tests set a fake game here; None = the real gateway
 
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -320,6 +322,14 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._send(400, {"error": "bad_request", "message": "since must be a number"})
             return self._send(200, _news.view(self.live, since=since))
+        if path == "/dealer-chat":                               # a human's own thread with a dealer (talks to the game)
+            from . import dealerchat
+            from ..gateway import GameError
+            try:
+                return self._send(200, dealerchat.state(self.live, str(q.get("dealer") or dealerchat.DEFAULT_DEALER),
+                                                        gw=self.dealer_gw))
+            except GameError as e:
+                return self._send(502, {"error": e.code, "message": e.message or e.code})
         if path == "/outbox":
             from ..outbox import Outbox
             try:
@@ -562,6 +572,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"item": Outbox().update(m.group(1), body.get("status"), body.get("note"))})
                 except KeyError:
                     return self._send(404, {"error": "not_found", "message": m.group(1)})
+            m = re.fullmatch(r"/dealer-chat/(send|accept|close|release)", path)
+            if m:
+                from . import dealerchat
+                from ..gateway import GameError
+                try:
+                    if m.group(1) == "release":
+                        return self._send(200, dealerchat.release(self.live, body))
+                    return self._send(200, getattr(dealerchat, m.group(1))(self.live, body, gw=self.dealer_gw))
+                except GameError as e:
+                    return self._send(502, {"error": e.code, "message": e.message or e.code})
             if path == "/brain/external":
                 from ..intel import external
                 if not str(body.get("text") or "").strip():

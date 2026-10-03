@@ -74,6 +74,8 @@
     outboxSet: (id, status, note) => write("POST", "outbox/" + enc(id), { status, note: note || "" }),
     external: (since) => get("brain/external", { since }, 0),
     externalAdd: (text, by, team_hint) => write("POST", "brain/external", team_hint ? { text, by, team_hint } : { text, by }),
+    dealerChat: (dealer) => get("dealer-chat", { dealer }, 0),
+    dealerChatDo: (what, body) => write("POST", "dealer-chat/" + what, body),
     broker: () => get("broker"),
     duelsLive: () => get("duels"),
     tickLatest: () => get("tick/latest"),
