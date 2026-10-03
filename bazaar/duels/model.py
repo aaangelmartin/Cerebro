@@ -45,7 +45,7 @@ def _num(x) -> float | None:
 # Every number that involves days (model.utility, policy, guard, accept, prompt) goes through
 # signed_days_weight() so the sign can never disagree between them.
 _COST_WORDS = re.compile(r"\b(cost|costs|costing|lose|loses|lost|loss|penalt\w*|late|delay\w*|hurts?)\b", re.I)
-_VALUE_WORDS = re.compile(r"\b(value|values|worth|gain|gains|benefit\w*|reward\w*|points?|for you|to you)\b", re.I)
+_VALUE_WORDS = re.compile(r"\b(value|values|worth|gain|gains|benefit\w*|reward\w*|points?|for you|to you|adds?|added|to your side)\b", re.I)
 
 
 def days_interpretation(w: float, meaning: str | None) -> tuple[float, bool, str]:
