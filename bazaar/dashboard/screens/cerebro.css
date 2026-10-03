@@ -176,3 +176,7 @@
 .scr-cerebro .cb-x-text { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .scr-cerebro .cb-x-ents { display: flex; flex-wrap: wrap; gap: 4px; }
 .scr-cerebro .cb-ev-h { flex-wrap: wrap; }
+.scr-cerebro .cb-x-reply { margin-top: 4px; padding: 8px 10px; border: 1px solid var(--line-2); border-left: 3px solid var(--t-compra); background: var(--s2);
+  display: flex; flex-direction: column; gap: 6px; }
+.scr-cerebro .cb-x-reply.is-done { opacity: .65; }
+.scr-cerebro .cb-x-reply .cb-cap { margin-bottom: 0; }

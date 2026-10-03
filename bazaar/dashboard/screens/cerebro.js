@@ -552,7 +552,8 @@
   }
   function obRender() {
     const host = O.host; if (!host) return;
-    const counts = {}; for (const [k] of OB_TABS) counts[k] = O.items.filter((x) => x.kind === k && isOpen(x)).length;
+    const inTab = (x, k) => x.kind === k && !isReply(x);   // replies to pasted messages are shown under that message
+    const counts = {}; for (const [k] of OB_TABS) counts[k] = O.items.filter((x) => inTab(x, k) && isOpen(x)).length;
     const sig = JSON.stringify([O.state, O.tab, [...O.open], O.items.map((x) => [x.id, x.status, x.updated, x.occurrences])]);
     if (sig === O.sig) return; O.sig = sig;
     const totalOpen = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -566,7 +567,7 @@
     else if (O.state === "off") body = U().empty("La bandeja del cerebro aún no está activa.");
     else if (O.state === "error") body = U().error(O.err);
     else {
-      const rows = O.items.filter((x) => x.kind === O.tab)
+      const rows = O.items.filter((x) => inTab(x, O.tab))
         .sort((a, b) => (isOpen(b) - isOpen(a)) || ((+b.updated || +b.ts || 0) - (+a.updated || +a.ts || 0)));
       if (!rows.length) body = U().empty(O.tab === "code" ? "Sin cambios de código propuestos." : O.tab === "promo" ? "Sin mensajes para enviar." : "Sin tareas.");
       else {
@@ -588,6 +589,7 @@
       }
     }
     U().keepScroll(host, () => host.replaceChildren(head, tabs, el("div", { class: "panel-body" }, body)));
+    if (typeof xRender === "function") xRender();
   }
 
 
@@ -643,9 +645,31 @@
     for (const t of en.ticks || []) out.push(el("span", { class: "tag res tone-mute num" }, "tick " + t));
     return out;
   }
+  // replies the brain drafted for a pasted message live in the outbox (promo, channel whatsapp, reply_to.external_id)
+  const isReply = (o) => o && o.kind === "promo" && o.reply_to && o.reply_to.external_id != null;
+  function replyFor(x) {
+    if (!x) return null;
+    if (x.reply_outbox_id != null) { const o = O.items.find((y) => String(y.id) === String(x.reply_outbox_id)); if (o) return o; }
+    return O.items.find((o) => isReply(o) && String(o.reply_to.external_id) === String(x.id)) || null;
+  }
+  function replyBlock(x) {
+    const o = replyFor(x);
+    if (!o) return x.reply_outbox_id != null && O.state !== "on" ? el("div", { class: "cb-rows" }, "Respuesta preparada (la bandeja aún no está activa).") : null;
+    const done = o.status === "sent" || o.status === "discarded";
+    const cp = el("button", { type: "button", class: "cb-ob-btn" }, "Copiar respuesta");
+    cp.addEventListener("click", async () => { const ok = await copyText(o.text || ""); cp.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { cp.textContent = "Copiar respuesta"; }, 1500); });
+    const act = (label, status, tone) => { const b = el("button", { type: "button", class: "cb-ob-btn tone-" + tone }, label); b.addEventListener("click", () => obSet(o, status, "")); return b; };
+    return el("div", { class: "cb-x-reply" + (done ? " is-done" : "") },
+      el("div", { class: "cb-ev-h" }, el("span", { class: "cb-cap" }, "Respuesta del cerebro"), (o.reply_to && o.reply_to.author) ? el("span", { class: "cb-muted" }, "para " + o.reply_to.author) : null,
+        el("span", { class: "cb-sp" }), obStatus(o.status)),
+      el("pre", { class: "cb-ob-text" }, o.text || ""),
+      o.why ? el("div", { class: "cb-rows" }, "Por qué: " + o.why) : null,
+      el("div", { class: "cb-ob-actions" }, cp, done ? null : act("Marcar enviado", "sent", "ok"), done ? null : act("Descartar", "discarded", "bad")));
+  }
   function xRender() {
     const box = X.list; if (!box) return;
-    const sig = JSON.stringify([X.state, X.items.map((x) => [x.id, x.actionable, x.llm && JSON.stringify(x.llm).length])]);
+    const sig = JSON.stringify([X.state, X.items.map((x) => [x.id, x.actionable, x.brain_conclusion, x.llm && JSON.stringify(x.llm).length]),
+      O.items.filter(isReply).map((o) => [o.id, o.status, o.text])]);
     if (sig === X.sig) return; X.sig = sig;
     if (X.state === "idle") return box.replaceChildren(U().loading());
     if (X.state === "off") return box.replaceChildren(U().empty("La entrada de mensajes aún no está activa."));
@@ -654,10 +678,10 @@
     const rows = X.items.slice().sort((a, b) => (!!b.actionable - !!a.actionable) || ((+b.received_at || +b.ts || 0) - (+a.received_at || +a.ts || 0)));
     const list = box.querySelector(".cb-list") || el("div", { class: "cb-list cb-x-list" });
     U().keyedList(list, rows.slice(0, 120), {
-      key: (x) => String(x.id), sig: (x) => [x.actionable, x.llm && JSON.stringify(x.llm).length].join("|"),
+      key: (x) => String(x.id), sig: (x) => { const r = replyFor(x); return [x.actionable, x.brain_conclusion, x.llm && JSON.stringify(x.llm).length, r && r.id, r && r.status, r && r.text].join("|"); },
       render: (x) => {
         const llm = x.llm || {};
-        const concl = llm.conclusion || llm.summary || llm.action || x.action_hint || "";
+        const concl = x.brain_conclusion || llm.conclusion || llm.summary || llm.action || x.action_hint || "";
         const team = x.team ? (x.team === "t10" ? U().teamTag("t10", { us: true }) : U().teamTag(x.team)) : el("span", { class: "cb-muted" }, x.author || "¿equipo?");
         const n = el("div", { class: "cb-x-item" + (x.actionable ? " is-act" : "") },
           el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+x.received_at || +x.ts)),
@@ -667,7 +691,8 @@
             el("span", { class: "cb-sp" }), el("span", { class: "cb-muted" }, "pegado por " + (x.by || "equipo"))),
           el("div", { class: "cb-x-text" }, x.text || ""),
           entityChips(x.entities).length ? el("div", { class: "cb-x-ents" }, entityChips(x.entities)) : null,
-          concl ? el("div", { class: "cb-rows" }, (x.actionable ? "Qué hacer: " : "Conclusión del cerebro: ") + concl) : null);
+          concl ? el("div", { class: "cb-rows" }, (x.actionable ? "Qué hacer: " : "Conclusión del cerebro: ") + concl) : null,
+          replyBlock(x));
         n.style.setProperty("--tc", x.actionable ? "var(--warn)" : (XT[(x.types || [])[0]] || [0, 0, "var(--t-anuncio)"])[2]);
         return n;
       },
