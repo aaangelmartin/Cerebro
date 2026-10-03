@@ -637,10 +637,59 @@
     return { keys: out, bad, allDown: out.length > 0 && bad.length === out.length && (health ? !!health.all_down || true : true), okLabels: out.filter((k) => k.ok).map((k) => k.label) };
   }
 
+  // ---- venue volume ranking (Competición and Broker) ------------------------------------------------------
+  // venues: rec/latest/venues rows {venue,name,owner,trades,volume,traders,pairs,fees}; hourVol: {venue: P in the last hour}
+  const ALLIED_VENUES = { v10: "t05" };
+  function venueRanking(o) {
+    o = o || {};
+    const ours = o.ours || "v07";
+    const rows = (o.venues || []).slice().sort((a, b) => (+b.volume || 0) - (+a.volume || 0) || (+b.trades || 0) - (+a.trades || 0) || String(a.venue).localeCompare(String(b.venue)));
+    const max = Math.max(1, ...rows.map((v) => +v.volume || 0));
+    const rank = rows.findIndex((v) => v.venue === ours) + 1;
+    const usRow = rows[rank - 1] || {};
+    const root = el("div", { class: ["vrank", o.compact ? "compact" : ""] });
+    root.appendChild(el("div", { class: "vrank-head" },
+      el("b", { class: "vrank-us" }, rank ? `${ours}: ${rank}.º de ${rows.length} por volumen` : "Sin tienda propia"),
+      rank ? el("span", { class: "num vrank-sub" }, `${fmtP(+usRow.volume || 0)} · ${+usRow.trades || 0} op. · ${+usRow.traders || 0} equipos · ${+usRow.pairs || 0} parejas`) : null));
+    const list = o.compact ? rows.filter((v, i) => i < 6 || v.venue === ours || ALLIED_VENUES[v.venue]) : rows;
+    for (const v of list) {
+      const i = rows.indexOf(v);
+      const us = v.venue === ours, ally = !!ALLIED_VENUES[v.venue];
+      const vol = +v.volume || 0, h = (o.hourVol || {})[v.venue] || 0;
+      const r = el("div", { class: ["vrank-row", us ? "is-us" : "", ally ? "is-ally" : "", o.onPick ? "clickable" : ""] },
+        el("span", { class: "num vrank-n" }, (i + 1) + "."),
+        el("span", { class: "vrank-name", title: v.name || v.venue }, el("b", { class: "num" }, v.venue), " ",
+          v.venue === "rastro" ? "El Rastro" : teamName(v.owner) || v.name || "", us ? el("span", { class: "tag vrank-tag us" }, "Nosotros") : null,
+          ally ? el("span", { class: "tag vrank-tag ally" }, "Aliado") : null),
+        el("span", { class: "vrank-bar" }, el("span", { class: "vrank-fill", style: { width: Math.max(vol ? 1.5 : 0, (vol / max) * 100) + "%" } }),
+          h ? el("span", { class: "vrank-hour", title: "volumen de la última hora", style: { width: Math.max(1.5, (Math.min(h, vol) / max) * 100) + "%" } }) : null),
+        el("span", { class: "num vrank-val" }, fmtP(vol)),
+        el("span", { class: "num vrank-h" }, h ? "+" + fmtNum(h) + " últ. h" : "—"),
+        o.compact ? null : el("span", { class: "num vrank-meta" }, `${+v.trades || 0} op. · ${+v.traders || 0} eq. · ${+v.pairs || 0} par.`));
+      if (o.onPick) r.addEventListener("click", () => o.onPick(v.venue));
+      root.appendChild(r);
+    }
+    if (!rows.length) root.appendChild(empty("Sin datos de tiendas todavía."));
+    return root;
+  }
+  // P traded per venue in the last hour, from feed settlements (payload.venue, payload.price; no venue and no dealer = El Rastro)
+  function venueHourVolume(settlements, now) {
+    now = now || Date.now() / 1000;
+    const out = {};
+    for (const e of settlements || []) {
+      if (!e || e.type !== "settlement") continue;
+      const p = e.payload || {}; const ts = +e.seen_at || +e.ts || 0;
+      if (now - ts > 3600 || p.kind === "bench") continue;
+      const k = p.venue || (p.persona ? null : "rastro");
+      if (k) out[k] = (out[k] || 0) + (+p.price || 0);
+    }
+    return out;
+  }
+
   window.ui = {
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL, keyHealth, keyProblem,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL, keyHealth, keyProblem, venueRanking, venueHourVolume, ALLIED_VENUES,
   };
 })();

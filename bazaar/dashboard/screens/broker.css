@@ -44,3 +44,5 @@
 .scr-broker .bk-cap { font-family: var(--font-num); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 10px 16px 6px; }
 .scr-broker .bk-time { color: var(--ink-3); font-size: 12px; }
 .scr-broker .bk-who { display: inline-flex; align-items: center; gap: 4px; }
+.scr-broker .bk-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.scr-broker .bk-link { font-size: 12px; color: var(--ink-2); text-decoration: underline; }

@@ -552,9 +552,19 @@
   async function pullFeed() {
     const api = window.api;
     if (S.lastSeq == null) {
-      const r = await api.recStream("feed", { tail: 4000 });
-      S.feed = (r && r.rows) || [];
-      S.lastSeq = r && r.last_seq != null ? r.last_seq : (S.feed.length ? S.feed[S.feed.length - 1].seq : 0);
+      // the API caps `tail` at 500 rows (a few minutes): read the last 8000 events by pages so "última hora" is real
+      const t = await api.recStream("feed", { tail: 1 });
+      const last = t && t.last_seq != null ? t.last_seq : ((t && t.rows && t.rows.length) ? t.rows[t.rows.length - 1].seq : 0);
+      let seq = Math.max(0, last - 8000), rows = [];
+      for (let guard = 0; guard < 6; guard++) {
+        const r = await api.recStream("feed", { since_seq: seq, limit: 5000 });
+        const got = (r && r.rows) || [];
+        rows = rows.concat(got);
+        if (got.length) seq = got[got.length - 1].seq;
+        if (got.length < 5000) break;
+      }
+      S.feed = rows;
+      S.lastSeq = rows.length ? rows[rows.length - 1].seq : last;
     } else {
       const r = await api.recStream("feed", { since_seq: S.lastSeq, limit: 2000 });
       const rows = (r && r.rows) || [];
@@ -618,7 +628,7 @@
       const fee = v.venue === "rastro" ? "5 % + 1 P/carta" : feeText(v);
       const tag = v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US });
       return item(v.venue, el("span", {}, v.name || v.venue),
-        el("span", { class: "ms-mono" }, `${v.venue} · ${fee} · ${v.trades || 0} op. · ${fmtP(v.volume || 0)}` + (openOffers(v.venue) != null ? ` · ${openOffers(v.venue).length} ofertas` : "")),
+        el("span", { class: "ms-mono" }, `${v.venue} · ${fee} · ${fmtP(v.volume || 0)} · ${v.trades || 0} op. · ${v.traders || 0} eq. · ${v.pairs || 0} par.` + (openOffers(v.venue) != null ? ` · ${openOffers(v.venue).length} ofertas` : "")),
         el("div", { class: "ms-item-t" }, tag, v.status && v.status !== "open" ? el("span", { class: "ms-bad" }, v.status) : null),
         v.venue === ours ? "is-us" : v.venue === "rastro" ? "is-rastro" : "");
     });
@@ -709,31 +719,51 @@
     const host = root.querySelector(".ms-detail");
     const ours = ourVenue();
     const since = Date.now() / 1000 - 3600;
-    const lastHour = {};
+    const lastHour = {}, hourVol = {};
     for (const e of S.feed) if (e.type === "settlement" && e.payload && (wallOf(e) || 0) >= since) {
-      const k = e.payload.venue || (e.payload.persona ? null : "rastro"); if (k) lastHour[k] = (lastHour[k] || 0) + 1;
+      const k = e.payload.venue || (e.payload.persona ? null : "rastro");
+      if (k) { lastHour[k] = (lastHour[k] || 0) + 1; hourVol[k] = (hourVol[k] || 0) + (num(e.payload.price) || 0); }
     }
+    Object.assign(hourVol, U().venueHourVolume(S.feed));   // same rule as the Broker screen
+    for (const k of Object.keys(hourVol)) if (!U().venueHourVolume(S.feed)[k]) delete hourVol[k];
     const rows = S.venues.map((v) => {
       const offs = openOffers(v.venue); const c = { venta: 0, puja: 0, cambio: 0 };
       if (offs) for (const o of offs) c[offerKind(o)]++;
-      return { v, offs, c, h: lastHour[v.venue] || 0 };
-    }).sort((a, b) => (b.v.venue === ours) - (a.v.venue === ours) || (num(b.v.volume) || 0) - (num(a.v.volume) || 0) || (num(b.v.trades) || 0) - (num(a.v.trades) || 0));
+      return { v, offs, c, h: lastHour[v.venue] || 0, hv: hourVol[v.venue] || 0 };
+    });
+    // sortable: click a numeric header (again to flip); default = volume, highest first
+    const SORTS = { trades: (r) => num(r.v.trades) || 0, hour: (r) => r.h, volume: (r) => num(r.v.volume) || 0, hvol: (r) => r.hv, traders: (r) => num(r.v.traders) || 0,
+      pairs: (r) => num(r.v.pairs) || 0, fees: (r) => num(r.v.fees) || 0, venta: (r) => r.c.venta, puja: (r) => r.c.puja, cambio: (r) => r.c.cambio };
+    const sk = SORTS[S.sumSort] ? S.sumSort : "volume", dir = S.sumDir === 1 ? 1 : -1;
+    rows.sort((a, b) => dir * (SORTS[sk](a) - SORTS[sk](b)) || (num(b.v.volume) || 0) - (num(a.v.volume) || 0) || String(a.v.venue).localeCompare(String(b.v.venue)));
+    const byVol = rows.slice().sort((a, b) => (num(b.v.volume) || 0) - (num(a.v.volume) || 0) || (num(b.v.trades) || 0) - (num(a.v.trades) || 0));
+    const volRank = (v) => byVol.findIndex((r) => r.v.venue === v.venue) + 1;
     const tot = rows.reduce((a, r) => ({ t: a.t + (num(r.v.trades) || 0), vol: a.vol + (num(r.v.volume) || 0), o: a.o + (r.offs ? r.offs.length : 0) }), { t: 0, vol: 0, o: 0 });
     const kpi = (l, val) => el("div", { class: "ms-kpi" }, el("span", { class: "ms-kpi-l" }, l), el("b", { class: "ms-mono" }, val));
     const head = el("div", { class: "ms-head" },
-      el("div", { class: "ms-title" }, el("h1", {}, "Todos los mercados"), el("span", { class: "ms-muted" }, "cada tienda del juego, la nuestra arriba")),
+      el("div", { class: "ms-title" }, el("h1", {}, "Todos los mercados"), el("span", { class: "ms-muted" }, "cada tienda del juego · pulsa una columna para ordenar")),
       el("div", { class: "ms-kpis" }, kpi("Tiendas", String(rows.length)), kpi("Operaciones", String(tot.t)), kpi("Volumen", fmtP(tot.vol)), kpi("Ofertas abiertas", String(tot.o))));
     const n = (x) => el("td", { class: "ms-mono ms-r" }, x);
+    const COLS = [["#", null], ["Tienda", null], ["Dueño", null], ["Comisión", null], ["Volumen", "volume"], ["Vol. últ. hora", "hvol"], ["Operaciones", "trades"], ["Op. últ. hora", "hour"],
+      ["Equipos", "traders"], ["Parejas", "pairs"], ["Comisiones", "fees"], ["En venta", "venta"], ["Se busca", "puja"], ["Cambios", "cambio"]];
+    const th = ([label, key], i) => el("th", { class: [i >= 4 ? "ms-r" : "", key ? "ms-sortable" : "", key === sk ? "is-sorted" : ""],
+      onclick: key ? () => { if (S.sumSort === key) S.sumDir = S.sumDir === 1 ? -1 : 1; else { S.sumSort = key; S.sumDir = -1; } summaryView(root); } : null },
+      label, key === sk ? (dir === -1 ? " ↓" : " ↑") : "");
+    const chart = el("div", { class: "ms-volchart" }, el("div", { class: "ms-cap" }, "Volumen por tienda · hoy (barra) y última hora (tramo claro)"),
+      U().venueRanking({ venues: S.venues, hourVol, ours, onPick: (id) => { S.sel = id; render(root); T10Markets.refresh(); } }));
     const table = el("table", { class: "ms-table ms-sum" },
-      el("thead", {}, el("tr", {}, ["Tienda", "Dueño", "Comisión", "Estado", "Operaciones", "Última hora", "Volumen", "Equipos", "En venta", "Se busca", "Cambios"].map((x, i) => el("th", { class: i >= 4 ? "ms-r" : "" }, x)))),
-      el("tbody", {}, rows.map(({ v, offs, c, h }) => el("tr", { class: ["ms-click", v.venue === ours ? "is-us" : ""], onclick: () => { S.sel = v.venue; render(root); T10Markets.refresh(); } },
-        el("td", {}, el("b", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, " " + v.venue)),
+      el("thead", {}, el("tr", {}, COLS.map(th))),
+      el("tbody", {}, rows.map(({ v, offs, c, h, hv }) => el("tr", { class: ["ms-click", v.venue === ours ? "is-us" : ""], onclick: () => { S.sel = v.venue; render(root); T10Markets.refresh(); } },
+        el("td", { class: "ms-mono ms-muted" }, volRank(v) + "."),
+        el("td", {}, el("b", {}, v.name || v.venue), el("span", { class: "ms-mono ms-muted" }, " " + v.venue),
+          U().ALLIED_VENUES[v.venue] ? el("span", { class: "tag vrank-tag ally" }, "Aliado") : null,
+          v.status && v.status !== "open" ? el("span", { class: "ms-bad" }, " " + v.status) : null),
         el("td", {}, v.venue === "rastro" ? el("span", { class: "ms-muted" }, "Organización") : U().teamTag(v.owner, { us: v.owner === US })),
         el("td", { class: "ms-mono" }, v.venue === "rastro" ? "5 % + 1 P" : feeText(v)),
-        el("td", { class: v.status === "open" ? "ms-muted" : "ms-bad" }, v.status === "open" ? "abierta" : v.status || "—"),
-        n(String(v.trades || 0)), n(h ? String(h) : "—"), n(fmtP(v.volume || 0)), n(String(v.traders || 0)),
+        n(el("b", {}, fmtP(v.volume || 0))), n(hv ? "+" + fmtP(hv) : "—"), n(String(v.trades || 0)), n(h ? "+" + h : "—"),
+        n(String(v.traders || 0)), n(String(v.pairs || 0)), n(v.fees ? fmtP(v.fees) : "—"),
         n(offs ? String(c.venta) : "…"), n(offs ? String(c.puja) : "…"), n(offs ? String(c.cambio) : "…")))));
-    host.replaceChildren(head, rows.length ? table : (S.venuesErr ? U().error(S.venuesErr) : U().loading()));
+    host.replaceChildren(head, rows.length ? chart : "", rows.length ? el("div", { class: "ms-tablewrap" }, table) : (S.venuesErr ? U().error(S.venuesErr) : U().loading()));
   }
   function offerPrice(o) { return num(o.want && o.want.cash) || num(o.give && o.give.cash) || 0; }
   function activityRow(e) {

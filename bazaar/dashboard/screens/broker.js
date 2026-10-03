@@ -18,7 +18,7 @@
   const add = (node, ...kids) => { for (const k of kids.flat(Infinity)) if (k !== null && k !== undefined && k !== false) node.append(k); return node; };
   const US = "t10", VENUE = "v07";
 
-  const S = { root: null, feed: [], feedSeq: 0, feedAt: 0, lb: [], lbAt: 0, sessions: null, sessErr: null, sig: "" };
+  const S = { root: null, settle: [], venues: [], feed: [], feedSeq: 0, feedAt: 0, lb: [], lbAt: 0, sessions: null, sessErr: null, sig: "" };
 
   async function pullFeed(force) {
     if (!force && Date.now() - S.feedAt < 15000 && S.feed.length) return;
@@ -29,6 +29,7 @@
       for (const x of rows) {
         const p = x.payload || {};
         if (String(x.type).startsWith("bench") || p.venue === VENUE || (x.type === "venue.announcement" && x.actor === US)) S.feed.push(x);
+        if (x.type === "settlement") S.settle.push(x);
       }
       if (rows.length) S.feedSeq = rows[rows.length - 1].seq;
       if (rows.length < 5000) break;
@@ -201,7 +202,8 @@
   }
 
   async function load(force) {
-    const [b, book] = await Promise.all([A().broker().catch(() => ({})), A().rec("books/" + VENUE).catch(() => null)]);
+    const [b, book, ven] = await Promise.all([A().broker().catch(() => ({})), A().rec("books/" + VENUE).catch(() => null), A().rec("venues").catch(() => null)]);
+    S.venues = (ven && (ven.venues || (ven.data || {}).venues)) || S.venues;
     await Promise.all([pullFeed(force).catch(() => {}), pullLb(force).catch(() => {}), pullSessions()]);
     const run = (b.active_runs || [])[0];
     if (run) { try { S.liveRun = { run, rows: ((await A().get("broker/session/" + encodeURIComponent(run), {}, 3000)) || {}).rows }; } catch (e) { S.liveRun = null; } }
@@ -220,13 +222,16 @@
       const d = await load(opts && opts.force);
       const wrap = root.querySelector(".scr-broker"); if (!wrap) return;
       const sig = JSON.stringify([d.b.updated, d.b.tick, (d.b.session_stats || {}).matches, S.feed.length, S.lb.length, S.sessions && S.sessions.length,
-        S.liveRun && S.liveRun.rows && S.liveRun.rows.length, d.book && d.book.tick]);
+        S.liveRun && S.liveRun.rows && S.liveRun.rows.length, d.book && d.book.tick,
+        S.settle.length, S.venues.map((v) => v.volume).join()]);
       if (sig === S.sig && !(opts && opts.force)) return;
       S.sig = sig;
       U().keepScroll(wrap, () => {
         wrap.querySelector(".bk-top").replaceChildren(statusPanel(d.b));
         wrap.querySelector(".bk-mid").replaceChildren(sessionsPanel(d.b));
-        wrap.querySelector(".bk-bot").replaceChildren(chartPanel(), livePanel(d.b));
+        const rk = U().panel("Volumen por tienda", { sub: "hoy y última hora · la nuestra en blanco", actions: [el("a", { class: "bk-link", href: "#competicion" }, "ver todas")] });
+        add(rk.body, U().venueRanking({ venues: S.venues, hourVol: U().venueHourVolume(S.settle), ours: VENUE, compact: true }));
+        wrap.querySelector(".bk-bot").replaceChildren(el("div", { class: "bk-col" }, chartPanel(), rk), livePanel(d.b));
         wrap.querySelector(".bk-ven").replaceChildren(venuePanel(d.book));
       });
     },

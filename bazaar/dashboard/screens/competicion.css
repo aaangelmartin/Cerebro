@@ -130,3 +130,8 @@ div.scr-competicion { display: flex; flex-direction: column; gap: 16px; }
 .scr-competicion .c-tabs .t10-seg { font-size: 12.5px; padding: 7px 14px; }
 .scr-competicion.c-tab-precios .c-markets { display: none; }
 .scr-competicion.c-tab-mercados .c-top, .scr-competicion.c-tab-mercados .c-bottom { display: none; }
+.ms-volchart { border: 1px solid var(--line-2); background: var(--s1); margin-bottom: 12px; }
+.ms-volchart > .ms-cap { padding: 10px 16px 0; }
+.ms-tablewrap { overflow-x: auto; }
+.ms-sum th.ms-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.ms-sum th.ms-sortable:hover, .ms-sum th.is-sorted { color: var(--ink); }
