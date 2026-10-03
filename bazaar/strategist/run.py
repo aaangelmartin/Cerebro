@@ -149,12 +149,13 @@ STRATEGY_TOOL = {
                               "diagnosis, proposed_change, impact, patch_sketch}; check OUTBOX first, same title = "
                               "same request", "items": {"type": "object"}},
             "promo_drafts": {"type": "array", "description": "proactive messages for humans to send (WhatsApp group or "
-                             "in-game): asking an ally to post publicly on v07, proposing a swap to a team that wants "
-                             "our spare, promoting our venue: {text, why, channel: whatsapp|in_game}",
+                             "in-game), ALWAYS in English (the group is in English), short and concrete: asking an ally to "
+                             "post publicly on v07, proposing a swap to a team that wants our spare, promoting our "
+                             "venue: {text, why, channel: whatsapp|in_game}",
                              "items": {"type": "object"}},
             "whatsapp_replies": {"type": "array", "description": "for EVERY new WhatsApp intake record (EVENTS kind "
                                  "external, ids in brackets): {reply_to: record id, conclusion: what you decided and "
-                                 "did in the game, text: the reply to send (their language and tone, short, concrete "
+                                 "did in the game, text: the reply to send (ALWAYS in English, friendly, short, concrete "
                                  "numbers/offer ids; empty if no reply is needed), why}", "items": {"type": "object"}},
             "human_tasks": {"type": "array", "description": "chores only humans can do (keys, infra, contacts): "
                             "{task, why}", "items": {"type": "object"}},

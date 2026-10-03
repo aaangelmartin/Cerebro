@@ -29,6 +29,7 @@ from bazaar.lab import gate, migrate, seed
 from bazaar.lab.common import read_json, safe_id, write_json
 from bazaar.lab.hypothesize import hypothesize
 from bazaar.lab.ingest import SCHEMA, Ingestor, build_features, load_or_build, seed_known
+from bazaar.core.types import Lesson
 from bazaar.lab.store import LessonStore, write_notice
 
 HYPOTHESIS_EVERY_S = 30 * 60
@@ -130,6 +131,56 @@ class Lab:
             self.last_novel_hyp = time.time()
         return handled
 
+    # --- the brain's policies become lessons -----------------------------------------
+    @staticmethod
+    def _policy_scope(text: str) -> str:
+        t = (text or "").lower()
+        if "duel" in t:
+            return "duel"
+        for d in ("abuela", "carmen", "chato", "pilar"):
+            if d in t:
+                return "dealer"
+        if "broker" in t or "announce" in t:
+            return "broker"
+        if any(w in t for w in ("post", "ask", "bid", "swap", "venue", "v07", "v10", "rastro", "sell", "buy")):
+            return "market"
+        return "global"
+
+    def ingest_brain(self) -> list[str]:
+        """Read data/lab/brain_input.json (written by el cerebro every plan) and mirror each brain policy as an
+        active lesson (retired when the brain retires it), so every domain prompt carries it. Returns changed ids."""
+        p = self.lab / "brain_input.json"
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        changed = []
+        seen = getattr(self, "_brain_seen", {})
+        for pol in doc.get("policies") or []:
+            pid, text = str(pol.get("id") or ""), str(pol.get("text") or "").strip()
+            if not pid or not text:
+                continue
+            lid = "B" + pid
+            status = "active" if pol.get("status", "active") == "active" else "retired"
+            sig = f"{status}|{text}"
+            if seen.get(lid) == sig:
+                continue
+            old = self.store.get(lid)
+            if old is not None and old.status == status and old.rule == text:
+                seen[lid] = sig
+                continue
+            self.store.upsert(Lesson(id=lid, scope=self._policy_scope(text), rule=text,
+                                     evidence=[f"cerebro:{pol.get('reason') or ''}"[:300]], n=1, sources=1,
+                                     status=status, weight=0.6 if status == "active" else 0.0,
+                                     created_by="cerebro"), by="cerebro")
+            seen[lid] = sig
+            changed.append(lid)
+        self._brain_seen = seen
+        if changed:
+            write_notice("brain_policies", f"El Laboratorio aplica {len(changed)} políticas del cerebro como lecciones.",
+                         path=self.lab / "notices.jsonl", ids=changed)
+        return changed
+
     def _can_spend(self) -> bool:
         if time.strftime("%Y-%m-%d") != self.day:
             self.day, self.spent_today = time.strftime("%Y-%m-%d"), 0.0
@@ -184,6 +235,7 @@ class Lab:
             out["ingested"] = self.ing.poll()
             out["record_use"] = self.apply_closings()
             out["novelty"] = [n["key"] for n in self.handle_novelty()]
+            out["brain"] = self.ingest_brain()
             due = time.time() - self.last_hyp >= HYPOTHESIS_EVERY_S and self.corpus.version != self.last_hyp_version
             if (force_hypothesis or due) and self._can_spend():
                 out["hypothesis"] = self._hypothesize()

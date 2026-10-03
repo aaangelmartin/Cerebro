@@ -190,6 +190,8 @@ def step(store: LessonStore, corpus: Corpus, now: float | None = None, run_sim: 
     for l in store.all():
         if l.status == "retired":
             continue
+        if l.created_by == "cerebro":       # the brain's policies: el cerebro (with its council) owns their status
+            continue
         pred = (l.params or {}).get("prediction")
         if touches_rails(l.rule, l.params):
             move(l, "retired", "Intentaba cambiar un raíl: las lecciones no pueden.")

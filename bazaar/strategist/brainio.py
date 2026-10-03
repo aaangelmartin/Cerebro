@@ -130,6 +130,22 @@ def _num_in(text: str) -> bool:
     return any(ch.isdigit() for ch in str(text or ""))
 
 
+_ES_WORDS = {"el", "los", "las", "que", "para", "con", "una", "por", "nuestro", "nuestra", "vendemos", "compramos",
+             "hola", "gracias", "tienda", "cartas", "precio", "también", "pero", "muy", "está", "están", "hay"}
+
+
+def looks_non_english(text: str) -> bool:
+    """WhatsApp/announcement drafts go to an English-speaking group: flag Spanish-looking text."""
+    t = str(text or "").lower()
+    if not t.strip():
+        return False
+    if any(ch in t for ch in "¿¡ñ"):
+        return True
+    words = [w.strip(".,;:!?()\"'") for w in t.split()]
+    hits = sum(1 for w in words if w in _ES_WORDS)
+    return hits >= 2 and hits / max(1, len(words)) > 0.06
+
+
 def validate(plan: dict, pic: dict) -> list[str]:
     """Code-side checks of a sanitised plan against the picture. Returns errors (empty = valid)."""
     errors = []
@@ -176,6 +192,12 @@ def validate(plan: dict, pic: dict) -> list[str]:
         for ref in avoid:
             if f"buy {ref}" in g or f"Buy {ref}" in g:
                 errors.append(f"guidance.{k} tells to buy {ref}, a set we avoid")
+    for i, d in enumerate(plan.get("promo_drafts") or [], 1):
+        if looks_non_english(d.get("text")):
+            errors.append(f"promo_draft {i} is not in English (the WhatsApp group and in-game chat are in English)")
+    for i, r in enumerate(plan.get("whatsapp_replies") or [], 1):
+        if looks_non_english(r.get("text")):
+            errors.append(f"whatsapp_reply {i} is not in English (the WhatsApp group is in English)")
     pp = plan.get("points_plan") or {}
     if not pp:
         errors.append("points_plan is missing (targets per component, gap to the leader, actions with expected points)")
@@ -222,5 +244,10 @@ def repair(plan: dict, pic: dict, errors: list[str]) -> dict:
     out["cancel_offers"] = [x for x in plan.get("cancel_offers") or [] if str(x) not in bad_can]
     if any(e.startswith("reserve ") for e in errors):
         out["cash_policy"] = {k: v for k, v in (plan.get("cash_policy") or {}).items() if k != "reserve"}
+    if any(e.startswith("promo_draft ") for e in errors):
+        out["promo_drafts"] = [d for d in plan.get("promo_drafts") or [] if not looks_non_english(d.get("text"))]
+    if any(e.startswith("whatsapp_reply ") for e in errors):
+        out["whatsapp_replies"] = [{**r, "text": ""} if looks_non_english(r.get("text")) else r
+                                   for r in plan.get("whatsapp_replies") or []]
     out["validation_errors"] = errors
     return out
