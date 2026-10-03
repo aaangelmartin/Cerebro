@@ -262,3 +262,4 @@ select {
 .topbar .tb-stats { flex: 0 1 auto; }
 .topbar .tb-clock { margin-left: 0; }
 .refresh.ok-flash { border-color: var(--ok); color: var(--ok); transition: border-color .2s, color .2s; }
+.nav-badge.is-alert { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }

@@ -469,18 +469,226 @@
   // poll faster than the 2 s screen refresh while waiting for a reply
   setInterval(() => { if (C.list && C.list.isConnected && C.waiting) chatPull(); }, 1500);
 
+
+  // ---------- "Para el equipo": what the brain decided but people must do (outbox) ----------
+  // GET outbox -> {items:[...]} with kind code | promo | task; POST outbox/<id> {status, note}
+  const O = { items: [], state: "idle", err: null, tab: "code", open: new Set(), host: null, busy: false, at: 0, sig: "" };
+  const OB_TABS = [["code", "Cambios de código", "bot"], ["promo", "Mensajes", "anuncio"], ["task", "Tareas", "check"]];
+  const SEV = { critical: ["Crítico", "var(--bad)", "alert"], high: ["Alto", "var(--t-venta)", "alert"], medium: ["Medio", "var(--t-puja)", "alert"],
+    low: ["Bajo", "var(--t-anuncio)", "alert"] };
+  const OB_STATUS = { open: ["Abierto", "warn"], accepted: ["Aceptado", "ok"], done: ["Hecho", "ok"], rejected: ["Rechazado", "bad"],
+    draft: ["Borrador", "warn"], sent: ["Enviado", "ok"], discarded: ["Descartado", "mute"] };
+  const isOpen = (x) => x.status === "open" || x.status === "draft" || x.status === "accepted";
+  const kindOf = (x) => x.kind || (x.channel ? "promo" : x.task ? "task" : "code");
+  function obChip(label, color, ic) { const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label)); c.style.setProperty("--tc", color); return c; }
+  function obStatus(st) { const [l, t] = OB_STATUS[st] || [st || "—", "mute"]; return el("span", { class: "tag res tone-" + t }, l); }
+
+  function outboxMount() {
+    const host = el("section", { class: "panel cb-outbox" });
+    O.host = host; O.sig = "";
+    obRender();
+    return host;
+  }
+  async function outboxPull(force) {
+    if (!O.host || O.busy || (!force && Date.now() - O.at < 4000)) return;
+    O.busy = true; O.at = Date.now();
+    try {
+      const r = await A().outbox();
+      O.items = (Array.isArray(r) ? r : (r && r.items) || []).map((x) => ({ ...x, kind: kindOf(x) }));
+      O.state = "on";
+    } catch (e) { O.state = e && e.status === 404 ? "off" : "error"; O.err = e; }
+    finally { O.busy = false; }
+    obRender();
+  }
+  async function obSet(item, status, note) {
+    try {
+      const r = await A().outboxSet(item.id, status, note);
+      const nx = (r && r.item) || { ...item, status, human_note: note };
+      const i = O.items.findIndex((x) => x.id === item.id); if (i >= 0) O.items[i] = { ...nx, kind: kindOf(nx) };
+      O.sig = ""; obRender();
+      if (window.__pollOutbox) window.__pollOutbox();
+    } catch (e) { U().toast({ type: "error", title: "No se pudo guardar", text: (e && e.message) || "Error" }); }
+  }
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) {
+      const ta = el("textarea", { style: "position:fixed;left:-9999px" }); ta.value = t; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand("copy"); } catch (e2) { ok = false; } ta.remove(); return ok;
+    }
+  }
+
+  function obHead(x) {
+    if (x.kind === "code") {
+      const [l, c, ic] = SEV[x.severity] || SEV.low;
+      return [obChip(l, c, ic), el("div", { class: "cb-ob-title" }, x.title || "Cambio de código"),
+        x.occurrences > 1 ? el("span", { class: "tag res tone-" + (x.recurred ? "bad" : "mute") }, (x.recurred ? "vuelve a pasar · " : "") + "×" + x.occurrences) : null];
+    }
+    if (x.kind === "promo") return [obChip(x.channel === "whatsapp" ? "WhatsApp" : "En el juego", x.channel === "whatsapp" ? "var(--t-compra)" : "var(--t-cambio)", "anuncio"),
+      el("div", { class: "cb-ob-title" }, short(x.text, 140))];
+    return [obChip("Tarea", "var(--t-dealer)", "check"), el("div", { class: "cb-ob-title" }, x.task || "Tarea"),
+      x.occurrences > 1 ? el("span", { class: "tag res tone-mute" }, "×" + x.occurrences) : null];
+  }
+  function obDetail(x) {
+    const ev = Array.isArray(x.evidence) ? x.evidence : x.evidence ? [x.evidence] : [];
+    const sec = (cap, body) => body ? el("div", { class: "cb-ob-sec" }, el("div", { class: "cb-cap" }, cap), body) : null;
+    const txt = (t) => t ? el("p", {}, t) : null;
+    const note = el("input", { class: "cb-q cb-ob-note", placeholder: "Nota (opcional)", value: "" });
+    const btn = (label, status, tone) => el("button", { type: "button", class: "cb-ob-btn tone-" + tone, onclick: (e) => { e.stopPropagation(); obSet(x, status, note.value.trim()); } }, label);
+    let actions;
+    if (x.kind === "promo") {
+      const cp = el("button", { type: "button", class: "cb-ob-btn", onclick: async (e) => { e.stopPropagation(); const ok = await copyText(x.text || ""); cp.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { cp.textContent = "Copiar texto"; }, 1500); } }, "Copiar texto");
+      actions = [cp, btn("Marcar enviado", "sent", "ok"), btn("Descartar", "discarded", "bad")];
+    } else if (x.kind === "code") actions = [btn("Aceptar", "accepted", "warn"), btn("Hecho", "done", "ok"), btn("Rechazar", "rejected", "bad")];
+    else actions = [btn("Hecho", "done", "ok"), btn("Rechazar", "rejected", "bad")];
+    return el("div", { class: "cb-ob-detail", onclick: (e) => e.stopPropagation() },
+      x.kind === "promo" ? sec("Texto", el("pre", { class: "cb-ob-text" }, x.text || "")) : null,
+      sec("Por qué", txt(x.why)),
+      sec("Diagnóstico", txt(x.diagnosis)),
+      sec("Pruebas", ev.length ? el("ul", { class: "cb-ob-ev" }, ev.map((e) => el("li", {}, typeof e === "string" ? e : JSON.stringify(e)))) : null),
+      sec("Cambio propuesto", txt(x.proposed_change)),
+      sec("Esbozo del parche", x.patch_sketch ? el("pre", { class: "cb-ob-code" }, x.patch_sketch) : null),
+      sec("Impacto", txt(x.impact)),
+      x.human_note ? sec("Nota del equipo", txt(x.human_note)) : null,
+      el("div", { class: "cb-ob-actions" }, note, actions));
+  }
+  function obRender() {
+    const host = O.host; if (!host) return;
+    const counts = {}; for (const [k] of OB_TABS) counts[k] = O.items.filter((x) => x.kind === k && isOpen(x)).length;
+    const sig = JSON.stringify([O.state, O.tab, [...O.open], O.items.map((x) => [x.id, x.status, x.updated, x.occurrences])]);
+    if (sig === O.sig) return; O.sig = sig;
+    const totalOpen = Object.values(counts).reduce((a, b) => a + b, 0);
+    const tabs = el("div", { class: "cb-ob-tabs" }, OB_TABS.map(([k, label, ic]) => el("button", { type: "button", class: "cb-ob-tab" + (O.tab === k ? " on" : ""),
+      onclick: () => { O.tab = k; obRender(); } }, U().icon(ic, 14), label, el("span", { class: "num cb-ob-n" + (counts[k] ? " has" : "") }, String(counts[k])))));
+    const head = el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Para el equipo"),
+      el("span", { class: "panel-sub" }, O.state === "on" ? (totalOpen ? totalOpen + " pendientes · lo decidió el cerebro y lo hacéis vosotros" : "nada pendiente") : ""));
+    const list = el("div", { class: "cb-list cb-ob-list" });
+    let body;
+    if (O.state === "idle") body = U().loading();
+    else if (O.state === "off") body = U().empty("La bandeja del cerebro aún no está activa.");
+    else if (O.state === "error") body = U().error(O.err);
+    else {
+      const rows = O.items.filter((x) => x.kind === O.tab)
+        .sort((a, b) => (isOpen(b) - isOpen(a)) || ((+b.updated || +b.ts || 0) - (+a.updated || +a.ts || 0)));
+      if (!rows.length) body = U().empty(O.tab === "code" ? "Sin cambios de código propuestos." : O.tab === "promo" ? "Sin mensajes para enviar." : "Sin tareas.");
+      else {
+        U().keyedList(list, rows, {
+          key: (x) => String(x.id), sig: (x) => [x.status, x.updated, x.occurrences, O.open.has(String(x.id))].join("|"),
+          render: (x) => {
+            const opened = O.open.has(String(x.id));
+            const color = x.kind === "code" ? (SEV[x.severity] || SEV.low)[1] : x.kind === "promo" ? "var(--t-compra)" : "var(--t-dealer)";
+            const n = el("div", { class: "cb-ob-item" + (isOpen(x) ? "" : " is-closed") + (opened ? " is-open" : ""),
+              onclick: () => { const k = String(x.id); if (O.open.has(k)) O.open.delete(k); else O.open.add(k); O.sig = ""; obRender(); } },
+              el("div", { class: "cb-ob-row" }, el("span", { class: "num cb-time" }, when(+x.updated || +x.ts)), ...obHead(x).filter(Boolean),
+                el("span", { class: "cb-sp" }), obStatus(x.status), U().icon("chevron", 13)),
+              opened ? obDetail(x) : null);
+            n.style.setProperty("--tc", color);
+            return n;
+          },
+        });
+        body = list;
+      }
+    }
+    U().keepScroll(host, () => host.replaceChildren(head, tabs, el("div", { class: "panel-body" }, body)));
+  }
+
+
+  // ---------- WhatsApp messages from other teams, pasted by the team for the brain ----------
+  // POST brain/external {text, by, team_hint?} -> {added, duplicates}; GET brain/external?since= -> {items}
+  const X = { items: [], state: "idle", err: null, host: null, list: null, busy: false, at: 0, sig: "", sending: false };
+  const XT = { request: ["Petición", "puja", "var(--t-puja)"], offer: ["Oferta", "venta", "var(--t-compra)"], tip: ["Pista", "target", "var(--t-cambio)"],
+    complaint: ["Queja", "alert", "var(--t-venta)"], promo: ["Promo", "anuncio", "var(--t-anuncio)"], news: ["Noticia", "bell", "var(--t-dealer)"] };
+  function xChip(t) { const [l, ic, c] = XT[t] || [t, "anuncio", "var(--t-anuncio)"]; const n = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, l)); n.style.setProperty("--tc", c); return n; }
+  function externalMount() {
+    const ta = el("textarea", { class: "cb-chat-in cb-x-in", rows: 3, placeholder: "Pega aquí mensajes del grupo de WhatsApp (uno o varios)…" });
+    const sel = el("select", { class: "fb-select cb-x-team", "aria-label": "Equipo" }, el("option", { value: "" }, "Equipo: detectar"));
+    for (let i = 1; i <= 18; i++) { const id = "t" + String(i).padStart(2, "0"); sel.append(el("option", { value: id }, (U().teamName ? U().teamName(id) : id) + (id === "t10" ? " · Nosotros" : ""))); }
+    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar al cerebro");
+    const go = async () => {
+      const text = ta.value.trim(); if (!text || X.sending) return;
+      X.sending = true; send.disabled = true;
+      try {
+        const r = await A().externalAdd(text, getName() || "equipo", sel.value || undefined);
+        const n = ((r && r.added) || []).length, dup = (r && r.duplicates) || 0;
+        U().toast({ type: "dealer", title: "Mensajes enviados al cerebro", text: `${n} nuevos${dup ? " · " + dup + " repetidos" : ""}` });
+        ta.value = ""; sel.value = ""; X.at = 0; extPull(true);
+      } catch (e) {
+        U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "La entrada de mensajes aún no está activa." : (e && e.message) || "Error" });
+      } finally { X.sending = false; send.disabled = false; }
+    };
+    send.addEventListener("click", go);
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); go(); } });
+    X.list = el("div", { class: "cb-x-body" });
+    const host = el("section", { class: "panel cb-x" },
+      el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Mensajes de WhatsApp"),
+        el("span", { class: "panel-sub" }, "lo que dicen otros equipos, para que el cerebro lo tenga en cuenta")),
+      el("div", { class: "cb-x-form" }, ta, el("div", { class: "cb-x-side" }, sel, send)), X.list);
+    X.host = host; X.sig = "";
+    xRender();
+    return host;
+  }
+  async function extPull(force) {
+    if (!X.host || X.busy || (!force && Date.now() - X.at < 5000)) return;
+    X.busy = true; X.at = Date.now();
+    try { const r = await A().external(); X.items = Array.isArray(r) ? r : (r && r.items) || []; X.state = "on"; }
+    catch (e) { X.state = e && e.status === 404 ? "off" : "error"; X.err = e; }
+    finally { X.busy = false; }
+    xRender();
+  }
+  function entityChips(en) {
+    if (!en) return [];
+    const out = [];
+    for (const o of en.offer_ids || []) out.push(el("span", { class: "tag res tone-mute num" }, "oferta #" + o));
+    for (const c of en.cards || []) out.push(el("span", { class: "tag res tone-mute num" }, c));
+    for (const v of en.venues || []) out.push(el("span", { class: "tag res tone-mute num" }, v));
+    for (const p of en.prices || []) out.push(el("span", { class: "tag res tone-mute num" }, fmtP(p)));
+    for (const t of en.ticks || []) out.push(el("span", { class: "tag res tone-mute num" }, "tick " + t));
+    return out;
+  }
+  function xRender() {
+    const box = X.list; if (!box) return;
+    const sig = JSON.stringify([X.state, X.items.map((x) => [x.id, x.actionable, x.llm && JSON.stringify(x.llm).length])]);
+    if (sig === X.sig) return; X.sig = sig;
+    if (X.state === "idle") return box.replaceChildren(U().loading());
+    if (X.state === "off") return box.replaceChildren(U().empty("La entrada de mensajes aún no está activa."));
+    if (X.state === "error") return box.replaceChildren(U().error(X.err));
+    if (!X.items.length) return box.replaceChildren(U().empty("Aún no habéis pegado mensajes."));
+    const rows = X.items.slice().sort((a, b) => (!!b.actionable - !!a.actionable) || ((+b.received_at || +b.ts || 0) - (+a.received_at || +a.ts || 0)));
+    const list = box.querySelector(".cb-list") || el("div", { class: "cb-list cb-x-list" });
+    U().keyedList(list, rows.slice(0, 120), {
+      key: (x) => String(x.id), sig: (x) => [x.actionable, x.llm && JSON.stringify(x.llm).length].join("|"),
+      render: (x) => {
+        const llm = x.llm || {};
+        const concl = llm.conclusion || llm.summary || llm.action || x.action_hint || "";
+        const team = x.team ? (x.team === "t10" ? U().teamTag("t10", { us: true }) : U().teamTag(x.team)) : el("span", { class: "cb-muted" }, x.author || "¿equipo?");
+        const n = el("div", { class: "cb-x-item" + (x.actionable ? " is-act" : "") },
+          el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+x.received_at || +x.ts)),
+            x.actionable ? el("span", { class: "tag cb-x-act" }, U().icon("bell", 12), "Hay que actuar") : null,
+            team, x.author && x.team && x.author !== (U().teamName ? U().teamName(x.team) : x.team) ? el("span", { class: "cb-muted" }, x.author) : null,
+            (x.types || []).map(xChip), x.about_us ? el("span", { class: "tag res tone-warn" }, "Sobre nosotros") : null,
+            el("span", { class: "cb-sp" }), el("span", { class: "cb-muted" }, "pegado por " + (x.by || "equipo"))),
+          el("div", { class: "cb-x-text" }, x.text || ""),
+          entityChips(x.entities).length ? el("div", { class: "cb-x-ents" }, entityChips(x.entities)) : null,
+          concl ? el("div", { class: "cb-rows" }, (x.actionable ? "Qué hacer: " : "Conclusión del cerebro: ") + concl) : null);
+        n.style.setProperty("--tc", x.actionable ? "var(--warn)" : (XT[(x.types || [])[0]] || [0, 0, "var(--t-anuncio)"])[2]);
+        return n;
+      },
+    });
+    if (!list.isConnected) box.replaceChildren(list);
+  }
+
   window.Screens.cerebro = {
     title: "Cerebro",
     mount(root) {
       S.root = root;
       root.replaceChildren(el("div", { class: "cb-layout" },
         el("div", { class: "scr-cerebro" },
-          el("div", { class: "cb-top" }, U().loading()), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })),
+          el("div", { class: "cb-top" }, U().loading()), outboxMount(), externalMount(), el("div", { class: "cb-mid" }), el("div", { class: "cb-bot" })),
         chatMount()));
     },
     async refresh(root, data, params, opts) {
       S.root = root;
       chatPull();
+      outboxPull(opts && opts.force);
+      extPull(opts && opts.force);
       try { const me = await A().rec("me"); window.__cbMe = (me && (me.data || me)) || {}; } catch (e) { /* optional */ }
       const d = await load(data);
       // avoid rebuilding when nothing changed (keeps scroll and open history item)
@@ -489,6 +697,6 @@
       S.sig = sig; S.data = d;
       render();
     },
-    unmount() { S.root = null; S.sig = null; S.findHost = null; C.host = null; },
+    unmount() { S.root = null; S.sig = null; S.findHost = null; C.host = null; O.host = null; X.host = null; },
   };
 })();

@@ -131,3 +131,48 @@
 .cb-chat-name, .cb-chat-f { flex: none; }
 @media (max-width: 1300px) { .cb-layout { margin-right: 0; } .cb-chat { position: static; margin-top: 0; height: 70vh; border: 1px solid var(--line-2); } }
 .scr-cerebro .filterbar { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+
+/* Para el equipo (outbox) */
+.scr-cerebro .cb-ob-tabs { display: flex; border-bottom: 1px solid var(--line); }
+.scr-cerebro .cb-ob-tab { display: inline-flex; align-items: center; gap: 7px; padding: 10px 16px; background: transparent; border: 0; border-bottom: 2px solid transparent;
+  color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; border-radius: 0; }
+.scr-cerebro .cb-ob-tab.on { color: var(--ink); border-bottom-color: var(--signal); background: var(--s2); }
+.scr-cerebro .cb-ob-n { font-size: 11px; padding: 0 5px; border: 1px solid var(--line-2); color: var(--ink-3); }
+.scr-cerebro .cb-ob-n.has { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.scr-cerebro .cb-ob-list { max-height: 520px; }
+.scr-cerebro .cb-ob-item { border-bottom: 1px solid var(--line); border-left: 3px solid var(--tc); cursor: pointer;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 5%, transparent), transparent 40%); }
+.scr-cerebro .cb-ob-item:hover { background-color: var(--s2); }
+.scr-cerebro .cb-ob-item.is-closed { opacity: .6; }
+.scr-cerebro .cb-ob-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; min-width: 0; }
+.scr-cerebro .cb-ob-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.scr-cerebro .cb-ob-item.is-open .cb-ob-row > .ic-wrap:last-child { transform: rotate(180deg); }
+.scr-cerebro .cb-ob-row > .ic-wrap:last-child { color: var(--ink-3); }
+.scr-cerebro .cb-ob-detail { padding: 2px 14px 14px 14px; cursor: default; display: flex; flex-direction: column; gap: 10px; }
+.scr-cerebro .cb-ob-sec p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.scr-cerebro .cb-ob-sec .cb-cap { margin-bottom: 4px; }
+.scr-cerebro .cb-ob-ev { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.scr-cerebro .cb-ob-code, .scr-cerebro .cb-ob-text { margin: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line-2); font-family: var(--font-num);
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; color: var(--ink); }
+.scr-cerebro .cb-ob-text { font-family: inherit; font-size: 13px; }
+.scr-cerebro .cb-ob-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.scr-cerebro .cb-ob-note { margin-left: 0; flex: 1; min-width: 200px; }
+.scr-cerebro .cb-ob-btn { background: var(--s2); border: 1px solid var(--line-2); color: var(--ink); padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer; border-radius: 0; }
+.scr-cerebro .cb-ob-btn:hover { border-color: var(--ink-3); }
+.scr-cerebro .cb-ob-btn.tone-ok { border-color: var(--ok); color: var(--ok); } .scr-cerebro .cb-ob-btn.tone-bad { border-color: var(--bad); color: var(--bad); }
+.scr-cerebro .cb-ob-btn.tone-warn { border-color: var(--warn); color: var(--warn); }
+
+/* Mensajes de WhatsApp */
+.scr-cerebro .cb-x-form { display: flex; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.scr-cerebro .cb-x-in { min-height: 64px; }
+.scr-cerebro .cb-x-side { display: flex; flex-direction: column; gap: 8px; width: 220px; flex: none; }
+.scr-cerebro .cb-x-side .cb-chat-send { justify-content: center; padding: 8px 12px; }
+.scr-cerebro .cb-x-team { width: 100%; }
+.scr-cerebro .cb-x-list { max-height: 460px; }
+.scr-cerebro .cb-x-item { padding: 9px 14px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--tc); display: flex; flex-direction: column; gap: 5px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 5%, transparent), transparent 40%); }
+.scr-cerebro .cb-x-item.is-act { background: linear-gradient(90deg, var(--warn-soft), transparent 55%); }
+.scr-cerebro .cb-x-act { border: 1px solid var(--warn); color: var(--warn); background: var(--warn-soft); font-size: 11px; padding: 0 6px; gap: 4px; }
+.scr-cerebro .cb-x-text { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.scr-cerebro .cb-x-ents { display: flex; flex-wrap: wrap; gap: 4px; }
+.scr-cerebro .cb-ev-h { flex-wrap: wrap; }

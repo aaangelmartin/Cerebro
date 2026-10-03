@@ -133,7 +133,23 @@
       renderBanners(S.data);
     } finally { if (gen === S.gen) S.inflight = false; }
     pollNotifications();
+    pollOutbox();
   }
+  // open items in the brain's outbox (what the team must do by hand) -> badge on the Cerebro nav entry
+  let outboxAt = 0;
+  async function pollOutbox(force) {
+    if (!force && Date.now() - outboxAt < 10000) return;
+    outboxAt = Date.now();
+    let n = 0;
+    try {
+      const r = await api.outbox();
+      const items = Array.isArray(r) ? r : (r && r.items) || [];
+      n = items.filter((x) => x && (x.status === "open" || x.status === "draft")).length;
+    } catch (e) { n = 0; }
+    const nb = $("nav-badge-cerebro");
+    if (nb) { nb.textContent = n > 99 ? "99+" : String(n); nb.hidden = !n; nb.classList.toggle("is-alert", n > 0); nb.title = n ? n + " cosas para el equipo" : ""; }
+  }
+  window.__pollOutbox = () => pollOutbox(true);
   let tickMapAt = 0;
   async function loadTickMap() {
     if (Date.now() - tickMapAt < 30000) return;
