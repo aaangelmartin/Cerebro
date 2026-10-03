@@ -142,6 +142,17 @@ def load_domains(only: list[str] | None = None, gw=None) -> list:
     return out
 
 
+def _own_venue(sit: Situation) -> str | None:
+    try:
+        from .core.rails import own_venue
+        return own_venue(sit)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+ANNOUNCE_EVERY_H = 2.0           # broker_announce for our venue: once on opening, then every 2 game hours
+
+
 def _urgent_duel_accept(a: Action, sit: Situation) -> bool:
     """A duel accept with <= 3 ticks left skips the council: a veto there means the duel scores 0."""
     if a.kind != "duel_accept":
@@ -196,6 +207,7 @@ class Runner:
                  rails=None, executor=None, arbiter=None, council=None, control_defaults: dict | None = None,
                  clock_fn: Callable[[], float] = time.time):
         self.gw = gw
+        self.last_announce = -99.0
         self.domains = domains
         self.mode = mode                         # "sim" | "live"
         self.live = Path(live or config.LIVE)
@@ -438,7 +450,7 @@ class Runner:
         me = sit.me or {}
         # The venue bond (250 P) is refundable: count it, or opening our venue would trip the breaker.
         portfolio = (float(me.get("cash") or 0) + float(me.get("collection_value") or 0)
-                     + (VENUE_BOND if me.get("venue") else 0))
+                     + (VENUE_BOND if _own_venue(sit) else 0))
         if self.history and self.history[-1][0] == sit.tick:
             self.history.pop()
         self.history.append((sit.tick, sit.score, portfolio))
@@ -488,6 +500,17 @@ class Runner:
                 out.append(venue.open_action(sit))
         except Exception as e:  # noqa: BLE001
             self._err("venue.should_open", e)
+        vid = _own_venue(sit)
+        if vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H:
+            try:
+                from bazaar.market.protocol import broker_pitch
+                text = broker_pitch(vid)
+            except Exception:  # noqa: BLE001
+                text = None
+            if text:
+                self.last_announce = sit.t_hours or 0
+                out.append(Action(kind="broker_announce", params={"text": text}, domain="broker", source="code",
+                                  reason="Invite other teams' bids and swaps to our fee-0 venue: their trades score for us."))
         packs = [x for x in (sit.me or {}).get("assets") or [] if x.get("kind") == "pack"]
         if packs:                                               # cards in the album and tradeable; one pack per tick
             out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="dealers", source="code",

@@ -252,6 +252,7 @@ if __name__ == "__main__":
 class VenueReserve(unittest.TestCase):
     def test_buys_keep_the_bond_until_the_venue_is_open(self):
         s = sit()
+        s.t_hours = 4.1
         s.me = {**s.me, "venue": None, "cash": 336}
         buy = Action("accept_offer", {"offer": 1, "expect": offer({"types": ["card:LAV-04"]}, {"cash": 30})}, "dealers")
         self.assertEqual(rails.rail_cash(buy, s, ctx()).rail, "cash")          # 336 - 30 < 40 + 270
@@ -294,3 +295,19 @@ class PackRail(unittest.TestCase):
         self.assertTrue(rails.rail_pack(Action("open_pack", {"asset": 431}, "dealers"), s, ctx()).ok)
         self.assertFalse(rails.rail_pack(Action("open_pack", {"asset": 1}, "dealers"), s, ctx()).ok)    # a card
         self.assertFalse(rails.rail_pack(Action("open_pack", {"asset": 999}, "dealers"), s, ctx()).ok)  # not ours
+
+
+class VenueReserveEdges(unittest.TestCase):
+    def test_before_the_grant_only_the_uncovered_part_is_kept(self):
+        s = sit()
+        s.t_hours, s.me = 2.7, {**s.me, "venue": None, "cash": 186}
+        buy = Action("accept_offer", {"offer": 1, "expect": offer({"types": ["card:LAV-04"]}, {"cash": 20})}, "dealers")
+        self.assertTrue(rails.rail_cash(buy, s, ctx()).ok)        # 186 - 20 >= 40 + (270 - 150)
+
+    def test_the_starter_stall_is_not_our_venue(self):
+        s = sit()
+        s.t_hours, s.me = 3.5, {**s.me, "venue": "v09", "cash": 186}
+        s.venues = [{"venue": "v09", "owner": "t10", "starter": True}]
+        self.assertIsNone(rails.own_venue(s))
+        s.venues = [{"venue": "v09", "owner": "t10", "starter": False}]
+        self.assertEqual(rails.own_venue(s), "v09")

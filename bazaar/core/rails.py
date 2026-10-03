@@ -309,13 +309,34 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
+def own_venue(sit) -> str | None:
+    """Our own venue id: the free starter stall (from hour 3.0) is not ours."""
+    vid = (_get(sit, "me") or {}).get("venue")
+    if isinstance(vid, dict):
+        vid = vid.get("venue") or vid.get("id")
+    if not vid:
+        return None
+    for v in _get(sit, "venues") or []:
+        if isinstance(v, dict) and (v.get("venue") or v.get("id")) == vid and (v.get("starter") or v.get("house")):
+            return None
+    return vid
+
+
+GRANT_AT_HOURS, GRANT_CASH = 4.05, 150   # Saturday allowance; the bond can count on it before it arrives
+
+
 def _venue_pending(sit, ctx) -> bool:
     """True while we still mean to open our own venue (decision: board venue at hour 4.05)."""
     control = _get(ctx, "control") or {}
     if control.get("venue_reserve") is False:
         return False
-    me = _get(sit, "me") or {}
-    return not me.get("venue")
+    return own_venue(sit) is None
+
+
+def _venue_reserve(sit) -> int:
+    """Cash to keep for the bond: the Saturday grant will cover part of it if it has not arrived yet."""
+    t = _num(_get(sit, "t_hours"), 0)
+    return max(0, VENUE_COST - (GRANT_CASH if t < GRANT_AT_HOURS else 0))
 
 
 def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
@@ -329,7 +350,7 @@ def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
     cash = _num((_get(sit, "me") or {}).get("cash"))
     reserve = _cap(ctx, "cash_reserve", config.CASH_RESERVE)
     if action.kind != "venue_open" and _venue_pending(sit, ctx):
-        reserve += VENUE_COST                                  # keep the bond for our venue until it is open
+        reserve += _venue_reserve(sit)                         # keep the bond for our venue until it is open
     if cash - spend < reserve:
         return Verdict(False, "cash", f"cash {cash:.0f} - {spend} < reserve {reserve}")
     if action.kind == "venue_open":
