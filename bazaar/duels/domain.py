@@ -20,7 +20,7 @@ from ..core.types import Action, Outcome
 from ..lab import feedback
 from .model import MIN_SURPLUS, DuelView, parse_duel, points
 from .opponent import OpponentMemory
-from .policy import Move, bound_claude, claude_mode, economics, guard, plan
+from .policy import PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_rule, plan
 from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
 log = logging.getLogger("bazaar.duels")
@@ -183,6 +183,8 @@ class DuelsDomain:
         opp["accept_queue"] = queue
         mv = plan(v, opp)
         mv, notes = guard(v, mv)
+        mv, hnotes = hold_rule(v, mv, opp)
+        notes = notes + hnotes
         mv.source = "fallback"
         self.last_notes[v.id] = notes
         return opp, mv
@@ -202,6 +204,9 @@ class DuelsDomain:
         return self._finish(views, {k: b[1] for k, b in bases.items()}, bases)
 
     def _needs_llm(self, v: DuelView) -> bool:
+        if (v.our_offer is not None or v.our_offers()) and not v.unanswered_rival_offer() \
+                and v.ticks_left > PARAMS["FINAL_TICKS"]:
+            return False        # the rival owes us an answer: we hold in silence, nothing for Claude to decide
         key = (len(v.rival_msgs()), v.rival_offer.key() if v.rival_offer else None)
         last = self._last_ask.get(v.id)
         if last is None or last[1:] != key:
@@ -304,6 +309,8 @@ class DuelsDomain:
                 notes = bnotes + notes
                 if safe is not base and safe.source == mv.source and not safe.lesson_ids:
                     safe.lesson_ids = list(mv.lesson_ids)
+                safe, hnotes = hold_rule(v, safe, opp)
+                notes = notes + hnotes
                 if notes:
                     self.last_notes[v.id] = notes
                     log.info("duel %s: guard %s", v.id, notes)
@@ -324,7 +331,8 @@ class DuelsDomain:
         if hold:
             return Move("wait", reason=f"[hold: {why}] keep Claude's standing offer; the rival has not moved",
                         source="fallback")
-        base.reason = f"[fallback: {why}] {base.reason}"
+        if base.action != "wait":
+            base.reason = f"[fallback: {why}] {base.reason}"
         return base
 
     def observe(self, outcome: Outcome) -> None:

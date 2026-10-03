@@ -140,7 +140,9 @@ class TestFallbackVsRivals(unittest.TestCase):
                 res.append(r)
             deal = sum(r.deal for r in res) / len(res)
             avg = sum(r.points for r in res) / len(res)
-            floor = {"tough": 0.4, "mute": 0.5}.get(kind, 0.85)
+            # mute: we hold our offer in silence and make one final step (team rule: never bid against
+            # ourselves), so fewer silent accepts than with the old tick-by-tick slide
+            floor = {"tough": 0.4, "mute": 0.2}.get(kind, 0.85)
             self.assertGreaterEqual(deal, floor, f"{kind}: deal rate {deal:.2f}")
             self.assertGreaterEqual(avg, 0.0, kind)
 
