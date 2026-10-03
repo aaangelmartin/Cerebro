@@ -91,12 +91,13 @@
   // --------- clock: game hours -> wall time. The game clock does not follow the calendar
   // (it pauses and resumes), so a game hour is placed relative to the live clock, where one
   // game hour takes one real hour. Past events use their recorded timestamps instead.
-  let anchors = [];
+  let anchors = [], calDays = [];
   function setClock(clock) {
     const t = clock && num(clock.t_hours);
     if (t === null || t === undefined) return;
     const at = num(clock.recorded_at) || num(clock.ts) || Date.now() / 1000;
     anchors = [{ t0: t, o: at, day: clock.today, name: clock.today_name }];
+    calDays = ((clock && clock.days) || []).map((d) => ({ day: d.day, name: d.name, o: Date.parse(d.opens) / 1000, c: Date.parse(d.closes) / 1000 })).filter((d) => d.o && d.c);
   }
   function tToWall(t) {
     t = num(t); if (t === null || !anchors.length) return null;
@@ -279,7 +280,7 @@
 
   window.T10D = { prime, US, TYPES, TYPE_LABEL, TYPE_COLOR, num, esc, fmt, fmtP, hhmm, hhmmss, dayKey, el, html, teamName, isTeam, venueName,
     cached, rec, recErr, stream, setClock, tToWall, evTs, normalize, feed, board, events, dayEvents, involves, leaderboard, series, rankMove,
-    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors };
+    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors, calDays: () => calDays };
 })();
 /* ---- HOME ---- */
 (function () {
@@ -303,9 +304,12 @@
   }
   function schedule() {
     // only the latest snapshot: older ones still list events that already happened
-    const last = sched.rows.length ? (sched.rows[sched.rows.length - 1].data || sched.rows[sched.rows.length - 1]) : null;
+    let lastRow = null;
+    for (const r of sched.rows) if (!lastRow || (num(r.ts) || 0) >= (num(lastRow.ts) || 0)) lastRow = r;
+    const last = lastRow ? (lastRow.data || lastRow) : null;
     const nowH = last && num(last.now_hours);
-    const ups = ((last && last.upcoming) || []).filter((u) => nowH === null || num(u.at_hours) >= nowH - 1e-6);
+    const today = (D.anchors()[0] || {}).day;   // leftovers from another day (e.g. Friday's close) are dropped
+    const ups = ((last && last.upcoming) || []).filter((u) => (nowH === null || num(u.at_hours) >= nowH - 1e-6) && !(u.params && u.params.day && today && u.params.day !== today));
     const out = ups.map((u) => ({ ...u, wall: D.tToWall(u.at_hours) })).filter((u) => u.wall);
     out.sort((a, b) => a.wall - b.wall);
     return out;
@@ -385,7 +389,7 @@
           el("span", { class: "num" }, hhmm(u.wall)), el("span", {}, evLabel(u)), el("span", { class: "num t10-accent" }, "en " + countdown(u.wall - now))))));
     }
     // timeline of the day (today, or the next day that opens)
-    const anchors = D.anchors();
+    const anchors = D.calDays();
     const today = D.dayKey(now);
     const day = anchors.find((a) => D.dayKey(a.o) === today) || anchors.find((a) => a.o > now) || anchors[anchors.length - 1];
     if (!day) return D.replace(lanes, D.state("empty", "Sin calendario."));

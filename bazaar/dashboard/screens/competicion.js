@@ -91,12 +91,13 @@
   // --------- clock: game hours -> wall time. The game clock does not follow the calendar
   // (it pauses and resumes), so a game hour is placed relative to the live clock, where one
   // game hour takes one real hour. Past events use their recorded timestamps instead.
-  let anchors = [];
+  let anchors = [], calDays = [];
   function setClock(clock) {
     const t = clock && num(clock.t_hours);
     if (t === null || t === undefined) return;
     const at = num(clock.recorded_at) || num(clock.ts) || Date.now() / 1000;
     anchors = [{ t0: t, o: at, day: clock.today, name: clock.today_name }];
+    calDays = ((clock && clock.days) || []).map((d) => ({ day: d.day, name: d.name, o: Date.parse(d.opens) / 1000, c: Date.parse(d.closes) / 1000 })).filter((d) => d.o && d.c);
   }
   function tToWall(t) {
     t = num(t); if (t === null || !anchors.length) return null;
@@ -279,7 +280,7 @@
 
   window.T10D = { prime, US, TYPES, TYPE_LABEL, TYPE_COLOR, num, esc, fmt, fmtP, hhmm, hhmmss, dayKey, el, html, teamName, isTeam, venueName,
     cached, rec, recErr, stream, setClock, tToWall, evTs, normalize, feed, board, events, dayEvents, involves, leaderboard, series, rankMove,
-    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors };
+    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors, calDays: () => calDays };
 })();
 /* ---- COMPETICIÓN ---- */
 (function () {
