@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 CROSS_RULES = ("quotes", "limits", "probe")
+MATCHERS = ("engine", "stall")
 
 # key -> (kind, lo, hi)
 TOP_BOUNDS: dict[str, tuple[str, float, float]] = {
@@ -72,6 +73,11 @@ def validate(raw: Any) -> tuple[dict, list[str]]:
                 clean[k] = v
             else:
                 rejected.append(f"cross_rule={v!r}")
+        elif k == "matcher":
+            if v in MATCHERS:
+                clean[k] = v
+            else:
+                rejected.append(f"matcher={v!r}")
         elif k == "profiles":
             if not isinstance(v, dict):
                 rejected.append("profiles is not an object")

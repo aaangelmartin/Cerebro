@@ -32,6 +32,9 @@ DEFAULT_POLICY: dict[str, Any] = {
     "max_bench_matches_per_tick": 10,
     "max_public_matches_per_tick": 10,
     "hard_traders": 12,           # a session with at least this many traders uses the hard profile
+    "matcher": "engine",          # engine | stall. "stall" pairs exactly as the free stall does (highest bid against
+                                  # lowest ask); it can never score below it. See broker/headroom.py for why the
+                                  # estimate-driven engine has no edge on one-by-one arrivals.
     "cross_rule": "quotes",       # quotes | limits | probe. The server said it on Saturday ("price must sit between
                                   # the ask and the bid"): quotes. Probing cost a little in every sim profile.
     "max_probes": 2,              # non-crossing tries per session while the rule is unknown
@@ -549,10 +552,30 @@ class BenchEngine:
     # ---- planning
     def plan(self, tick: int, fee_bps: int = 0, fee_per_card: int = 0) -> list[Match]:
         out: list[Match] = []
+        plan_run = self._plan_run_stall if self.policy.get("matcher") == "stall" else self._plan_run
         for run in sorted({t.run for t in self.traders.values() if t.active}):
-            out.extend(self._plan_run(run, tick, fee_bps, fee_per_card))
+            out.extend(plan_run(run, tick, fee_bps, fee_per_card))
         out.sort(key=lambda m: -m.weight)
         return out[: int(self.policy.get("max_bench_matches_per_tick", 10))]
+
+    def _plan_run_stall(self, run: str, tick: int, fee_bps: int, fee_per_card: int) -> list[Match]:
+        """The free stall's pairing on the traders in this tick's book: highest bid against lowest ask while the
+        bid covers it. Estimates are still refreshed, so the session report compares like with like."""
+        self.estimates(run)
+        act = [t for t in self.traders.values() if t.run == run and t.active and t.last_tick == tick]
+        asks = sorted((t for t in act if t.side == "sell"), key=lambda t: t.quote)
+        bids = sorted((t for t in act if t.side == "buy"), key=lambda t: -t.quote)
+        out = []
+        for s, b in zip(asks, bids):
+            if b.quote < s.quote:
+                break
+            price = midpoint_price(s.quote, b.quote, fee_bps, fee_per_card)
+            if price is None:
+                continue
+            surplus = max(b.est, b.quote) - min(s.est, s.quote)
+            out.append(Match(s.offer_id, b.offer_id, price, run, surplus + 1.0, surplus,
+                             f"stall pairing: bid {b.quote} >= ask {s.quote}", "cross"))
+        return out
 
     def _plan_run(self, run: str, tick: int, fee_bps: int, fee_per_card: int) -> list[Match]:
         prof = self.profile_for(run)

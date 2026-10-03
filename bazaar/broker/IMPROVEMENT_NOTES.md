@@ -53,3 +53,43 @@ So "much better than the stall" is not available from matching alone under this 
 4. Replay the recorded sessions (book per tick) as a backtest for lessons, not only the synthetic simulator.
 5. Conflict choice when one seller crosses two buyers: test "leave the pair closest to crossing" against "highest bid first" on replays.
 6. The larger lever: public trades on v07 (other half of the market score): more teams listing publicly there.
+
+## Update 19:45: is there an algorithm that beats the stall? Measured: no (`bazaar/broker/headroom.py`)
+
+Question from Ángel: make the broker much better than the stall. Four sessions in (b7, b25, b43, b60) we matched exactly the traders the stall would have matched, every time.
+
+**Where the lost share goes in the real sessions** (`python -m bazaar.broker.headroom --real`, limits guessed from the quote paths):
+
+| Session | Pairs (ours = stall) | Share of what crossing pairs allowed | Share of all traders |
+|---|---|---|---|
+| b7 | 5 | 1.00 | 0.93 |
+| b25 | 4 | 1.00 | 0.99 |
+| b43 | 5 | 1.00 | 0.84 |
+| b60 | 6 | 1.00 | 0.96 |
+
+- No crossing pair was ever left unmatched, none was matched late (one book read per tick, 26 to 34 s apart), no refusal outside the two probes of b7, no rate limit.
+- Everything lost was lost to traders that never met a crossing partner while they were in the book (b7-1 at 79 against b7-16 at 80; b43-2 at 56 against b43-10 at 57, which reached 55 one tick after the buyer left).
+- Greedy pairing costs nothing here: with one arrival per tick there is almost never a choice of partner.
+
+**What the quote paths show** (used for `STRUCTURED` in headroom.py): sellers that ran their course ended at 0.79 to 0.82 of their first ask (six cases), buyers started near 0.70 of their last bid; they move in equal steps and leave when they stop. Slow movers shade 5 to 20 %. About one in six never moves.
+
+**Bounds in the simulator** (300 sessions per model; wins/losses are sessions against the stall):
+
+| Model | Stall | Engine | Knows every limit | + future quotes and exits of the book | + reserve price, knows who leaves next |
+|---|---|---|---|---|---|
+| normal (all present from tick 0) | 0.908 | 0.909 | 0.922 | 0.930 | 0.927 |
+| hard | 0.847 | 0.863 | 0.876 | 0.898 | 0.879 |
+| real (fitted, long stays) | 0.904 | 0.894 | 0.900 | 0.899 | 0.924 (+106/-49) |
+| structured (as recorded) | 0.843 | 0.839 | 0.842 | 0.844 | 0.856 (+98/-50) |
+
+- With one-by-one arrivals a broker that knows every hidden limit, and even the future quotes and the leaving tick of every trader in the book, does not beat the stall. Only knowing the arrivals still to come does (perfect foresight under the quotes rule reaches 0.92 in the structured model and 1.00 in the fitted one).
+- A reserve-price rule with perfect knowledge of limits and exits gains 1 to 2 points and still loses one session in three. With estimated limits the same rule loses in seven of eight models (structured 0.816 to 0.834 against 0.843).
+- A look-ahead matcher on predicted quotes (the "diagonal": hold a cheap seller for a buyer about to cross) changed nothing measurable: within 0.003 of the engine in every model, above it in some and below it in others.
+
+**Decision: nothing deployed.** The deployment test was "better on the real sessions or equal on some and better on the rest, and better in every simulator regime". No candidate passes it.
+
+**What was added:**
+- `headroom.py`: the bounds, the three oracle brokers, the `STRUCTURED` session model and the real-session breakdown, so the Lab and the brain can re-measure after each session instead of searching the policy grid again.
+- Overlay knob `matcher`: `engine` (default, unchanged) or `stall` (exactly the stall's pairing, can never score below it). The engine averages 0.003 to 0.010 below the stall in the two one-by-one models and 0.015 above it in `hard`, so the default stays; switch with `{"policy": {"matcher": "stall"}}` in `data/live/broker_policy.json` if a real session ever comes in under the stall. The broker must be restarted once (outside a session) to know the knob.
+
+**Open:** how bench points move between "stall = 0.5" and "mean of the top three = 1.0" is still unknown; we have never been above or below the stall, so we have no reading of it.
