@@ -63,6 +63,17 @@ class PlannerTest(unittest.TestCase):
         pool = W.spare_pool(sit(THREE), {"min_asks": {"MAL-02": 8}})
         self.assertEqual({x["value"] for x in pool["common"] if x["ref"] == "MAL-02"}, {8.0})
 
+    def test_an_ordered_craft_frees_its_copies_from_our_open_offers(self):
+        """Outbox request code-f84c0c91: the market's code listed a copy the brain ordered crafted."""
+        s = sit(THREE + [card(6, "LAT-01")], offers=[ask(9, 4, "MAL-01", 12), ask(8, 6, "LAT-01", 12)])
+        acts = W.plan_actions(s, {}, [[1, 2, 4]], FakeValues())
+        self.assertEqual([(a.kind, a.params) for a in acts], [("cancel_offer", {"offer": 9})])   # only the ordered copy
+        self.assertEqual(W.plan_actions(sit(THREE), {}, [[1, 2, 4]], FakeValues())[0].kind, "taller")
+        in_thread = {**ask(9, 4, "MAL-01", 12), "thread": 77}
+        self.assertEqual(W.plan_actions(sit(THREE, offers=[in_thread]), {}, [[1, 2, 4]], FakeValues()), [])
+        self.assertEqual(W.plan_actions(sit(THREE[:3], offers=[ask(9, 3, "MAL-02", 12)]), {}, [[1, 2, 3]],
+                                        FakeValues()), [])                      # freeing it would not make the craft run
+
     def test_cancels_cheap_asks_to_free_spares_but_not_good_ones(self):
         s = sit(THREE, offers=[ask(9, 4, "MAL-01", 5)])
         acts = W.plan_actions(s, {}, "auto", FakeValues())
