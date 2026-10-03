@@ -234,7 +234,7 @@
         el("div", { class: "bot-bar" }, el("span", { style: `width:${Math.max(1, Math.round((v / max) * 100))}%` }))))
         : [el("div", { class: "bot-muted bot-small" }, "sin gasto")]));
   }
-  const PURPOSE = { duels: "Duelos", dealers: "Dealers", market: "Mercado", lab: "Laboratorio", council: "Consejo", broker: "Broker", smoke: "Prueba" };
+  const PURPOSE = (window.ui && window.ui.PURPOSE_LABEL) || {};
 
   function paintSpend() {
     const box = S.root.querySelector(".bot-spend");

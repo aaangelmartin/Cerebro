@@ -577,10 +577,15 @@
     return t;
   }
 
+  // API spend purposes as people read them; unknown purposes are shown as they come
+  const PURPOSE_LABEL = { strategy: "Cerebro", council: "Consejo", duels: "Duelos", dealers: "Dealers", market: "Mercado", lab: "Laboratorio",
+    smoke: "Pruebas", brain_eval: "Pruebas del cerebro", external_intel: "Mensajes externos", broker: "Broker" };
+  const purposeLabel = (k) => PURPOSE_LABEL[k] || k;
+
   window.ui = {
     el, append, esc, icon, iconSvg, ICONS, TYPES, TYPE_LABEL, normType,
     typeChip, row, sourceTag, resultChip, teamTag, teamName, filterBar, matchFilter, priceBar,
     kpi, meter, sparkline, bars, panel, drawer, closeDrawer, empty, loading, error,
-    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast,
+    fmtP, fmtNum, fmtUsd, fmtTime, fmtAgo, fmtDur, toDate, tickTime, setClock, setTickMap, tickWall, tickClock, keepScroll, keyedList, confirm, toast, purposeLabel, PURPOSE_LABEL,
   };
 })();
