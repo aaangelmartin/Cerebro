@@ -236,6 +236,58 @@ def post_offers(live: Path | None = None) -> list[dict]:
     return list(_plan(live).get("post_offers") or [])
 
 
+# --------------------------------------------------------------------------- outcomes of the brain's posts
+def posts_path(live: Path | None = None) -> Path:
+    return Path(live or config.LIVE) / "brain_posts.jsonl"
+
+
+def post_key(p: dict) -> tuple:
+    """What makes two brain posts identical: same card out, same ask (card or cash), same venue, same target."""
+    return (str(p.get("give") or ""), str(p.get("want_card") or ""), int(p.get("want_cash") or 0),
+            str(p.get("venue") or "rastro"), str(p.get("to") or ""))
+
+
+def record_post(row: dict, live: Path | None = None) -> None:
+    """One line per brain post attempt: {ts, tick, give, want_card, want_cash, venue, to, status, rail, detail,
+    offer_id, why}. status: sent | vetoed | refused | error."""
+    p = posts_path(live)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": time.time(), **row}, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        pass
+
+
+def post_history(live: Path | None = None, n: int = 300) -> list[dict]:
+    p = posts_path(live)
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()[-n:]
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def post_outcomes_text(live: Path | None = None, n: int = 10) -> str:
+    """The last outcomes of the brain's posts, for its next prompt (so it re-plans what a rail or the server refused)."""
+    rows = post_history(live, 200)[-n:]
+    lines = []
+    for r in rows:
+        ask = f"card {r.get('want_card')}" if r.get("want_card") else f"{r.get('want_cash')} P"
+        where = f"{r.get('venue') or 'rastro'}" + (f" to {r['to']}" if r.get("to") else "")
+        st = r.get("status")
+        why = f" by {r.get('rail')}: {r.get('detail')}" if st == "vetoed" else (f": {r.get('detail')}" if r.get("detail") else "")
+        lines.append(f"- t{r.get('tick')}: post {r.get('give')} for {ask} on {where} -> {st}{why}"
+                     + (f" (offer #{r['offer_id']})" if r.get("offer_id") else ""))
+    return "\n".join(lines)
+
+
 def _float(x) -> float | None:
     try:
         return round(float(x), 2)

@@ -125,6 +125,42 @@ def log_event(live: Path, kind: str, text: str, tick=None, data: dict | None = N
     return row
 
 
+# --------------------------------------------------------------------------- WhatsApp reply_to
+def _hhmm(ts) -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Madrid")).strftime("%H:%M")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def resolve_reply_to(raw, records: list[dict]) -> str | None:
+    """Map the brain's reply_to to an intake record id. Accepts the id itself; a time label ("11:06", Madrid
+    time of the message) or an author/team name only when exactly one record matches. None when ambiguous."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    ids = {str(r.get("id")): r for r in records if r.get("id") is not None}
+    if raw in ids:
+        return raw
+    if raw.strip("[]") in ids:
+        return raw.strip("[]")
+    import re as _re
+    m = _re.search(r"\b(\d{1,2}):(\d{2})\b", raw)
+    if m:
+        label = f"{int(m.group(1)):02d}:{m.group(2)}"
+        hits = [r for r in records if _hhmm(r.get("ts") or r.get("received_at")) == label]
+        if len(hits) == 1:
+            return str(hits[0].get("id"))
+        if len(hits) > 1:
+            return None
+    low = raw.lower()
+    hits = [r for r in records if low and any(low in str(r.get(k) or "").lower() or str(r.get(k) or "").lower() in low
+                                              for k in ("author", "by", "team") if r.get(k))]
+    return str(hits[0].get("id")) if len(hits) == 1 else None
+
+
 # --------------------------------------------------------------------------- sanity check
 def _num_in(text: str) -> bool:
     return any(ch.isdigit() for ch in str(text or ""))

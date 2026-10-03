@@ -46,6 +46,7 @@ MAX_OWN_LISTINGS = 8            # our sell listings at once (team cap 30; leave 
 POSTS_PER_TICK = 3              # new sells + bids + swaps per tick (team cap 12, shared)
 CANCELS_PER_TICK = 2
 LIST_EXPIRES = 60               # ticks
+BRAIN_REPOST_TICKS = 120        # an identical successful brain post is not repeated within this many ticks
 ASK_MARKUP_MAX = 1.6            # never ask more than this x book
 LLM_EVERY = 6                   # ticks between Claude calls when only listings are on the table
 MIN_LLM_S = 3.0
@@ -170,14 +171,15 @@ class MarketDomain:
         self._cancelled: set[str] = set()             # offer ids we cancelled ourselves
         self._ctx: Any = None
         self._last_state: dict | None = None
-        self._brain_posted: set = set()              # brain offers already sent (key: give, want, cash)
+        self._brain_posted: set = set()              # brain offers in flight this process (strategy.post_key)
 
     # ================================================================== protocol
     def fallback(self, sit, ctx) -> list[Action]:
         acc, posts, state = self._prepare(sit, ctx)
         return self._brain_first(self._code_plan(acc, posts, state), state)
 
-    def _brain_posts(self, me: dict, own_market: list[dict], can_give, counts: dict, control: dict) -> list[Action]:
+    def _brain_posts(self, me: dict, own_market: list[dict], can_give, counts: dict, control: dict,
+                     tick_now: int = 0) -> list[Action]:
         """The brain's targeted offers (from the needs intel) not on the board yet: at most 2 per tick.
         The rails still check value (never below value + margin) and the last-copy rule."""
         try:
@@ -186,16 +188,27 @@ class MarketDomain:
         except Exception:  # noqa: BLE001
             return []
         from bazaar.core.goal import avoided as _avoided
+        from bazaar.brain.strategy import post_history, post_key
         live = {(tuple(a.get("ref") for a in (o.get("give") or {}).get("assets") or []),
                  tuple(want_cards(o)), int((o.get("want") or {}).get("cash") or 0)) for o in own_market}
+        # an identical post the rails or the server refused is never resent (the brain must change price/venue);
+        # an identical successful post is not repeated for BRAIN_REPOST_TICKS
+        refused, recent_ok = set(), set()
+        for r in post_history():
+            k = post_key(r)
+            if r.get("status") in ("vetoed", "refused"):
+                refused.add(k)
+            elif r.get("status") == "sent" and tick_now - int(r.get("tick") or 0) < BRAIN_REPOST_TICKS:
+                recent_ok.add(k)
         out = []
         for p in wanted:
             if len(out) >= 2:
                 break
             if p.get("want_card") and _avoided(p["want_card"], control):
                 continue
-            key = ((p["give"],), (p["want_card"],) if p.get("want_card") else (), int(p.get("want_cash") or 0))
-            if key in live or key in self._brain_posted:
+            board = ((p["give"],), (p["want_card"],) if p.get("want_card") else (), int(p.get("want_cash") or 0))
+            key = post_key(p)
+            if board in live or key in self._brain_posted or key in refused or key in recent_ok:
                 continue
             copies = sorted((a for a in me.get("assets") or [] if a.get("ref") == p["give"] and can_give(a, counts)),
                             key=lambda a: float(a.get("your_value") or 0))
@@ -213,7 +226,8 @@ class MarketDomain:
             act = Action(kind="post_offer", params=params, domain=self.name, source="council",
                          reason="the brain: " + (p.get("why") or f"targeted offer for {p['give']}"),
                          expected={"kind": "swap" if p.get("want_card") else "ask", "points": 0.0}, priority=0.0)
-            self._sent[act.id] = {"kind": "post_offer", "team": p.get("to")}
+            self._sent[act.id] = {"kind": "post_offer", "team": p.get("to"), "brain": {**p, "venue": venue},
+                                  "params": {"expires_in_ticks": params["expires_in_ticks"]}}
             self._brain_posted.add(key)
             out.append(act)
         return out
@@ -267,6 +281,8 @@ class MarketDomain:
 
     def observe(self, outcome: Outcome) -> None:
         meta = self._sent.pop(outcome.action_id, None)
+        if meta and meta.get("brain"):
+            self._record_brain_post(meta["brain"], outcome)
         if meta and meta["kind"] == "accept_offer" and outcome.status in ("sent", "deal") and meta.get("team"):
             self.rivals.record_deal(meta["team"])
         if not meta or outcome.status not in ("sent", "deal"):
@@ -287,6 +303,22 @@ class MarketDomain:
                                           "expires_tick": resp.get("expires_tick") or (outcome.tick + int(ttl))}
         elif meta["kind"] == "cancel_offer" and meta.get("offer") is not None:
             self._cancelled.add(str(meta["offer"]))
+
+    def _record_brain_post(self, p: dict, outcome: Outcome) -> None:
+        """Log the outcome of a brain post (brain_posts.jsonl) so the brain re-plans what was refused."""
+        from bazaar.brain.strategy import post_key, record_post
+        resp = outcome.response if isinstance(outcome.response, dict) else {}
+        st = outcome.status
+        status = "sent" if st in ("sent", "deal") else "vetoed" if st == "vetoed" else "refused" if st == "refused" \
+            else "error"
+        oid = resp.get("id") if resp.get("id") is not None else (resp.get("offer") or {}).get("id")
+        record_post({"tick": outcome.tick, "give": p.get("give"), "want_card": p.get("want_card"),
+                     "want_cash": p.get("want_cash"), "venue": p.get("venue") or "rastro", "to": p.get("to"),
+                     "status": status, "rail": resp.get("rail"),
+                     "detail": resp.get("detail") or resp.get("message") or resp.get("error"),
+                     "offer_id": oid, "why": p.get("why")})
+        if status != "sent":
+            self._brain_posted.discard(post_key(p))      # the refused-key set (from the log) now blocks it
 
     def _close_posted(self, sit, ctx=None) -> None:
         """Our posted offers that left /api/me/offers: filled (deal) before expiry, else expired/cancelled.
@@ -595,7 +627,7 @@ class MarketDomain:
                 if offer_kind(o) == "bid" and o.get("id") not in seen:
                     stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
-        brain_posts = self._brain_posts(me, own_market, can_give, counts, control)
+        brain_posts = self._brain_posts(me, own_market, can_give, counts, control, tick)
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,
                  "accept_candidates": [self._accept_row(c) for c in accepts],

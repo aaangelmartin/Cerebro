@@ -155,7 +155,8 @@ STRATEGY_TOOL = {
                              "venue: {text, why, channel: whatsapp|in_game}",
                              "items": {"type": "object"}},
             "whatsapp_replies": {"type": "array", "description": "for EVERY new WhatsApp intake record (EVENTS kind "
-                                 "external, ids in brackets): {reply_to: record id, conclusion: what you decided and "
+                                 "external, ids in brackets): {reply_to: the record id EXACTLY as shown inside the "
+                                 "brackets (never a time or a name), conclusion: what you decided and "
                                  "did in the game, text: the reply to send (ALWAYS in English, friendly, short, concrete "
                                  "numbers/offer ids; empty if no reply is needed), why}", "items": {"type": "object"}},
             "human_tasks": {"type": "array", "description": "chores only humans can do (keys, infra, contacts): "
@@ -569,14 +570,24 @@ class Strategist:
             box = Outbox()
         except Exception:  # noqa: BLE001
             box = None
+        records = self._external_records()
         for r in reps:
-            rid = r["reply_to"]
+            rid = B.resolve_reply_to(r.get("reply_to"), records)
+            if rid is None:
+                self._finding("whatsapp", f"reply_to '{r.get('reply_to')}' matches no single WhatsApp record: "
+                              "reply filed without a link", {"reply_to": r.get("reply_to"), "text": (r.get("text") or "")[:120]})
+                if r.get("text") and box is not None:
+                    try:
+                        box.draft_promo(r["text"], r.get("why") or r.get("conclusion") or "", channel="whatsapp")
+                    except Exception:  # noqa: BLE001
+                        pass
+                continue
             row = {"brain_conclusion": r.get("conclusion") or "", "reply_outbox_id": None, "ts": self.now(),
                    "plan_tick": doc.get("tick")}
             if r.get("text") and box is not None:
                 try:
                     it = box.draft_promo(r["text"], r.get("why") or r.get("conclusion") or "", channel="whatsapp")
-                    rec = next((x for x in self._external_records() if x.get("id") == rid), {})
+                    rec = next((x for x in records if str(x.get("id")) == rid), {})
                     box.update(it["id"], reply_to={"record": rid, "author": rec.get("author") or rec.get("by"),
                                                    "team": rec.get("team")})
                     row["reply_outbox_id"] = it["id"]
@@ -793,6 +804,14 @@ class Strategist:
                         "promo_drafts and human_tasks; do not repeat what is already open:\n" + ob) if ob else ""
         extra = ""
         try:
+            po = S.post_outcomes_text(self.live, 10)
+            if po:
+                extra += ("\n\nYOUR LAST TARGETED POSTS (post_offers) AND WHAT HAPPENED. An identical post that was "
+                          "vetoed or refused is never resent: if it is still worth it, re-plan it with a different "
+                          "price, venue or target (above our floor), or drop it:\n" + po)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             from bazaar.intel import external
             d = external.recent_digest(max_chars=2500, live_dir=config.LIVE, hours=6)
             if d:
@@ -842,6 +861,14 @@ class Strategist:
                 for x in found:
                     f.write(json.dumps({"ts": doc["updated"], "tick": doc.get("tick"), **x}, ensure_ascii=False) + "\n")
         return doc
+
+    def _finding(self, topic: str, finding: str, evidence: Any = None) -> None:
+        try:
+            with (self.live / "strategist_findings.jsonl").open("a") as f:
+                f.write(json.dumps({"ts": self.now(), "tick": self.last_plan_tick, "topic": topic, "finding": finding,
+                                    "evidence": evidence}, ensure_ascii=False, default=str) + "\n")
+        except OSError:
+            pass
 
     def _file_outbox(self, plan: dict, doc: dict) -> None:
         if not (plan.get("code_requests") or plan.get("promo_drafts") or plan.get("human_tasks")):
