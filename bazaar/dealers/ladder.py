@@ -6,6 +6,8 @@ components of Negotiating: `neg_points` (value gained in trades with other teams
 `ladder_points`. Measured on Saturday: three good Abuela deals took ladder_points 0 -> 0.056 (~0.019 each), which
 fits weights level/15 over five levels with three slots each (a full level 1 = 0.067, level 2 = 0.133,
 level 3 = 0.2). Dealer deals did not move neg_points: with a dealer only the share of its range counts.
+A deal closed by hand counts in the game like any other: MAL-09 bought from Los Pícaros at 57 (opening 73) in
+a hand-run thread took ladder_points 0.149 -> 0.196 at tick 967 (+0.047, about half of a level 4 slot of 0.089).
 """
 from __future__ import annotations
 
@@ -95,7 +97,8 @@ def report(live: Path, me: dict | None = None, dealers: list[dict] | None = None
         "how_it_scores": "ladder_points: best 3 negotiated deals per dealer level, each = share of the dealer's range "
                          "(opening -> its limit) we captured; an empty slot is 0; higher levels weigh more. A deal at "
                          "the opening price scores 0. Dealer deals do NOT add to neg_points (only trades with teams "
-                         "do); the size of the deal does not matter, the share captured does.",
+                         "do); the size of the deal does not matter, the share captured does. Captures here are our "
+                         "estimates; the game's ladder_points is the truth (a hand-closed deal counts too).",
         "levels": levels, "ladder_points_missing_total": round(at_stake, 3),
         "dealer_prices_seen_today": dealer_prices(feed or [], since_tick),
     }

@@ -142,6 +142,11 @@ class ProfileStore:
                         for name, xs in samples.items():
                             k[name] = (list(k.get(name) or []) + list(xs))[-MAX_SAMPLES:]
                 applied.append(sid)
+        for d in self.data.get("deals") or []:           # deals stored before limit_fallback existed
+            if d.get("limit_est") is None and d.get("opening") and d.get("price") is not None:
+                buying = d.get("side") == "buy"
+                d["limit_est"] = self.limit_fallback(d.get("dealer", ""), d.get("kind") or "?", buying, d["opening"])
+                d["capture"] = capture(d["opening"], d["price"], d["limit_est"], buying)
 
     def save(self) -> None:
         with self.lock:
@@ -199,6 +204,18 @@ class ProfileStore:
         """Estimated secret limit (buy: lowest the dealer sells at; sell: highest it pays)."""
         return opening * self.stat(dealer, kind, "limit_ratio")
 
+    def limit_fallback(self, dealer: str, kind: str, buying: bool, opening: float) -> float:
+        """Limit estimate for a deal the bot never evaluated (closed by hand, or settled while the domain was
+        paused): the furthest any thread on that side pushed this dealer, as a share of its opening."""
+        side = "buy" if buying else "sell"
+        prof = self.data["profiles"].get(dealer) or {}
+        kinds = [kind] if (prof.get(kind) or {}).get("limit_ratio") and kind != "?" else \
+            [k for k in prof if k.startswith(side + ":") and k != "buy:pack"]
+        ratios = [r for k in kinds for r in (prof[k].get("limit_ratio") or [])]
+        if not ratios:
+            return round(self.expect_limit(dealer, kind if kind != "?" else f"{side}:card", opening), 2)
+        return round(opening * (min(ratios) if buying else max(ratios)), 2)
+
     def summary(self, dealer: str, kind: str) -> dict:
         return {"limit_ratio": round(self.stat(dealer, kind, "limit_ratio"), 3),
                 "mirror": round(self.stat(dealer, kind, "mirror"), 2),
@@ -237,6 +254,8 @@ class ProfileStore:
     def record_deal(self, dealer: str, level: int, kind: str, item: str, opening: int | None, price: int,
                     limit_est: float | None, buying: bool, value: float | None, thread: int | None = None,
                     tick: int | None = None) -> dict:
+        if limit_est is None and opening:        # no estimate on the thread: the slot would read as empty
+            limit_est = self.limit_fallback(dealer, kind, buying, opening)
         cap = capture(opening, price, limit_est, buying)
         deal = {"at": time.time(), "tick": tick, "dealer": dealer, "level": level, "kind": kind, "item": item,
                 "opening": opening, "price": price, "limit_est": limit_est, "capture": cap, "side": "buy" if buying else "sell",
