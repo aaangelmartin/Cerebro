@@ -49,12 +49,20 @@ def read_rows(path: Path, since: float | None = None, limit: int = 200) -> list[
 
 # --------------------------------------------------------------------------- chat
 CHAT_DUP_WINDOW_S = 15.0
+CHAT_MAX_CHARS = 4000           # a team directive reaches the brain whole; anything longer says it was cut
 _CHAT_LOCK = threading.Lock()
+
+
+def clip(text: str, limit: int) -> str:
+    """`text` within `limit` characters; a cut text ends with a note that says how much is missing."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f" [cut: {len(text) - limit} more characters, send the rest in another message]"
 
 
 def chat_post(live: Path, text: str, by: str = "", role: str = "user", refs: dict | None = None,
               now: float | None = None) -> dict:
-    text = str(text or "").strip()[:2000]
+    text = clip(str(text or "").strip(), CHAT_MAX_CHARS)
     if not text:
         raise ValueError("text is empty")
     row = {"ts": now or time.time(), "role": role if role in ("user", "brain") else "user",
@@ -132,7 +140,9 @@ def apply_policies(live: Path, updates: list[dict], by: str = "brain", now: floa
 
 # --------------------------------------------------------------------------- events
 def log_event(live: Path, kind: str, text: str, tick=None, data: dict | None = None, now: float | None = None) -> dict:
-    row = {"ts": now or time.time(), "tick": tick, "kind": kind, "text": str(text)[:400], "data": data or {}}
+    # a human's chat message is an instruction: it is never clipped to the short cap of a game event
+    cap = CHAT_MAX_CHARS + 600 if kind == "chat" else 400
+    row = {"ts": now or time.time(), "tick": tick, "kind": kind, "text": str(text)[:cap], "data": data or {}}
     _append(Path(live) / "brain_events.jsonl", row)
     return row
 

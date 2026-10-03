@@ -373,12 +373,12 @@ def _tail(path: Path, n: int) -> list[dict]:
     return out
 
 
-def _wrap(text: Any, source: str) -> str:
+def _wrap(text: Any, source: str, limit: int = 600) -> str:
     try:
         from bazaar.core.untrusted import wrap
-        return wrap(text, source)
+        return wrap(text, source, limit)
     except Exception:  # noqa: BLE001
-        return "<untrusted>" + str(text or "")[:300].replace("<", "&lt;") + "</untrusted>"
+        return "<untrusted>" + str(text or "")[:min(limit, 300)].replace("<", "&lt;") + "</untrusted>"
 
 
 def _e(kind: str, text: str, data: dict | None = None) -> dict:
@@ -960,7 +960,7 @@ class Strategist:
             pass
         for m in B.chat_since(self.live, self.chat_seen_ts, 50):
             if m.get("role") == "user":
-                new.append(_e("chat", f"{m.get('by') or 'equipo'}: " + _wrap(m.get("text"), "team-chat"),
+                new.append(_e("chat", f"{m.get('by') or 'equipo'}: " + _wrap(m.get("text"), "team-chat", B.CHAT_MAX_CHARS + 120),
                               {"chat_ts": m.get("ts")}))
             self.chat_seen_ts = max(self.chat_seen_ts or 0, float(m.get("ts") or 0))
         rows = []
