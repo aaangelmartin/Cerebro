@@ -4,6 +4,7 @@
 
 GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
 GET  /overview?since=  (everything the dashboard shows, in one read)
+GET  /broker/sessions  GET /broker/session/<run>?since_tick=&limit=  (Market Test sessions, per-tick rows)
 GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
 GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
 GET  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
@@ -51,6 +52,94 @@ def _read_json(path: Path, default=None):
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return default
+
+
+RUN_RX = re.compile(r"^b\d+$")
+TRADERS_MAX = 60                      # per-tick rows: keep at most this many traders (they can be large)
+
+
+def _jsonl(path: Path) -> list[dict]:
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        continue
+    except OSError:
+        pass
+    return out
+
+
+def _run_files(bench: Path) -> dict[str, list[Path]]:
+    """run id -> its per-tick files (<day>-<run>.jsonl), across days."""
+    runs: dict[str, list[Path]] = {}
+    for p in sorted(bench.glob("*-b*.jsonl")):
+        run = p.stem.rsplit("-", 1)[-1]
+        if RUN_RX.match(run):
+            runs.setdefault(run, []).append(p)
+    return runs
+
+
+def broker_sessions(live: Path) -> list[dict]:
+    """One row per Market Test session: results.jsonl rows, plus result rows found only in the per-run files,
+    plus sessions still running (status "live"). Ordered by start, newest last."""
+    bench = Path(live) / "bench"
+    results: dict[str, dict] = {}
+    for r in _jsonl(bench / "results.jsonl"):
+        if r.get("run"):
+            results[r["run"]] = r
+    out = []
+    for run, files in _run_files(bench).items():
+        rows = [r for p in files for r in _jsonl(p)]
+        starts = [r for r in rows if r.get("type") == "start"]
+        ticks = [r for r in rows if r.get("type") == "tick"]
+        res = results.get(run) or next((r for r in reversed(rows) if r.get("type") == "result"), None)
+        first = starts[0] if starts else (ticks[0] if ticks else {})
+        last = ticks[-1] if ticks else {}
+        row = {"run": run, "session": (res or {}).get("session") or f"{files[0].stem}",
+               "status": "done" if res else "live",
+               "start_tick": ((res or {}).get("stats") or {}).get("start_tick") or first.get("tick"),
+               "start_ts": first.get("t") if isinstance(first.get("t"), (int, float)) else None,
+               "end_tick": (res or {}).get("tick") if res else last.get("tick"),
+               "end_ts": (res or {}).get("t") or (res or {}).get("ts") or last.get("t"),
+               "ticks": len(ticks)}
+        if res:
+            row.update({k: res.get(k) for k in ("score", "est_efficiency", "stall_efficiency", "stats", "vs_stall")})
+        out.append(row)
+    for run, res in results.items():                     # results whose per-run file is gone
+        if not any(r["run"] == run for r in out):
+            out.append({"run": run, "session": res.get("session"), "status": "done",
+                        "start_tick": (res.get("stats") or {}).get("start_tick"), "start_ts": None,
+                        "end_tick": res.get("tick"), "end_ts": res.get("t") or res.get("ts"), "ticks": None,
+                        **{k: res.get(k) for k in ("score", "est_efficiency", "stall_efficiency", "stats", "vs_stall")}})
+    out.sort(key=lambda r: (r.get("start_tick") or 0, r["run"]))
+    return out
+
+
+def broker_session_rows(live: Path, run: str, since_tick: int | None = None, limit: int = 200) -> list[dict] | None:
+    """Per-tick rows of one session (None if the run id is invalid or unknown)."""
+    if not RUN_RX.match(run or ""):
+        return None
+    files = _run_files(Path(live) / "bench").get(run)
+    if not files:
+        return None
+    rows = [r for p in files for r in _jsonl(p)]
+    if since_tick is not None:
+        rows = [r for r in rows if isinstance(r.get("tick"), int) and r["tick"] > since_tick]
+    rows = rows[-limit:]
+    for r in rows:
+        tr = r.get("traders")
+        if isinstance(tr, list) and len(tr) > TRADERS_MAX:
+            r["traders"] = tr[:TRADERS_MAX]
+            r["traders_trimmed"] = len(tr)
+        elif isinstance(tr, dict) and len(tr) > TRADERS_MAX:
+            r["traders"] = dict(list(tr.items())[:TRADERS_MAX])
+            r["traders_trimmed"] = len(tr)
+    return rows
 
 
 def _tail(path: Path, since: int | None, limit: int) -> list[dict]:
@@ -207,6 +296,21 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._send(400, {"error": "bad_query", "message": "since must be a number"})
             return self._send(200, {"items": Outbox().list(q.get("kind") or None, q.get("status") or None, since)})
+        if path == "/broker/sessions":
+            return self._send(200, {"items": broker_sessions(self.live)})
+        if path.startswith("/broker/session/"):
+            try:
+                st = int(q["since_tick"]) if q.get("since_tick") not in (None, "") else None
+                lim = max(1, min(2000, int(q.get("limit") or 200)))
+            except ValueError:
+                return self._send(400, {"error": "bad_query", "message": "since_tick and limit must be integers"})
+            run = path[len("/broker/session/"):]
+            if not RUN_RX.match(run):
+                return self._send(400, {"error": "bad_run", "message": "run must look like b25"})
+            rows = broker_session_rows(self.live, run, st, lim)
+            if rows is None:
+                return self._send(404, {"error": "not_found", "message": f"no session {run}"})
+            return self._send(200, {"run": run, "rows": rows})
         if path.startswith("/rec/") or path == "/notifications":
             try:
                 return self._get_rec(path, q)
