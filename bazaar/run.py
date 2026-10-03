@@ -402,9 +402,11 @@ class Runner:
                 self._err("council", e)
                 r = a
             if r is None:
-                self._ledger("decision", a, Verdict(False, "council", "vetoed by the council"),
+                why = (getattr(sys.modules.get("bazaar.brain.council"), "LAST_WHY", {}) or {}).get(a.id, "")
+                self._ledger("decision", a, Verdict(False, "council", ("vetoed by the council: " + why)[:400]
+                                                    if why else "vetoed by the council"),
                              tick=sit.tick, dry_run=False)
-                self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"by": "council"}))
+                self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"by": "council", "why": why}))
                 alt = None
                 if self.arbiter is not None and hasattr(self.arbiter, "alternative"):
                     try:
