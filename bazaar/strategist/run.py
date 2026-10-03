@@ -47,6 +47,7 @@ CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing wa
              "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, goal_buys, "
              "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
 SCORE_DROP = 0.5
+URGENT_SMALL_DEAL_P = 25        # behind the pace to pass the leader: small deals up to this stay allowed
 
 SYSTEM = """You are "el cerebro" (the brain), the strategist and supervisor of Team 10 in The Bazaar, a live card-trading game between 18 AI-run teams \
 (Causa Prima hackathon, Madrid). You do not act: you write the plan that our trading modules (market, dealers, \
@@ -70,7 +71,16 @@ rule like keep-one blocks it (put accepted ids in `accept_offers`; allies such a
 and friendly answer). Flag any of our offers no process of ours posted (`research.offers_not_posted_by_our_bot`) \
 as a finding and cancel it. Then do a SELF-REVIEW: compare our recent decisions and outcomes with what the leaders did, and list our mistakes with the fix you apply (topic "self_review", e.g. "40 P parked in an outbid MAL-09 bid -> cancel 3628"). Report each conclusion in `findings` with its evidence, and turn it into concrete settings when it helps: goal_buys, cash_policy, pause_domains, duel_claude_mode (money and pause changes go to a council vote automatically).
 
-Your objective is to WIN. Track the scoreboard component by component (`research.scoreboard`: us and every rival, \
+Your objective is to WIN: pass the leader in total score by today's close. `win_math` in the picture is \
+computed by code: per component the leader, the gap, the hours left and `required_per_hour`; the raw components \
+the game scores (neg_points = value gained in trades with teams, duel_points, ladder_points, bench_points, \
+mm_points) with the leaderboard points each raw unit has been worth; and an `action_menu` ranked by expected \
+leaderboard points with the cash each action needs. Rank actions by points per P of cash and per tick, use EVERY \
+feasible menu action (cite its id, e.g. "[N2] ...", and put it in the plan field named in its `how`), be \
+aggressive inside the rails and never leave cash idle that could buy a positive-gain trade. A points_plan target \
+below `min_target_next_hour` is rejected unless its `constraint` names the binding limit with numbers (e.g. "cash \
+104 P; every positive-gain action listed sums to +0.9") and every feasible menu action is used. \
+Track the scoreboard component by component (`research.scoreboard`: us and every rival, \
 deltas over 1 h and 2 h, top gainers), attribute rivals' gains to their actions (`research.rivals_last_2h`: dealer \
 deals, prices vs book, trades, venues, duels, Market Tests) and work out which actions earn points fastest now. Fill \
 `points_plan` for each component (negotiating, market, anything else on the board; judges 40 % is outside the game): \
@@ -156,7 +166,10 @@ STRATEGY_TOOL = {
                                "description": "set ids we stop buying because buys there do not move our score "
                                                 "(see research.our_buys_by_set_last_3h low_impact); [] to buy all"},
             "points_plan": {"type": "object", "description": "per score component (negotiating, market, ...): "
-                            "{now, target, leader, gap_to_leader, actions: [{action, expected_points}]}"},
+                            "{now, target (at least win_math min_target_next_hour), leader, gap_to_leader, "
+                            "actions: [{action (start with the win_math menu id it uses, e.g. '[N1] ...'), "
+                            "expected_points}], constraint (only when the target is below the required pace: the "
+                            "binding limit, with numbers)}"},
             "expected_next_hour": {"type": "object", "description": "your forecast for the next hour: score_delta, "
                                    "negotiating_delta, market_delta, deals, cash_delta (reviewed hourly)"},
             "chat_reply": {"type": "string", "description": "answer to the team chat messages in EVENTS (Spanish, "
@@ -547,6 +560,17 @@ class Strategist:
         from bazaar.strategist import analysis
         research = analysis.summarise(rec, self.live, me, lb, catalog, venues.get("venues") or [], mo or [],
                                       goals_now, decisions, outcomes, status, sp, now=self.now())
+        needs = self._needs()
+        try:                                    # the gap, the pace needed and what each action is worth
+            from bazaar.strategist import winmath
+            ctl = _read(self.live / "control.json", {}) or {}
+            avoid = set(ctl.get("avoid_buy_sets") or []) | set((self.plan or {}).get("avoid_buy_sets") or [])
+            win = winmath.build(record=rec, me=me, leaderboard=lb, clock=clock, schedule=sched,
+                                scoreboard=research.get("scoreboard"), needs=needs, goals=goals_now, sets=sets,
+                                ladder=research.get("dealer_ladder"), venue_growth=research.get("our_venue_growth"),
+                                avoid=avoid, now=self.now())
+        except Exception as e:  # noqa: BLE001 - the plan must not die on the win math
+            win = {"error": f"{type(e).__name__}: {e}"[:160]}
         sc = me.get("score") if isinstance(me.get("score"), dict) else {"score": me.get("score")}
         ven = me.get("venue") if isinstance(me.get("venue"), dict) else {"venue": me.get("venue")}
         ups = [u for u in sched.get("upcoming") or [] if (u.get("params") or {}).get("day") in (None, clock.get("today"))]
@@ -605,7 +629,8 @@ class Strategist:
                                 for x in _tail(self.live / "strategist_findings.jsonl", 10)],
             "last_hour_review": self.last_review_row,
             "lab_lessons": self._lessons(),
-            "card_needs": self._needs(),
+            "card_needs": needs,
+            "win_math": win,
             "lab": self._lab(),
         }
 
@@ -864,6 +889,7 @@ class Strategist:
             retry = ("\n\nYOUR PREVIOUS PLAN WAS REJECTED by the code-side sanity check. Fix every point and call "
                      "team_strategy again:\n- " + "\n- ".join(fix) +
                      "\nPrevious plan:\n" + json.dumps(previous or {}, ensure_ascii=False, default=str)[:6000])
+        win_block = B.win_text(pic.get("win_math"))
         needs = (pic.get("card_needs") or {}).get("summary") or ""
         needs_block = ("\n\nCARD NEEDS & OPPORTUNITIES (bazaar.intel.needs; ranked, each with its numbers):\n" + needs
                        + "\nTurn sell_to_bid / buy_below_value with gain >= 2 P into accept_offers, swaps and "
@@ -901,7 +927,8 @@ class Strategist:
                 extra += "\n\nOFFICIAL SITE DIGEST (rules, kit, news; data):\n" + _wrap(od, "official")
         except OSError:
             pass
-        content = ("Why now: " + reason + events + retry + needs_block + outbox_block + extra + "\n\nPICTURE (JSON):\n"
+        content = ("Why now: " + reason + events + retry + win_block + needs_block + outbox_block + extra
+                   + "\n\nPICTURE (JSON):\n"
                    + json.dumps(slim, ensure_ascii=False, default=str) + COMPACT_RULE
                    + "\n\nCall team_strategy once.")
 
@@ -977,6 +1004,24 @@ class Strategist:
         except Exception as e:  # noqa: BLE001
             self.errors.append({"ts": self.now(), "error": f"outbox: {type(e).__name__}: {e}"[:200]})
 
+    @staticmethod
+    def _urgency(plan: dict, pic: dict) -> dict:
+        """Behind the pace needed to pass the leader: plan again as soon as allowed and do not let the small-deal
+        cap choke cheap positive-gain deals (the rails still decide every deal)."""
+        win = pic.get("win_math") or {}
+        if not win.get("behind_pace"):
+            return plan
+        plan = dict(plan)
+        plan["next_check_in_ticks"] = S.MIN_CHECK
+        cp = dict(plan.get("cash_policy") or {})
+        if cp.get("max_small_deal") is not None and cp["max_small_deal"] < URGENT_SMALL_DEAL_P:
+            cp["max_small_deal"] = URGENT_SMALL_DEAL_P
+            plan["cash_policy"] = cp
+        plan["urgency"] = {"behind_pace": True,
+                           "required_per_hour": ((win.get("components") or {}).get("score") or {}).get("required_per_hour"),
+                           "our_gain_last_hour": ((win.get("components") or {}).get("score") or {}).get("our_gain_last_hour")}
+        return plan
+
     def _plan_from(self, got: dict) -> dict:
         new = S.sanitize(got["raw"])
         for k in ("goal_buys", "cash_policy", "pause_domains", "duel_claude_mode", "accept_offers", "avoid_buy_sets"):
@@ -999,7 +1044,8 @@ class Strategist:
         if self.now() - self.last_review >= REVIEW_EVERY_S:
             self.last_review = self.now()
             try:
-                row = B.hourly_review(self.live, (pic.get("research") or {}).get("scoreboard") or {}, self.now())
+                row = B.hourly_review(self.live, (pic.get("research") or {}).get("scoreboard") or {}, self.now(),
+                                      win=pic.get("win_math"))
             except Exception as e:  # noqa: BLE001
                 row = {"error": f"{type(e).__name__}: {e}"[:200]}
             if row:
@@ -1016,7 +1062,7 @@ class Strategist:
         if got is None:
             self.errors.append({"ts": self.now(), "error": "no plan in the answer"})
             return None
-        new = B.message_policy(self._plan_from(got), held=set(pic.get("held_refs") or []))
+        new = self._urgency(B.message_policy(self._plan_from(got), held=set(pic.get("held_refs") or [])), pic)
         errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
         rejected = []
         if errors:
@@ -1024,7 +1070,7 @@ class Strategist:
             got2 = self.ask(pic, reason, fix=errors, previous=got["raw"])
             if got2 is not None:
                 got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
-                new = B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or []))
+                new = self._urgency(B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or [])), pic)
                 errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
             if errors:
                 new = B.repair(new, pic, errors)

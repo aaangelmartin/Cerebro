@@ -306,6 +306,108 @@ def message_policy(plan: dict, held: set[str] | None = None, allies: set[str] | 
     return out
 
 
+# --------------------------------------------------------------------------- aiming to win
+WIN_TOL = 0.05
+
+
+def win_text(win: dict | None) -> str:
+    """The win math as a short prompt block (the full numbers are in the picture under win_math)."""
+    if not isinstance(win, dict) or not win.get("components"):
+        return ""
+    lines = [f"\n\nWIN MATH (computed by code; mission: {win.get('mission')}; hours left today "
+             f"{win.get('hours_left_today')}, tomorrow {win.get('hours_tomorrow')}):"]
+    for comp in ("score", "negotiating", "market"):
+        c = (win.get("components") or {}).get(comp) or {}
+        if not c:
+            continue
+        lines.append(f"- {comp}: we {c.get('now')}, leader {c.get('leader')} {c.get('leader_score')}, gap {c.get('gap')}, "
+                     f"required +{c.get('required_per_hour')}/h (we made {c.get('our_gain_last_hour')} last hour), "
+                     f"min target next hour {c.get('min_target_next_hour')}")
+    for comp in ("negotiating", "market"):
+        for a in (win.get("action_menu") or {}).get(comp) or []:
+            cash = f", needs {a.get('cash')} P" if a.get("cash") else ""
+            short = f" (short by {a.get('cash_short')} P)" if not a.get("feasible") else ""
+            short += "" if a.get("next_hour", True) else " (later today, not this hour)"
+            lines.append(f"- [{a.get('id')}] {a.get('action')} -> +{a.get('expected_points')} points{cash}{short}; "
+                         f"plan field: {a.get('how')}")
+    lines.append("Set each points_plan target at or above its min target, cite the menu ids you use, and put each "
+                 "used action in its plan field so the bot executes it.")
+    return "\n".join(lines)
+
+
+def _menu_unused(plan_comp: dict, menu: list[dict]) -> list[dict]:
+    text = " ".join(str(a.get("action") or "") for a in plan_comp.get("actions") or [])
+    return [m for m in menu if m.get("feasible") and m.get("next_hour", True) and (m.get("expected_points") or 0) > 0
+            and f"[{m.get('id')}]" not in text and f"{m.get('id')} " not in text and f"{m.get('id')}:" not in text]
+
+
+def win_errors(plan: dict, win: dict | None) -> list[str]:
+    """A plan may not under-aim: per component the target reaches the required pace, or it names the binding
+    constraint with numbers and still uses every feasible menu action."""
+    if not isinstance(win, dict) or not win.get("components"):
+        return []
+    errors = []
+    pp = plan.get("points_plan") or {}
+    for comp in ("negotiating", "market"):
+        c = (win.get("components") or {}).get(comp) or {}
+        menu = (win.get("action_menu") or {}).get(comp) or []
+        need_target = c.get("min_target_next_hour")
+        d = pp.get(comp)
+        if not isinstance(d, dict):
+            if need_target is not None and ((c.get("gap") or 0) > 0 or _menu_unused({}, menu)):
+                errors.append(f"points_plan.{comp} is missing (min target next hour {need_target})")
+            continue
+        target, now = d.get("target"), c.get("now")
+        acts = d.get("actions") or []
+        total = sum(float(a.get("expected_points") or 0) for a in acts)
+        unused = _menu_unused(d, menu)
+        ids = ", ".join(f"[{m['id']}] +{m['expected_points']}" for m in unused)
+        constrained = bool(d.get("constraint")) and _num_in(d.get("constraint"))
+        low = need_target is not None and (target is None or target + WIN_TOL < need_target)
+        if low and not constrained:
+            errors.append(f"points_plan.{comp} target {target} is below the pace to pass the leader (min "
+                          f"{need_target}: we {now}, leader {c.get('leader_score')}, required "
+                          f"+{c.get('required_per_hour')}/h): raise it, or state `constraint` with numbers")
+        if unused and (low or (target is not None and now is not None and total + WIN_TOL < target - now) or not acts):
+            errors.append(f"points_plan.{comp} leaves feasible win_math menu actions unused: {ids}. Use them (cite "
+                          f"the id in the action and fill the plan field in `how`)")
+    return errors
+
+
+def win_repair(plan: dict, win: dict | None) -> dict:
+    """After one re-ask the plan still under-aims: code fills in the unused feasible menu actions and lifts the
+    target to what they add up to (capped by the required pace). Menu accepts go into accept_offers."""
+    if not isinstance(win, dict) or not win.get("components"):
+        return plan
+    out = dict(plan)
+    pp = {k: dict(v) for k, v in (plan.get("points_plan") or {}).items() if isinstance(v, dict)}
+    accepts = list(out.get("accept_offers") or [])
+    for comp in ("negotiating", "market"):
+        c = (win.get("components") or {}).get(comp) or {}
+        menu = (win.get("action_menu") or {}).get(comp) or []
+        d = pp.setdefault(comp, {"now": c.get("now"), "target": None, "leader": c.get("leader"),
+                                 "gap_to_leader": c.get("gap"), "actions": []})
+        acts = list(d.get("actions") or [])
+        for m in _menu_unused(d, menu):
+            acts.append({"action": f"[{m['id']}] {m['action']}"[:200], "expected_points": m["expected_points"]})
+            if m.get("how") == "accept_offers" and m.get("offer") is not None and m["offer"] not in accepts:
+                accepts.append(m["offer"])
+        d["actions"] = acts[:8]
+        total = sum(float(a.get("expected_points") or 0) for a in d["actions"])
+        now, need = c.get("now"), c.get("min_target_next_hour")
+        if now is not None:
+            reach = round(now + total, 2)
+            cur = d.get("target")
+            if need is not None and (cur is None or cur + WIN_TOL < need):
+                d["target"] = round(min(need, max(reach, cur or now)), 2) if reach < need else need
+                if reach + WIN_TOL < need and not d.get("constraint"):
+                    d["constraint"] = (f"every feasible action this hour adds +{total:.2f}; the pace to pass the "
+                                       f"leader needs +{need - now:.2f}")
+    out["points_plan"] = pp
+    out["accept_offers"] = accepts[:6]
+    return out
+
+
 def validate(plan: dict, pic: dict) -> list[str]:
     """Code-side checks of a sanitised plan against the picture. Returns errors (empty = valid)."""
     errors = []
@@ -363,6 +465,7 @@ def validate(plan: dict, pic: dict) -> list[str]:
     pp = plan.get("points_plan") or {}
     if not pp:
         errors.append("points_plan is missing (targets per component, gap to the leader, actions with expected points)")
+    errors.extend(win_errors(plan, pic.get("win_math")))
     tick = (pic.get("clock") or {}).get("tick")
     if isinstance(tick, int) and isinstance(plan.get("as_of_tick"), int) and tick - plan["as_of_tick"] > 6:
         errors.append(f"plan says as_of_tick {plan['as_of_tick']} but the game is at {tick}: stale facts")
@@ -370,7 +473,8 @@ def validate(plan: dict, pic: dict) -> list[str]:
 
 
 # --------------------------------------------------------------------------- hourly review
-def hourly_review(live: Path, scoreboard_now: dict, now: float | None = None, window_s: float = 3600) -> dict | None:
+def hourly_review(live: Path, scoreboard_now: dict, now: float | None = None, window_s: float = 3600,
+                  win: dict | None = None) -> dict | None:
     """Compare the plan published about an hour ago (its expected_next_hour) with what happened since."""
     now = now or time.time()
     plans = read_rows(Path(live) / "strategy.jsonl", None, 400)
@@ -388,8 +492,16 @@ def hourly_review(live: Path, scoreboard_now: dict, now: float | None = None, wi
         e = exp.get(f"{k}_delta")
         if isinstance(e, (int, float)):
             verdict.append(f"{k}: expected {e:+.2f}, got {v:+.2f}")
+    pace = {}
+    for comp, c in ((win or {}).get("components") or {}).items():
+        need = c.get("required_per_hour")
+        got = realised.get(comp)
+        if need is not None and got is not None:
+            pace[comp] = {"required_per_hour": need, "realised_last_hour": got, "behind": got + 1e-9 < need}
+            if got + 1e-9 < need:
+                verdict.append(f"{comp}: BEHIND the pace to pass the leader (need +{need:.2f}/h, got {got:+.2f})")
     row = {"ts": now, "tick": (scoreboard_now or {}).get("tick"), "plan_tick": p.get("tick"),
-           "plan_ts": p.get("updated"), "expected": exp, "realised": realised,
+           "plan_ts": p.get("updated"), "expected": exp, "realised": realised, "pace": pace,
            "verdict": "; ".join(verdict) or "no expectation to compare"}
     _append(Path(live) / "strategist_reviews.jsonl", row)
     return row
@@ -413,5 +525,7 @@ def repair(plan: dict, pic: dict, errors: list[str]) -> dict:
                                    for r in plan.get("whatsapp_replies") or []]
     if any(e.startswith("venue_announcement ") for e in errors):
         out.pop("venue_announcement", None)
+    if any(e.startswith("points_plan.") for e in errors):
+        out = win_repair(out, pic.get("win_math"))
     out["validation_errors"] = errors
     return out

@@ -335,12 +335,14 @@ def _points_plan(raw) -> dict:
         if not isinstance(d, dict):
             continue
         acts = []
-        for a in (d.get("actions") or [])[:5] if isinstance(d.get("actions"), list) else []:
+        for a in (d.get("actions") or [])[:8] if isinstance(d.get("actions"), list) else []:
             if isinstance(a, dict) and _clean(a.get("action"), 200):
                 acts.append({"action": _clean(a.get("action"), 200), "expected_points": _float(a.get("expected_points"))})
         out[_clean(comp, 30)] = {"now": _float(d.get("now")), "target": _float(d.get("target")),
                                  "leader": _clean(d.get("leader"), 20), "gap_to_leader": _float(d.get("gap_to_leader")),
                                  "actions": acts}
+        if _clean(d.get("constraint"), 300):        # why the target is below the required pace, with numbers
+            out[_clean(comp, 30)]["constraint"] = _clean(d.get("constraint"), 300)
     return out
 
 
