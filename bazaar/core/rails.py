@@ -368,9 +368,10 @@ def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
     committed = 0
     if action.kind != "venue_open":
         try:
-            from .context import committed_cash
-            committed = committed_cash(sit) - (spend if action.kind in ("thread_message", "post_offer") else 0)
-            committed = max(0, committed)
+            from .context import dealer_committed, market_committed
+            # a new price in a thread replaces our previous price there; a new offer adds to what is promised
+            committed = market_committed(sit) + dealer_committed(
+                sit, exclude_thread=(action.params or {}).get("thread") if action.kind == "thread_message" else None)
         except Exception:  # noqa: BLE001
             committed = 0
     if cash - spend - committed < reserve:

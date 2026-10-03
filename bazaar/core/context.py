@@ -100,11 +100,13 @@ def market_committed(sit) -> int:
     return total
 
 
-def dealer_committed(sit) -> int:
+def dealer_committed(sit, exclude_thread=None) -> int:
     """Our latest price in each open dealer BUY thread: the dealer can take any of them."""
     from bazaar.dealers.threads import parse_thread     # pure parser; imported lazily (core stays light)
     total = 0
     for t in _get(sit, "threads") or []:
+        if exclude_thread is not None and str(t.get("id")) == str(exclude_thread):
+            continue
         try:
             v = parse_thread(t)
         except Exception:  # noqa: BLE001 - a malformed thread never blocks sizing

@@ -373,3 +373,12 @@ def tearDownModule():
     for p in _PINS:
         p.stop()
     _PINS.clear()
+
+
+class PromisedCash(unittest.TestCase):
+    def test_new_bid_adds_to_what_is_promised(self):
+        s = sit()
+        s.me = {**s.me, "id": "t10", "cash": 66}
+        s.my_offers = [{"id": 1, "maker": "t10", "status": "open", "give": {"cash": 40}, "want": {"cards": ["LAV-09"]}}]
+        bid = Action("post_offer", {"venue": "rastro", "give": {"cash": 30}, "want": {"cards": ["LAV-10"]}}, "market")
+        self.assertEqual(rails.rail_cash(bid, s, ctx(control={"cash_reserve": 15})).rail, "cash")   # 66-40-30 < 15
