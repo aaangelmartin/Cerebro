@@ -5,14 +5,15 @@
   const api = window.api;
   window.Screens = window.Screens || {};
 
+  const I18N = window.I18N, t = I18N.t;
+  // [id, label, icon]; labels are shell.nav.<id>
   const NAV = [
-    ["home", "Home", "home"], ["cerebro", "Cerebro", "cerebro"], ["noticias", "Noticias", "bell"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"], ["broker", "Broker", "broker"],
-    ["duelos", "Duelos", "duelo"], ["competicion", "Competición", "competicion"], ["rivales", "Rivales", "rivales"],
-    ["supervision", "Supervisión", "supervision"], ["laboratorio", "Laboratorio", "laboratorio"], ["bot", "Bot", "bot"],
-  ];
+    ["home", "home"], ["cerebro", "cerebro"], ["noticias", "bell"], ["coleccion", "coleccion"], ["mercado", "mercado"], ["broker", "broker"],
+    ["duelos", "duelo"], ["competicion", "competicion"], ["rivales", "rivales"],
+    ["supervision", "supervision"], ["laboratorio", "laboratorio"], ["bot", "bot"],
+  ].map(([id, ic]) => [id, t("shell.nav." + id), ic]);
   const IDS = NAV.map((n) => n[0]);
-  const EVENT_NAMES = { bench: "Market Test", duels: "Duelos", duel_session: "Duelos", round: "Ronda", set_release: "Nuevo set",
-    level: "Nivel", persona: "Nuevo dealer", venue: "Tiendas", fee: "Comisiones", day_opens: "Apertura", day_closes: "Cierre" };
+  const rankOf = (rank, n) => t("shell.rankOf", { rank: I18N.ordinal(rank), n: n || "—" });
 
   const $ = (id) => document.getElementById(id);
   const S = {
@@ -23,11 +24,7 @@
 
   // ------------------------------------------------------------------ prefs (localStorage, never required)
   const PREF_KEY = "bazaar.dash.notif";
-  const NOTIF_GROUPS = [
-    ["aprobar", "Pendientes de aprobar"], ["breaker", "Disyuntores y errores"], ["gran", "Grandes operaciones"],
-    ["novedad", "Nuevos dealers y novedades"], ["duelo", "Sesiones de duelos"], ["broker", "Broker y Market Test"],
-    ["lab", "Laboratorio"], ["limite", "Cambios de límites"],
-  ];
+  const NOTIF_GROUPS = ["aprobar", "breaker", "gran", "novedad", "duelo", "broker", "lab", "limite"].map((k) => [k, t("shell.notif." + k)]);
   function loadPrefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(PREF_KEY) || "{}") || {}; } catch (e) { p = {}; }
@@ -91,7 +88,7 @@
     const label = (NAV.find((n) => n[0] === id) || [])[1] || id;
     document.title = label + " · Bazaar";
     if (!S.screen) {
-      root.appendChild(el("div", { class: "placeholder" }, el("h1", null, label), el("p", null, "En construcción.")));
+      root.appendChild(el("div", { class: "placeholder" }, el("h1", null, label), el("p", null, t("shell.underConstruction"))));
       return;
     }
     try { S.screen.mount(root, params); } catch (e) { console.error(e); root.appendChild(window.ui.error(e)); }
@@ -142,7 +139,7 @@
     if (!window.RadioNews) return;
     try {
       await window.RadioNews.pull();
-      for (const x of window.RadioNews.fresh().slice(0, 3)) window.ui.toast({ type: "aprobar", title: "Noticia que pide actuar", text: (x.head || x.body || "").slice(0, 140), href: "#noticias", ttl: 12000 });
+      for (const x of window.RadioNews.fresh().slice(0, 3)) window.ui.toast({ type: "aprobar", title: t("shell.newsToast"), text: (x.head || x.body || "").slice(0, 140), href: "#noticias", ttl: 12000 });
     } catch (e) { /* optional */ }
   }
   // Anthropic keys: one model for the sidebar, the banner, the toasts and the Bot screen (window.__keyHealth)
@@ -160,25 +157,25 @@
       if (keysPrev !== null && sig !== keysPrev) {
         const before = Object.fromEntries(keysPrev.split(",").filter(Boolean).map((x) => x.split(":")));
         for (const k of kh.keys) {
-          if (!k.ok && before[k.label] === "ok") window.ui.toast({ type: "error", title: `Clave ${k.label}: ${k.chip.toLowerCase()}`,
-            text: kh.allDown ? "Ninguna clave funciona: el bot juega sin Claude." : "El bot sigue con " + listKeys(kh.okLabels) + ". " + k.text, href: "#bot", ttl: 12000 });
-          if (k.ok && before[k.label] && before[k.label] !== "ok") window.ui.toast({ type: "deal", title: `Clave ${k.label} vuelve a funcionar`, href: "#bot" });
+          if (!k.ok && before[k.label] === "ok") window.ui.toast({ type: "error", title: t("shell.keys.one", { label: k.label, state: k.chip.toLowerCase() }),
+            text: kh.allDown ? t("shell.keys.allDownToast") : t("shell.keys.goesOn", { keys: listKeys(kh.okLabels) }) + ". " + k.text, href: "#bot", ttl: 12000 });
+          if (k.ok && before[k.label] && before[k.label] !== "ok") window.ui.toast({ type: "deal", title: t("shell.keys.backOk", { label: k.label }), href: "#bot" });
         }
       }
       keysPrev = sig;
       if (S.data) { renderStatus(S.data); renderBanners(S.data); }
     } catch (e) { /* the API banner already covers a dead API */ }
   }
-  const listKeys = (ls) => (ls.length ? ls.slice(0, -1).join(", ") + (ls.length > 1 ? " y " : "") + ls[ls.length - 1] : "ninguna");
+  const listKeys = (ls) => (ls.length ? I18N.list(ls) : t("shell.keys.none"));
   function keysBlock() {
     const kh = window.__keyHealth;
     if (!kh || !kh.keys.length) return null;
     const n = kh.keys.length, ok = n - kh.bad.length;
     const tone = kh.allDown ? "bad" : kh.bad.some((k) => k.tone === "bad") ? "bad" : kh.bad.length ? "warn" : "ok";
     return el("a", { class: "sb-sec sb-keys", href: "#bot" },
-      el("div", { class: "sb-line" }, el("span", null, "Claude"), pill(kh.allDown ? "SIN CLAUDE" : ok + "/" + n + " CLAVES", tone)),
-      el("div", { class: "sb-sub" }, kh.allDown ? "ninguna clave funciona: juega con reglas" : kh.bad.length
-        ? kh.bad.map((k) => "Clave " + k.label + ": " + k.chip.toLowerCase()).join(" · ") : "todas las claves responden"));
+      el("div", { class: "sb-line" }, el("span", null, "Claude"), pill(kh.allDown ? t("shell.keys.noClaude") : t("shell.keys.count", { ok, n }), tone)),
+      el("div", { class: "sb-sub" }, kh.allDown ? t("shell.keys.allDownSub") : kh.bad.length
+        ? kh.bad.map((k) => t("shell.keys.one", { label: k.label, state: k.chip.toLowerCase() })).join(" · ") : t("shell.keys.allOk")));
   }
   // open items in the brain's outbox (what the team must do by hand) -> badge on the Cerebro nav entry
   let outboxAt = 0;
@@ -192,7 +189,7 @@
       n = items.filter((x) => x && (x.status === "open" || x.status === "draft")).length;
     } catch (e) { n = 0; }
     const nb = $("nav-badge-cerebro");
-    if (nb) { nb.textContent = n > 99 ? "99+" : String(n); nb.hidden = !n; nb.classList.toggle("is-alert", n > 0); nb.title = n ? n + " cosas para el equipo" : ""; }
+    if (nb) { nb.textContent = n > 99 ? "99+" : String(n); nb.hidden = !n; nb.classList.toggle("is-alert", n > 0); nb.title = n ? t("shell.outboxBadge", { n }) : ""; }
   }
   window.__pollOutbox = () => pollOutbox(true);
   let tickMapAt = 0;
@@ -250,17 +247,17 @@
     const unlocked = Array.isArray(me.unlocked) ? me.unlocked.length : null;
     const g = $("tb-stats");
     g.replaceChildren(
-      el("div", { class: "tb-group" }, stat("Puntos", fmtNum(team.score, 1), team.rank ? team.rank + ".º de " + (team.teams || "—") : "")),
-      el("div", { class: "tb-group" }, stat("Dinero", fmtP(cash), hasVenue ? "+" + fmtNum(d.bond || 250) + " fianza" : ""),
-        stat("Valor colección", assets.length ? fmtP(value) : "—")),
-      el("div", { class: "tb-group" }, stat("Nivel", level !== undefined && level !== null ? String(level) : "—", unlocked !== null ? unlocked + " dealers" : ""),
-        stat("Álbum", lbMe.album_slots ? lbMe.album_filled + "/" + lbMe.album_slots : (assets.length ? String(assets.length) : "—"),
-          lbMe.pages_complete !== undefined ? lbMe.pages_complete + " págs" : "")),
-      el("div", { class: "tb-group" }, stat("API hoy", spend.usd !== undefined && spend.usd !== null ? fmtNum(spend.usd, 2) + " $" : "—", spend.cap ? "de " + fmtNum(spend.cap, 0) : "")),
+      el("div", { class: "tb-group" }, stat(t("common.points"), fmtNum(team.score, 1), team.rank ? rankOf(team.rank, team.teams) : "")),
+      el("div", { class: "tb-group" }, stat(t("common.cash"), fmtP(cash), hasVenue ? t("shell.top.bond", { n: fmtNum(d.bond || 250) }) : ""),
+        stat(t("shell.top.collectionValue"), assets.length ? fmtP(value) : "—")),
+      el("div", { class: "tb-group" }, stat(t("common.level"), level !== undefined && level !== null ? String(level) : "—", unlocked !== null ? t("shell.top.dealers", { n: unlocked }) : ""),
+        stat(t("common.album"), lbMe.album_slots ? lbMe.album_filled + "/" + lbMe.album_slots : (assets.length ? String(assets.length) : "—"),
+          lbMe.pages_complete !== undefined ? t("shell.top.pages", { n: lbMe.pages_complete }) : "")),
+      el("div", { class: "tb-group" }, stat(t("shell.top.apiToday"), spend.usd !== undefined && spend.usd !== null ? fmtNum(spend.usd, 2) + " $" : "—", spend.cap ? t("common.of") + " " + fmtNum(spend.cap, 0) : "")),
     );
     renderClock();
   }
-  function evName(a) { return EVENT_NAMES[a] || (a ? String(a).replace(/_/g, " ") : "—"); }
+  function evName(a) { return a && I18N.has("common.event." + a, "es") ? t("common.event." + a) : (a ? String(a).replace(/_/g, " ") : "—"); }
   function renderClock() {
     const d = S.data; if (!d) return;
     const c = d.clock || {};
@@ -269,15 +266,15 @@
     let ev = "—";
     const ne = c.next_event;
     if (ne) {
-      if (ne.at) ev = [evName(ne.action), " · ", fmtTime(ne.at, false), " ", el("span", { class: "tb-accent" }, "en " + fmtDur(ne.at - Date.now() / 1000))];
+      if (ne.at) ev = [evName(ne.action), " · ", fmtTime(ne.at, false), " ", el("span", { class: "tb-accent" }, t("common.in", { x: fmtDur(ne.at - Date.now() / 1000) }))];
       else ev = evName(ne.action) + (ne.at_hours !== undefined ? " · h" + fmtNum(ne.at_hours, 1) : "");
     }
-    const madrid = new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    const madrid = new Date().toLocaleTimeString(I18N.locale, { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     $("tb-wall").replaceChildren(el("span", { class: "tb-label" }, "Madrid"), el("span", { class: "num" }, madrid));
     $("tb-clock").replaceChildren(
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Tick"), el("span", { class: "num" }, c.tick !== undefined && c.tick !== null ? String(c.tick) : "—")),
-      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Sig."), el("span", { class: "num" }, nextTick !== null ? fmtDur(nextTick) : "—")),
-      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Próx."), el("span", { class: "num" }, ev)),
+      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, t("shell.clock.next")), el("span", { class: "num" }, nextTick !== null ? fmtDur(nextTick) : "—")),
+      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, t("shell.clock.event")), el("span", { class: "num" }, ev)),
     );
   }
 
@@ -323,8 +320,8 @@
     const recLast = Number(r.rate_limited_last) || 0;
     if (!lanes.length && !alerts.length) return null;
     const what = [];
-    if (lanes.length) what.push("la grabadora (" + lanes.map((k) => k === "public" ? "lecturas públicas" : "lecturas con clave").join(" y ") + ")");
-    if (alerts.length) what.push("las lecturas del bot (" + [...new Set(alerts.map((a) => a.where || "juego"))].join(", ") + ")");
+    if (lanes.length) what.push(t("shell.limit.recorder", { lanes: I18N.list(lanes.map((k) => t(k === "public" ? "shell.limit.public" : "shell.limit.keyed"))) }));
+    if (alerts.length) what.push(t("shell.limit.bot", { where: [...new Set(alerts.map((a) => a.where || t("shell.limit.game")))].join(", ") }));
     const times = alerts.map((a) => Number(a.ts) || 0).concat(recLast ? [recLast] : []);
     return { last: Math.max(...times, 0) || null, what };
   }
@@ -333,13 +330,14 @@
     const st = d.status || {};
     const age = st.age_s;
     const alive = st.present && age != null && age <= 120;
-    if (!alive) return ["APAGADO", "bad", st.present ? "sin latido hace " + Math.round(age || 0) + " s" : "proceso caído"];
-    if (st.stop_file) return ["APAGADO", "bad", "STOP activo"];
-    if (!st.armed) return ["APAGADO", "bad", "listo para encender"];
-    if (d.clock && d.clock.doors !== "open") return ["ENCENDIDO", "ok", "esperando a que abran"];
-    if (d.clock && d.clock.paused) return ["ENCENDIDO", "ok", "juego en pausa: espera al primer tick"];
-    if (degraded(d)) return ["ENCENDIDO", "ok", "sin Opus: decide el código"];
-    return ["ENCENDIDO", "ok", "jugando"];
+    const OFF = t("common.offCaps"), ON = t("common.onCaps");
+    if (!alive) return [OFF, "bad", st.present ? t("shell.bot.noBeat", { n: Math.round(age || 0) }) : t("shell.bot.down")];
+    if (st.stop_file) return [OFF, "bad", t("shell.bot.stop")];
+    if (!st.armed) return [OFF, "bad", t("shell.bot.ready")];
+    if (d.clock && d.clock.doors !== "open") return [ON, "ok", t("shell.bot.waiting")];
+    if (d.clock && d.clock.paused) return [ON, "ok", t("shell.bot.paused")];
+    if (degraded(d)) return [ON, "ok", t("shell.bot.noOpus")];
+    return [ON, "ok", t("shell.bot.playing")];
   }
   function dealerShort(p) {
     const n = String(p.name || p.id || "");
@@ -352,17 +350,16 @@
     const stale = r.age_s == null || r.age_s > 120;
     const down = (r.down || []).length > 0;
     // Real state: ENCENDIDA when the recorder process is alive and reaching the game; APAGADA otherwise.
-    let text = "ENCENDIDA", tone = "ok";
-    if (stale || r.state == null) { text = "APAGADA"; tone = "bad"; }
-    else if (down || /down/.test(String(r.state))) { text = "APAGADA"; tone = "bad"; }
+    const off = stale || r.state == null || down || /down/.test(String(r.state));
+    const text = t(off ? "common.offFCaps" : "common.onFCaps"), tone = off ? "bad" : "ok";
     const gaps = Number(r.feed_gaps || 0);
     const squeezed = Object.keys(r.rate_limited || {}).length > 0;
-    const what = text === "APAGADA" ? (down ? "sin red con el juego" : "proceso sin latido")
-      : r.state === "closed" ? "puertas cerradas: vigila cada 30 s"
-      : squeezed ? "el juego nos limita: graba más despacio" : "grabando todo lo que pasa";
-    const sub = what + " · " + (gaps ? gaps + " huecos en el feed" : "feed sin huecos");
+    const what = off ? t(down ? "shell.rec.noNetwork" : "shell.rec.noBeat")
+      : r.state === "closed" ? t("shell.rec.closed")
+      : squeezed ? t("shell.rec.squeezed") : t("shell.rec.recording");
+    const sub = what + " · " + (gaps ? t("shell.rec.gaps", { n: gaps }) : t("shell.rec.noGaps"));
     return el("div", { class: "sb-sec" },
-      el("div", { class: "sb-line" }, el("span", null, "Grabación"), pill(text, tone)),
+      el("div", { class: "sb-line" }, el("span", null, t("shell.rec.title")), pill(text, tone)),
       el("div", { class: "sb-sub" }, sub));
   }
 
@@ -374,9 +371,9 @@
     const open = d.clock && d.clock.doors === "open" && !d.clock.paused;
     const ca = closesAt(d), oa = opensAt();
     const paused = d.clock && d.clock.doors === "open" && d.clock.paused;
-    const marketSub = open ? "abiertas · cierra " + (ca ? fmtTime(ca, false) : "—")
-      : paused ? "puertas abiertas · reloj parado por la organización · cierra " + (ca ? fmtTime(ca, false) : "—")
-      : "abre " + (oa ? fmtTime(oa, false) + " · en " + fmtDur(oa - Date.now() / 1000) : (d.clock && d.clock.opens_at) || "—");
+    const marketSub = open ? t("shell.market.openSub", { t: ca ? fmtTime(ca, false) : "—" })
+      : paused ? t("shell.market.pausedSub", { t: ca ? fmtTime(ca, false) : "—" })
+      : oa ? t("shell.market.opensIn", { t: fmtTime(oa, false), d: fmtDur(oa - Date.now() / 1000) }) : t("shell.market.opens", { t: (d.clock && d.clock.opens_at) || "—" });
     // This tick
     const limits = (S.rec.clock && S.rec.clock.limits) || {};
     const tickNo = d.clock && d.clock.tick;
@@ -400,24 +397,24 @@
     const venues = (S.rec.venues && S.rec.venues.venues) || [];
     const v = vid ? venues.find((x) => x.venue === vid) : null;
     const venueBlock = v
-      ? [el("div", { class: "sb-line" }, el("span", null, "Tienda " + v.venue), pill(v.status === "open" ? "ABIERTA" : String(v.status || "—").toUpperCase(), v.status === "open" ? "ok" : "bad")),
-         el("div", { class: "sb-sub" }, fmtNum((v.fee_bps || 0) / 100, (v.fee_bps || 0) % 100 ? 1 : 0) + " % comisión · " + fmtNum(v.trades || 0) + " op.")]
-      : [el("div", { class: "sb-sub" }, vid ? "Tienda " + vid : "Sin tienda propia")];
+      ? [el("div", { class: "sb-line" }, el("span", null, t("common.venue") + " " + v.venue), pill(v.status === "open" ? t("shell.venue.openCaps") : String(v.status || "—").toUpperCase(), v.status === "open" ? "ok" : "bad")),
+         el("div", { class: "sb-sub" }, t("shell.venue.sub", { fee: fmtNum((v.fee_bps || 0) / 100, (v.fee_bps || 0) % 100 ? 1 : 0), n: fmtNum(v.trades || 0) }))]
+      : [el("div", { class: "sb-sub" }, vid ? t("common.venue") + " " + vid : t("common.vrank.noVenue"))];
 
     box.replaceChildren(
       el("div", { class: "sb-sec" },
         el("div", { class: "sb-line" }, el("span", null, "Bot"), pill(bText, bTone)),
-        el("div", { class: "sb-sub" }, bSub + " · " + okN + "/" + procs.length + " procesos"),
-        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : paused ? "EN PAUSA" : "CERRADO", open ? "ok" : paused ? "pause" : "bad")),
+        el("div", { class: "sb-sub" }, bSub + " · " + t("shell.processes", { ok: okN, n: procs.length })),
+        el("div", { class: "sb-line" }, el("span", null, t("common.market")), pill(t(open ? "shell.market.open" : paused ? "shell.market.paused" : "shell.market.closed"), open ? "ok" : paused ? "pause" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
       recorderBlock(d.recorder || {}),
       keysBlock() || "",
-      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),
-        window.ui.meter({ label: "Aceptar", value: accepted, max: limits.accepts_per_team_per_tick }),
-        window.ui.meter({ label: "Conversac.", value: threads, max: limits.max_open_threads_per_team }),
-        window.ui.meter({ label: "Ofertas", value: offers, max: limits.max_open_offers_per_team })),
-      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Cupos dealers · esta hora"), dealerRows.length ? dealerRows : el("div", { class: "sb-sub" }, "—")),
-      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Tienda propia"), venueBlock),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, t("shell.thisTick")),
+        window.ui.meter({ label: t("shell.meter.accepts"), value: accepted, max: limits.accepts_per_team_per_tick }),
+        window.ui.meter({ label: t("shell.meter.threads"), value: threads, max: limits.max_open_threads_per_team }),
+        window.ui.meter({ label: t("common.offers"), value: offers, max: limits.max_open_offers_per_team })),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, t("shell.dealerQuotas")), dealerRows.length ? dealerRows : el("div", { class: "sb-sub" }, "—")),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, t("shell.ownVenue")), venueBlock),
     );
   }
 
@@ -427,35 +424,34 @@
     const items = [];
     if (S.apiDown) {
       items.push(el("div", { class: "banner tone-bad" }, icon("off", 18), el("div", null,
-        el("strong", null, "Sin conexión con la API del dashboard"),
-        el("div", null, S.lastOk ? "Último dato hace " + fmtAgo(S.lastOk / 1000) + ". Reintento automático cada 3 s; lo que ves puede estar desfasado." : "Reintentando cada 3 s."))));
+        el("strong", null, t("shell.banner.apiDown")),
+        el("div", null, S.lastOk ? t("shell.banner.apiDownSub", { ago: fmtAgo(S.lastOk / 1000) }) : t("shell.banner.retrying")))));
     } else if (d && degraded(d)) {
       const a = llmAlert(d);
       items.push(el("div", { class: "banner tone-bad" }, icon("cloud", 18), el("div", null,
-        el("strong", null, "API de Anthropic con problemas" + (a && a.ts ? " desde " + fmtTime(a.ts, false) : "")),
-        el("div", null, "El bot sigue en modo Código: sin Opus ni Consejo, solo reglas y raíles. " + (a ? String(a.text || "").slice(0, 160) : ""))),
-        el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
+        el("strong", null, t("shell.banner.llm") + (a && a.ts ? " " + t("shell.since", { t: fmtTime(a.ts, false) }) : "")),
+        el("div", null, t("shell.banner.llmSub") + " " + (a ? String(a.text || "").slice(0, 160) : ""))),
+        el("a", { class: "btn", href: "#bot" }, t("shell.viewBot") + " ", icon("arrow", 12))));
     }
     const gl = !S.apiDown && d ? gameLimit(d) : null;
     if (gl) {
       items.push(el("div", { class: "banner tone-warn" }, icon("alert", 18), el("div", null,
-        el("strong", null, "El juego limita nuestras peticiones (60/s por dirección)" + (gl.last ? " · último aviso " + fmtTime(gl.last, false) : "")),
-        el("div", null, "Afecta a " + gl.what.join(" y ") + ". No es un fallo de Claude: el bot sigue decidiendo con Opus. " +
-          "El límite es por dirección de red y la compartimos con otros equipos; reintentamos solos con espera y se quita al recuperarse."))));
+        el("strong", null, t("shell.banner.limit") + (gl.last ? " · " + t("shell.banner.limitLast", { t: fmtTime(gl.last, false) }) : "")),
+        el("div", null, t("shell.banner.limitSub", { what: I18N.list(gl.what) })))));
     }
     const kh = window.__keyHealth;
     if (!S.apiDown && kh && kh.bad.length) {
       const hard = kh.allDown || kh.bad.some((k) => k.tone === "bad");
       items.push(el("div", { class: "banner tone-" + (hard ? "bad" : "warn") }, icon("alert", 18), el("div", null,
-        el("strong", null, kh.allDown ? "El bot juega sin Claude: ninguna clave funciona"
-          : kh.bad.map((k) => "Clave " + k.label + " " + k.chip.toLowerCase()).join(" · ") + ": el bot sigue con " + listKeys(kh.okLabels)),
-        el("div", null, kh.bad.map((k) => "Clave " + k.label + ": " + k.text.replace(/\.$/, "") + ".").join(" "))),
-        el("a", { class: "btn", href: "#bot" }, "Ver claves ", icon("arrow", 12))));
+        el("strong", null, kh.allDown ? t("shell.banner.noClaude")
+          : kh.bad.map((k) => t("common.key") + " " + k.label + " " + k.chip.toLowerCase()).join(" · ") + ": " + t("shell.keys.goesOnLower", { keys: listKeys(kh.okLabels) })),
+        el("div", null, kh.bad.map((k) => t("common.key") + " " + k.label + ": " + k.text.replace(/\.$/, "") + ".").join(" "))),
+        el("a", { class: "btn", href: "#bot" }, t("shell.viewKeys") + " ", icon("arrow", 12))));
     }
     if (d && d.status && d.status.stop_file) {
-      items.push(el("div", { class: "banner tone-bad" }, icon("alert", 18), el("div", null, el("strong", null, "STOP activo"),
-        el("div", null, "El bot no envía nada al juego hasta quitar el STOP y encenderlo en la pantalla Bot.")),
-        el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
+      items.push(el("div", { class: "banner tone-bad" }, icon("alert", 18), el("div", null, el("strong", null, t("shell.banner.stop")),
+        el("div", null, t("shell.banner.stopSub"))),
+        el("a", { class: "btn", href: "#bot" }, t("shell.viewBot") + " ", icon("arrow", 12))));
     }
     host.replaceChildren(...items);
     // Doors closed: dim the screen with a centred card (can be dismissed to keep working).
@@ -469,21 +465,21 @@
       ov.hidden = false;
       if (pausedOnly) {
         ov.replaceChildren(el("div", { class: "closed-card is-paused" },
-          el("h2", null, icon("lock", 18), "Juego en pausa"),
-          el("div", { class: "closed-sub num" }, "puertas abiertas · la organización ha parado el reloj (tick " + (d.clock.tick ?? "—") + ")"),
-          el("p", null, "No hay cuenta atrás: se reanuda cuando lo decidan los organizadores. El bot arranca solo en el primer tick si está encendido."),
-          el("div", { class: "closed-foot num" }, "Hoy: " + fmtNum(d.team && d.team.score, 1) + " pts" + (d.team && d.team.rank ? " · " + d.team.rank + ".º de " + d.team.teams : "")),
-          el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, "Ver el dashboard igualmente")));
+          el("h2", null, icon("lock", 18), t("shell.closed.pausedTitle")),
+          el("div", { class: "closed-sub num" }, t("shell.closed.pausedSub", { tick: d.clock.tick ?? "—" })),
+          el("p", null, t("shell.closed.pausedText")),
+          el("div", { class: "closed-foot num" }, t("common.today") + ": " + fmtNum(d.team && d.team.score, 1) + " " + t("common.pts") + (d.team && d.team.rank ? " · " + rankOf(d.team.rank, d.team.teams) : "")),
+          el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, t("shell.closed.dismiss"))));
         return;
       }
       ov.replaceChildren(el("div", { class: "closed-card" },
-        el("h2", null, icon("lock", 18), "Mercado cerrado"),
-        el("div", { class: "closed-sub num" }, oa ? "abre el " + new Date(oa * 1000).toLocaleDateString("es-ES", { weekday: "long" }) + " a las " + fmtTime(oa, false) : "abre " + ((d.clock && d.clock.opens_at) || "—")),
+        el("h2", null, icon("lock", 18), t("shell.closed.title")),
+        el("div", { class: "closed-sub num" }, oa ? t("shell.closed.opensOn", { day: new Date(oa * 1000).toLocaleDateString(I18N.locale, { weekday: "long" }), t: fmtTime(oa, false) }) : t("shell.market.opens", { t: (d.clock && d.clock.opens_at) || "—" })),
         el("div", { class: "closed-count num" }, oa ? fmtDur(oa - Date.now() / 1000) : "—"),
-        el("p", null, "Mientras está cerrado el bot no hace nada; al abrir arranca solo si está encendido."),
-        el("div", { class: "closed-foot num" }, "Hoy: " + fmtNum(d.team && d.team.score, 1) + " pts" + (d.team && d.team.rank ? " · " + d.team.rank + ".º de " + d.team.teams : "") +
-          (lbMe.album_slots ? " · álbum " + lbMe.album_filled + "/" + lbMe.album_slots : "")),
-        el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, "Ver el dashboard igualmente")));
+        el("p", null, t("shell.closed.text")),
+        el("div", { class: "closed-foot num" }, t("common.today") + ": " + fmtNum(d.team && d.team.score, 1) + " " + t("common.pts") + (d.team && d.team.rank ? " · " + rankOf(d.team.rank, d.team.teams) : "") +
+          (lbMe.album_slots ? " · " + t("common.album").toLowerCase() + " " + lbMe.album_filled + "/" + lbMe.album_slots : "")),
+        el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, t("shell.closed.dismiss"))));
     } else ov.hidden = true;
   }
 
@@ -536,24 +532,41 @@
           el("strong", null, n.title || ""), el("span", { class: "num muted" }, fmtAgo(n.ts))),
         n.text ? el("div", { class: "bell-item-text" }, n.text) : null));
     p.replaceChildren(
-      el("header", { class: "bell-head" }, el("strong", null, "Avisos"),
-        el("button", { type: "button", class: "link-btn", onclick: () => { prefs.readTs = Date.now() / 1000; savePrefs(); renderBell(); } }, "Marcar leídos")),
+      el("header", { class: "bell-head" }, el("strong", null, t("shell.alerts")),
+        el("button", { type: "button", class: "link-btn", onclick: () => { prefs.readTs = Date.now() / 1000; savePrefs(); renderBell(); } }, t("shell.bell.markRead"))),
       el("div", { class: "bell-sec" },
-        el("div", { class: "bell-opt" }, el("div", null, "Mostrar avisos emergentes", el("div", { class: "muted small" }, "no se muestran en Supervisión")),
-          toggle(prefs.toasts, set((v) => { prefs.toasts = v; }), "Mostrar avisos emergentes")),
-        el("div", { class: "bell-opt" }, el("div", null, "Silenciar 30 min", muted ? el("div", { class: "muted small num" }, "hasta " + fmtTime(prefs.muteUntil, false)) : null),
-          toggle(muted, set((v) => { prefs.muteUntil = v ? Date.now() / 1000 + 1800 : 0; }), "Silenciar 30 min"))),
-      el("div", { class: "bell-sec" }, el("div", { class: "sb-head" }, "Por tipo"),
+        el("div", { class: "bell-opt" }, el("div", null, t("shell.bell.popups"), el("div", { class: "muted small" }, t("shell.bell.popupsSub"))),
+          toggle(prefs.toasts, set((v) => { prefs.toasts = v; }), t("shell.bell.popups"))),
+        el("div", { class: "bell-opt" }, el("div", null, t("shell.bell.mute"), muted ? el("div", { class: "muted small num" }, t("shell.until", { t: fmtTime(prefs.muteUntil, false) })) : null),
+          toggle(muted, set((v) => { prefs.muteUntil = v ? Date.now() / 1000 + 1800 : 0; }), t("shell.bell.mute")))),
+      el("div", { class: "bell-sec" }, el("div", { class: "sb-head" }, t("shell.bell.byType")),
         NOTIF_GROUPS.map(([k, label]) => el("div", { class: "bell-opt" }, el("span", null, label),
           toggle(prefs.types[k] !== false, set((v) => { prefs.types[k] = v; }), label)))),
-      el("div", { class: "bell-list" }, list.length ? list : window.ui.empty("Sin avisos.")),
-      el("a", { class: "bell-foot", href: "#supervision", onclick: () => { p.hidden = true; } }, "Las aprobaciones se hacen en Supervisión", icon("arrow", 12)),
+      el("div", { class: "bell-list" }, list.length ? list : window.ui.empty(t("shell.bell.empty"))),
+      el("a", { class: "bell-foot", href: "#supervision", onclick: () => { p.hidden = true; } }, t("shell.bell.foot"), icon("arrow", 12)),
     );
   }
 
   // ------------------------------------------------------------------ boot
+  // ES | EN at the bottom of the menu; a change reloads the page in the other language
+  function buildLang() {
+    const box = $("lang-switch");
+    if (!box) return;
+    box.setAttribute("aria-label", t("shell.language"));
+    box.replaceChildren(...I18N.langs.map((l) => {
+      const on = l === I18N.lang;
+      return el("button", { type: "button", class: ["lang-btn", on ? "on" : ""], "aria-pressed": on ? "true" : "false", lang: l,
+        title: t("shell.lang." + l), "aria-label": t("shell.lang." + l), onclick: () => I18N.setLang(l) }, l.toUpperCase());
+    }));
+  }
+  function applyStatic() {
+    document.querySelectorAll("[data-i18n-aria]").forEach((n) => n.setAttribute("aria-label", t(n.dataset.i18nAria)));
+    document.querySelectorAll("[data-i18n-title]").forEach((n) => n.setAttribute("title", t(n.dataset.i18nTitle)));
+  }
   function boot() {
+    applyStatic();
     buildNav();
+    buildLang();
     $("refresh").addEventListener("click", async () => {
       // Refresh every panel right now, without reloading the page (keeps filters, scroll and drawers).
       const btn = $("refresh");
@@ -569,7 +582,7 @@
       } catch (e) {
         S.apiDown = true;
         renderBanners(S.data);
-        window.ui.toast({ type: "error", title: "No se pudo actualizar", text: (e && e.message) || "La API no responde.", ttl: 5000 });
+        window.ui.toast({ type: "error", title: t("shell.refreshFailed"), text: (e && e.message) || t("shell.apiSilent"), ttl: 5000 });
       } finally { setTimeout(() => btn.classList.remove("spin"), Math.max(0, 400 - (Date.now() - t0))); }
     });
     $("bell").addEventListener("click", (e) => {

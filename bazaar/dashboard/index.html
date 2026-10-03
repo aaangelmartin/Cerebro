@@ -27,19 +27,20 @@
   <div class="tb-stats" id="tb-stats"></div>
   <div class="tb-wall" id="tb-wall"></div>
   <div class="tb-clock" id="tb-clock"></div>
-  <button id="refresh" class="bell refresh" type="button" aria-label="Actualizar ahora" title="Actualizar ahora">
+  <button id="refresh" class="bell refresh" type="button" data-i18n-aria="shell.refreshNow" data-i18n-title="shell.refreshNow" aria-label="Actualizar ahora" title="Actualizar ahora">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
   </button>
-  <button id="bell" class="bell" type="button" aria-label="Avisos">
+  <button id="bell" class="bell" type="button" data-i18n-aria="shell.alerts" aria-label="Avisos">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
     <span id="bell-count" class="bell-count num" hidden>0</span>
   </button>
 </header>
 <div id="bell-panel" class="bell-panel" hidden></div>
 <div class="layout">
-  <nav class="sidenav" aria-label="Menú">
+  <nav class="sidenav" data-i18n-aria="shell.menu" aria-label="Menú">
     <div id="nav-list" class="nav-list"></div>
     <div id="status-box" class="status-box"></div>
+    <div id="lang-switch" class="lang-switch" role="group"></div>
   </nav>
   <div class="main-wrap">
     <div id="banners" class="banners"></div>
@@ -48,6 +49,21 @@
   </div>
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="static/i18n.js"></script>
+<script src="static/i18n-common.js"></script>
+<script src="static/i18n-shell.js"></script>
+<script src="static/i18n-home.js"></script>
+<script src="static/i18n-coleccion.js"></script>
+<script src="static/i18n-mercado.js"></script>
+<script src="static/i18n-duelos.js"></script>
+<script src="static/i18n-competicion.js"></script>
+<script src="static/i18n-rivales.js"></script>
+<script src="static/i18n-supervision.js"></script>
+<script src="static/i18n-laboratorio.js"></script>
+<script src="static/i18n-bot.js"></script>
+<script src="static/i18n-cerebro.js"></script>
+<script src="static/i18n-broker.js"></script>
+<script src="static/i18n-radio.js"></script>
 <script src="static/ui.js"></script>
 <script src="static/api.js"></script>
 <script src="screens/home.js"></script>

@@ -48,13 +48,21 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------- layout + nav */
 .layout { position: fixed; inset: var(--topbar-h) 0 0 0; display: flex; }
-.sidenav { width: var(--nav-w); flex: none; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 12px 12px; border-right: 1px solid var(--line); background: var(--s1); overflow-y: auto; }
+.sidenav { width: var(--nav-w); flex: none; display: flex; flex-direction: column; padding: 14px 12px 12px; border-right: 1px solid var(--line); background: var(--s1); overflow-y: auto; }
 .nav-list { display: flex; flex-direction: column; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: 12px; padding: 7px 9px; border: 1px solid transparent; color: var(--ink-2); font-size: 13.5px; }
 .nav-item:hover { background: var(--s2); border-color: var(--line-2); color: var(--ink); }
 .nav-item.active { background: var(--s3); border-color: var(--line-2); color: var(--ink); }
 .nav-badge { margin-left: auto; font-size: 10px; padding: 0 5px; background: var(--s3); color: var(--ink-2); border: 1px solid var(--line-2); }
-.status-box { border: 1px solid var(--line-2); background: var(--s1); margin-top: 16px; font-size: 12px; }
+.nav-list { margin-bottom: 16px; }
+.status-box { border: 1px solid var(--line-2); background: var(--s1); margin-top: auto; font-size: 12px; }
+.lang-switch { display: flex; flex: none; border: 1px solid var(--line-2); background: var(--s1); margin-top: 8px; }
+.status-box + .lang-switch { margin-top: 8px; }
+.lang-btn { flex: 1; height: 28px; background: none; border: 0; border-left: 1px solid var(--line-2); color: var(--ink-3); font-family: var(--font-num); font-size: 11px; letter-spacing: .08em; cursor: pointer; }
+.lang-btn:first-child { border-left: 0; }
+.lang-btn:hover { background: var(--s2); color: var(--ink); }
+.lang-btn.on { background: var(--s3); color: var(--ink); }
+.lang-btn:focus-visible { outline: 1px solid var(--ink-2); outline-offset: -1px; }
 .sb-sec { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .sb-sec:first-child { border-top: 0; }
 .sb-head { font-family: var(--font-num); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
@@ -232,6 +240,9 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 820px) {
   :root { --nav-w: 64px; }
   .brand-name, .nav-item span:not(.ic-wrap), .status-box { display: none; }
+  .lang-switch { flex-direction: column; margin-top: auto; }
+  .lang-btn { flex: none; border-left: 0; border-top: 1px solid var(--line-2); letter-spacing: 0; }
+  .lang-btn:first-child { border-top: 0; }
   .tb-stats { display: none; }
   .screen { padding: 12px; }
 }

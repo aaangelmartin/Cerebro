@@ -24,7 +24,7 @@
     }
     let res;
     try { res = await fetch("api/" + path, opts); }
-    catch (e) { throw new ApiError(0, "Sin conexión con la API"); }
+    catch (e) { throw new ApiError(0, window.I18N ? window.I18N.t("common.noConnection").replace(/\.$/, "") : "Sin conexión con la API"); }
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
     if (!res.ok) throw new ApiError(res.status, (data && (data.message || data.error)) || ("HTTP " + res.status), data);

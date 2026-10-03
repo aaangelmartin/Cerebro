@@ -2,6 +2,13 @@
 (function () {
   "use strict";
   const SVGNS = "http://www.w3.org/2000/svg";
+  const I18N = window.I18N, t = I18N.t;
+  // {key: i18n key} -> object whose values are read in the active language (keeps the old constant maps working)
+  function lazyMap(keys) {
+    const o = {};
+    for (const [k, key] of Object.entries(keys)) Object.defineProperty(o, k, { enumerable: true, get: () => t(key) });
+    return o;
+  }
 
   // ------------------------------------------------------------------ el
   function el(tag, attrs, ...children) {
@@ -80,7 +87,7 @@
 
   // ------------------------------------------------------------------ types
   const TYPES = ["compra", "venta", "cambio", "puja", "duelo", "dealer", "anuncio"];
-  const TYPE_LABEL = { compra: "Compra", venta: "Venta", cambio: "Cambio", puja: "Puja", duelo: "Duelo", dealer: "Dealer", anuncio: "Anuncio" };
+  const TYPE_LABEL = lazyMap({ compra: "common.buy", venta: "common.sell", cambio: "common.swap", puja: "common.bid", duelo: "common.duel", dealer: "common.dealer", anuncio: "common.announcement" });
   function normType(t) {
     t = String(t || "").toLowerCase();
     return TYPES.includes(t) ? t : "anuncio";
@@ -111,7 +118,7 @@
   }
 
   // ------------------------------------------------------------------ tags
-  const SOURCES = { opus: "Opus", consejo: "Consejo", reserva: "Reserva", codigo: "Código", "código": "Código" };
+  const SOURCES = lazyMap({ opus: "common.source.opus", consejo: "common.source.council", reserva: "common.source.fallback", codigo: "common.source.code", "código": "common.source.code" });
   function sourceTag(source, extra) {
     let s = String(source || "codigo").toLowerCase();
     if (s.startsWith("council")) s = "consejo";
@@ -122,24 +129,25 @@
     return el("span", { class: "tag src src-" + s }, SOURCES[s], extra ? el("span", { class: "num src-extra" }, " " + extra) : null);
   }
 
+  // status -> [common.result.<key>, tone]
   const RESULTS = {
-    enviado: ["Enviado", "ok"], vetado: ["Vetado", "bad"], rechazado: ["Rechazado", "bad"], pendiente: ["Pendiente", "warn"],
-    sin_enviar: ["Sin enviar", "mute"], cerrado: ["Cerrado", "ok"], sin_acuerdo: ["Sin acuerdo", "mute"],
-    sent: ["Enviado", "ok"], deal: ["Cerrado", "ok"], vetoed: ["Vetado", "bad"], veto: ["Vetado", "bad"], rejected: ["Rechazado", "bad"],
-    refused: ["Rechazado", "bad"], error: ["Rechazado", "bad"], pending: ["Pendiente", "warn"], dry_run: ["Sin enviar", "mute"],
-    skipped: ["Sin enviar", "mute"], closed: ["Cerrado", "ok"], no_deal: ["Sin acuerdo", "mute"], expired: ["Sin acuerdo", "mute"],
+    enviado: ["sent", "ok"], vetado: ["vetoed", "bad"], rechazado: ["rejected", "bad"], pendiente: ["pending", "warn"],
+    sin_enviar: ["notSent", "mute"], cerrado: ["closed", "ok"], sin_acuerdo: ["noDeal", "mute"],
+    sent: ["sent", "ok"], deal: ["closed", "ok"], vetoed: ["vetoed", "bad"], veto: ["vetoed", "bad"], rejected: ["rejected", "bad"],
+    refused: ["rejected", "bad"], error: ["rejected", "bad"], pending: ["pending", "warn"], dry_run: ["notSent", "mute"],
+    skipped: ["notSent", "mute"], closed: ["closed", "ok"], no_deal: ["noDeal", "mute"], expired: ["noDeal", "mute"],
   };
   function resultChip(status) {
     const k = String(status || "pendiente").toLowerCase();
-    const [label, tone] = RESULTS[k] || [String(status), "mute"];
-    return el("span", { class: "tag res tone-" + tone }, label);
+    const hit = RESULTS[k];
+    return el("span", { class: "tag res tone-" + (hit ? hit[1] : "mute") }, hit ? t("common.result." + hit[0]) : String(status));
   }
 
   function teamName(id) {
     const s = String(id || "");
     const m = /^t0*(\d+)$/i.exec(s);
     if (m) return "Team " + m[1];
-    const names = { abuela: "Abuela", chato: "Chato", rastro: "El Rastro", org: "Organización", house: "Organización" };
+    const names = { abuela: "Abuela", chato: "Chato", rastro: "El Rastro", org: t("common.organisers"), house: t("common.organisers") };
     return names[s.toLowerCase()] || s;
   }
   function teamTag(teamId, opts) {
@@ -151,7 +159,7 @@
     const initials = m ? "T" + m[1] : name.slice(0, 2).toUpperCase();
     return el("span", { class: ["tag team", us ? "us" : ""], title: name },
       opts.short ? null : el("span", { class: "team-sq num" }, us ? "10" : initials),
-      el("span", { class: "team-name" }, us ? (opts.short ? "Nosotros" : "Team 10 · Nosotros") : name));
+      el("span", { class: "team-name" }, us ? t(opts.short ? "common.us" : "common.team10us") : name));
   }
 
   // ------------------------------------------------------------------ filter bar
@@ -181,12 +189,12 @@
     }
     if (o.team) {
       const seg = el("div", { class: "fb-seg" });
-      const opts = [["todos", "Todos"], ["nosotros", "Nos."], ["rivales", "Riv."]];
+      const opts = [["todos", t("common.all")], ["nosotros", t("common.usShort")], ["rivales", t("common.rivalsShort")]];
       const btns = {};
-      const sel = el("select", { class: "fb-select", "aria-label": "Equipo" }, el("option", { value: "" }, "Equipo"));
+      const sel = el("select", { class: "fb-select", "aria-label": t("common.team") }, el("option", { value: "" }, t("common.team")));
       for (let i = 1; i <= (o.teamCount || 18); i++) {
         const id = "t" + String(i).padStart(2, "0");
-        sel.appendChild(el("option", { value: id }, teamName(id) + (i === 10 ? " · Nosotros" : "")));
+        sel.appendChild(el("option", { value: id }, teamName(id) + (i === 10 ? " · " + t("common.us") : "")));
       }
       function setTeam(v) {
         state.team = v;
@@ -205,7 +213,7 @@
       typeRow.appendChild(seg);
     }
     if (o.search) {
-      const inp = el("input", { type: "search", class: "fb-search", placeholder: o.placeholder || "Buscar…", "aria-label": "Buscar" });
+      const inp = el("input", { type: "search", class: "fb-search", placeholder: o.placeholder || t("common.searchPlaceholder"), "aria-label": t("common.search") });
       let tm = null;
       inp.addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => { state.q = inp.value.trim(); fire(); }, 150); });
       typeRow.appendChild(el("label", { class: "fb-search-wrap" }, icon("search", 13), inp));
@@ -280,7 +288,7 @@
     root.appendChild(bottom);
     track.appendChild(el("div", { class: "pb-line" }));
     if (o.zone && o.zone.length === 2 && isFinite(o.zone[0]) && isFinite(o.zone[1]) && o.zone[1] >= o.zone[0]) {
-      track.appendChild(el("div", { class: "pb-zone", title: "Zona de acuerdo " + fmtNum(o.zone[0]) + "–" + fmtNum(o.zone[1]),
+      track.appendChild(el("div", { class: "pb-zone", title: t("common.dealZone", { a: fmtNum(o.zone[0]), b: fmtNum(o.zone[1]) }),
         style: { left: pos(o.zone[0]) + "%", width: Math.max(0.8, pos(o.zone[1]) - pos(o.zone[0])) + "%" } }));
     }
     for (const h of o.history || []) {
@@ -290,14 +298,14 @@
     }
     const label = (row, cls, text, v) => row.appendChild(el("div", { class: "pb-lab " + cls, style: { left: pos(v) + "%" } },
       el("span", null, text), " ", el("span", { class: "num" }, fmtNum(v, v % 1 ? 1 : 0))));
-    if (typeof o.limit === "number") { track.appendChild(el("div", { class: "pb-limit", style: { left: pos(o.limit) + "%" } })); label(limRow, "lim", "Límite", o.limit); }
-    if (typeof o.theirs === "number") { track.appendChild(el("div", { class: "pb-dot theirs", style: { left: pos(o.theirs) + "%" } })); label(bottom, "theirs", "Ellos", o.theirs); }
-    if (typeof o.ours === "number") { track.appendChild(el("div", { class: "pb-dot ours", style: { left: pos(o.ours) + "%" } })); label(top, "ours", "Nosotros", o.ours); }
+    if (typeof o.limit === "number") { track.appendChild(el("div", { class: "pb-limit", style: { left: pos(o.limit) + "%" } })); label(limRow, "lim", t("common.limit"), o.limit); }
+    if (typeof o.theirs === "number") { track.appendChild(el("div", { class: "pb-dot theirs", style: { left: pos(o.theirs) + "%" } })); label(bottom, "theirs", t("common.them"), o.theirs); }
+    if (typeof o.ours === "number") { track.appendChild(el("div", { class: "pb-dot ours", style: { left: pos(o.ours) + "%" } })); label(top, "ours", t("common.us"), o.ours); }
     if (o.closed && typeof o.closed.price === "number") {
       track.appendChild(el("div", { class: "pb-deal", style: { left: pos(o.closed.price) + "%" } }));
-      label(bottom, "deal", "Cerrado", o.closed.price);
+      label(bottom, "deal", t("common.result.closed"), o.closed.price);
     }
-    if (o.noDeal) root.appendChild(el("div", { class: "pb-nodeal" }, "Sin acuerdo"));
+    if (o.noDeal) root.appendChild(el("div", { class: "pb-nodeal" }, t("common.result.noDeal")));
     // Nudge labels that overlap on the same row.
     requestAnimationFrame(() => [limRow, top, bottom].forEach(spread));
     return root;
@@ -384,9 +392,9 @@
   function drawer({ title, body, onClose, wide } = {}) {
     closeDrawer(true);
     const content = el("div", { class: "drawer-body" }, body);
-    const box = el("aside", { class: ["drawer", wide ? "wide" : ""], role: "dialog", "aria-label": typeof title === "string" ? title : "Detalle" },
+    const box = el("aside", { class: ["drawer", wide ? "wide" : ""], role: "dialog", "aria-label": typeof title === "string" ? title : t("common.detail") },
       el("header", { class: "drawer-head" }, el("h2", null, title || ""),
-        el("button", { type: "button", class: "icon-btn", "aria-label": "Cerrar", onclick: () => closeDrawer() , html: iconSvg("close", 16) })),
+        el("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => closeDrawer() , html: iconSvg("close", 16) })),
       content);
     const shade = el("div", { class: "drawer-shade", onclick: () => closeDrawer() });
     drawerEl = el("div", { class: "drawer-wrap" }, shade, box);
@@ -403,16 +411,17 @@
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && drawerEl && !document.querySelector(".modal-wrap")) closeDrawer(); });
 
-  function empty(text) { return el("div", { class: "state empty" }, text || "Sin datos todavía."); }
-  function loading(text) { return el("div", { class: "state loading" }, el("span", { class: "spinner" }), text || "Cargando…"); }
+  function empty(text) { return el("div", { class: "state empty" }, text || t("common.empty")); }
+  function loading(text) { return el("div", { class: "state loading" }, el("span", { class: "spinner" }), text || t("common.loading")); }
   function error(err) {
     const status = err && err.status;
-    const msg = status === 404 ? "Este dato aún no está disponible en la API." :
-      status === 0 ? "Sin conexión con la API." : (err && err.message) || String(err || "Error");
+    const msg = status === 404 ? t("common.notAvailable") :
+      status === 0 ? t("common.noConnection") : (err && err.message) || String(err || t("common.error"));
     return el("div", { class: "state error" }, icon("alert", 14), el("span", null, msg));
   }
 
-  // ------------------------------------------------------------------ formatting (es-ES, always grouped)
+  // ------------------------------------------------------------------ formatting (1.234,5 in Spanish, 1,234.5 in English; always grouped)
+  const SEP = I18N.lang === "en" ? [",", "."] : [".", ","];
   function fmtNum(n, dec) {
     if (n === null || n === undefined || n === "" || !isFinite(Number(n))) return "—";
     n = Number(n);
@@ -420,8 +429,8 @@
     const neg = n < 0;
     const fixed = Math.abs(n).toFixed(d);
     let [i, f] = fixed.split(".");
-    i = i.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-    return (neg && Number(fixed) !== 0 ? "−" : "") + i + (f ? "," + f : "");
+    i = i.replace(/\B(?=(\d{3})+(?!\d))/g, SEP[0]);
+    return (neg && Number(fixed) !== 0 ? "−" : "") + i + (f ? SEP[1] + f : "");
   }
   function fmtP(n, dec) { return n === null || n === undefined ? "—" : fmtNum(n, dec) + " P"; }
   function fmtUsd(n) { return n === null || n === undefined ? "—" : fmtNum(n, 2) + " $"; }
@@ -439,7 +448,7 @@
   function fmtAgo(ts) {
     const d = toDate(ts); if (!d) return "—";
     const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
-    if (s < 45) return "ahora";
+    if (s < 45) return t("common.now");
     if (s < 3600) return Math.round(s / 60) + " min";
     if (s < 86400) return Math.floor(s / 3600) + " h " + pad(Math.floor((s % 3600) / 60));
     return Math.floor(s / 86400) + " d";
@@ -536,10 +545,10 @@
   // ------------------------------------------------------------------ confirm + toast
   function confirm({ title, text, confirmLabel, cancelLabel, danger, body } = {}) {
     return new Promise((resolve) => {
-      const yes = el("button", { type: "button", class: ["btn", danger ? "btn-danger" : "btn-primary"] }, confirmLabel || "Confirmar");
-      const no = el("button", { type: "button", class: "btn" }, cancelLabel || "Cancelar");
+      const yes = el("button", { type: "button", class: ["btn", danger ? "btn-danger" : "btn-primary"] }, confirmLabel || t("common.confirm"));
+      const no = el("button", { type: "button", class: "btn" }, cancelLabel || t("common.cancel"));
       const box = el("div", { class: ["modal", danger ? "danger" : ""], role: "alertdialog", "aria-modal": "true" },
-        el("h2", { class: "modal-title" }, danger ? icon("alert", 16) : null, title || "¿Seguro?"),
+        el("h2", { class: "modal-title" }, danger ? icon("alert", 16) : null, title || t("common.sure")),
         text ? el("p", { class: "modal-text" }, text) : null, body || null,
         el("div", { class: "modal-actions" }, no, yes));
       const wrap = el("div", { class: "modal-wrap" }, box);
@@ -563,12 +572,12 @@
     let stack = document.getElementById("toasts");
     if (!stack) { stack = el("div", { id: "toasts", class: "toasts", "aria-live": "polite" }); document.body.appendChild(stack); }
     const k = toastKey(type);
-    const close = el("button", { type: "button", class: "icon-btn", "aria-label": "Cerrar", html: iconSvg("close", 13) });
+    const close = el("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), html: iconSvg("close", 13) });
     const t = el("div", { class: "toast tone-" + (TOAST_TONE[k] || "mute") },
       el("div", { class: "toast-head" }, icon(TOAST_ICON[k] || "bell", 15), el("strong", null, title || ""),
-        el("span", { class: "toast-time num" }, ts ? fmtAgo(ts) : "ahora"), close),
+        el("span", { class: "toast-time num" }, ts ? fmtAgo(ts) : t("common.now")), close),
       text ? el("div", { class: "toast-text" }, text) : null,
-      href ? el("a", { class: "toast-link", href }, "Abrir en Supervisión ", icon("arrow", 12)) : null);
+      href ? el("a", { class: "toast-link", href }, t("common.openIn") + " ", icon("arrow", 12)) : null);
     const remove = () => { t.classList.add("out"); setTimeout(() => t.remove(), 200); };
     close.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); remove(); });
     if (href) t.addEventListener("click", (e) => { if (!e.target.closest("button")) { location.hash = href.replace(/^#?/, "#"); remove(); } });
@@ -579,8 +588,8 @@
   }
 
   // API spend purposes as people read them; unknown purposes are shown as they come
-  const PURPOSE_LABEL = { strategy: "Cerebro", council: "Consejo", duels: "Duelos", dealers: "Dealers", market: "Mercado", lab: "Laboratorio",
-    smoke: "Pruebas", brain_eval: "Pruebas del cerebro", external_intel: "Mensajes externos", broker: "Broker" };
+  const PURPOSE_LABEL = lazyMap(Object.fromEntries(["strategy", "council", "duels", "dealers", "market", "lab", "smoke", "brain_eval", "external_intel", "broker"]
+    .map((k) => [k, "common.purpose." + k])));
   const purposeLabel = (k) => PURPOSE_LABEL[k] || k;
 
   // ---- Anthropic key health, for the Bot screen, the sidebar and the alerts --------------------------------
@@ -592,16 +601,16 @@
     if (/usage limit|spend limit|credit balance|billing|api usage limits|workspace.*limit/.test(l)) {
       const m = t.match(/(?:regain access on|access on|until)\s+(\d{4}-\d{2}-\d{2})/i);
       let back = "";
-      if (m) { const d = new Date(m[1] + "T00:00:00Z"); if (!isNaN(d)) back = "; vuelve el " + d.getUTCDate() + " " + ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][d.getUTCMonth()]; }
-      return { state: "agotada", label: "Agotada: límite de gasto", tone: "bad", text: "Límite de gasto de la cuenta alcanzado" + back + ", o súbelo en console.anthropic.com → Settings → Limits" };
+      if (m) { const d = new Date(m[1] + "T00:00:00Z"); if (!isNaN(d)) back = t("common.keyText.back", { day: d.getUTCDate(), month: t("common.months").split(",")[d.getUTCMonth()] }); }
+      return { state: "agotada", label: t("common.keyState.spent"), tone: "bad", text: t("common.keyText.spent", { back }) };
     }
-    if (/not scoped to a workspace|workspace-id/.test(l)) return { state: "rechazada", label: "Rechazada", tone: "bad", text: "La API rechaza la clave: no está asignada a un workspace (parece una clave de administración). Hace falta una clave normal de API." };
-    if (/\b401\b|\b403\b|authentication|invalid x-api-key|invalid_api_key|permission/.test(l)) return { state: "rechazada", label: "Rechazada", tone: "bad", text: "La API rechaza la clave (no válida o sin permiso). Revísala en console.anthropic.com → API keys." };
-    if (/\b429\b|rate.?limit/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "Demasiadas peticiones por minuto; la clave descansa y vuelve sola." };
-    if (/\b529\b|overloaded/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "La API de Anthropic está saturada; reintenta sola." };
-    if (/timeout|timed out/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "La API tarda demasiado en responder; reintenta sola." };
-    if (/connection|network/.test(l)) return { state: "espera", label: "En espera", tone: "warn", text: "Sin conexión con la API de Anthropic; reintenta sola." };
-    return { state: "error", label: "Con errores", tone: "warn", text: t.replace(/\s+/g, " ").slice(0, 140) };
+    if (/not scoped to a workspace|workspace-id/.test(l)) return { state: "rechazada", label: t("common.keyState.rejected"), tone: "bad", text: t("common.keyText.workspace") };
+    if (/\b401\b|\b403\b|authentication|invalid x-api-key|invalid_api_key|permission/.test(l)) return { state: "rechazada", label: t("common.keyState.rejected"), tone: "bad", text: t("common.keyText.auth") };
+    if (/\b429\b|rate.?limit/.test(l)) return { state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: t("common.keyText.rate") };
+    if (/\b529\b|overloaded/.test(l)) return { state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: t("common.keyText.overloaded") };
+    if (/timeout|timed out/.test(l)) return { state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: t("common.keyText.timeout") };
+    if (/connection|network/.test(l)) return { state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: t("common.keyText.network") };
+    return { state: "error", label: t("common.keyState.errors"), tone: "warn", text: t.replace(/\s+/g, " ").slice(0, 140) };
   }
   function keyHealth(spend, llmRows, health, now) {
     now = now || Date.now() / 1000;
@@ -622,8 +631,8 @@
         const errs15 = errs.filter((r) => now - (r.ts || 0) <= 900);
         const lastErr = errs[errs.length - 1], lastOk = mine.filter((r) => !r.error).slice(-1)[0];
         let p = null, since = null;
-        if (v.dead) { p = keyProblem(typeof v.dead === "string" ? v.dead : (v.dead.reason || v.dead.why || JSON.stringify(v.dead))); since = (v.dead && v.dead.since) || v.dead_since || (lastErr && lastErr.ts) || null; if (p && p.tone !== "bad") p = { ...p, tone: "bad", label: "Rechazada", state: "rechazada" }; }
-        else if (+v.cooldown_s > 0) { p = keyProblem(lastErr && lastErr.error) || { state: "espera", label: "En espera", tone: "warn", text: "La clave descansa tras un error." }; p = { ...p, state: "espera", label: "En espera", tone: "warn", text: p.text + " Vuelve en " + Math.round(v.cooldown_s) + " s." }; since = lastErr && lastErr.ts; }
+        if (v.dead) { p = keyProblem(typeof v.dead === "string" ? v.dead : (v.dead.reason || v.dead.why || JSON.stringify(v.dead))); since = (v.dead && v.dead.since) || v.dead_since || (lastErr && lastErr.ts) || null; if (p && p.tone !== "bad") p = { ...p, tone: "bad", label: t("common.keyState.rejected"), state: "rechazada" }; }
+        else if (+v.cooldown_s > 0) { p = keyProblem(lastErr && lastErr.error) || { state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: t("common.keyText.cooldown") }; p = { ...p, state: "espera", label: t("common.keyState.waiting"), tone: "warn", text: p.text + t("common.keyText.backIn", { n: Math.round(v.cooldown_s) }) }; since = lastErr && lastErr.ts; }
         else if (errs15.length >= 3 && lastErr && (!lastOk || lastOk.ts < lastErr.ts)) { p = keyProblem(lastErr.error); }
         if (p && !since) { // since = first error of the current run of failures
           let i = mine.length - 1; while (i >= 0 && mine[i].error) i--; since = (mine[i + 1] || lastErr || {}).ts || null;
@@ -649,8 +658,8 @@
     const usRow = rows[rank - 1] || {};
     const root = el("div", { class: ["vrank", o.compact ? "compact" : ""] });
     root.appendChild(el("div", { class: "vrank-head" },
-      el("b", { class: "vrank-us" }, rank ? `${ours}: ${rank}.º de ${rows.length} por volumen` : "Sin tienda propia"),
-      rank ? el("span", { class: "num vrank-sub" }, `${fmtP(+usRow.volume || 0)} · ${+usRow.trades || 0} op. · ${+usRow.traders || 0} equipos · ${+usRow.pairs || 0} parejas`) : null));
+      el("b", { class: "vrank-us" }, rank ? t("common.vrank.us", { venue: ours, rank: I18N.ordinal(rank), n: rows.length }) : t("common.vrank.noVenue")),
+      rank ? el("span", { class: "num vrank-sub" }, t("common.vrank.sub", { vol: fmtP(+usRow.volume || 0), trades: +usRow.trades || 0, teams: +usRow.traders || 0, pairs: +usRow.pairs || 0 })) : null));
     const list = o.compact ? rows.filter((v, i) => i < 6 || v.venue === ours || ALLIED_VENUES[v.venue]) : rows;
     for (const v of list) {
       const i = rows.indexOf(v);
@@ -659,17 +668,17 @@
       const r = el("div", { class: ["vrank-row", us ? "is-us" : "", ally ? "is-ally" : "", o.onPick ? "clickable" : ""] },
         el("span", { class: "num vrank-n" }, (i + 1) + "."),
         el("span", { class: "vrank-name", title: v.name || v.venue }, el("b", { class: "num" }, v.venue), " ",
-          v.venue === "rastro" ? "El Rastro" : teamName(v.owner) || v.name || "", us ? el("span", { class: "tag vrank-tag us" }, "Nosotros") : null,
-          ally ? el("span", { class: "tag vrank-tag ally" }, "Aliado") : null),
+          v.venue === "rastro" ? "El Rastro" : teamName(v.owner) || v.name || "", us ? el("span", { class: "tag vrank-tag us" }, t("common.us")) : null,
+          ally ? el("span", { class: "tag vrank-tag ally" }, t("common.ally")) : null),
         el("span", { class: "vrank-bar" }, el("span", { class: "vrank-fill", style: { width: Math.max(vol ? 1.5 : 0, (vol / max) * 100) + "%" } }),
-          h ? el("span", { class: "vrank-hour", title: "volumen de la última hora", style: { width: Math.max(1.5, (Math.min(h, vol) / max) * 100) + "%" } }) : null),
+          h ? el("span", { class: "vrank-hour", title: t("common.vrank.lastHourTitle"), style: { width: Math.max(1.5, (Math.min(h, vol) / max) * 100) + "%" } }) : null),
         el("span", { class: "num vrank-val" }, fmtP(vol)),
-        el("span", { class: "num vrank-h" }, h ? "+" + fmtNum(h) + " últ. h" : "—"),
-        o.compact ? null : el("span", { class: "num vrank-meta" }, `${+v.trades || 0} op. · ${+v.traders || 0} eq. · ${+v.pairs || 0} par.`));
+        el("span", { class: "num vrank-h" }, h ? t("common.vrank.lastHour", { n: fmtNum(h) }) : "—"),
+        o.compact ? null : el("span", { class: "num vrank-meta" }, t("common.vrank.meta", { trades: +v.trades || 0, teams: +v.traders || 0, pairs: +v.pairs || 0 })));
       if (o.onPick) r.addEventListener("click", () => o.onPick(v.venue));
       root.appendChild(r);
     }
-    if (!rows.length) root.appendChild(empty("Sin datos de tiendas todavía."));
+    if (!rows.length) root.appendChild(empty(t("common.vrank.empty")));
     return root;
   }
   // P traded per venue in the last hour, from feed settlements (payload.venue, payload.price; no venue and no dealer = El Rastro)
@@ -690,11 +699,11 @@
   function negParts(score) {
     const sc = score || {};
     const n = (x) => (x === null || x === undefined || isNaN(+x) ? null : +x);
-    const parts = [["Tratos", n(sc.neg_points), 1], ["Duelos", n(sc.duel_points), 2], ["Escalera", n(sc.ladder_points), 3]].filter((p) => p[1] !== null);
+    const parts = [[t("common.deals"), n(sc.neg_points), 1], [t("common.duels"), n(sc.duel_points), 2], [t("common.ladder"), n(sc.ladder_points), 3]].filter((p) => p[1] !== null);
     if (!parts.length) return null;
-    return el("div", { class: "negparts", title: "componentes en bruto de la negociación, antes de comparar con el mejor equipo" },
-      el("span", { class: "negparts-l" }, "en bruto"), parts.map(([l, v, d]) => el("span", { class: "negparts-i" }, l + " ", el("b", { class: "num" }, fmtNum(v, v < 1 ? 3 : d === 1 ? 1 : 2)))),
-      n(sc.bench_points) !== null ? el("span", { class: "negparts-i negparts-m" }, "Market Test ", el("b", { class: "num" }, fmtNum(sc.bench_points, 2)), n(sc.mm_points) !== null ? [" · tienda ", el("b", { class: "num" }, fmtNum(sc.mm_points, 1))] : null) : null);
+    return el("div", { class: "negparts", title: t("common.neg.title") },
+      el("span", { class: "negparts-l" }, t("common.neg.raw")), parts.map(([l, v, d]) => el("span", { class: "negparts-i" }, l + " ", el("b", { class: "num" }, fmtNum(v, v < 1 ? 3 : d === 1 ? 1 : 2)))),
+      n(sc.bench_points) !== null ? el("span", { class: "negparts-i negparts-m" }, "Market Test ", el("b", { class: "num" }, fmtNum(sc.bench_points, 2)), n(sc.mm_points) !== null ? [" · " + t("common.neg.shop") + " ", el("b", { class: "num" }, fmtNum(sc.mm_points, 1))] : null) : null);
   }
 
   window.ui = {
