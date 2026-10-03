@@ -31,17 +31,17 @@ class MatcherTest(unittest.TestCase):
         self.assertEqual(m["saves"], 2)
         self.assertTrue(m["last_of_page"])
 
-    def test_bid_and_ask_meet_in_the_middle_or_not_at_all(self):
+    def test_bid_and_ask_meet_in_the_middle(self):
         ok = M.find(sheets(sheet("t09", sale=[{"ref": "SAL-09", "price": 60}]),
                            sheet("t07", wants=[{"ref": "SAL-09", "bid": 70}])), CAT)
         self.assertEqual(ok[0]["price"], 65)
         far = M.find(sheets(sheet("t09", sale=[{"ref": "SAL-09", "price": 90}]),
                             sheet("t07", wants=[{"ref": "SAL-09", "bid": 50}])), CAT)
-        self.assertEqual(far, [])
+        self.assertEqual((far[0]["price"], far[0]["basis"]), (70, "midpoint"))    # a suggestion: the agents counter
 
     def test_never_a_giveaway(self):
         ms = M.find(sheets(sheet("t09", sale=[{"ref": "SAL-09", "price": 12}]), sheet("t07", wants=["SAL-09"])), CAT)
-        self.assertEqual(ms, [])                              # a rare at 12 P destroys value: not proposed
+        self.assertEqual((ms[0]["price"], ms[0]["basis"]), (40, "floor"))   # a rare at 12 P destroys value: the floor
 
     def test_the_host_is_never_a_party(self):
         ms = M.find(sheets(sheet("t10", wants=["LAT-06"], sale=["RET-03"]), sheet("t09", sale=["LAT-06"], wants=["RET-03"])), CAT)

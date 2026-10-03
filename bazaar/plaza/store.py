@@ -144,7 +144,7 @@ class Store:
                 raise PlazaError(403, "bad_pin", "wrong PIN")
             return rec
 
-    def declare(self, team: str, pin: str, body: dict) -> dict:
+    def declare(self, team: str, pin: str | None, body: dict) -> dict:
         """Replaces the fields the agent sends (wants, spares, for_sale); fields left out stay as they were."""
         if not isinstance(body, dict):
             raise PlazaError(400, "bad_request", "send a JSON object")
@@ -158,10 +158,13 @@ class Store:
             new["spares"] = clean_refs(body["spares"], "spares")
         if "for_sale" in body:
             new["for_sale"] = clean_sale(body["for_sale"])
-        self.check(team, pin)
+        if pin is not None:                                    # None: the caller already checked an agent token
+            self.check(team, pin)
+        else:
+            self._team(team)
         with self.lock:
             data = self._load()
-            rec = data["teams"][team]
+            rec = data.setdefault("teams", {}).setdefault(team, {})
             rec["declared"] = {**(rec.get("declared") or {}), **new, "updated": self.clock()}
             rec["seen"] = self.clock()
             self._save(data)
@@ -180,6 +183,15 @@ class Store:
             self._save(data)
             return True
 
+    def mark_verified(self, team: str) -> None:
+        """The team proved a connection code in the game."""
+        with self.lock:
+            data = self._load()
+            rec = data.setdefault("teams", {}).setdefault(self._team(team), {})
+            if not rec.get("verified"):
+                rec["verified"] = True
+                self._save(data)
+
     def touch(self, team: str) -> None:
         """The team's agent did something with its PIN: remember when."""
         with self.lock:
@@ -194,9 +206,33 @@ class Store:
         a = self._load().get("admin") or {}
         return {"hidden": [i for i in a.get("hidden") or [] if isinstance(i, int)],
                 "blocked": [t for t in a.get("blocked") or [] if isinstance(t, str)],
-                "enabled": a.get("enabled", True) is not False}
+                "hidden_msgs": [m for m in a.get("hidden_msgs") or [] if isinstance(m, str)],
+                "enabled": a.get("enabled", True) is not False,
+                "mm_paused": bool(a.get("mm_paused")),
+                "excluded_teams": [t for t in a.get("excluded_teams") or [] if isinstance(t, str)],
+                "excluded_matches": [m for m in a.get("excluded_matches") or [] if isinstance(m, str)]}
 
-    def admin_do(self, action: str, team: str | None = None, message: int | None = None) -> dict:
+    def admin_do(self, action: str, team: str | None = None, message: int | None = None,
+                 match: str | None = None) -> dict:
+        if action in ("exclude", "include"):
+            return self._exclude(action, team, match)
+        if action in ("hide", "unhide") and match is not None:      # one line of a match thread
+            if not (isinstance(match, str) and re.fullmatch(r"m-[0-9a-f]{10}", match)) \
+                    or isinstance(message, bool) or not isinstance(message, int):
+                raise PlazaError(400, "bad_request", "name the match and the number of its message")
+            with self.lock:
+                data = self._load()
+                a = data.setdefault("admin", {})
+                rows = [x for x in a.get("hidden_msgs") or [] if x != f"{match}:{message}"]
+                a["hidden_msgs"] = (rows + [f"{match}:{message}"] if action == "hide" else rows)[-2000:]
+                self._save(data)
+            return self.admin()
+        if action in ("pause", "resume"):
+            with self.lock:
+                data = self._load()
+                data.setdefault("admin", {})["mm_paused"] = action == "pause"
+                self._save(data)
+            return self.admin()
         if action in ("block", "unblock") and not (isinstance(team, str) and TEAM_RX.fullmatch(team)):
             raise PlazaError(400, "bad_request", "team ids look like t04")
         if action in ("hide", "unhide") and (isinstance(message, bool) or not isinstance(message, int)):
@@ -216,8 +252,26 @@ class Store:
             elif action in ("on", "off"):
                 a["enabled"] = action == "on"
             elif action not in ("hide", "block"):
-                raise PlazaError(400, "bad_request", "action: hide, unhide, block, unblock, on, off, refresh")
+                raise PlazaError(400, "bad_request", "action: hide, unhide, block, unblock, on, off, refresh, pause, resume, exclude, include, "
+                                                    "force, expire")
             a["hidden"], a["blocked"] = hidden[-2000:], blocked
+            self._save(data)
+        return self.admin()
+
+    def _exclude(self, action: str, team, match) -> dict:
+        """Keeps a team, or one match, out of the matchmaker."""
+        if team is not None and not (isinstance(team, str) and TEAM_RX.fullmatch(team)):
+            raise PlazaError(400, "bad_request", "team ids look like t04")
+        if match is not None and not (isinstance(match, str) and re.fullmatch(r"m-[0-9a-f]{10}", match)):
+            raise PlazaError(400, "bad_request", "match ids look like m-0123456789")
+        if (team is None) == (match is None):
+            raise PlazaError(400, "bad_request", "name a team or a match")
+        key, value = ("excluded_teams", team) if team else ("excluded_matches", match)
+        with self.lock:
+            data = self._load()
+            a = data.setdefault("admin", {})
+            rows = [x for x in a.get(key) or [] if x != value]
+            a[key] = (rows + [value] if action == "exclude" else rows)[-200:]
             self._save(data)
         return self.admin()
 

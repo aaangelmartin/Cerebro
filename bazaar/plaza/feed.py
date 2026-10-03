@@ -14,6 +14,7 @@ RASTRO = "rastro"
 RASTRO_FEE = (500, 1)                      # bps, P per card, when venues.json does not say
 KEEP_ITEMS = 600
 KEEP_SALES = 4000
+KEEP_LOG = 4000
 WANTED = ('"offer.listed"', '"offer.cancelled"', '"settlement"', '"pack.opened"', '"taller.crafted"',
           '"venue.announcement"')
 
@@ -79,6 +80,7 @@ class Feed:
         self.cancelled: set[int] = set()
         self.sales: collections.deque = collections.deque(maxlen=KEEP_SALES)
         self.items: collections.deque = collections.deque(maxlen=KEEP_ITEMS)
+        self.venue_log: list[dict] = []                        # what happened on our venue, for the match threads
         self.counts = {"venue_offers": 0, "venue_deals": 0, "venue_volume": 0, "team_deals": 0}
 
     # ---- reading
@@ -128,6 +130,8 @@ class Feed:
             self.offers[o["id"]] = o
             if o["venue"] == self.venue:
                 self.counts["venue_offers"] += 1
+                self._log({"t": "listed", "tick": tick, **{k: o[k] for k in ("id", "maker", "to", "side", "ref",
+                                                                              "ref_back", "price")}})
             return {**base, "kind": "offer", "side": o["side"], "team": o["maker"], "to": o["to"],
                     "venue": o["venue"], "ref": o["ref"], "ref_back": o["ref_back"], "price": o["price"],
                     "offer": o["id"], "highlight": o["venue"] == self.venue}
@@ -135,6 +139,8 @@ class Feed:
             oid = p.get("offer")
             oid = oid.get("id") if isinstance(oid, dict) else oid
             if isinstance(oid, int):
+                if (self.offers.get(oid) or {}).get("venue") == self.venue or p.get("venue") == self.venue:
+                    self._log({"t": "cancelled", "tick": tick, "id": oid})
                 self.cancelled.add(oid)
                 self.offers.pop(oid, None)
             return None
@@ -155,6 +161,7 @@ class Feed:
             if len(teams) == 2:
                 self.counts["team_deals"] += 1
             if venue == self.venue:
+                self._log({"t": "settled", "tick": tick, "parties": parties, "refs": refs, "price": price})
                 self.counts["venue_deals"] += 1
                 self.counts["venue_volume"] += price
             if p.get("persona") and len(teams) < 2:
@@ -177,6 +184,11 @@ class Feed:
             return {**base, "kind": "announce", "team": p.get("owner") or e.get("actor") or None,
                     "venue": p.get("venue"), "text": text[:400], "highlight": p.get("venue") == self.venue}
         return None
+
+    def _log(self, entry: dict) -> None:
+        self.venue_log.append(entry)
+        if len(self.venue_log) > 2 * KEEP_LOG:                 # shrinking makes the reader start over, harmlessly
+            del self.venue_log[:KEEP_LOG]
 
     # ---- views
     def open_offers(self, fees: dict[str, dict] | None = None) -> list[dict]:
