@@ -170,6 +170,8 @@ class BrokerLoop:
         self.state_file = state_file or (self.out.parent / "broker_state.json")
         self.notices_file = notices_file or (self.out.parent / "notices.jsonl")
         self.watch: dict = {"below": 0, "history": [], "switched": None}
+        self.matchmaker = None                          # broker.matchmaker.MatchMaker, attached for the live venue
+        self.bench_hours: list[float] = []              # every scheduled Market Test, to stay quiet around it
         self._load_state()
 
     # ---- helpers
@@ -221,6 +223,8 @@ class BrokerLoop:
             self._err(tick, "schedule", e)
             return
         hard, ticks = [], None
+        self.bench_hours = [float(ev.get("at_hours", -1)) for ev in sch.get("upcoming") or []
+                            if ev.get("action") == "bench"]
         for ev in sch.get("upcoming") or []:
             if ev.get("action") != "bench":
                 continue
@@ -362,7 +366,24 @@ class BrokerLoop:
                                                     "plan": [m.to_dict() for m in pplan], "results": presults})
         self._read_results(tick)
         self.engine.forget_before(tick - 40)
+        self._matchmake(tick, clock, send, bool(bench))
         self.heartbeat(tick)
+
+    def _matchmake(self, tick: int, clock: dict, send: bool, in_session: bool) -> None:
+        """Invite pairs of other teams to our venue. Never during a Market Test or the 12 ticks before one."""
+        from .matchmaker import EVERY_TICKS
+        mm = self.matchmaker
+        if mm is None or not send or in_session or self.active_runs or self.pending_results or tick % EVERY_TICKS:
+            return
+        per_hour = 3600.0 / float(clock.get("tick_seconds") or 30.0)       # ticks in one game hour
+        if any(0 <= (h - self.t_hours) * per_hour <= 12 for h in self.bench_hours):
+            return
+        try:
+            done = mm.step(tick, last_venue_announce=last_announce_tick(mm.venue))
+            if done.get("announced") or done.get("messages"):
+                self._append(f"matchmaker-{self.day}", {"tick": tick, **done})
+        except Exception as e:  # noqa: BLE001 - a side job: it must never hurt the Market Test loop
+            self._err(tick, "matchmaker", f"{type(e).__name__}: {e}")
 
     def _send(self, tick: int, plan: list[Match], send: bool, bench: bool) -> list[dict]:
         out = []
@@ -519,6 +540,41 @@ class BrokerLoop:
         tmp.replace(self.status_file)
 
 
+def last_announce_tick(venue_id: str, live: Path | None = None, tail_bytes: int = 400_000) -> int | None:
+    """The tick of the last announcement on a venue, from the recorded feed (ours or the bot's)."""
+    path = (live or config.LIVE) / "events.jsonl"
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - tail_bytes))
+            rows = f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return None
+    for line in reversed(rows):
+        if '"venue.announcement"' not in line or f'"{venue_id}"' not in line:
+            continue
+        try:
+            return int(json.loads(line).get("tick"))
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def team_message(gw: Gateway, venue_id: str) -> Callable[[str, str], Any]:
+    """Open a thread with a team on our venue, leave one message and close it (frees the thread slot)."""
+    def send(team: str, text: str) -> Any:
+        t = gw.post("/api/threads", {"with": team, "venue": venue_id})
+        tid = t.get("id") or (t.get("thread") or {}).get("id")
+        try:
+            return gw.post(f"/api/threads/{int(tid)}/messages", {"text": text[:600]})
+        finally:
+            try:
+                gw.post(f"/api/threads/{int(tid)}/close")
+            except Exception:  # noqa: BLE001
+                pass
+    return send
+
+
 def _num(x: Any) -> float | None:
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         return None
@@ -616,6 +672,12 @@ def main(argv: list[str] | None = None) -> None:
                       status_file=out.parent / "broker_status.json",
                       state_file=(out.parent / "broker_state.json") if against_sim else (config.LAB / "broker" / "state.json"),
                       notices_file=(out.parent / "notices.jsonl") if against_sim else (config.LAB / "notices.jsonl"))
+    if not against_sim:
+        from ..intel.needs import needs_report
+        from .matchmaker import VENUE, MatchMaker
+        loop.matchmaker = MatchMaker(config.LIVE / "matchmaker.json", needs_report,
+                                     lambda: _read_json(config.LIVE / "control.json"),
+                                     announce=client.announce, message=team_message(gw, VENUE))
     print(f"broker: {'fake bazaar' if against_sim else 'live'} | key {'present' if key else 'MISSING'} | "
           f"writes {'on' if writes()[0] else 'off (' + writes()[1] + ')'} | out {out}", flush=True)
     while True:

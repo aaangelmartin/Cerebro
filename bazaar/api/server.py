@@ -218,6 +218,19 @@ def apply_control(live: Path, body: dict) -> dict:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):
                 raise ValueError(f"{key} must be a list")
             change[key] = body[key]
+    if "matchmaker" in body:                            # broker.matchmaker: invite pairs of other teams to our venue
+        if body["matchmaker"] not in ("on", "off"):
+            raise ValueError("matchmaker must be \"on\" or \"off\"")
+        change["matchmaker"] = body["matchmaker"]
+    if "matchmaker_threads" in body:
+        if not isinstance(body["matchmaker_threads"], bool):
+            raise ValueError("matchmaker_threads must be true or false")
+        change["matchmaker_threads"] = body["matchmaker_threads"]
+    if "matchmaker_exclude" in body:
+        x = body["matchmaker_exclude"]
+        if not isinstance(x, list) or not all(isinstance(t, str) for t in x):
+            raise ValueError("matchmaker_exclude must be a list of team ids")
+        change["matchmaker_exclude"] = x
     from ..strategist import budget as _budget          # brain intensity, caps and the event budget
     change.update(_budget.validate_control(body))
     from ..llm import cli_backend as _mac

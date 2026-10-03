@@ -951,6 +951,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("broker", lambda: broker(live, now)),
                      ("our_venue_growth", lambda: venue_growth(record, feed, venue_list, me, our_venue, now)),
                      ("venue_listing_mix_today", lambda: venue_mix(feed, venue_list, our_venue)),
+                     ("matchmaker", lambda: _matchmaker(live)),
                      ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
                      ("workshop", lambda: workshop(record, live, me, my_offers)),
                      ("arbitrage", lambda: arbitrage(live)),
@@ -961,3 +962,9 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
         except Exception as e:  # noqa: BLE001 - one broken analysis must not stop the plan
             out[name] = {"error": f"{type(e).__name__}: {e}"[:160]}
     return out
+
+
+def _matchmaker(live) -> dict:
+    """The pairs of other teams our broker is inviting to our venue (broker.matchmaker)."""
+    from ..broker.matchmaker import summary
+    return summary(live)
