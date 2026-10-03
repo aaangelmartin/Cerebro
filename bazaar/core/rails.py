@@ -247,8 +247,43 @@ def rail_avoid_sets(action: Action, sit=None, ctx=None) -> Verdict:
             refs.add(a.get("ref"))
     bad = sorted(r for r in refs if r and str(r).upper()[:3] in avoid)
     if bad:
-        return Verdict(False, "avoid_sets", f"we do not buy {sorted(avoid)} cards: {bad}")
+        why = _avoid_exception(action, sit, ctx, bad)
+        if why:
+            return Verdict(False, "avoid_sets", f"we do not buy {sorted(avoid)} cards: {bad} ({why})")
     return OK
+
+
+def _avoid_exception(action: Action, sit, ctx, bad: list) -> str:
+    """control.avoid_buy_exceptions (approved by the team): a card of an avoided set may come in when its rarity is
+    at least the exception's and the whole trade leaves us that many P of value after fees. Returns "" when
+    every avoided card is covered, else the reason the veto stands. The value and cash rails still run after."""
+    from .goal import exception_gain
+    control = _control(ctx)
+    held = {a.get("ref"): a.get("rarity") for a in _held(sit).values()}
+    rarity_of = getattr(_get(ctx, "value"), "rarity", None)
+    need = 0.0
+    for ref in bad:
+        if str(ref).endswith("-"):
+            return "a lot has no exception"
+        rarity = None
+        try:
+            rarity = rarity_of(ref) if callable(rarity_of) else None
+        except Exception:  # noqa: BLE001
+            pass
+        g = exception_gain(ref, control, rarity or held.get(ref))
+        if g is None:
+            return "no exception for its rarity"
+        need = max(need, g)
+    if action.kind in ("thread_message", "open_thread") and (action.params or {}).get("price") is None \
+            and not isinstance((action.params or {}).get("offer"), dict):
+        return ""                                              # words only: the priced message is checked later
+    give, get = flows(action, sit)
+    surplus, err = _surplus(action, sit, ctx, give, get)
+    if surplus is None:
+        return err
+    if surplus < need:
+        return f"gain {surplus:.1f} < {need:g} P required by the exception"
+    return ""
 
 
 def _brain_exception(sit, ref, offer_id) -> bool:
@@ -329,6 +364,41 @@ def _value_of(item: str, sit, ctx, action) -> float | None:
     return None
 
 
+def _surplus(action: Action, sit, ctx, give: dict, get: dict):
+    """(value gained by the trade after fees, (v_get, v_give, fee)), or (None, reason) when a value is unknown."""
+    held = _held(sit)
+    v_give = 0.0
+    for aid in give["assets"]:
+        a = held.get(aid)
+        if a is None or a.get("your_value") is None:
+            return None, f"no value for our asset {aid}"
+        v_give += float(a["your_value"])
+    for t in give["types"]:
+        refs = [a for a in held.values() if f"card:{a.get('ref')}" == t and a.get("your_value") is not None]
+        if not refs:
+            return None, f"no value for {t}"
+        v_give += max(float(a["your_value"]) for a in refs)    # worst case: they get our best copy
+    v_get = 0.0
+    hint = (action.expected or {}).get("value_get")
+    for aid in get["assets"]:
+        ref = get["asset_refs"].get(aid)
+        v = _value_of(f"card:{ref}", sit, ctx, action) if ref else None
+        if v is None:
+            return None, f"unknown value of asset {aid}"
+        v_get += v
+    for t in get["types"]:
+        v = _value_of(t, sit, ctx, action)
+        if v is None and str(t).startswith("pack:"):
+            v = _pack_value(str(t)[5:], sit)                   # independent EV from the catalog, never the proposer's
+        elif v is None and not str(t).startswith("card:") and hint is not None:
+            v = _num(hint, None)                               # a lot's EV comes from the domain's estimate
+        if v is None:
+            return None, f"unknown value of {t}"
+        v_get += v
+    fee = _taker_fee(action, sit, give, get)
+    return v_get + get["cash"] - v_give - give["cash"] - fee, (v_get, v_give, fee)
+
+
 def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
     """4. Buy at most at our private value minus a margin; sell at least at our value plus a margin."""
     if action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread"):
@@ -338,38 +408,11 @@ def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
         return OK                                              # words only, nothing on the table
     if not (give["assets"] or give["types"] or get["assets"] or get["types"]):
         return OK                                              # cash for cash: nothing to value
-    held = _held(sit)
     margin = max(1.0, float(_cap(ctx, "value_margin", VALUE_MARGIN)))   # never below +1 P, whoever proposes
-    v_give = 0.0
-    for aid in give["assets"]:
-        a = held.get(aid)
-        if a is None or a.get("your_value") is None:
-            return Verdict(False, "value", f"no value for our asset {aid}")
-        v_give += float(a["your_value"])
-    for t in give["types"]:
-        refs = [a for a in held.values() if f"card:{a.get('ref')}" == t and a.get("your_value") is not None]
-        if not refs:
-            return Verdict(False, "value", f"no value for {t}")
-        v_give += max(float(a["your_value"]) for a in refs)    # worst case: they get our best copy
-    v_get = 0.0
-    hint = (action.expected or {}).get("value_get")
-    for aid in get["assets"]:
-        ref = get["asset_refs"].get(aid)
-        v = _value_of(f"card:{ref}", sit, ctx, action) if ref else None
-        if v is None:
-            return Verdict(False, "value", f"unknown value of asset {aid}")
-        v_get += v
-    for t in get["types"]:
-        v = _value_of(t, sit, ctx, action)
-        if v is None and str(t).startswith("pack:"):
-            v = _pack_value(str(t)[5:], sit)                   # independent EV from the catalog, never the proposer's
-        elif v is None and not str(t).startswith("card:") and hint is not None:
-            v = _num(hint, None)                               # a lot's EV comes from the domain's estimate
-        if v is None:
-            return Verdict(False, "value", f"unknown value of {t}")
-        v_get += v
-    fee = _taker_fee(action, sit, give, get)
-    surplus = v_get + get["cash"] - v_give - give["cash"] - fee
+    surplus, err = _surplus(action, sit, ctx, give, get)
+    if surplus is None:
+        return Verdict(False, "value", err)
+    v_get, v_give, fee = err
     if surplus < margin:
         arb = _arbitrage_buy(action, sit, ctx, give, get)      # the one approved exception: a secured resale
         if arb is not None:

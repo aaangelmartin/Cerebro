@@ -451,7 +451,7 @@ def validate(plan: dict, pic: dict) -> list[str]:
         if not _num_in(pr):
             errors.append(f"priority {i} cites no number (values, prices or scores): '{pr[:80]}'")
     for k, g in (plan.get("guidance") or {}).items():
-        for ref in avoid:
+        for ref in avoid - set((pic.get("control") or {}).get("avoid_buy_exceptions") or {}):
             if f"buy {ref}" in g or f"Buy {ref}" in g:
                 errors.append(f"guidance.{k} tells to buy {ref}, a set we avoid")
     for i, d in enumerate(plan.get("promo_drafts") or [], 1):

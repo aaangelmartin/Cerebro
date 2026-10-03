@@ -63,5 +63,68 @@ class AvoidSetsTest(unittest.TestCase):
         self.assertTrue(rails.rail_avoid_sets(bid, sit, TickContext(tick=1, day="sat", deadline=0.0, control={})).ok)
 
 
+class AvoidExceptionTest(unittest.TestCase):
+    """control.avoid_buy_exceptions: RET rares may be bought when worth 15 P more than the total price."""
+    CONTROL = {"avoid_buy_sets": ["RET"], "avoid_buy_exceptions": {"RET": {"min_rarity": "rare", "min_gain": 15}}}
+
+    class V:
+        RAR = {"RET-09": "rare", "RET-10": "rare", "RET-03": "common", "RET-06": "uncommon"}
+        VAL = {"RET-09": 77.0, "RET-10": 60.0, "RET-03": 40.0, "RET-06": 50.0}
+
+        def __call__(self, ref):
+            return self.VAL.get(ref)
+
+        def rarity(self, ref):
+            return self.RAR.get(ref)
+
+    def _check(self, ref, price, control=None, kind="dealer"):
+        from bazaar.core import rails
+        from bazaar.core.context import TickContext
+        from bazaar.core.types import Action
+        ctx = TickContext(tick=1, day="sat", deadline=0.0, value=self.V(),
+                          control=self.CONTROL if control is None else control)
+        sit = {"me": {"id": "t10", "cash": 200, "assets": []}}
+        if kind == "dealer":
+            a = Action(kind="open_thread", params={"with": "picaros", "topic": {"buy": {"card": ref}}, "price": price},
+                       domain="dealers")
+        else:
+            a = Action(kind="accept_offer", domain="market",
+                       params={"offer": 1, "expect": {"give": {"assets": [{"id": 5, "ref": ref}]},
+                                                      "want": {"cash": price}}})
+        return rails.rail_avoid_sets(a, sit, ctx)
+
+    def test_rare_with_gain_is_allowed(self):
+        self.assertTrue(self._check("RET-09", 54).ok)                 # worth 77: gain 23
+        self.assertTrue(self._check("RET-09", 54, kind="accept").ok)
+        self.assertTrue(self._check("RET-09", 62).ok)                 # gain exactly 15
+
+    def test_rare_with_small_gain_is_blocked(self):
+        v = self._check("RET-10", 54)                                 # worth 60: gain 6
+        self.assertFalse(v.ok)
+        self.assertEqual(v.rail, "avoid_sets")
+        self.assertFalse(self._check("RET-09", 63).ok)                # gain 14
+        self.assertFalse(self._check("RET-10", 54, kind="accept").ok)
+
+    def test_lower_rarities_stay_blocked_whatever_the_gain(self):
+        self.assertFalse(self._check("RET-03", 5).ok)                 # common worth 40
+        self.assertFalse(self._check("RET-06", 5, kind="accept").ok)  # uncommon worth 50
+        self.assertFalse(self._check("RET-99", 5).ok)                 # unknown rarity
+
+    def test_no_exception_keeps_the_veto(self):
+        self.assertFalse(self._check("RET-09", 54, control={"avoid_buy_sets": ["RET"]}).ok)
+        bad = {"avoid_buy_sets": ["RET"], "avoid_buy_exceptions": {"RET": {"min_rarity": "shiny"}}}
+        self.assertFalse(self._check("RET-09", 54, control=bad).ok)
+
+    def test_planner_helpers(self):
+        from bazaar.core.goal import avoided, buy_cap
+        self.assertTrue(avoided("RET-09", self.CONTROL))               # rarity unknown: avoided
+        self.assertFalse(avoided("RET-09", self.CONTROL, "rare"))
+        self.assertFalse(avoided("RET-11", self.CONTROL, "epic"))
+        self.assertTrue(avoided("RET-03", self.CONTROL, "common"))
+        self.assertEqual(buy_cap("RET-09", self.CONTROL, "rare", 77.0, 76), 62)
+        self.assertEqual(buy_cap("RET-09", self.CONTROL, "rare", 77.0, None), 62)
+        self.assertEqual(buy_cap("MAL-09", self.CONTROL, "rare", 91.0, 74), 74)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ from ..core.types import Action, Outcome
 from ..dealers.compat import clean, lessons_block, llm_module, time_left
 from ..lab import feedback
 from ..dealers.values import Values
+from ..core.goal import avoided as _avoided_ref
 from . import bargain
 from . import protocol as proto
 from .protocol import (BID_EXPIRES, MAX_OWN_BIDS, MAX_OWN_OPEN, MAX_OWN_SWAPS, SWAP_EXPIRES, BidCand, SwapCand,
@@ -241,6 +242,9 @@ class MarketDomain:
             return "human"
         return ""
 
+    def _rar(self, ref):
+        return (getattr(self, "_cat_r", None) or {}).get(ref)
+
     def _brain_posts(self, me: dict, own_market: list[dict], can_give, counts: dict, control: dict,
                      tick_now: int = 0) -> list[Action]:
         """The brain's targeted offers (from the needs intel) not on the board yet: at most 2 per tick.
@@ -276,7 +280,7 @@ class MarketDomain:
             if len(out) >= 2:
                 break
             key = post_key(p)
-            if p.get("want_card") and _avoided(p["want_card"], control):
+            if p.get("want_card") and _avoided(p["want_card"], control, self._rar(p["want_card"])):
                 self._skip_brain_post(p, key, tick_now, f"wants {p['want_card']}, a set we avoid buying")
                 continue
             board = board_of(p)
@@ -378,7 +382,7 @@ class MarketDomain:
                        if r.get("kind") != "accept" and r.get("status") in ("vetoed", "refused")}
             return {str(x["give"]) for x in wanted
                     if x.get("give") and post_key(x) not in refused
-                    and not (x.get("want_card") and _avoided(x["want_card"], control))
+                    and not (x.get("want_card") and _avoided(x["want_card"], control, self._rar(x["want_card"])))
                     and ((x["give"],), (x["want_card"],) if x.get("want_card") else (),
                          int(x.get("want_cash") or 0)) not in live}
         except Exception:  # noqa: BLE001 - no plan, nothing reserved
@@ -617,6 +621,7 @@ class MarketDomain:
         tick = int(_g(sit, "tick", 0) or 0)
         values = Values(me, self.catalog(self._reader(ctx)), self._exact)
         cat_r = {r: c.get("rarity") for r, c in values.cards.items()}
+        self._cat_r = cat_r                         # rarity by ref: the avoid-set exceptions go by rarity
         self.rivals.ingest_feed(_g(sit, "feed_new") or [], my_id, cat_r)
         control = _g(ctx, "control") or {}
         budget = _g(ctx, "budget") or {}
@@ -787,7 +792,8 @@ class MarketDomain:
                     continue
                 spend = c.cash_out + c.fee - c.cash_in
                 big = (c.gain >= bargain.BIG_BARGAIN_P and c.in_refs
-                       and not any(values.set_of(r) in avoid_sets for r in c.in_refs))
+                       and not any(values.set_of(r) in avoid_sets and _avoided_ref(r, control, values.rarity(r))
+                                   for r in c.in_refs))
                 if big:
                     live_bargains.add(o.get("id"))
                     if spend <= fast_cap:
@@ -915,7 +921,7 @@ class MarketDomain:
                   if o.get("id") not in seen and str(o.get("venue")) in skip_venues]
         seen = {o.get("id") for o, _ in stale}
         stale += [(o, "we no longer buy this set") for o in own_market if o.get("id") not in seen
-                  and offer_kind(o) in ("bid", "swap") and any(_avoided(r, control) for r in want_cards(o))]
+                  and offer_kind(o) in ("bid", "swap") and any(_avoided(r, control, self._rar(r)) for r in want_cards(o))]
         if goal:                                    # free the cash locked in bids for other cards
             seen = {o.get("id") for o, _ in stale}
             for o in own_market:

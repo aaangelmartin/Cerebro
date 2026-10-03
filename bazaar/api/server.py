@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -190,6 +190,16 @@ def apply_control(live: Path, body: dict) -> dict:
         if not isinstance(a, list) or not all(isinstance(x, str) and len(x.strip()) == 3 for x in a):
             raise ValueError("avoid_buy_sets must be a list of set ids like \"RET\"")
         change["avoid_buy_sets"] = sorted({x.strip().upper() for x in a})
+    if "avoid_buy_exceptions" in body:                 # {"RET": {"min_rarity": "rare", "min_gain": 15}}; {} = none
+        ex = body["avoid_buy_exceptions"]
+        rar = ("common", "uncommon", "rare", "epic", "legendary")
+        if not isinstance(ex, dict) or not all(
+                isinstance(k, str) and len(k.strip()) == 3 and isinstance(e, dict) and e.get("min_rarity") in rar
+                and isinstance(e.get("min_gain"), (int, float)) and not isinstance(e.get("min_gain"), bool)
+                and e["min_gain"] >= 1 for k, e in ex.items()):
+            raise ValueError('avoid_buy_exceptions must be like {"RET": {"min_rarity": "rare", "min_gain": 15}}')
+        change["avoid_buy_exceptions"] = {k.strip().upper(): {"min_rarity": e["min_rarity"], "min_gain": e["min_gain"]}
+                                          for k, e in ex.items()}
     if "allied_venues" in body:                        # {venue: owner team}; {} = no allies (the default)
         av = body["allied_venues"]
         if not isinstance(av, dict) or not all(isinstance(k, str) and re.fullmatch(r"v\d{1,3}", k) and isinstance(v, str)

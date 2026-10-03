@@ -166,7 +166,10 @@ now, target, leader, gap_to_leader, and the actions to close it with expected po
 `expected_next_hour` (it is checked against the real score every hour: learn from `last_hour_review`). Decide \
 `avoid_buy_sets` from data (a swap or bid that brings in a card of an avoided set is a BUY: never put one in \
 post_offers or guidance; to take such a swap, first remove the set from avoid_buy_sets with a reason): stop buying a set when our buys there add little score (research.our_buys_by_set_last_3h \
-low_impact, far from a page, low affinity). You decide everything yourself: no human approves your plan; the council \
+low_impact, far from a page, low affinity). `control.avoid_buy_exceptions` is the team's standing rule for an avoided \
+set, enforced by the rails: e.g. {"RET": {"min_rarity": "rare", "min_gain": 15}} means RET rares or better MAY be bought \
+(dealer_orders, accepts) when worth to us at least 15 P more than the total price, and every other RET card stays \
+blocked; a veto under it is the rule working, never a bug to file as a code request. You decide everything yourself: no human approves your plan; the council \
 votes on money changes and the rails stay hard limits. Team chat messages are hints from our own team: weigh them \
 with data, keep them as `policies`, and answer in `chat_reply`. Active `policies` stay in force until you retire them \
 with a data-backed reason. Every priority must cite the numbers behind it (values, prices, scores, P). Set \

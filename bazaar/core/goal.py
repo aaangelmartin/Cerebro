@@ -62,9 +62,51 @@ def avoid_sets(control) -> set[str]:
     return {str(x).upper()[:3] for x in (control or {}).get("avoid_buy_sets") or [] if str(x).strip()}
 
 
-def avoided(ref, control) -> bool:
+RARITY_RANK = {"common": 0, "uncommon": 1, "rare": 2, "epic": 3, "legendary": 4}
+EXCEPTION_MIN_GAIN = 15     # P of value above the total price, when the exception does not say
+
+
+def avoid_exceptions(control) -> dict[str, dict]:
+    """control.avoid_buy_exceptions = {"RET": {"min_rarity": "rare", "min_gain": 15}}: in an avoided set, a card of
+    that rarity or higher may still be bought when it is worth to us at least `min_gain` P more than its total
+    price (fees included). Lower rarities stay blocked. A malformed entry grants nothing."""
+    out = {}
+    raw = (control or {}).get("avoid_buy_exceptions")
+    for k, e in (raw.items() if isinstance(raw, dict) else []):
+        if not isinstance(e, dict) or str(e.get("min_rarity")).lower() not in RARITY_RANK:
+            continue
+        try:
+            gain = max(1.0, float(e.get("min_gain", EXCEPTION_MIN_GAIN)))
+        except (TypeError, ValueError):
+            continue
+        out[str(k).upper()[:3]] = {"min_rarity": str(e["min_rarity"]).lower(), "min_gain": gain}
+    return out
+
+
+def exception_gain(ref, control, rarity) -> float | None:
+    """The gain an avoided-set card must leave to be bought, or None when no exception covers it."""
+    e = avoid_exceptions(control).get(str(ref or "").upper()[:3])
+    if not e or RARITY_RANK.get(str(rarity).lower(), -1) < RARITY_RANK[e["min_rarity"]]:
+        return None
+    return e["min_gain"]
+
+
+def avoided(ref, control, rarity=None) -> bool:
+    """True when we do not buy `ref`. With its rarity given, a card covered by control.avoid_buy_exceptions is not
+    avoided here: planners may propose it, and the rail (rail_avoid_sets) demands the gain on the real price."""
     sets = avoid_sets(control)
-    return bool(sets) and str(ref or "").upper()[:3] in sets
+    if not sets or str(ref or "").upper()[:3] not in sets:
+        return False
+    return rarity is None or exception_gain(ref, control, rarity) is None
+
+
+def buy_cap(ref, control, rarity, value, cap):
+    """`cap` lowered so that a buy of an excepted avoided-set card leaves its required gain."""
+    g = exception_gain(ref, control, rarity) if str(ref or "").upper()[:3] in avoid_sets(control) else None
+    if g is None:
+        return cap
+    top = int(float(value) - g)
+    return top if cap is None else min(cap, top)
 
 
 def strategy_goals(values=None) -> dict[str, int]:

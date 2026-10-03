@@ -35,6 +35,7 @@ from .profiles import FRIDAY_QUOTAS, ProfileStore, capture, ladder_gain
 from .threads import ThreadView, parse_thread
 from .values import Values, pack_value
 from bazaar.core.goal import avoided as _avoided   # sets we decided not to buy
+from bazaar.core.goal import buy_cap as _buy_cap   # ...and the gain an excepted card of such a set must leave
 
 log = logging.getLogger("bazaar.dealers")
 
@@ -309,11 +310,12 @@ class DealersDomain:
                 kind = f"sell:{rarity}" + (":loved" if self._loved(d, rarity, set_id) else "")
                 topic = {"sell": {"assets": [aid]}}
             else:
-                if _avoided(ref, control):
+                if _avoided(ref, control, rarity):
                     self._note_order(o, "skipped", f"{set_id} is a set we avoid buying", plan.tick)
                     continue
                 value = values.next_copy(ref)
                 cap = min(goal[ref], int(value) - 1) if ref in goal else haggle.buy_max(value)
+                cap = _buy_cap(ref, control, rarity, value, cap)   # an excepted avoided-set card must leave its gain
                 if o.get("arbitrage"):                           # a secured resale: the rail checks every condition
                     cap = int(o["bound"])
                 limit = min(int(o["bound"]), cap, budget)
@@ -671,6 +673,8 @@ class DealersDomain:
                 g_ref = str(getattr(v, "item", None) or "").upper()
                 if g_ref in goal_now:   # a goal card: the team approved paying up to its max (still below value)
                     value_limit = max(value_limit, min(goal_now[g_ref], int(value) - 1))
+                if not v.is_pack:   # an excepted card of an avoided set must leave its gain (the rail checks it too)
+                    value_limit = _buy_cap(v.item, _g(ctx, "control") or {}, values.rarity(v.item), value, value_limit)
                 limit = min(value_limit, own_cap)
                 budget_bound = own_cap < value_limit
                 if cautious:
@@ -703,7 +707,7 @@ class DealersDomain:
                     and 0.0 in self.store.ladder(level))
             if hold and not force.startswith(("dealer silent", "dealer never")):
                 force = ""
-            if v.buying and _avoided(v.item, _g(ctx, "control") or {}):
+            if v.buying and _avoided(v.item, _g(ctx, "control") or {}, values.rarity(v.item)):
                 ok, why = False, "we no longer buy this set"
                 force = "we no longer buy this set: close the thread"
             if order is None and not v.buying and not v.is_pack and not v.final and not ok:
@@ -839,11 +843,12 @@ class DealersDomain:
                     for ref in values.released_refs(r):
                         if isinstance(sets, list) and values.set_of(ref) not in sets:
                             continue
-                        if _avoided(ref, control):
+                        if _avoided(ref, control, r):
                             continue
                         add({"buy": {"card": ref}}, f"buy:{r}", ref, (values.cards.get(ref) or {}).get("name", ref),
                             values.next_copy(ref), entry.get("list_price"),
-                            max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal else None,
+                            max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal
+                            else _buy_cap(ref, control, r, values.next_copy(ref), None),
                             small_only=bool(goal) and ref not in goal)
             buys = {e.get("rarity"): e for e in menu.get("buys") or [] if e.get("rarity")}
             for a in me.get("assets") or []:
