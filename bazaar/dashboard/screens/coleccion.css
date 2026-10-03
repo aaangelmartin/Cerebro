@@ -102,46 +102,95 @@
 .cc-drawer .cc-t-venta { --lt: #FF6B6B; } .cc-drawer .cc-t-puja { --lt: #F2A541; } .cc-drawer .cc-t-cambio { --lt: #4C8DFF; }
 .cc-fallback-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); overflow: auto; background: #12151a; color: #e8ebf0; border-left: 1px solid #262b33; padding: 16px; z-index: 50; }
 
-/* official artwork (cards.json) — ported from the site's Cromo css, scoped */
-.scr-coleccion .cc-set.has-art { grid-template-columns: 180px minmax(0, 1fr) 150px; }
-.scr-coleccion .cc-grid.has-art { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 10px; max-width: 980px; }
-.scr-coleccion .cc-set.has-art .cc-extra-g { gap: 8px 6px; }
-.scr-coleccion .cc-card.cc-art { aspect-ratio: auto; min-height: 0; background: none; border: 0; overflow: visible; gap: 4px; }
+/* official artwork (cards.json) — ported from the site's Cromo css, scoped.
+   One row per set: side panel · 10 page cards · 2 off-page cards, all the same size. */
+.scr-coleccion .cc-set.has-art { grid-template-columns: 132px minmax(0, 10fr) minmax(0, 2fr); gap: 0 12px; padding: 10px 12px; align-items: start; }
+.scr-coleccion .cc-set.has-art .cc-set-title b { font-size: 13px; }
+.scr-coleccion .cc-set.has-art .cc-set-title { font-size: 12px; }
+.scr-coleccion .cc-set.has-art .cc-set-page { font-size: 11px; flex-wrap: wrap; gap: 0 6px; }
+.scr-coleccion .cc-grid.has-art { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+.scr-coleccion .cc-set.has-art .cc-extra { border-left: 1px dashed var(--c-line); padding-left: 10px; }
+.scr-coleccion .cc-set.has-art .cc-extra-t { display: none; }
+.scr-coleccion .cc-set.has-art .cc-extra-g { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.scr-coleccion .cc-card.cc-art { aspect-ratio: auto; min-height: 0; background: none; border: 0; overflow: visible; gap: 2px; min-width: 0; }
 .scr-coleccion .cc-card.cc-art:hover, .scr-coleccion .cc-card.cc-art:focus-visible { outline: none; }
-.scr-coleccion .cc-card.cc-art:hover .cc-face, .scr-coleccion .cc-card.cc-art:focus-visible .cc-face { box-shadow: 0 0 0 2px var(--set), 0 10px 20px -12px #000; }
 .scr-coleccion .cc-face {
   --font-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --font-sans: "Manrope", "Hanken Grotesk", system-ui, sans-serif;
-  position: relative; width: 100%; aspect-ratio: 5 / 7; border-radius: 7px; overflow: hidden; background: #1b0c22;
-  box-shadow: 0 10px 20px -12px #000000d9, 0 0 0 1px #00000073; isolation: isolate;
+  position: relative; width: 100%; aspect-ratio: 5 / 7; border-radius: 5px; overflow: hidden; background: #1b0c22;
+  box-shadow: 0 8px 16px -10px #000000d9, 0 0 0 1px #00000073; isolation: isolate;
 }
 .scr-coleccion .cc-face > svg { width: 100%; height: 100%; display: block; }
-.scr-coleccion .cc-face.cromo--legendary { box-shadow: 0 0 16px -4px #ffc44d8c, 0 10px 20px -12px #000000d9, 0 0 0 1px #00000073; }
+.scr-coleccion .cc-card.cc-art:hover .cc-face, .scr-coleccion .cc-card.cc-art:focus-visible .cc-face { box-shadow: 0 0 0 2px var(--set), 0 8px 16px -10px #000; }
+.scr-coleccion .cc-face.cromo--legendary { box-shadow: 0 0 14px -3px #ffc44d8c, 0 8px 16px -10px #000000d9, 0 0 0 1px #00000073; }
 .scr-coleccion .cc-foil { position: absolute; inset: 0; z-index: 2; pointer-events: none; mix-blend-mode: color-dodge; opacity: .42;
   background: linear-gradient(112deg, #0000 22%, #fff0be80 38%, #ff7aaa61 44%, #b061ff6b 50%, #4c8dff5c 56%, #3ddc974d 61%, #0000 76%) 45% 0 / 320% 100%; }
 .scr-coleccion .cromo--legendary .cc-foil { opacity: .6; }
-.scr-coleccion .cc-card.cc-art.is-missing .cc-face > svg { filter: grayscale(1) brightness(.45) contrast(.9); }
-.scr-coleccion .cc-card.cc-art.is-missing .cc-face { box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--set) 60%, transparent); outline-offset: -1px; }
-.scr-coleccion .cc-falta { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; pointer-events: none; }
-.scr-coleccion .cc-falta span { font: 900 15px "Big Shoulders Display", "Arial Narrow", sans-serif; letter-spacing: .18em; color: #e8ebf0; background: #0b0d10cc; border: 1px solid color-mix(in srgb, var(--set) 70%, transparent); padding: 3px 9px 2px; transform: rotate(-6deg); }
-.scr-coleccion .cc-card.cc-art.is-target .cc-face { outline: 2px solid var(--c-ink); outline-offset: 2px; }
-.scr-coleccion .cc-oband { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; display: flex; flex-direction: column; gap: 1px; padding: 14px 3px 3px; background: linear-gradient(180deg, #0b0d1000, #0b0d10e6 30%); }
-.scr-coleccion .cc-oband .cc-chip { background: color-mix(in srgb, var(--tint) 30%, #0b0d10e0); }
-.scr-coleccion .cc-vline { font: 11px var(--c-mono); font-variant-numeric: tabular-nums; color: var(--c-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scr-coleccion .cc-vline b { font-weight: 500; color: var(--c-ink); }
-.scr-coleccion .cc-card.cc-art.is-missing .cc-vline b { color: var(--c-muted); }
-.scr-coleccion .cc-card.cc-art.is-small .cc-vline { font-size: 9px; }
-.scr-coleccion .cc-card.cc-art.is-small .cc-falta span { font-size: 10px; padding: 2px 5px 1px; letter-spacing: .1em; }
-.scr-coleccion .cc-card.cc-art.is-small .cc-face { border-radius: 4px; }
+/* active state: coloured frame (first state wins) + stacked corner badges */
+.scr-coleccion .cc-card.cc-art.has-state .cc-face { box-shadow: 0 0 0 3px var(--frame), 0 0 12px -2px var(--frame); }
+.scr-coleccion .cc-card.cc-art.is-target .cc-face { outline: 2px dashed #E8EBF0; outline-offset: 3px; }
+.scr-coleccion .cc-badges { position: absolute; top: 3px; left: 3px; right: 3px; z-index: 4; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; pointer-events: none; }
+.scr-coleccion .cc-badge { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 1px 3px 1px 2px; background: var(--bc); color: #0b0d10;
+  font: 700 8.5px/1.25 var(--c-mono); letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 1px 3px #000a; }
+.scr-coleccion .cc-badge .cc-ico { color: #0b0d10; flex: none; }
+.scr-coleccion .cc-badge .cc-ico svg { width: 9px; height: 9px; }
+.scr-coleccion .cc-vline { display: flex; justify-content: space-between; gap: 4px; margin-top: 3px; font: 9.5px var(--c-mono); font-variant-numeric: tabular-nums; color: var(--c-muted); white-space: nowrap; overflow: hidden; }
+.scr-coleccion .cc-vline b { font-weight: 600; color: var(--c-ink); }
+.scr-coleccion .cc-cname { font-size: 9.5px; line-height: 1.2; color: var(--c-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-coleccion .cc-card.cc-art.is-owned .cc-cname { color: var(--c-ink); }
 .scr-coleccion .cc-card.cc-art.is-dim { opacity: .22; }
-.cc-drawer .cc-dhero:has(.cc-art) { grid-template-columns: 220px 1fr; }
-.cc-drawer .cc-dcard .cc-card.cc-art .cc-oband .cc-chip { font-size: 10px; }
+.cc-drawer .cc-dhero:has(.cc-art) { grid-template-columns: 200px 1fr; }
+.cc-drawer .cc-dcard .cc-badge { font-size: 11px; padding: 2px 5px; }
+.cc-drawer .cc-dcard .cc-vline, .cc-drawer .cc-dcard .cc-cname { font-size: 12px; }
+
+/* missing card: the official empty slot, from our port of the official card component
+   (static/cromo.js + cromo.css, commit fd14156) — only the rules the MISSING state uses, scoped. */
+.scr-coleccion .cc-face.is-slot { background: transparent; box-shadow: none; overflow: visible; }
+.scr-coleccion .cromo[data-card] {
+  --rar: #9aa4b8; --set: #5c6b73; --cromo-ink: #1b0c22; --cromo-cream: #fff1da;
+  --cromo-muted: var(--muted, #8e99b8);
+  --cromo-display: "Big Shoulders Display Variable", "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  --cromo-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: var(--cromo-display);
+  all: unset; box-sizing: border-box; display: block; position: relative; flex: none;
+  width: var(--cromo-w, 176px); max-width: 100%; min-width: 0; container-type: inline-size;
+  color: var(--cromo-cream); text-align: left; -webkit-user-select: none; user-select: none;
+}
+.scr-coleccion .cromo[data-card] *, .scr-coleccion .cromo[data-card] *::before, .scr-coleccion .cromo[data-card] *::after { box-sizing: border-box; }
+.scr-coleccion .cromo--md { --cromo-w: 176px; }
+.scr-coleccion .cromo[data-card].cromo--fluid { width: 100%; }
+.scr-coleccion .cromo__frame {
+  position: relative; aspect-ratio: 5 / 7; font-size: calc(var(--cromo-w, 176px) / 16); font-size: 6.25cqw;
+  border-radius: .8em; background: var(--cromo-ink); isolation: isolate;
+  box-shadow: 0 .9em 1.9em -1.1em #000000d9, 0 0 0 1px #00000073;
+}
+.scr-coleccion .cromo__inner { position: relative; height: 100%; overflow: hidden; border-radius: inherit; background: var(--cromo-ink); }
+.scr-coleccion .cromo__pip {
+  position: absolute; z-index: 6; right: .9em; bottom: .9em; width: .9em; height: .9em; border-radius: 50%;
+  background: var(--rar); box-shadow: 0 0 .6em color-mix(in oklab, var(--rar) 60%, transparent);
+}
+.scr-coleccion .cromo--missing .cromo__frame { background: transparent; box-shadow: none; }
+.scr-coleccion .cromo--missing .cromo__inner {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35em;
+  padding: 0 .8em 5.5em; text-align: center;
+  border: .14em dashed color-mix(in oklab, var(--set) 55%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--set) 12%, transparent), transparent 70%), #1b0c2273;
+}
+.scr-coleccion .cromo__ghost { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 62%; opacity: .2; filter: grayscale(.4); }
+.scr-coleccion .cromo__slot-no { position: relative; color: color-mix(in oklab, var(--set) 55%, transparent); font: 900 3.6em/1 var(--cromo-display); }
+.scr-coleccion .cromo__slot-name {
+  position: relative; max-width: 100%; color: var(--cromo-muted); font: 800 1.05em/1.05 var(--cromo-display);
+  letter-spacing: .04em; text-transform: uppercase; text-wrap: balance;
+}
+.scr-coleccion .cc-card.cc-art.has-state .cc-face.is-slot { box-shadow: 0 0 0 3px var(--frame), 0 0 12px -2px var(--frame); border-radius: 5px; }
 
 @media (max-width: 1100px) {
   .scr-coleccion .cc-set { grid-template-columns: 1fr; }
   .scr-coleccion .cc-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .scr-coleccion .cc-set.has-art { grid-template-columns: 1fr; }
+  .scr-coleccion .cc-set.has-art { grid-template-columns: minmax(0, 10fr) minmax(0, 2fr); }
+  .scr-coleccion .cc-set.has-art .cc-set-side { grid-column: 1 / -1; margin-bottom: 8px; }
+  .scr-coleccion .cc-grid.has-art { grid-template-columns: repeat(10, minmax(0, 1fr)); }
   .scr-coleccion .cc-kpis { grid-template-columns: repeat(3, 1fr); }
   .scr-coleccion .cc-extra-g { grid-template-columns: repeat(6, 1fr); }
 }

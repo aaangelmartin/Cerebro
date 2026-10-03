@@ -4,6 +4,7 @@
 Read-only scrape of the public /cards/<SET> pages with headless Chrome. Every id, url(#…) and
 href="#…" inside a card's SVG is prefixed per card so many cards can live in one document.
 Merges into the existing cards.json: cards already there are kept; found cards are added/replaced.
+The special entry "_back" is the official face-down card (shown for cards we do not own).
 Rerun after a set is released (RET, CHA) to add its cards.
 
     python3 bazaar/dashboard/tools/fetch_cards.py [SET ...]
@@ -76,8 +77,16 @@ def prefix_ids(svg: str, ref: str) -> str:
     return svg
 
 
+BACK_RX = re.compile(r'class="cromo[^"]*cromo--back"[^>]*aria-label="Face-down card"')
+
+
 def extract(html: str) -> dict[str, str]:
     out: dict[str, str] = {}
+    b = BACK_RX.search(html)                       # official face-down card (unreleased sets show it)
+    if b:
+        svg = balanced_svg(html, b.end())
+        if svg and 'class="cromo__face"' in svg:
+            out["_back"] = prefix_ids(svg, "back")
     for m in LABEL_RX.finditer(html):
         ref = m.group(1)
         if ref in out:
@@ -98,12 +107,12 @@ def main(argv: list[str]) -> int:
             cards = {}
     for s in sets:
         try:
-            found = {k: v for k, v in extract(dump_dom(BASE + s)).items() if k.startswith(s + "-")}
+            found = {k: v for k, v in extract(dump_dom(BASE + s)).items() if k.startswith(s + "-") or k == "_back"}
         except Exception as e:  # network/chrome hiccup: keep what we have
             print(f"{s}: error {e}", file=sys.stderr)
             continue
         cards.update(found)
-        print(f"{s}: {len(found)} cards")
+        print(f"{s}: {len(found) - ('_back' in found)} cards" + (" + card back" if "_back" in found else ""))
     tmp = OUT.with_suffix(".tmp")
     tmp.write_text(json.dumps(dict(sorted(cards.items())), ensure_ascii=False, separators=(",", ":")))
     tmp.replace(OUT)

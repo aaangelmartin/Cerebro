@@ -92,6 +92,7 @@
     const values = cat.values || {};
     const cardInfo = {};
     for (const s of sets) for (const c of s.cards || []) cardInfo[c.id] = { ...c, set: s.id };
+    for (const s of sets) CROMO.sets[s.id] = s;
 
     const owned = {};
     for (const a of me.assets || []) {
@@ -232,41 +233,66 @@
     } catch (e) { /* keep the fallback design */ }
     return ART.map || {};
   }
+  // Our port of the official card component (static/cromo.js), used for the official empty slot.
+  const CROMO = { mod: null, tried: false, sets: {} };
+  function loadCromo() {
+    if (CROMO.tried) return Promise.resolve(CROMO.mod);
+    CROMO.tried = true;
+    return import(new URL("static/cromo.js", document.baseURI).href)
+      .then((m) => (CROMO.mod = m && typeof m.cromo === "function" ? m : null))
+      .catch(() => null);
+  }
+  function slotHtml(i) {
+    if (!CROMO.mod) return null;
+    const set = CROMO.sets[i.set] || { id: i.set };
+    try {
+      return CROMO.mod.cromo(i, { set: { ...set, color: SET_COLORS[i.set] || set.color }, size: "md", fluid: true, state: "missing" });
+    } catch (e) { return null; }
+  }
   function artOf(ref) {
     const svg = ART.map && ART.map[ref];
     return typeof svg === "string" && svg.startsWith("<svg") ? svg : null;
   }
-  function valueLine(c, have) {
-    return h("div", { class: "cc-vline" },
-      h("b", null, have ? fmtP(c.ourValue) : "—"),
-      h("span", null, " · m " + (c.market != null ? fmtN(c.market, 0) : "—") + " · l " + fmtN(c.book, 0)));
+  // States that are active on a card, in priority order: the first one colours the frame.
+  const BADGE_COLORS = { venta: "#FF6B6B", compra: "#3DDC97", puja: "#F2A541", cambio: "#4C8DFF", dealer: "#2EC4B6", objetivo: "#E8EBF0", dup: "#9AA4B8", protegida: "#B9C0CC" };
+  function cardBadges(c) {
+    const s = c.states, out = [];
+    if (s.venta != null) out.push(["venta", "VENTA " + fmtN(s.venta, 0)]);
+    if (s.compra != null) out.push(["compra", "COMPRA " + fmtN(s.compra, 0)]);
+    if (s.puja != null) out.push(["puja", "PUJA ≤" + fmtN(s.puja, 0)]);
+    if (s.cambio) out.push(["cambio", "CAMBIO"]);
+    if (s.dealer) out.push(["dealer", "CONV" + (typeof s.dealer === "string" ? " " + s.dealer : "")]);
+    if (s.objetivo) out.push(["objetivo", "OBJETIVO"]);
+    if (s.dup) out.push(["dup", "×" + s.dup]);
+    if (s.protegida) out.push(["protegida", "PROT"]);
+    return out;
   }
-  function renderArtCard(c, small, onOpen, svg) {
+  function renderArtCard(c, onOpen, svg) {
     const i = c.info;
     const have = c.own.length > 0;
     const serials = c.own.map((a) => "#" + a.serial).join(" ");
-    const chips = cardChips(c);
-    const face = h("div", { class: "cc-face cromo--" + (i.rarity || "common"), html: svg });
-    if (i.rarity === "epic" || i.rarity === "legendary") face.appendChild(h("div", { class: "cc-foil" }));
-    if (!have) face.appendChild(h("div", { class: "cc-falta" }, h("span", null, "FALTA")));
-    if (chips.length && !small) face.appendChild(h("div", { class: "cc-oband" }, chips));
-    else if (small && c.states.dup) face.appendChild(h("div", { class: "cc-oband" }, chip("dup", "×" + c.states.dup)));
+    const badges = cardBadges(c);
+    const frame = badges.length ? BADGE_COLORS[badges[0][0]] : null;
+    const face = h("div", { class: "cc-face cromo--" + (i.rarity || "common") + (have ? "" : " is-slot"), html: svg });
+    if (have && (i.rarity === "epic" || i.rarity === "legendary")) face.appendChild(h("div", { class: "cc-foil" }));
+    if (badges.length) face.appendChild(h("div", { class: "cc-badges" }, badges.map(([id, text]) =>
+      h("span", { class: "cc-badge", style: `--bc:${BADGE_COLORS[id]}` }, icon(id), text))));
     return h("button", {
-      class: "cc-card cc-art" + (have ? " is-owned" : " is-missing") + (small ? " is-small" : "") + (c.states.objetivo ? " is-target" : ""),
-      style: `--set:${SET_COLORS[i.set] || "#888"};--rar:${RAR_COLORS[i.rarity] || "#888"}`,
-      title: `${i.id} · ${i.name}` + (have ? ` · ${serials}/${i.print_run}` : " · falta"),
+      class: "cc-card cc-art" + (have ? " is-owned" : " is-missing") + (c.states.objetivo ? " is-target" : "") + (frame ? " has-state" : ""),
+      style: `--set:${SET_COLORS[i.set] || "#888"};--rar:${RAR_COLORS[i.rarity] || "#888"}` + (frame ? `;--frame:${frame}` : ""),
+      title: `${i.id} · ${i.name}` + (have ? ` · ${serials}/${i.print_run}` : " · falta") +
+        ` · nuestro ${have ? fmtP(c.ourValue) : "—"} · mercado ${c.market != null ? fmtN(c.market, 0) : "—"} · libro ${fmtN(c.book, 0)}`,
       onclick: () => onOpen(i.id),
     },
       face,
-      small
-        ? h("div", { class: "cc-vline" }, h("b", null, i.id), h("span", null, have ? " " + fmtN(c.ourValue, 0) : ""))
-        : valueLine(c, have),
+      h("div", { class: "cc-vline" }, h("span", null, i.id), have ? h("b", null, fmtN(c.ourValue, 0) + " P") : null),
+      h("div", { class: "cc-cname" }, i.name),
     );
   }
   function renderCard(c, small, onOpen) {
     const i = c.info;
-    const svg = artOf(i.id);
-    if (svg) return renderArtCard(c, small, onOpen, svg);
+    const svg = c.own.length ? artOf(i.id) : slotHtml(i);
+    if (svg) return renderArtCard(c, onOpen, svg);
     const have = c.own.length > 0;
     const setColor = SET_COLORS[i.set] || "#888";
     const serials = c.own.map((a) => "#" + a.serial).join(" ");
@@ -326,7 +352,7 @@
         h("div", { class: "cc-kv" }, h("span", null, "Valor del set"), h("b", null, fmtP(setVal))),
         h("div", { class: "cc-kv" }, h("span", null, "Afinidad"), h("b", null, aff != null ? "×" + fmtN(aff, 1) : "—")),
         page.master ? h("div", { class: "cc-kv" }, h("span", null, "Maestro"), h("b", null, "sí")) : null);
-      const grid = h("div", { class: "cc-grid" + (pageCards.some((c) => artOf(c.id)) ? " has-art" : "") });
+      const grid = h("div", { class: "cc-grid" + ((CROMO.mod || pageCards.some((c) => artOf(c.id))) ? " has-art" : "") });
       let shown = 0;
       for (const c of pageCards) {
         const cm = m.cards[c.id];
@@ -496,7 +522,7 @@
     if (!api) throw new Error("api.js no cargado");
     const [catalog, me, myOffers, status, decisions] = await Promise.all([
       safe(() => api.rec("catalog")), safe(() => api.rec("me")), safe(() => api.rec("my_offers")),
-      safe(() => api.status()), safe(() => api.decisions()), loadArt(),
+      safe(() => api.status()), safe(() => api.decisions()), loadArt(), loadCromo(),
     ]);
     if (!catalog.ok) throw catalog.err;
     const now = Date.now();
