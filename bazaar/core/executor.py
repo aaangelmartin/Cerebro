@@ -134,6 +134,19 @@ def _call(action: Action, gw):
     raise ValueError(f"unknown action kind {k!r}")
 
 
+def _blocked_maker(fresh: dict | None, sit, ctx) -> str | None:
+    """The maker of the offer just re-read, when control.json "blocked_teams" forbids dealing with that team."""
+    from .arbiter import blocked_teams
+    blocked = blocked_teams(ctx, sit)
+    if not blocked or not isinstance(fresh, dict):
+        return None
+    for k in ("maker", "from", "team"):
+        who = str(fresh.get(k) or "").strip().lower()
+        if who in blocked:
+            return who
+    return None
+
+
 def _realised(action: Action) -> dict:
     """What a successful send commits us to (read by ledger.spend_last_hour / deals_with)."""
     if action.kind != "accept_offer":
@@ -173,6 +186,10 @@ def _execute(action: Action, gw, sit, ctx, tick: int) -> Outcome:
             v = rails.verify_fresh(action, fresh)
             if not v.ok:
                 return Outcome(action.id, tick, "vetoed", {"rail": v.rail, "detail": v.detail})
+            who = _blocked_maker(fresh, sit, ctx) if action.kind == "accept_offer" else None
+            if who:                                              # a public bid names its maker only on the re-read
+                return Outcome(action.id, tick, "vetoed", {"rail": "blocked_team",
+                                                           "detail": f"team {who} is in control.blocked_teams"})
         method, path, body, bk = _call(action, gw)
         if bk == "broker":
             bk = (action.params or {}).get("broker_key") or broker_key()

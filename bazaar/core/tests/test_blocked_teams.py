@@ -45,6 +45,21 @@ class BlockedTeams(unittest.TestCase):
         self.assertEqual(chosen, [])
         self.assertEqual(len(dropped), 2)
 
+    def test_accept_and_offer_inside_a_blocked_teams_thread_are_dropped(self):
+        sit = _sit([{"id": 7, "with": "t06", "status": "open"}])
+        acc = Action(kind="accept_offer", domain="market", params={"offer": 3, "thread": 7, "expect": {"thread": 7}})
+        post = Action(kind="post_offer", domain="market", params={"thread": 7, "give": {"assets": [5]}, "want": {"cash": 9}})
+        chosen, dropped = arbiter.select([acc, post], sit, {}, ctx=_ctx(["t06"]))
+        self.assertEqual(chosen, [])
+        self.assertEqual(len(dropped), 2)
+
+    def test_swap_addressed_to_a_blocked_team_is_dropped(self):
+        swap = Action(kind="post_offer", domain="market",
+                      params={"venue": "rastro", "to": "t06", "give": {"cash": 0, "assets": [5]},
+                              "want": {"cash": 0, "assets": [], "types": ["RET-05"]}})
+        chosen, _ = arbiter.select([swap], _sit(), {}, ctx=_ctx(["t06"]))
+        self.assertEqual(chosen, [])
+
     def test_no_list_changes_nothing_and_duels_are_never_blocked(self):
         chosen, _ = arbiter.select([_accept("t06")], _sit(), {}, ctx=_ctx([]))
         self.assertEqual(len(chosen), 1)
