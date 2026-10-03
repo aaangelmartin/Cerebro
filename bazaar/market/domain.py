@@ -47,6 +47,7 @@ POSTS_PER_TICK = 3              # new sells + bids + swaps per tick (team cap 12
 CANCELS_PER_TICK = 2
 LIST_EXPIRES = 60               # ticks
 BRAIN_REPOST_TICKS = 120        # an identical successful brain post is not repeated within this many ticks
+BRAIN_ACCEPT_MIN_GAIN = 1.0          # an accept the brain planned only has to create value (rails re-check)
 ASK_MARKUP_MAX = 1.6            # never ask more than this x book
 REPOST_COOLDOWN_TICKS = 60      # the same card is not offered to the same team again within this many ticks
 LLM_EVERY = 6                   # ticks between Claude calls when only listings are on the table
@@ -197,6 +198,8 @@ class MarketDomain:
         # an identical successful post is not repeated for BRAIN_REPOST_TICKS
         refused, recent_ok = set(), set()
         for r in post_history():
+            if r.get("kind") == "accept":
+                continue
             k = post_key(r)
             if r.get("status") in ("vetoed", "refused"):
                 refused.add(k)
@@ -218,7 +221,13 @@ class MarketDomain:
                 continue
             a = copies[0]
             venue = p.get("venue") or "rastro"
-            if venue in {str(v) for v in control.get("avoid_post_venues") or []}:
+            avoid_venues = {str(v) for v in control.get("avoid_post_venues") or []}
+            note = ""
+            if venue == self._my_venue(me):          # the game refuses offers on our own venue (self_venue)
+                ally = next((v for v in sorted(proto.ALLIED_VENUES) if v not in avoid_venues), None)
+                note = f"{venue} is our own venue (we cannot trade there): rerouted to {ally or 'rastro'}"
+                venue = ally or "rastro"
+            if venue in avoid_venues:
                 venue = "rastro"
             params = {"venue": venue, "give": {"assets": [a["id"]]},
                       "want": {"cards": [p["want_card"]]} if p.get("want_card") else {"cash": int(p["want_cash"])},
@@ -228,7 +237,8 @@ class MarketDomain:
             act = Action(kind="post_offer", params=params, domain=self.name, source="council",
                          reason="the brain: " + (p.get("why") or f"targeted offer for {p['give']}"),
                          expected={"kind": "swap" if p.get("want_card") else "ask", "points": 0.0}, priority=0.0)
-            self._sent[act.id] = {"kind": "post_offer", "team": p.get("to"), "brain": {**p, "venue": venue},
+            self._sent[act.id] = {"kind": "post_offer", "team": p.get("to"),
+                                  "brain": {**p, "venue": venue, "note": note},
                                   "params": {"expires_in_ticks": params["expires_in_ticks"]}}
             self._brain_posted.add(key)
             out.append(act)
@@ -247,6 +257,9 @@ class MarketDomain:
             actions = [a for a in actions if a.kind != "accept_offer"]   # one accept per tick: the brain's
             a = self._act_accept(c, "council", f"the brain and the council approved accepting #{oid} "
                                               f"(gain {c.gain} P at our values)")
+            a.priority = 99.0                            # the plan's accept takes this tick's accept slot
+            if a.id in self._sent:
+                self._sent[a.id]["brain_accept"] = oid
             return [a] + actions
         return actions
 
@@ -285,6 +298,8 @@ class MarketDomain:
         meta = self._sent.pop(outcome.action_id, None)
         if meta and meta.get("brain"):
             self._record_brain_post(meta["brain"], outcome)
+        if meta and meta.get("brain_accept") is not None:
+            self._record_brain_accept(meta["brain_accept"], outcome)
         if meta and meta["kind"] == "accept_offer" and outcome.status in ("sent", "deal") and meta.get("team"):
             self.rivals.record_deal(meta["team"])
         if not meta or outcome.status not in ("sent", "deal"):
@@ -306,6 +321,25 @@ class MarketDomain:
         elif meta["kind"] == "cancel_offer" and meta.get("offer") is not None:
             self._cancelled.add(str(meta["offer"]))
 
+    def _note_brain_accepts(self, notes: dict, tick: int) -> None:
+        """Log (once per offer and reason) why an accept from the brain's plan cannot go out, so it re-plans."""
+        from bazaar.brain.strategy import record_post
+        seen = self.__dict__.setdefault("_accept_noted", {})
+        for oid, why in notes.items():
+            if seen.get(oid) == why:
+                continue
+            seen[oid] = why
+            record_post({"kind": "accept", "tick": tick, "offer_id": oid, "status": "skipped", "detail": why})
+
+    def _record_brain_accept(self, oid, outcome: Outcome) -> None:
+        from bazaar.brain.strategy import record_post
+        resp = outcome.response if isinstance(outcome.response, dict) else {}
+        st = outcome.status
+        status = "sent" if st in ("sent", "deal") else st if st in ("vetoed", "refused") else "error"
+        record_post({"kind": "accept", "tick": outcome.tick, "offer_id": oid, "status": status,
+                     "rail": resp.get("rail"),
+                     "detail": resp.get("detail") or resp.get("message") or resp.get("error")})
+
     def _record_brain_post(self, p: dict, outcome: Outcome) -> None:
         """Log the outcome of a brain post (brain_posts.jsonl) so the brain re-plans what was refused."""
         from bazaar.brain.strategy import post_key, record_post
@@ -317,7 +351,7 @@ class MarketDomain:
         record_post({"tick": outcome.tick, "give": p.get("give"), "want_card": p.get("want_card"),
                      "want_cash": p.get("want_cash"), "venue": p.get("venue") or "rastro", "to": p.get("to"),
                      "status": status, "rail": resp.get("rail"),
-                     "detail": resp.get("detail") or resp.get("message") or resp.get("error"),
+                     "detail": resp.get("detail") or resp.get("message") or resp.get("error") or p.get("note"),
                      "offer_id": oid, "why": p.get("why")})
         if status != "sent":
             self._brain_posted.discard(post_key(p))      # the refused-key set (from the log) now blocks it
@@ -475,22 +509,43 @@ class MarketDomain:
         except Exception:  # noqa: BLE001
             brain_ok, _exc, _min_gain = set(), None, 5.0
         book_offers = [o for _v, offers in books for o in offers or []]
-        for o in addressed + [o for o in book_offers if o.get("id") in brain_ok and o.get("id") not in
-                              {x.get("id") for x in addressed}]:
-            if o.get("id") not in brain_ok or o.get("status", "open") != "open" or o.get("maker") == my_id:
+        cand_offers = addressed + [o for o in book_offers if o.get("id") in brain_ok and o.get("id") not in
+                                   {x.get("id") for x in addressed}]
+        accept_notes: dict[int, str] = {}                # why a plan accept is not going out this tick
+        for oid in brain_ok - {o.get("id") for o in cand_offers}:
+            accept_notes[oid] = "not open any more (or not visible in a book we read)"
+        for o in cand_offers:
+            if o.get("id") not in brain_ok:
                 continue
+            if o.get("status", "open") != "open" or o.get("maker") == my_id:
+                accept_notes[o.get("id")] = "not open any more" if o.get("maker") != my_id else "it is our own offer"
+                continue
+            used = {"exc": False}
 
-            def can_give_exc(a: dict, left: dict, _o=o) -> bool:
+            def can_give_exc(a: dict, left: dict, _o=o, _used=used) -> bool:
                 if can_give(a, left):
                     return True
                 ref = a.get("ref")
-                return (a.get("id") not in reserved and str(a.get("id")) not in protected and str(ref) not in protected
-                        and _exc is not None and _exc(sit, ref, _o.get("id")))
+                ok = (a.get("id") not in reserved and str(a.get("id")) not in protected and str(ref) not in protected
+                      and _exc is not None and _exc(sit, ref, _o.get("id")))
+                _used["exc"] = _used["exc"] or bool(ok)
+                return ok
             vid = o.get("venue") or "rastro"
             c = self._evaluate(o, by_vid.get(vid) or {"venue": vid}, values, counts, can_give_exc)
-            if c is not None and c.gain >= _min_gain and c.cash_out + c.fee - c.cash_in <= spend_cap:
+            # the last-copy exception needs a clear gain; a plain accept only has to create value (rails re-check)
+            need = _min_gain if used["exc"] else BRAIN_ACCEPT_MIN_GAIN
+            if c is None:
+                accept_notes[o.get("id")] = "no copy we may give (last copy, reserved or protected) or not priceable"
+            elif c.gain < need:
+                accept_notes[o.get("id")] = (f"gain {c.gain} P after fees is below the minimum {need} P"
+                                             + (" for giving a last copy" if used["exc"] else ""))
+            elif c.cash_out + c.fee - c.cash_in > spend_cap:
+                accept_notes[o.get("id")] = f"needs {c.cash_out + c.fee - c.cash_in} P, above the spend cap {spend_cap} P"
+            else:
                 c.addressed = True
                 brain_accepts.append(c)
+        brain_accepts.sort(key=lambda c: -c.gain)        # one accept per tick: best first, the rest next tick
+        self._note_brain_accepts(accept_notes, tick)
         seen: set = {c.offer.get("id") for c in brain_accepts}
         for venue, offers, is_addr in sources:
             for o in offers:

@@ -304,6 +304,12 @@ def post_outcomes_text(live: Path | None = None, n: int = 10) -> str:
     rows = post_history(live, 200)[-n:]
     lines = []
     for r in rows:
+        if r.get("kind") == "accept":
+            st = r.get("status")
+            why = (f" by {r.get('rail')}: {r.get('detail')}" if st == "vetoed"
+                   else (f": {r.get('detail')}" if r.get("detail") else ""))
+            lines.append(f"- t{r.get('tick')}: accept #{r.get('offer_id')} -> {st}{why}")
+            continue
         ask = f"card {r.get('want_card')}" if r.get("want_card") else f"{r.get('want_cash')} P"
         where = f"{r.get('venue') or 'rastro'}" + (f" to {r['to']}" if r.get("to") else "")
         st = r.get("status")
