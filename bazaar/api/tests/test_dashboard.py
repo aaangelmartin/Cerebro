@@ -85,6 +85,16 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(self.raw("/static/nope.js")[0], 404)
         self.assertEqual(self.raw("/static/..%2Fserver.py")[0], 404)
 
+    def test_cards_json(self):
+        code, ctype, body = self.raw("/static/cards.json")
+        if (server.DASHBOARD_DIR / "cards.json").exists():
+            self.assertEqual((code, ctype.split(";")[0]), (200, "application/json"))
+            self.assertIsInstance(json.loads(body), dict)
+        else:
+            self.assertEqual(code, 404)
+        self.assertEqual(self.raw("/static/../cards.json")[0], 404)
+        self.assertEqual(self.raw("/static/cards.jsonx")[0], 404)
+
     def test_api_prefix_alias(self):
         a = json.loads(self.raw("/api/status")[2])
         self.assertEqual(a["tick"], 300)

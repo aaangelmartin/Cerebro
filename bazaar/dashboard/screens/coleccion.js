@@ -221,8 +221,52 @@
     if (s.dup) out.push(chip("dup", "×" + s.dup));
     return out;
   }
+  // Official artwork: dashboard/cards.json (ref -> inline SVG), written by tools/fetch_cards.py from
+  // bazaar.causaprima.ai. Our own trusted file, so it goes in with innerHTML.
+  const ART = { map: null, at: 0 };
+  async function loadArt() {
+    if (ART.map && Date.now() - ART.at < 10 * 60 * 1000) return ART.map;
+    try {
+      const r = await fetch("static/cards.json", { cache: "no-store" });
+      if (r.ok) { const j = await r.json(); if (j && typeof j === "object") { ART.map = j; ART.at = Date.now(); } }
+    } catch (e) { /* keep the fallback design */ }
+    return ART.map || {};
+  }
+  function artOf(ref) {
+    const svg = ART.map && ART.map[ref];
+    return typeof svg === "string" && svg.startsWith("<svg") ? svg : null;
+  }
+  function valueLine(c, have) {
+    return h("div", { class: "cc-vline" },
+      h("b", null, have ? fmtP(c.ourValue) : "—"),
+      h("span", null, " · m " + (c.market != null ? fmtN(c.market, 0) : "—") + " · l " + fmtN(c.book, 0)));
+  }
+  function renderArtCard(c, small, onOpen, svg) {
+    const i = c.info;
+    const have = c.own.length > 0;
+    const serials = c.own.map((a) => "#" + a.serial).join(" ");
+    const chips = cardChips(c);
+    const face = h("div", { class: "cc-face cromo--" + (i.rarity || "common"), html: svg });
+    if (i.rarity === "epic" || i.rarity === "legendary") face.appendChild(h("div", { class: "cc-foil" }));
+    if (!have) face.appendChild(h("div", { class: "cc-falta" }, h("span", null, "FALTA")));
+    if (chips.length && !small) face.appendChild(h("div", { class: "cc-oband" }, chips));
+    else if (small && c.states.dup) face.appendChild(h("div", { class: "cc-oband" }, chip("dup", "×" + c.states.dup)));
+    return h("button", {
+      class: "cc-card cc-art" + (have ? " is-owned" : " is-missing") + (small ? " is-small" : "") + (c.states.objetivo ? " is-target" : ""),
+      style: `--set:${SET_COLORS[i.set] || "#888"};--rar:${RAR_COLORS[i.rarity] || "#888"}`,
+      title: `${i.id} · ${i.name}` + (have ? ` · ${serials}/${i.print_run}` : " · falta"),
+      onclick: () => onOpen(i.id),
+    },
+      face,
+      small
+        ? h("div", { class: "cc-vline" }, h("b", null, i.id), h("span", null, have ? " " + fmtN(c.ourValue, 0) : ""))
+        : valueLine(c, have),
+    );
+  }
   function renderCard(c, small, onOpen) {
     const i = c.info;
+    const svg = artOf(i.id);
+    if (svg) return renderArtCard(c, small, onOpen, svg);
     const have = c.own.length > 0;
     const setColor = SET_COLORS[i.set] || "#888";
     const serials = c.own.map((a) => "#" + a.serial).join(" ");
@@ -282,7 +326,7 @@
         h("div", { class: "cc-kv" }, h("span", null, "Valor del set"), h("b", null, fmtP(setVal))),
         h("div", { class: "cc-kv" }, h("span", null, "Afinidad"), h("b", null, aff != null ? "×" + fmtN(aff, 1) : "—")),
         page.master ? h("div", { class: "cc-kv" }, h("span", null, "Maestro"), h("b", null, "sí")) : null);
-      const grid = h("div", { class: "cc-grid" });
+      const grid = h("div", { class: "cc-grid" + (pageCards.some((c) => artOf(c.id)) ? " has-art" : "") });
       let shown = 0;
       for (const c of pageCards) {
         const cm = m.cards[c.id];
@@ -298,7 +342,7 @@
           if (!matchFilter(m.cards[c.id], f)) n.classList.add("is-dim"); else shown++;
           return n;
         })));
-      const row = h("section", { class: "cc-set", style: `--set:${color}` }, side, grid, ex);
+      const row = h("section", { class: "cc-set" + (grid.classList.contains("has-art") ? " has-art" : ""), style: `--set:${color}` }, side, grid, ex);
       if (f.states.size && !shown) row.classList.add("is-hidden");
       wrap.appendChild(row);
     }
@@ -452,7 +496,7 @@
     if (!api) throw new Error("api.js no cargado");
     const [catalog, me, myOffers, status, decisions] = await Promise.all([
       safe(() => api.rec("catalog")), safe(() => api.rec("me")), safe(() => api.rec("my_offers")),
-      safe(() => api.status()), safe(() => api.decisions()),
+      safe(() => api.status()), safe(() => api.decisions()), loadArt(),
     ]);
     if (!catalog.ok) throw catalog.err;
     const now = Date.now();

@@ -136,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self._cors()
         self.end_headers()
         self.wfile.write(body)
@@ -149,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.end_headers()
         self.wfile.write(body)
 
@@ -174,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html") and ("text/html" in (self.headers.get("Accept") or "")
                                              or path == "/index.html"):
             return self._send_file(self.dashboard / "index.html", STATIC_TYPES["html"])
+        if path == "/static/cards.json":                         # official card art (tools/fetch_cards.py)
+            return self._send_file(self.dashboard / "cards.json", "application/json; charset=utf-8")
         m = STATIC_RX.fullmatch(path)
         if m:
             return self._send_file(self.dashboard / m.group(1), STATIC_TYPES[m.group(2)])
