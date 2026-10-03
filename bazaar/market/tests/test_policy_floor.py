@@ -3,7 +3,7 @@
 import unittest
 
 from bazaar.brain.strategy import sanitize
-from bazaar.market.domain import REPOST_COOLDOWN_TICKS, MarketDomain, PostCand
+from bazaar.market.domain import REPOST_COOLDOWN_TICKS, MarketDomain, PostCand, capped_ask
 
 
 def cand(ask=24, max_ask=30, fans=("t03",), target="t03", ref="SAL-08", aid=540):
@@ -32,7 +32,8 @@ class PolicyFloorTest(unittest.TestCase):
 
     def test_same_card_same_team_waits_for_the_cooldown(self):
         self.assertEqual(self.emit(cand(), state(356))[0].params.get("to"), "t03")
-        self.assertEqual(self.emit(cand(), state(365)), [])                       # 9 ticks later: skipped
+        soon = self.emit(cand(), state(365))                                      # 9 ticks later: not to t03 again
+        self.assertIsNone(soon[0].params.get("to"))                               # listed publicly instead
         again = self.emit(cand(), state(356 + REPOST_COOLDOWN_TICKS))
         self.assertEqual(again[0].params.get("to"), "t03")
 
@@ -45,6 +46,26 @@ class PolicyFloorTest(unittest.TestCase):
         p = sanitize({"min_asks": {"sal-08": 27, "bad": 5}})
         self.assertEqual(p["min_asks"], {"SAL-08": 27})
         self.assertNotIn("min_asks", sanitize({}))
+
+
+class CappedAskTest(unittest.TestCase):
+    """The code poster does not ask three times our value (outbox request code-7285742c)."""
+
+    def test_spare_is_capped_near_our_value_when_the_market_is_cheap(self):
+        # LAV-05 spare: worth 4 to us, a fan's bid level pushed the ask to 13, others sell it at 6
+        self.assertEqual(capped_ask(13, 4.0, 6, 6, 10), 6)
+
+    def test_market_ask_above_value_plus_two_is_matched(self):
+        self.assertEqual(capped_ask(13, 4.0, 6, 9, 10), 9)
+
+    def test_book_stands_in_when_no_ask_is_live(self):
+        self.assertEqual(capped_ask(13, 4.0, 6, None, 10), 10)
+
+    def test_never_below_our_floor(self):
+        self.assertEqual(capped_ask(30, 22.5, 25, 20, 25), 25)
+
+    def test_an_ask_already_under_the_cap_is_kept(self):
+        self.assertEqual(capped_ask(24, 22.5, 24, 30, 25), 24)
 
 
 if __name__ == "__main__":

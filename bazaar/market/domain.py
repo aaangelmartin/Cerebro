@@ -50,6 +50,7 @@ LIST_EXPIRES = 60               # ticks
 BRAIN_REPOST_TICKS = 120        # an identical successful brain post is not repeated within this many ticks
 BRAIN_ACCEPT_MIN_GAIN = 1.0          # an accept the brain planned only has to create value (rails re-check)
 ASK_MARKUP_MAX = 1.6            # never ask more than this x book
+ASK_CAP_OVER_VALUE_P = 2.0      # default ask <= max(our value + this, the cheapest live ask of the card)
 REPOST_COOLDOWN_TICKS = 60      # the same card is not offered to the same team again within this many ticks
 LLM_EVERY = 6                   # ticks between Claude calls when only listings are on the table
 MIN_LLM_S = 3.0
@@ -117,6 +118,14 @@ ASK_GAIN_P, ASK_GAIN_FRAC = 1.5, 0.05      # a sell we post: value + max(1.5 P, 
 
 def ask_gain(value: float) -> float:
     return max(ASK_GAIN_P, ASK_GAIN_FRAC * value)
+
+
+def capped_ask(ask: int, value: float, min_ask: int, market: float | None, book: float) -> int:
+    """The code poster's default ask, kept near what the card is worth to us and to the market: at most
+    max(value + ASK_CAP_OVER_VALUE_P, cheapest other live ask of the card, or the usual ask of its rarity,
+    or book when no ask is live), and never below our floor."""
+    cap = max(value + ASK_CAP_OVER_VALUE_P, float(market) if market else float(book))
+    return int(max(min_ask, min(ask, math.floor(cap))))
 
 
 def _market_asks(books, my_id) -> tuple[dict, dict]:
@@ -804,6 +813,8 @@ class MarketDomain:
                 ask = int(min(max_ask, max(min_ask, round(target_price))))
                 if min_ask > max_ask:
                     continue
+                # a spare worth 4 P to us is not asked at 13 P because a fan once bid high: stay near the market
+                ask = capped_ask(ask, value, min_ask, mkt, book)
                 seen_refs.add(ref)
                 posts.append(PostCand(id=f"p{len(posts) + 1}", asset=a, value=round(value, 2), min_ask=min_ask,
                                       max_ask=max_ask, ask=ask, target=fans[0] if fans else None, fans=fans[:3],
@@ -1015,9 +1026,8 @@ class MarketDomain:
                 tick_now = _int(state.get("tick"), 0)
                 if to and self._targeted_recently(ref, to, tick_now):
                     # never the same card to the same team again within REPOST_COOLDOWN_TICKS: try another fan
+                    # (no fan left: list it publicly instead, where anyone who collects the set can take it)
                     to = next((t for t in c.fans if not self._targeted_recently(ref, t, tick_now)), None)
-                    if to is None:
-                        continue
                 if to:
                     self._note_targeted(ref, to, tick_now)
                 assets.add(c.asset["id"])
