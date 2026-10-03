@@ -810,6 +810,12 @@ def workshop(record: Path, live: Path, me: dict, my_offers: list[dict]) -> dict:
     return W.facts({"me": me, "my_offers": my_offers, "threads": []}, {}, cheapest, Path(live))
 
 
+def news(live: Path, now: float) -> dict:
+    """Game news (Boletín, Radio Rastro, El Tablón) with what was confirmed and how reliable each source is."""
+    from bazaar.intel.news import brain_block
+    return brain_block(live, since=now - 1800)
+
+
 def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: dict, venue_list: list[dict],
               my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict], status: dict,
               spend: dict, now: float | None = None, hours: float = 2.0) -> dict[str, Any]:
@@ -835,6 +841,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("venue_listing_mix_today", lambda: venue_mix(feed, venue_list, our_venue)),
                      ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
                      ("workshop", lambda: workshop(record, live, me, my_offers)),
+                     ("news", lambda: news(live, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()

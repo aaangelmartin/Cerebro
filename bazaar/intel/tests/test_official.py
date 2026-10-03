@@ -113,8 +113,9 @@ class OfficialWatcherTest(unittest.TestCase):
         w["/api/catalog"] = {"sets": [w["/api/catalog"]["sets"][0], dict(w["/api/catalog"]["sets"][1], released=True)],
                              "rarities": w["/api/catalog"]["rarities"]}
         kinds = {e["kind"] for e in off.run_once(self.dir, fetcher(FakeServer(w)))}
-        self.assertTrue({"rules_changed", "schedule_changed", "new_level", "limits_changed", "news",
+        self.assertTrue({"rules_changed", "schedule_changed", "new_level", "limits_changed",
                          "venue_changed", "set_released"} <= kinds, kinds)
+        self.assertNotIn("news", kinds)          # news belongs to bazaar.intel.news (the listener)
         lines = (self.dir / off.EVENTS_FILE).read_text().splitlines()
         rules = [json.loads(l) for l in lines if json.loads(l)["kind"] == "rules_changed"][0]
         self.assertIn("Negotiating 40", rules["diff_excerpt"])

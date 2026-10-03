@@ -255,6 +255,19 @@ def strategy_view(live: Path, now: float) -> dict:
             "duel_claude_mode": plan.get("duel_claude_mode")}
 
 
+def news_view(live: Path) -> dict:
+    """Counts for the dashboard: game news captured, still open, worth acting on, and the last one."""
+    try:
+        from bazaar.intel import news as _news
+        v = _news.view(live)
+        last = v["items"][0] if v["items"] else None
+        return {"items": len(v["items"]), "open": v["open"], "actionable": v["actionable"],
+                "last": {k: last.get(k) for k in ("id", "ts", "source_name", "title", "status")} if last else None,
+                "sources": {k: s.get("reliability") for k, s in v["sources"].items()}}
+    except Exception:  # noqa: BLE001 - the overview never fails on an optional block
+        return {"items": 0, "open": 0, "actionable": 0, "last": None, "sources": {}}
+
+
 def recorder_view(live: Path, now: float) -> dict:
     """Is everything being recorded? Heartbeat, lane outages, feed gaps (for the sidebar)."""
     st = _read_json(live / "recorder_status.json", {}) or {}
@@ -346,6 +359,7 @@ def build(live: Path, lab: Path, stop_file: Path, since: int | None = None, now:
         "processes": processes(live, lab, status, broker, now, gw),
         "recorder": recorder_view(live, now),
         "strategy": strategy_view(live, now),
+        "news": news_view(live),
         "threads": threads,
         "activity": rows,
         "last_id": last_id,

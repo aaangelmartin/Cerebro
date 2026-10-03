@@ -5,6 +5,7 @@
 GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
 GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /broker/sessions  GET /broker/session/<run>?since_tick=&limit=  (Market Test sessions, per-tick rows)
+GET  /news?since=<epoch>   (game news with status confirmed/false/open and each source's reliability)
 GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
 GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
 GET  /brain/budget (intensity, cost table, event budget)  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
@@ -294,6 +295,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(self.dashboard / "screens" / m.group(1), STATIC_TYPES[m.group(2)])
         if path.startswith("/brain/"):
             return self._get_brain(path, q)
+        if path == "/news":                                      # Radio Rastro listener (bazaar.intel.news)
+            from ..intel import news as _news
+            try:
+                since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else 0.0
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "bad_request", "message": "since must be a number"})
+            return self._send(200, _news.view(self.live, since=since))
         if path == "/outbox":
             from ..outbox import Outbox
             try:

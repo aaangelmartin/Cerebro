@@ -36,6 +36,7 @@ log = logging.getLogger("bazaar.official")
 BASE = "https://bazaar.causaprima.ai"
 KIT_PATH = "/bazaar-kit.zip"
 EVERY_S = 600                     # one run every 10 minutes
+NEWS_EVERY_S = 15                 # the news listener steps this often between runs
 MIN_GAP_S = 1.0                   # at most one request per second
 TIMEOUT_S = 20
 USER_AGENT = "team10-bazaar-official-watcher/1.0 (read-only)"
@@ -282,10 +283,9 @@ def diff_source(name: str, old: dict, new: dict) -> list[dict]:
             if old.get(k) != new.get(k):
                 evs.append(_ev("clock_state", name, f"Clock {k}: {old.get(k)} → {new.get(k)}"))
     elif name == "news":
-        a, _, c = _keyed_changes(old.get("news") or {}, new.get("news") or {})
-        for k in a + c:
-            n = new["news"][k]
-            evs.append(_ev("news", name, f"News ({n['source']}): {n['headline']}", n.get("body") or ""))
+        # news items are captured, structured and reported by bazaar.intel.news (the Radio Rastro listener),
+        # which only wakes the brain for the ones worth acting on: nothing to report from here
+        return evs
     elif name == "venues":
         a, r, c = _keyed_changes(old.get("venues") or {}, new.get("venues") or {})
         for k in a:
@@ -504,6 +504,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     from bazaar import config
     status_file = config.LIVE / "official_status.json"
+    listener = None
     while True:
         t0 = time.time()
         try:
@@ -517,7 +518,23 @@ def main(argv: list[str] | None = None) -> None:
         if args.once:
             print((config.LIVE / DIGEST_FILE).read_text())
             return
-        time.sleep(max(5.0, args.every - (time.time() - t0)))
+        # between two runs, listen to the game's news (feed rows are local; /api/news at most once a minute)
+        while True:
+            try:
+                if listener is None:
+                    from bazaar.intel.news import Listener
+                    listener = Listener()
+                got = listener.step()
+                for it in got["new"]:
+                    log.info("news #%s (%s): %s", it["id"], it.get("source_name"), it["title"])
+                for it in got["changed"]:
+                    log.info("news #%s is %s: %s", it["id"], it["status"], it.get("evidence"))
+            except Exception:  # noqa: BLE001 - the watcher must keep running
+                log.exception("news step failed")
+            left = args.every - (time.time() - t0)
+            if left <= 0:
+                break
+            time.sleep(min(NEWS_EVERY_S, max(1.0, left)))
 
 
 if __name__ == "__main__":
