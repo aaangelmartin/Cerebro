@@ -32,10 +32,10 @@ from typing import Any
 from bazaar import config
 from bazaar.brain import strategy as S
 from bazaar.strategist import brainio as B
+from bazaar.strategist import budget as BG
 
 MIN_GAP_S = float(config.ENV.get("BAZAAR_STRATEGY_MIN_GAP_S", "150"))     # at most one plan this often
 TRIGGER_GAP_S = 45.0                                                      # ...or this often on a big change
-DAY_CAP_USD = float(config.ENV.get("BAZAAR_STRATEGY_DAY_CAP_USD", "40"))
 POLL_S = 5.0
 CHAT_GAP_S = 10.0               # a team chat message gets a plan this soon
 REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once an hour
@@ -47,6 +47,67 @@ CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing wa
              "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, dealer_orders, goal_buys, "
              "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
 SCORE_DROP = 0.5
+MINOR_CHANGES = ("avoid buying sets", "stop posting on venues", "duel mode", "broker policy")   # no money, no pause
+REFERENCE_KEYS = ("scoring", "levels", "dealers", "lab_lessons", "lab", "policies", "allies", "chat_summary_older")
+CORE_KEYS = ("clock", "us", "sets", "win_math", "control", "our_open_offers", "our_open_offer_ids", "goals_in_force",
+             "automatic_goals", "spares", "held_refs", "schedule_next", "leaderboard", "our_level", "bot")
+TAIL_KEYS = ("chat_recent", "recent_decisions", "plan_history", "recent_findings", "recent_refusals")   # keep the newest
+
+
+def _size(x) -> int:
+    return len(json.dumps(x, ensure_ascii=False, default=str))
+
+
+def _shrink(v, tail: bool):
+    """Half of a list or dict (the newest half for logs), or half of a long string; None when it cannot shrink."""
+    if isinstance(v, list) and len(v) > 1:
+        return v[len(v) // 2:] if tail else v[:(len(v) + 1) // 2]
+    if isinstance(v, dict) and len(v) > 1:
+        ks = list(v)
+        return {k: v[k] for k in ks[:(len(ks) + 1) // 2]}
+    if isinstance(v, str) and len(v) > 400:
+        return v[-len(v) // 2:] if tail else v[:len(v) // 2]
+    return None
+
+
+def split_picture(pic: dict, max_chars: int) -> tuple[dict, dict]:
+    """(reference, live): the rarely-changing blocks go first (prompt cache); the live part is cut to `max_chars`
+    by halving its biggest non-core block until it fits. Core facts (clock, cash, sets, win math...) are never cut."""
+    reference = {k: pic[k] for k in REFERENCE_KEYS if k in pic}
+    live = {k: v for k, v in pic.items() if k not in reference}
+    trimmed = []
+    for _ in range(60):
+        if _size(live) <= max_chars:
+            break
+        cands = []
+        for k, v in live.items():
+            if k in CORE_KEYS:
+                continue
+            if k == "research" and isinstance(v, dict):
+                cands += [(_size(x), ("research", rk)) for rk, x in v.items()]
+            else:
+                cands.append((_size(v), (k,)))
+        cands.sort(reverse=True)
+        done = False
+        for size, path in cands:
+            if size < 600:
+                break
+            holder = live if len(path) == 1 else live["research"]
+            key = path[-1]
+            small = _shrink(holder[key], key in TAIL_KEYS)
+            if small is not None:
+                if len(path) == 2:
+                    live["research"] = {**live["research"], key: small}
+                else:
+                    live[key] = small
+                trimmed.append(".".join(path))
+                done = True
+                break
+        if not done:
+            break
+    if trimmed:
+        live["picture_trimmed"] = sorted(set(trimmed))
+    return reference, live
 URGENT_SMALL_DEAL_P = 25        # behind the pace to pass the leader: small deals up to this stay allowed
 
 SYSTEM = """You are "el cerebro" (the brain), the strategist and supervisor of Team 10 in The Bazaar, a live card-trading game between 18 AI-run teams \
@@ -413,6 +474,12 @@ class Strategist:
         self.ext_seen_ts: float | None = self.now()
         self.official_seen_ts: float | None = self.now()
         self.bargain_seen_ts: float = self.now()
+        self.level: int = BG.DEFAULT_LEVEL        # brain intensity 0-100 (strategist/budget.py)
+        self.level_reason: str = "start"
+        self.level_tick: int | None = None
+        self.level_mode: str = "auto"
+        self.budget_plan: dict = {}               # the split of the event budget (budget.event_plan)
+        self.last_pic_sig: str | None = None      # what the last plan saw, to notice "nothing changed"
         self.last_review_row: dict | None = None
         self.calls = 0
         self.last_reason = ""
@@ -819,19 +886,23 @@ class Strategist:
         clock = pic.get("clock") or {}
         tick = clock.get("tick")
         self.poll_inputs(tick)
-        chat = any(e.get("kind") in ("chat", "external", "official", "bargain") for e in self.pending_events)
+        cfg = self.intensity(pic)
+        stopped = bool(clock.get("paused")) or clock.get("doors") not in (None, "open")
+        urgent_kinds = ("chat",) if stopped else BG.ALWAYS_KINDS     # a paused game only answers the team
+        chat = any(e.get("kind") in urgent_kinds for e in self.pending_events)
         now = self.now()
         since = now - self.last_call
         if chat and since >= CHAT_GAP_S:
-            kinds = sorted({e.get("kind") for e in self.pending_events
-                            if e.get("kind") in ("chat", "external", "official", "bargain")})
+            kinds = sorted({e.get("kind") for e in self.pending_events if e.get("kind") in urgent_kinds})
             return "message in the team chat" if kinds == ["chat"] else f"new input: {', '.join(kinds)}"
-        if clock.get("paused") or clock.get("doors") not in (None, "open"):
+        if stopped:
             return ""
-        reasons = [f"{len(self.pending_events)} game event(s)"] if self.pending_events else []
+        wake = [e for e in self.pending_events if e.get("kind") in cfg["wake_kinds"]]
+        reasons = [f"{len(wake)} game event(s): " + ", ".join(sorted({str(e.get('kind')) for e in wake}))] if wake else []
         score = (pic.get("us") or {}).get("score")
         score = score.get("score") if isinstance(score, dict) else score
-        if isinstance(score, (int, float)) and self.last_score is not None and self.last_score - score >= SCORE_DROP:
+        if (cfg["wake_on_score_drop"] and isinstance(score, (int, float)) and self.last_score is not None
+                and self.last_score - score >= SCORE_DROP):
             reasons.append(f"score dropped {self.last_score}->{score}")
         t_h = clock.get("t_hours")
         passed = set()
@@ -846,12 +917,71 @@ class Strategist:
         self.seen_events |= passed
         if reasons and since >= TRIGGER_GAP_S:
             return "; ".join(reasons)
-        every = int((self.plan or {}).get("next_check_in_ticks") or S.DEFAULT_CHECK)
+        every = int(cfg["interval_ticks"])           # the intensity level sets the cadence (budget.settings)
         if self.last_plan_tick is None:
             return "first plan" if since >= TRIGGER_GAP_S else ""
-        if isinstance(tick, int) and tick - self.last_plan_tick >= every and since >= MIN_GAP_S:
-            return f"every {every} ticks"
+        if isinstance(tick, int) and tick - self.last_plan_tick >= every and since >= cfg["min_gap_s"]:
+            return f"every {every} ticks (intensity {cfg['level']})"
         return ""
+
+    # ------------------------------------------------------------------ intensity (strategist/budget.py)
+    def _signals(self, pic: dict) -> dict:
+        win = pic.get("win_math") or {}
+        kinds = {e.get("kind") for e in self.pending_events}
+        research = pic.get("research") or {}
+        broker = research.get("broker") or {}
+        sig = json.dumps([pic.get("our_open_offer_ids"), pic.get("held_refs"), (pic.get("us") or {}).get("cash"),
+                          (pic.get("us") or {}).get("score"), sorted(str(k) for k in kinds)], default=str)
+        menu = win.get("menu") or win.get("actions") or []
+        cash = (pic.get("us") or {}).get("cash")
+        return {"bargain": "bargain" in kinds, "chat": bool(kinds & {"chat", "external"}),
+                "behind_pace": bool(win.get("behind_pace")),
+                "duels_live": bool((pic.get("bot") or {}).get("duels_live") or research.get("duels_live")),
+                "bench_live": bool(broker.get("active_runs") or broker.get("session")),
+                "unchanged": self.last_pic_sig is not None and sig == self.last_pic_sig and not kinds,
+                "no_feasible_action": isinstance(cash, (int, float)) and cash <= 0 and not menu,
+                "_sig": sig}
+
+    def intensity(self, pic: dict) -> dict:
+        """The settings in force now: the manual level from control.json, or the governor's (auto mode)."""
+        clock = pic.get("clock") or {}
+        tick = clock.get("tick")
+        ctl = BG.control(self.live)
+        md = BG.mode(ctl)
+        fresh = not (isinstance(tick, int) and isinstance(self.level_tick, int) and 0 <= tick - self.level_tick < 3
+                     and self.budget_plan and md == self.level_mode and not clock.get("paused")
+                     and not any(e.get("kind") in BG.ALWAYS_KINDS for e in self.pending_events))
+        if not fresh:                                         # the governor moves every 3 ticks, or on urgent input
+            return BG.settings(self.level)
+        sched = _read(self.record / "schedule.json", {}) or {}
+        days = (_read(config.SPEND_FILE, {}) or {}).get("days") or {}
+        full_clock = {**(_read(self.record / "clock.json", {}) or {}), **clock}     # with the calendar `days`
+        plan = BG.event_plan(clock=full_clock, upcoming=sched.get("upcoming") or [], days_spent=days,
+                             total=BG.budget_total(ctl), now=self.now())
+        plan["spent_by_purpose"] = {k: round(float(v), 2) for k, v in
+                                    ((days.get(plan["day"]) or {}).get("by_purpose") or {}).items()}
+        self.budget_plan = plan
+        state = {"day": plan["day"], "plan": plan, "day_cap_today": plan["plan_today"],
+                 "brain_cap_today": plan["brain_cap_today"]}
+        BG.write_state(self.live, {**BG.read_state(self.live), **state})     # the caps follow the plan at once
+        cap = BG.brain_day_cap(ctl, self.live)
+        if md == "manual":
+            level, why = BG.manual_level(ctl), "set by the team (manual)"
+        else:
+            level, why = BG.govern(clock=full_clock, spent=self.spent_today(), cap=cap,
+                                   upcoming=sched.get("upcoming") or [], signals=self._signals(pic),
+                                   tick_seconds=float(clock.get("tick_seconds") or 30.0),
+                                   m=BG.measured(self.live, self.now()), now=self.now())
+        if level != self.level or md != self.level_mode:
+            BG.log_change(self.live, level, why, md, self.now())
+        BG.write_state(self.live, {**state, "level": level, "mode": md, "reason": why,
+                                   "changed": self.now() if (level != self.level or md != self.level_mode)
+                                   else BG.read_state(self.live).get("changed"),
+                                   "tick": tick, "spent_today": round(self.spent_today(), 4), "updated": self.now()})
+        self.level, self.level_reason, self.level_mode = level, why, md
+        if isinstance(tick, int):
+            self.level_tick = tick
+        return BG.settings(level)
 
     # ------------------------------------------------------------------ plan
     def llm(self):
@@ -934,10 +1064,17 @@ class Strategist:
                 extra += "\n\nOFFICIAL SITE DIGEST (rules, kit, news; data):\n" + _wrap(od, "official")
         except OSError:
             pass
-        content = ("Why now: " + reason + events + retry + win_block + needs_block + outbox_block + extra
-                   + "\n\nPICTURE (JSON):\n"
-                   + json.dumps(slim, ensure_ascii=False, default=str) + COMPACT_RULE
-                   + "\n\nCall team_strategy once.")
+        cfg = BG.settings(self.level)
+        reference, live_pic = split_picture(slim, cfg["picture_chars"])
+        ref_text = ("REFERENCE (changes rarely; JSON):\n" + json.dumps(reference, ensure_ascii=False, default=str,
+                                                                        sort_keys=True))
+        tail = ("Why now: " + reason + events + retry + win_block + needs_block + outbox_block + extra
+                + "\n\nPICTURE (JSON):\n"
+                + json.dumps(live_pic, ensure_ascii=False, default=str) + COMPACT_RULE
+                + "\n\nCall team_strategy once.")
+        # the reference block is byte-stable between plans, so it is read from the prompt cache
+        content = [{"type": "text", "text": ref_text, "cache_control": {"type": "ephemeral"}},
+                   {"type": "text", "text": tail}]
 
         def call(text: str, label: str):
             self.calls += 1
@@ -953,7 +1090,7 @@ class Strategist:
         res = call(content, label)
         if cut(res):                               # never lose a planning cycle: ask once more for the compact plan
             self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens: asking again for a compact plan"})
-            res = call(content + CUT_RETRY, label + " (compact)")
+            res = call(content[:-1] + [{"type": "text", "text": tail + CUT_RETRY}], label + " (compact)")
             if cut(res):
                 self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens twice: not published"})
                 return None
@@ -1045,8 +1182,9 @@ class Strategist:
             return None
         if dry:
             return {"reason": reason, "picture": pic}
-        if self.spent_today() >= DAY_CAP_USD:
-            self.last_reason = f"day cap {DAY_CAP_USD} $ reached"
+        cap = BG.brain_day_cap(live=self.live)
+        if self.spent_today() >= cap:
+            self.last_reason = f"day cap {cap:g} $ reached"
             return None
         if self.now() - self.last_review >= REVIEW_EVERY_S:
             self.last_review = self.now()
@@ -1062,6 +1200,8 @@ class Strategist:
                                                        clock.get("tick"), row, self.now()))
         self.last_call = self.now()
         self.last_reason = reason
+        cfg_now = BG.settings(self.level)
+        self.last_pic_sig = self._signals(pic)["_sig"]
         got = self.ask(pic, reason)
         score = (pic.get("us") or {}).get("score")
         self.last_score = score.get("score") if isinstance(score, dict) else score
@@ -1074,7 +1214,7 @@ class Strategist:
         rejected = []
         if errors:
             rejected = errors
-            got2 = self.ask(pic, reason, fix=errors, previous=got["raw"])
+            got2 = self.ask(pic, reason, fix=errors, previous=got["raw"]) if cfg_now["max_reasks"] else None
             if got2 is not None:
                 got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
                 new = self._urgency(B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or [])), pic)
@@ -1087,6 +1227,9 @@ class Strategist:
         changes = S.big_changes(self.plan, new)
         council = None
         ok = True
+        vote = [c for c in changes if cfg_now["council_minor"] or not c.startswith(MINOR_CHANGES)]
+        if changes and not vote:
+            changes = []                       # low intensity: minor (no money, no pause) changes skip the vote
         if changes:
             with self.thinking("council vote: " + ", ".join(changes)[:60]):
                 council = S.council_vote(self.plan, new, pic, changes, llm=self.llm())
@@ -1173,7 +1316,9 @@ class Strategist:
     def heartbeat(self, extra: dict | None = None):
         st = {"updated": self.now(), "calls": self.calls, "last_call": self.last_call,
               "last_plan_tick": self.last_plan_tick, "last_reason": self.last_reason,
-              "spent_today": round(self.spent_today(), 4), "day_cap": DAY_CAP_USD,
+              "spent_today": round(self.spent_today(), 4), "day_cap": BG.brain_day_cap(live=self.live),
+              "intensity": {"level": self.level, "mode": self.level_mode, "reason": self.level_reason,
+                            "interval_ticks": BG.settings(self.level)["interval_ticks"]},
               "thinking_since": self.thinking_since, "thinking_reason": self.thinking_reason,
               "errors": self.errors[-5:], **(extra or {})}
         p = self.live / "strategist_status.json"

@@ -72,7 +72,42 @@ def anthropic_keys() -> list[tuple[str, str]]:
 
 
 KEY_CAP_USD = float(ENV.get("BAZAAR_KEY_CAP_USD", "100"))     # hard cap per key, whole weekend
-DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "100"))     # all keys together, per Madrid day
+DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "130"))     # all keys together, per Madrid day (default)
+DAY_CAP_MIN_USD, DAY_CAP_MAX_USD = 20.0, 200.0                 # control.json "day_cap" is clamped to this range
+
+
+def madrid_day(now: float | None = None) -> str:
+    """'fri' | 'sat' | 'sun' | ... for the Madrid calendar day (the key the spend file uses)."""
+    import time as _time
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        d = datetime.fromtimestamp(now or _time.time(), ZoneInfo("Europe/Madrid"))
+    except Exception:  # noqa: BLE001
+        d = datetime.fromtimestamp(now or _time.time(), timezone(timedelta(hours=2)))
+    return d.strftime("%a").lower()
+
+
+def day_cap_usd() -> float:
+    """Today's total cap, clamped to the hard limits: control.json "day_cap" when the team set one; else today's
+    share of the event budget, which the brain's governor writes to brain_budget.json; else DAY_CAP_USD."""
+    import json as _json
+
+    def _load(name):
+        try:
+            return _json.loads((LIVE / name).read_text(encoding="utf-8")) or {}
+        except (OSError, ValueError):
+            return {}
+    ctl = _load("control.json")
+    v = ctl.get("day_cap") if ctl.get("caps_day") in (None, madrid_day()) else None   # a hand-set cap lasts one day
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        st = _load("brain_budget.json")
+        v = st.get("day_cap_today") if st.get("day") == madrid_day() else None
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return DAY_CAP_USD
+    return max(DAY_CAP_MIN_USD, min(DAY_CAP_MAX_USD, float(v)))
+
+
 DEGRADE_AT = 0.97                                              # share of the day cap that steps Opus -> Sonnet
 DEGRADE_HAIKU_AT = 0.99                                        # share of the day cap that steps Sonnet -> Haiku
 # Effective day cap = min(DAY_CAP_USD, budget left at the start of the day across live keys x share of the day).

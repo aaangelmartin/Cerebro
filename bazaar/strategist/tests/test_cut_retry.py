@@ -12,7 +12,7 @@ class FakeLLM:
         self.answers, self.prompts, self.max_tokens = list(answers), [], []
 
     def ask(self, **kw):
-        self.prompts.append(kw["messages"][0]["content"])
+        self.prompts.append((lambda c: "\n".join(b.get("text", "") for b in c) if isinstance(c, list) else c)(kw["messages"][0]["content"]))
         self.max_tokens.append(kw["max_tokens"])
         return self.answers.pop(0)
 

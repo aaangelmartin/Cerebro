@@ -237,7 +237,16 @@ def llm_cap(purpose: str, live: Path | None = None) -> float | None:
     """The brain's day cap for one LLM purpose (None = no cap of its own)."""
     caps = ((_plan(live).get("budgets") or {}).get("llm_usd_per_day")) or {}
     v = caps.get(purpose)
-    return float(v) if isinstance(v, (int, float)) else None
+    if not isinstance(v, (int, float)):
+        return None
+    try:                                    # never above this purpose's share of the event budget for today
+        from bazaar.strategist.budget import purpose_cap
+        top = purpose_cap(purpose, live)
+        if top is not None:
+            return float(min(v, top))
+    except Exception:  # noqa: BLE001
+        pass
+    return float(v)
 
 
 def _post_offers(raw) -> list[dict]:

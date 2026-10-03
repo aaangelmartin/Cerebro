@@ -7,7 +7,7 @@ GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /broker/sessions  GET /broker/session/<run>?since_tick=&limit=  (Market Test sessions, per-tick rows)
 GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
 GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
-GET  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
+GET  /brain/budget (intensity, cost table, event budget)  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
 GET  /brain/external?since=   POST /brain/external {"text", "by", "team_hint"?}   (pasted WhatsApp messages)
 GET  /outbox?kind=code|promo|task&status=&since=   POST /outbox/<id> {"status", "note"}   (what the brain asks humans)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
@@ -199,11 +199,15 @@ def apply_control(live: Path, body: dict) -> dict:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):
                 raise ValueError(f"{key} must be a list")
             change[key] = body[key]
+    from ..strategist import budget as _budget          # brain intensity, caps and the event budget
+    change.update(_budget.validate_control(body))
     if not change:
         raise ValueError("nothing to change")
     with _control_lock:
         cur = load_control(live, DEFAULT_CONTROL)
         cur.update(change)
+        for k in [k for k, v in change.items() if v is None]:
+            cur.pop(k, None)                              # null clears a team override: back to automatic
         cur["updated"] = time.time()
         tmp = live / "control.tmp"
         tmp.write_text(json.dumps(cur, indent=1))
@@ -393,6 +397,19 @@ class Handler(BaseHTTPRequestHandler):
                               if r.get("id") in handled else {"brain_conclusion": None, "reply_outbox_id": None})}
                      for r in external.load(live, since=since)]
             return self._send(200, {"items": items})
+        if path == "/brain/budget":
+            from ..strategist import budget as BG
+            try:
+                from ..llm import client as _llm
+                spend = _llm.spend_today()
+            except Exception:  # noqa: BLE001
+                spend = {}
+            clock = {}
+            try:
+                clock = json.loads((config.DATA / "record" / "latest" / "clock.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            return self._send(200, BG.report(live, clock=clock, spend=spend))
         if path == "/brain/memory":
             return self._send(200, B.memory(live))
         if path == "/brain/findings":

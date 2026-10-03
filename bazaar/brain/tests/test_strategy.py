@@ -160,7 +160,7 @@ class SeqLLM(FakeLLM):
 
     def ask(self, *, purpose, system, messages, tools=None, **kw):
         if purpose == "strategy":
-            self.prompts.append(messages[0]["content"])
+            self.prompts.append((lambda c: "\n".join(b.get("text", "") for b in c) if isinstance(c, list) else c)(messages[0]["content"]))
             self.plan = self.plans.pop(0) if len(self.plans) > 1 else self.plans[0]
         return super().ask(purpose=purpose, system=system, messages=messages, tools=tools, **kw)
 
@@ -300,7 +300,8 @@ class EventDetectorTest(unittest.TestCase):
         class Spy(FakeLLM):
             def ask(self, **kw):
                 if kw["purpose"] == "strategy":
-                    self.prompt = kw["messages"][0]["content"]
+                    c = kw["messages"][0]["content"]
+                    self.prompt = "\n".join(b.get("text", "") for b in c) if isinstance(c, list) else c
                 return super().ask(**kw)
 
         self._snap()

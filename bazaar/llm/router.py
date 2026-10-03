@@ -62,7 +62,7 @@ class KeyRouter:
         self.keys = list(config.anthropic_keys() if keys is None else keys)
         self.path = Path(path or config.SPEND_FILE)
         self.key_cap = config.KEY_CAP_USD if key_cap is None else key_cap
-        self.day_cap = config.DAY_CAP_USD if day_cap is None else day_cap
+        self._day_cap = day_cap                  # None: config.day_cap_usd(), which follows control.json
         self.clock = clock
         self.shares = dict(config.DAY_SHARE if shares is None else shares)
         self.lock = threading.RLock()
@@ -153,6 +153,14 @@ class KeyRouter:
     def share(self, day: str | None = None) -> float:
         d = day or self.day()
         return float(self.shares.get(d, self.shares.get("*", 1.0)))
+
+    @property
+    def day_cap(self) -> float:
+        return config.day_cap_usd() if self._day_cap is None else self._day_cap
+
+    @day_cap.setter
+    def day_cap(self, value: float) -> None:
+        self._day_cap = value
 
     def effective_day_cap(self, reload: bool = True) -> float:
         """min(day_cap, (left on live keys + spent today) x share of today)."""
