@@ -192,7 +192,9 @@
       if (ne.at) ev = [evName(ne.action), " · ", fmtTime(ne.at, false), " ", el("span", { class: "tb-accent" }, "en " + fmtDur(ne.at - Date.now() / 1000))];
       else ev = evName(ne.action) + (ne.at_hours !== undefined ? " · h" + fmtNum(ne.at_hours, 1) : "");
     }
+    const madrid = new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     $("tb-clock").replaceChildren(
+      el("div", { class: "tb-cell tb-wall" }, el("span", { class: "tb-label" }, "Madrid"), el("span", { class: "num" }, madrid)),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Tick"), el("span", { class: "num" }, c.tick !== undefined && c.tick !== null ? String(c.tick) : "—")),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Sig."), el("span", { class: "num" }, nextTick !== null ? fmtDur(nextTick) : "—")),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Próx."), el("span", { class: "num" }, ev)),
@@ -448,7 +450,7 @@
     window.addEventListener("hashchange", route);
     route();
     tick();
-    setInterval(tick, 3000);
+    setInterval(tick, 2000);
     setInterval(() => { renderClock(); if (S.data) { const ov = $("closed-overlay"); const c = ov.querySelector(".closed-card:not(.is-paused) .closed-count"); const oa = opensAt(); if (c && oa) c.textContent = fmtDur(oa - Date.now() / 1000); } }, 1000);
   }
   window.app = { state: S, refresh: tick, route, groupOf, reloadRec: () => loadRec(true) };

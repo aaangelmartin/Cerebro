@@ -255,3 +255,4 @@ select {
 .refresh.spin svg { animation: refresh-spin .7s linear infinite; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .refresh.spin svg { animation: none; } }
+.tb-wall .num { color: var(--ink-1, #fff); font-weight: 600; }

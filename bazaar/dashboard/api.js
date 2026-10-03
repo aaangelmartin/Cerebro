@@ -4,7 +4,7 @@
   class ApiError extends Error {
     constructor(status, message, body) { super(message || ("HTTP " + status)); this.name = "ApiError"; this.status = status; this.body = body; }
   }
-  const TTL = 2000;
+  const TTL = 1500;
   const cache = new Map();   // url -> {at, promise}
 
   function qs(params) {

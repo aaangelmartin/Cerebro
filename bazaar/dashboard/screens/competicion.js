@@ -88,24 +88,22 @@
     return s;
   }
 
-  // --------- clock: game hours -> wall time (days run back to back in game hours)
+  // --------- clock: game hours -> wall time. The game clock does not follow the calendar
+  // (it pauses and resumes), so a game hour is placed relative to the live clock, where one
+  // game hour takes one real hour. Past events use their recorded timestamps instead.
   let anchors = [];
   function setClock(clock) {
-    const days = (clock && clock.days) || [];
-    let t = 0; anchors = [];
-    for (const d of days) {
-      const o = Date.parse(d.opens) / 1000, c = Date.parse(d.closes) / 1000;
-      if (!o || !c) continue;
-      anchors.push({ t0: t, o, c, day: d.day, name: d.name }); t += (c - o) / 3600;
-    }
+    const t = clock && num(clock.t_hours);
+    if (t === null || t === undefined) return;
+    const at = num(clock.recorded_at) || num(clock.ts) || Date.now() / 1000;
+    anchors = [{ t0: t, o: at, day: clock.today, name: clock.today_name }];
   }
   function tToWall(t) {
     t = num(t); if (t === null || !anchors.length) return null;
-    let a = anchors[0];
-    for (const x of anchors) if (t >= x.t0 - 1e-6) a = x;
+    const a = anchors[0];
     return a.o + (t - a.t0) * 3600;
   }
-  const evTs = (e) => tToWall(e.t) || num(e.seen_at) || num(e.ts) || 0;
+  const evTs = (e) => num(e.seen_at) || num(e.ts) || tToWall(e.t) || 0;
 
   // --------- feed events -> normalised rows {type, actor, teams[], text, value, ts, raw}
   function venueName(v) {
@@ -275,7 +273,7 @@
   function replace(node, ...kids) { if (!node) return; node.replaceChildren(...kids.flat().filter((k) => k != null)); }
 
   async function prime() {
-    const c = await rec("clock", 60000); if (c && !anchors.length) setClock(c);
+    const c = await rec("clock", 5000); if (c) setClock(c);
     await rec("venues", 15000);
   }
 
