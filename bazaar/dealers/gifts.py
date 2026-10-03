@@ -20,6 +20,10 @@ COOLDOWN_TICKS = {"abuela": 240}      # dealer -> ticks between two gifts to the
 RETRY_TICKS = 6                       # after a thread that brought nothing, wait this long before the next one
 MAX_TRIES = 4                         # threads opened only for the gift, per window: the hourly quota is for deals
 DEALERS = tuple(COOLDOWN_TICKS)
+# Events that restart a dealer's gift clock. `egg.given` is a hypothesis from Saturday night: Abuela handed us a
+# card as an easter egg at tick 1364 and two priced bids at 1426 and 1428 brought no gift although 240 ticks had
+# passed since the last `gift.given` (1181). Drop "egg.given" here if Sunday shows gifts ignore it.
+GIFT_EVENTS = ("gift.given", "egg.given")
 
 
 def _mem(mem: dict, dealer: str) -> dict:
@@ -46,7 +50,7 @@ def note_feed(mem: dict, events, team) -> list[dict]:
     """Record every `gift.given` to our team among these public events; returns the new ones."""
     new = []
     for e in events or []:
-        if not isinstance(e, dict) or e.get("type") != "gift.given":
+        if not isinstance(e, dict) or e.get("type") not in GIFT_EVENTS:
             continue
         p = e.get("payload") or {}
         dealer = str(e.get("actor") or "")
@@ -59,12 +63,12 @@ def note_feed(mem: dict, events, team) -> list[dict]:
 
 def bootstrap(mem: dict, events_path: Path, team) -> None:
     """Once per memory file: read the gifts we already got from the recorded public feed."""
-    if not team or (mem.setdefault("gifts", {}).get("_scanned") == team):
+    if not team or (mem.setdefault("gifts", {}).get("_scanned") == f"{team}:{len(GIFT_EVENTS)}"):
         return
     try:
         with open(events_path, encoding="utf-8") as f:
             for line in f:
-                if '"gift.given"' not in line:
+                if not any(f'"{t}"' in line for t in GIFT_EVENTS):
                     continue
                 try:
                     note_feed(mem, [json.loads(line)], team)
@@ -72,7 +76,7 @@ def bootstrap(mem: dict, events_path: Path, team) -> None:
                     continue
     except OSError:
         return
-    mem["gifts"]["_scanned"] = team
+    mem["gifts"]["_scanned"] = f"{team}:{len(GIFT_EVENTS)}"      # a new event kind rescans the feed once
 
 
 def next_tick(mem: dict, dealer: str) -> int:

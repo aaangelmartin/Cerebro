@@ -118,12 +118,44 @@ class FirstBid(unittest.TestCase):
         self.assertEqual([a.kind for a in out], ["thread_message"])
         self.assertTrue(0 < out[0].params["price"] <= info.limit)
 
+    def test_the_bid_goes_out_even_when_the_spend_budget_is_zero(self):
+        # live, tick 1422, thread 2189: buy MAL-06 (we hold one: a second copy is worth ~8), Abuela at 29, all
+        # spendable cash reserved for goals -> limit 0 -> closed with no bid and no gift.
+        off = {"id": 901, "maker": "abuela", "to": "t10", "give": {"types": ["card:LAT-02"]}, "want": {"cash": 29},
+               "final": False, "status": "open", "created_tick": 1422}
+        th = {"id": 2189, "kind": "persona", "with": "abuela", "topic": {"buy": {"card": "LAT-02"}}, "status": "open",
+              "created_tick": 1421, "messages": [{"tick": 1422, "sender": "abuela", "text": "hola", "offer": off}],
+              "standing_offers": [off]}
+        dom = domain(last_gift=1181)
+        dom._spend_cap = lambda *a, **k: 0                              # goals and reserve leave nothing to spend
+        out = [a for a in dom.fallback(SIT(tick=1422, cash=340, threads=[th]), CTX(1422))
+               if a.params.get("thread") == 2189]
+        self.assertEqual([a.kind for a in out], ["thread_message"])
+        self.assertGreater(out[0].params["price"], 0)
+        value = dom._prepare(SIT(tick=1422, cash=340, threads=[th]), CTX(1422)).infos[0]
+        self.assertLess(out[0].params["price"], 29)                     # never her price: nothing can close above value
+        closed = domain(last_gift=1300)                                 # window closed: no probe, the thread closes
+        closed._spend_cap = lambda *a, **k: 0
+        out = [a for a in closed.fallback(SIT(tick=1422, cash=340, threads=[th]), CTX(1422))
+               if a.params.get("thread") == 2189]
+        self.assertNotIn("thread_message", [a.kind for a in out])
+
     def test_no_flag_once_we_named_a_price_or_the_window_is_closed(self):
         dom = domain()
         th = S.thread([("d", 340, 27, S.CARD), ("u", 341, 12), ("d", 342, 26, S.CARD)])
         self.assertFalse(dom._prepare(SIT(tick=343, threads=[th]), CTX(343)).infos[0].gift_bid)
         th = S.thread([("d", 200, 27, S.CARD)])
         self.assertFalse(domain()._prepare(SIT(tick=201, threads=[th]), CTX(201)).infos[0].gift_bid)
+
+
+class EggGift(unittest.TestCase):
+    def test_an_easter_egg_card_from_the_dealer_restarts_the_clock_too(self):
+        dom = domain(last_gift=1181)
+        ev = {"id": 5, "tick": 1364, "type": "egg.given", "actor": "abuela",
+              "payload": {"team": "t10", "cards": ["MAL-06"], "cash": 0, "packs": [], "reason": "easter egg"}}
+        self.assertEqual(len(gifts.note_feed(dom.store.data, [ev], "t10")), 1)
+        self.assertFalse(gifts.window_open(dom.store.data, "abuela", 1421))
+        self.assertEqual(gifts.next_tick(dom.store.data, "abuela"), 1604)
 
 
 class Memory(unittest.TestCase):

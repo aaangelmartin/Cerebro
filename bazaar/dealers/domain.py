@@ -889,11 +889,18 @@ class DealersDomain:
             # Gift window open and we have not named a price in this thread yet: the gift comes with the dealer's
             # answer to our first priced message, so send that bid before closing or waiting.
             gift_bid = False
+            # The bid must go out even when the spend budget or the breaker leaves our limit at 0 (live, tick 1422:
+            # thread 2189 closed with no bid because cash was reserved for goals): the probe is a buy at or below
+            # our own value that real cash covers, so it loses nothing if the dealer takes it.
+            gift_limit = limit
+            if limit <= 0 and v.buying and not v.is_pack:
+                gift_limit = max(0, min(int(value_limit), plan.cash - int(config.CASH_RESERVE)))
             if (v.dealer in gifts.DEALERS and not v.ours and not v.final and v.last_theirs is not None
-                    and v.last_sender == "dealer" and limit > 0 and not cautious and not switch_hold and not kept
+                    and v.last_sender == "dealer" and gift_limit > 0 and not switch_hold and not kept
                     and not force.startswith(("we no longer buy", "dealer silent", "dealer never"))
                     and gifts.window_open(self.store.data, v.dealer, tick)):
-                if force or move.kind in ("close", "wait"):
+                if force or move.kind in ("close", "wait") or limit <= 0:
+                    limit = gift_limit
                     p_gift = haggle.guard_price(v, haggle.plan_next(v, limit, limit_est, patience) or limit, limit)
                     if p_gift is not None:
                         move, force = Move("price", p_gift, "gift window open: name our price before anything else"), ""
