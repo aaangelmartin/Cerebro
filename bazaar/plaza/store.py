@@ -163,6 +163,7 @@ class Store:
             data = self._load()
             rec = data["teams"][team]
             rec["declared"] = {**(rec.get("declared") or {}), **new, "updated": self.clock()}
+            rec["seen"] = self.clock()
             self._save(data)
             return dict(rec["declared"])
 
@@ -179,12 +180,58 @@ class Store:
             self._save(data)
             return True
 
+    def touch(self, team: str) -> None:
+        """The team's agent did something with its PIN: remember when."""
+        with self.lock:
+            data = self._load()
+            rec = (data.get("teams") or {}).get(team)
+            if rec:
+                rec["seen"] = self.clock()
+                self._save(data)
+
+    # ---- moderation (ours, behind the dashboard login)
+    def admin(self) -> dict:
+        a = self._load().get("admin") or {}
+        return {"hidden": [i for i in a.get("hidden") or [] if isinstance(i, int)],
+                "blocked": [t for t in a.get("blocked") or [] if isinstance(t, str)],
+                "enabled": a.get("enabled", True) is not False}
+
+    def admin_do(self, action: str, team: str | None = None, message: int | None = None) -> dict:
+        if action in ("block", "unblock") and not (isinstance(team, str) and TEAM_RX.fullmatch(team)):
+            raise PlazaError(400, "bad_request", "team ids look like t04")
+        if action in ("hide", "unhide") and (isinstance(message, bool) or not isinstance(message, int)):
+            raise PlazaError(400, "bad_request", "message is the id of an agent message")
+        with self.lock:
+            data = self._load()
+            a = data.setdefault("admin", {})
+            hidden, blocked = list(a.get("hidden") or []), list(a.get("blocked") or [])
+            if action == "hide" and message not in hidden:
+                hidden.append(message)
+            elif action == "unhide":
+                hidden = [i for i in hidden if i != message]
+            elif action == "block" and team not in blocked:
+                blocked.append(team)
+            elif action == "unblock":
+                blocked = [t for t in blocked if t != team]
+            elif action in ("on", "off"):
+                a["enabled"] = action == "on"
+            elif action not in ("hide", "block"):
+                raise PlazaError(400, "bad_request", "action: hide, unhide, block, unblock, on, off, refresh")
+            a["hidden"], a["blocked"] = hidden[-2000:], blocked
+            self._save(data)
+        return self.admin()
+
+    def raw(self, team: str) -> dict:
+        """A team's record for our own panel: everything but the PIN hash and its salt."""
+        rec = (self._load().get("teams") or {}).get(team) or {}
+        return {k: v for k, v in rec.items() if k not in ("pin", "salt")}
+
     # ---- reads (never the PIN, the salt or the code)
     def declared(self) -> dict[str, dict]:
         out = {}
         for team, rec in (self._load().get("teams") or {}).items():
             out[team] = {"declared": rec.get("declared"), "claimed": bool(rec.get("pin")),
-                         "verified": bool(rec.get("verified"))}
+                         "verified": bool(rec.get("verified")), "seen": rec.get("seen")}
         return out
 
     def pending_codes(self) -> dict[str, str]:
