@@ -167,14 +167,40 @@ class TeamTalk:
             refs += REF_RX.findall(str(m.get("text") or "").upper())
         return list(dict.fromkeys(refs))
 
-    def _cards(self, refs: list[str], sit, control: dict, values) -> dict:
+    def _plan_holds(self, sit, other) -> dict[str, int]:
+        """Copies per ref the plan in force keeps for something else: every copy of a `reserved_refs` card (99) and
+        one copy per targeted post to another team that is not on the board yet. A reply must not offer those."""
+        try:
+            from ..brain.strategy import post_offers, reserved_refs
+            me = _g(sit, "me") or {}
+            listed: dict[str, int] = {}
+            for o in _g(sit, "my_offers") or []:
+                if o.get("maker") == me.get("id") and o.get("status", "open") == "open":
+                    for a in ((o.get("give") or {}).get("assets") or []):
+                        ref = a.get("ref") if isinstance(a, dict) else next(
+                            (x.get("ref") for x in me.get("assets") or [] if x.get("id") == a), None)
+                        if ref:
+                            listed[ref] = listed.get(ref, 0) + 1
+            holds: dict[str, int] = {}
+            for x in post_offers(self.live):
+                if x.get("give") and x.get("to") != other:
+                    holds[x["give"]] = holds.get(x["give"], 0) + 1
+            holds = {r: n - listed.get(r, 0) for r, n in holds.items() if n - listed.get(r, 0) > 0}
+            for r in reserved_refs(self.live):
+                holds[r] = 99
+            return holds
+        except Exception:  # noqa: BLE001 - no plan, nothing held
+            return {}
+
+    def _cards(self, refs: list[str], sit, control: dict, values, other=None) -> dict:
         """For each card they mention: whether we hold it, our value, the floor we sell at, and whether the copy
-        is tied to one of our open offers."""
+        is tied to one of our open offers or kept by the brain's plan for a pending post."""
         me = _g(sit, "me") or {}
         my_id = me.get("id")
         tied = {(_g(a, "id") if isinstance(a, dict) else a)
                 for o in _g(sit, "my_offers") or [] if o.get("maker") == my_id and o.get("status", "open") == "open"
                 for a in ((o.get("give") or {}).get("assets") or [])}
+        holds = self._plan_holds(sit, other)
         floors = (control or {}).get("min_asks") or {}
         out = {}
         for ref in refs[:6]:
@@ -184,6 +210,7 @@ class TeamTalk:
                 continue
             free = [a for a in copies if a.get("id") not in tied]
             pick = (free or copies)[-1]
+            free = free[:max(0, len(free) - holds.get(ref, 0))]     # copies the plan needs are not free to offer
             value = None
             try:
                 value = float(values.asset_value(pick.get("id"))) if values is not None else None
@@ -341,7 +368,7 @@ class TeamTalk:
             new = last is not None and last.get("id") != st["answered"]
             if new and st["ours"] < MAX_OUR_MSGS:
                 refs = self._wanted(t, msgs, other)
-                cards = self._cards(refs, sit, control, values)
+                cards = self._cards(refs, sit, control, values, other)
                 ours = self._our_offers_for(sit, other)
                 offer = last.get("offer") if isinstance(last.get("offer"), dict) else None
                 their_cash = int(((offer or {}).get("give") or {}).get("cash") or 0) or None

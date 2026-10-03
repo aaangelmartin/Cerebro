@@ -65,6 +65,38 @@ class TeamTalkTest(unittest.TestCase):
         self.assertEqual(self.kinds(acts), ["thread_message"])
         self.assertIn("tied to another offer", acts[0].params["text"])
 
+    def _plan(self, **plan):
+        import json, time
+        (self.live / "strategy.json").write_text(json.dumps({"updated": time.time(), "plan": plan}))
+
+    def test_card_a_pending_brain_post_needs_is_not_offered(self):          # code-78f932d2
+        self._plan(post_offers=[{"give": "SAL-10", "want_card": "LAT-09", "want_cash": None, "to": "t15",
+                                 "venue": "rastro", "why": "swap"}])
+        acts = self.tt.actions(sit(threads=[thread(msgs=[ASK])], assets=[SAL10]), None,
+                               values=FakeValues({797: 63.0}), check=lambda a: OK)
+        self.assertEqual(self.kinds(acts), ["thread_message"])
+        self.assertIn("tied to another offer", acts[0].params["text"])
+
+    def test_reserved_ref_is_not_offered(self):
+        self._plan(reserved_refs=["SAL-10"])
+        acts = self.tt.actions(sit(threads=[thread(msgs=[ASK])], assets=[SAL10]), None,
+                               values=FakeValues({797: 63.0}), check=lambda a: OK)
+        self.assertEqual(self.kinds(acts), ["thread_message"])
+
+    def test_brain_post_to_the_same_team_or_a_second_copy_still_offers(self):
+        self._plan(post_offers=[{"give": "SAL-10", "want_card": None, "want_cash": 90, "to": "t03",
+                                 "venue": "rastro", "why": "them"}])
+        acts = self.tt.actions(sit(threads=[thread(msgs=[ASK])], assets=[SAL10]), None,
+                               values=FakeValues({797: 63.0}), check=lambda a: OK)
+        self.assertEqual(self.kinds(acts), ["thread_message", "post_offer"])
+        self._plan(post_offers=[{"give": "SAL-10", "want_card": "LAT-09", "want_cash": None, "to": "t15",
+                                 "venue": "rastro", "why": "swap"}])
+        tt = T.TeamTalk(live=self.live, use_llm=False)
+        spare = dict(SAL10, id=798)
+        acts = tt.actions(sit(threads=[thread(tid=8, msgs=[ASK])], assets=[SAL10, spare]), None,
+                          values=FakeValues({797: 63.0, 798: 63.0}), check=lambda a: OK)
+        self.assertEqual(self.kinds(acts), ["thread_message", "post_offer"])
+
     def test_rail_veto_turns_into_a_polite_decline_then_a_close(self):
         s = sit(threads=[thread(msgs=[ASK])], assets=[SAL10])
         acts = self.tt.actions(s, None, values=FakeValues({797: 63.0}), check=lambda a: NO)
