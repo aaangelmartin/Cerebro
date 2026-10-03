@@ -431,14 +431,14 @@
       root.classList.add("scr-duelos");
       root.replaceChildren();
       const titleBar = h("div", { class: "dl-title" }, h("h1", {}, "Duelos"), h("span", { class: "dl-sub dl-mono dl-muted" }, ""));
-      const grid = h("div", { class: "dl-grid" }, comp("loading") || h("div", { class: "dl-muted" }, "Cargando…"));
+      const grid = h("div", { class: "dl-grid" }, window.ui.loading());
       const segs = h("div", { class: "dl-segs" });
       const drawSegs = () => segs.replaceChildren(
         segmented([["vivo", "En vivo"], ["historial", "Historial"]], S.view, (v) => { S.view = v; drawSegs(); refreshNow(); }),
         segmented([["todos", "Todos"], ["nosotros", "Nosotros"]], S.team, (v) => { S.team = v; drawSegs(); refreshNow(); }));
       drawSegs();
       const fb = S.fb = comp("filterBar", { types: ["compra", "venta"], team: false, search: true, onChange: (st) => { S.filter = st; refreshNow(); } });
-      const side = h("aside", { class: "dl-side" }, segs, fb ? h("div", { class: "dl-fb" }, fb) : null, h("div", { class: "dl-side-body" }, comp("loading") || "Cargando…"));
+      const side = h("aside", { class: "dl-side" }, segs, fb ? h("div", { class: "dl-fb" }, fb) : null, h("div", { class: "dl-side-body" }, window.ui.loading()));
       root.append(h("div", { class: "dl-layout" }, h("section", { class: "dl-main" }, titleBar, grid), side));
       let lastData = null;
       refreshNow = () => this.refresh(root, lastData, S.params);

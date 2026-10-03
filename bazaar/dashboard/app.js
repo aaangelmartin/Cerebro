@@ -193,8 +193,8 @@
       else ev = evName(ne.action) + (ne.at_hours !== undefined ? " · h" + fmtNum(ne.at_hours, 1) : "");
     }
     const madrid = new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    $("tb-wall").replaceChildren(el("span", { class: "tb-label" }, "Madrid"), el("span", { class: "num" }, madrid));
     $("tb-clock").replaceChildren(
-      el("div", { class: "tb-cell tb-wall" }, el("span", { class: "tb-label" }, "Madrid"), el("span", { class: "num" }, madrid)),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Tick"), el("span", { class: "num" }, c.tick !== undefined && c.tick !== null ? String(c.tick) : "—")),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Sig."), el("span", { class: "num" }, nextTick !== null ? fmtDur(nextTick) : "—")),
       el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Próx."), el("span", { class: "num" }, ev)),

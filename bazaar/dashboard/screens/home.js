@@ -302,9 +302,11 @@
     return u.note || u.action;
   }
   function schedule() {
-    const map = new Map();
-    for (const r of sched.rows) for (const u of ((r.data || r).upcoming || [])) map.set(u.at_hours + "|" + u.action + "|" + (u.note || ""), u);
-    const out = [...map.values()].map((u) => ({ ...u, wall: D.tToWall(u.at_hours) })).filter((u) => u.wall);
+    // only the latest snapshot: older ones still list events that already happened
+    const last = sched.rows.length ? (sched.rows[sched.rows.length - 1].data || sched.rows[sched.rows.length - 1]) : null;
+    const nowH = last && num(last.now_hours);
+    const ups = ((last && last.upcoming) || []).filter((u) => nowH === null || num(u.at_hours) >= nowH - 1e-6);
+    const out = ups.map((u) => ({ ...u, wall: D.tToWall(u.at_hours) })).filter((u) => u.wall);
     out.sort((a, b) => a.wall - b.wall);
     return out;
   }

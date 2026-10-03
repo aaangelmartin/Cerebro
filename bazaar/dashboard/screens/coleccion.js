@@ -74,6 +74,7 @@
     if (kind === "loading" && u.loading) return u.loading();
     if (kind === "error" && u.error) return u.error(text);
     if (kind === "empty" && u.empty) return u.empty(text);
+    if (kind === "loading" && u.loading) return u.loading(text);
     return h("div", { class: "cc-state cc-" + kind }, kind === "error" ? "Error: " + ((text && text.message) || text) : (text || "Cargando…"));
   }
   const refsOf = (side) => {

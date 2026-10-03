@@ -198,7 +198,7 @@ button, input, select { font: inherit; color: inherit; }
 /* ---------- states */
 .state { display: flex; align-items: center; gap: 8px; padding: 18px 16px; color: var(--ink-3); font-size: 12.5px; }
 .state.error { color: var(--bad); }
-.spinner { width: 10px; height: 10px; border: 2px solid var(--line-2); border-top-color: var(--ink-2); border-radius: 50%; animation: spin .8s linear infinite; }
+.spinner { width: 10px; height: 10px; flex: none; border: 2px solid var(--line-2); border-top-color: var(--ink-2); border-radius: 0; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- toasts */
@@ -255,4 +255,7 @@ select {
 .refresh.spin svg { animation: refresh-spin .7s linear infinite; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .refresh.spin svg { animation: none; } }
-.tb-wall .num { color: var(--ink-1, #fff); font-weight: 600; }
+.tb-wall { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px;
+  border: 1px solid var(--line-2); background: var(--s2); white-space: nowrap; }
+.tb-wall .num { font-size: 15px; font-weight: 600; color: var(--ink); }
+.tb-stats { max-width: calc(50vw - var(--nav-w) - 70px); }

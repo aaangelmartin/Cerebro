@@ -391,13 +391,13 @@
       S.root = root; S.drawerFor = null; S.params = params;
       root.classList.add("scr-supervision");
       root.replaceChildren(h("div", { class: "sv-layout" },
-        h("div", { class: "sv-strip-wrap" }, comp("loading") || "Cargando…"),
+        h("div", { class: "sv-strip-wrap" }, window.ui.loading()),
         h("div", { class: "sv-main" },
           h("div", { class: "sv-queue-wrap" }),
           h("section", { class: "sv-panel" },
             h("div", { class: "sv-ph" }, h("b", {}, "Qué está haciendo el bot"), h("span", { class: "sv-mono sv-muted sv-count" }, "")),
             h("div", { class: "sv-fb" }),
-            h("div", { class: "sv-list-wrap" }, comp("loading") || "Cargando…"))),
+            h("div", { class: "sv-list-wrap" }, window.ui.loading()))),
         h("aside", { class: "sv-right" })));
     },
     async refresh(root, data, params) {
