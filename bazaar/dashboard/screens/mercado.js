@@ -146,7 +146,7 @@
     feed: [], lastSeq: null, feedErr: null,
     live: { scope: "todos", filter: null },
     conv: { cache: {}, list: [], err: null, f: { kind: "", status: "", q: "" }, limit: 24, at: 0 },
-    hist: { view: "eventos", rows: [], lastSeq: 0, loading: false, done: false, err: null, page: 0, f: { type: "", team: "", card: "", venue: "", from: "", to: "", q: "", us: false } },
+    hist: { view: "conv", rows: [], lastSeq: 0, loading: false, done: false, err: null, page: 0, f: { type: "", team: "", card: "", venue: "", from: "", to: "", q: "", us: false } },
   };
 
   async function pullFeedTail() {
@@ -163,6 +163,22 @@
   }
 
   // ---------- live: chats ----------
+  // bot decisions (decisions.jsonl rows) -> the flat shape the chat helpers read
+  const KIND_TXT = { thread_message: "Decir", open_thread: "Abrir conversación", close_thread: "Cerrar conversación", accept_offer: "Aceptar", thread_accept: "Aceptar" };
+  function normDec(r) {
+    if (!r || !r.action || typeof r.action !== "object") return r;
+    const a = r.action, p = a.params || {}, x = a.expected || {};
+    const isOpen = a.kind === "open_thread";
+    const out = { thread: p.thread, dealer: p.with, topic: p.topic, at: r.ts, why: a.reason, model: r.source === "opus" ? "opus" : null,
+      council: r.source === "council", strategy: r.source === "opus" ? "llm" : "code", kind: a.kind, price: p.price };
+    out.action = a.kind === "thread_message" ? "say" : KIND_TXT[a.kind] || a.kind;
+    if (a.kind === "thread_message") out.args = [p.thread, p.text];
+    if (a.kind === "thread_message" && p.price != null) out.kwargs = { price: p.price };
+    // our ceiling/floor: the limit set when the conversation opened, else our value for the card
+    if (isOpen && x.limit != null) out.limit = x.limit; else if (x.value != null) out.value = x.value;
+    if (x.dealer_limit_est != null) out.theirs = Math.round(x.dealer_limit_est * 10) / 10;
+    return out;
+  }
   function decisionsFor(decs, th) {
     const tp = th.topic ? JSON.stringify(th.topic) : null;
     return decs.filter((d) => d.thread === th.id || (Array.isArray(d.args) && d.args[0] === th.id) ||
@@ -181,14 +197,15 @@
     return { txt, src, at: d.at };
   }
   function limitsFor(ds) {
-    let limit = null, theirs = null;
+    let limit = null, theirs = null, value = null;
     for (const d of ds) {
+      if (d.value != null) value = d.value;
       if (d.limit != null) limit = d.limit;
       if (d.theirs != null) theirs = d.theirs;
       if (d.remembered_floor != null) theirs = d.remembered_floor;
       if (d.kwargs && d.kwargs.limit != null) limit = d.kwargs.limit;
     }
-    return { limit, theirs };
+    return { limit: limit != null ? limit : value, theirs };
   }
   function renderChat(th, decs, dealerNames, opts) {
     const full = !!(opts && opts.full);
@@ -219,13 +236,13 @@
     const mv = nextMove(ds);
     const card = h("article", { class: "mk-chat" + (anyFinal ? " is-final" : "") },
       h("header", { class: "mk-chat-h" },
-        typeChip(isDealer ? "dealer" : goal, isDealer ? "Dealer" : TYPE_LABEL[goal]),
+        typeChip(isDealer ? "dealer" : goal === "dealer" ? "cambio" : goal, isDealer ? "Dealer" : goal === "dealer" ? "Equipo" : TYPE_LABEL[goal]),
         h("b", { class: "mk-chat-who" }, isDealer ? dealerNames[who] || who : teamName(who)),
         h("span", { class: "mk-status" + (anyFinal ? " is-final" : "") }, status)),
       h("div", { class: "mk-chat-sub" },
         h("span", null, `${goal === "venta" ? "Vendemos" : goal === "compra" ? "Compramos" : ""} ${item}`),
         h("span", { class: "mk-muted" }, `#${th.id} · ${msgs.length} mensajes` + (msgs.length ? ` · ${tclock(msgs[0].tick)}–${tclock(msgs[msgs.length - 1].tick)}` : ""))),
-      h("div", { class: "mk-chat-bar" }, bar, h("span", { class: "mk-lims" }, `lím ${lim.limit != null ? lim.limit : "?"} · ${isDealer ? "él" : "ellos"} ~${lim.theirs != null ? lim.theirs : theirsP != null ? theirsP : "?"}`)),
+      h("div", { class: "mk-chat-bar" }, bar, h("span", { class: "mk-lims" }, [lim.limit != null ? `lím ${lim.limit}` : null, (lim.theirs != null || theirsP != null) ? `${isDealer ? "él" : "ellos"} ~${lim.theirs != null ? lim.theirs : theirsP}` : null].filter(Boolean).join(" · "))),
       h("div", { class: "mk-msgs" }, msgs.length ? (full ? msgs : msgs.slice(-8)).map((m) => {
         const us = m.sender === US;
         return h("div", { class: "mk-msg" + (us ? " is-us" : "") + (m.offer && m.offer.final ? " is-final" : "") },
@@ -321,7 +338,7 @@
     if (lb.ok) for (const r of arr(lb.v.data || lb.v)) if (r && (r.team || r.id)) NAMES[r.team || r.id] = r.name;
     const dealerNames = {};
     if (dealers.ok) for (const p of arr(dealers.v.personas || dealers.v)) if (p && p.id) dealerNames[p.id] = p.name;
-    const decs = decisions.ok ? arr(decisions.v) : [];
+    const decs = decisions.ok ? arr(decisions.v).map(normDec) : [];
     const ctx = { myOffers: myOffers.ok ? arr(myOffers.v.offers || myOffers.v) : [], clock: clock.ok ? clock.v : null, decisions: decs };
 
     const chatsHost = root.querySelector(".mk-chats");
@@ -470,7 +487,7 @@
     const shown = rows.slice(0, C.limit);
     const cards = shown.map((t) => {
       const c = C.cache[t.id];
-      const card = renderChat(c ? c.data : t, [], dealerNames, { full: true });
+      const card = renderChat(c ? c.data : t, S.conv.decs || [], dealerNames, { full: true });
       card.classList.add("mk-chat-hist", "mk-st-" + (t.status || "open"));
       const st = card.querySelector(".mk-status"); if (st) st.textContent = TH_STATUS[t.status] || t.status || "";
       return card;
@@ -495,7 +512,7 @@
     root.replaceChildren(h("div", { class: "scr-mercado is-hist" },
       h("div", { class: "mk-head" }, h("h1", null, "Mercado · Historial"), h("span", { class: "mk-muted" }, S.hist.view === "conv" ? "todas nuestras conversaciones, completas" : "todos los eventos del feed desde el viernes"),
         h("span", { class: "mk-grow" }),
-        h("div", { class: "mk-seg mk-histview" }, ["eventos", "conv"].map((v) => h("button", { class: S.hist.view === v ? "on" : "", "data-v": v, onclick: () => { S.hist.view = v; mountHistory(root); window.Screens.mercado.refresh(root, null, "historial"); } }, v === "eventos" ? "Eventos" : "Conversaciones"))),
+        h("div", { class: "mk-seg mk-histview" }, ["conv", "eventos"].map((v) => h("button", { class: S.hist.view === v ? "on" : "", "data-v": v, onclick: () => { S.hist.view = v; mountHistory(root); window.Screens.mercado.refresh(root, null, "historial"); } }, v === "eventos" ? "Eventos" : "Conversaciones"))),
         h("div", { class: "mk-seg" }, h("button", { onclick: () => { location.hash = "#mercado"; } }, "● En vivo"), h("button", { class: "on" }, "Historial"))),
       S.hist.view === "conv" ? h("div", { class: "mk-conv" },
         h("div", { class: "mk-hfilters" },
@@ -536,17 +553,20 @@
   window.Screens["mercado"] = {
     title: "Mercado",
     mount(root, params) {
-      S.mode = params === "historial" || params === "conversaciones" ? "hist" : "live";
+      S.mode = params === "historial" || params === "conversaciones" || params === "eventos" ? "hist" : "live";
       if (params === "conversaciones") S.hist.view = "conv";
+      if (params === "eventos") S.hist.view = "eventos";
       S.live.filter = null;
       if (S.mode === "hist") mountHistory(root); else mountLive(root);
     },
     async refresh(root, data, params) {
-      const mode = params === "historial" || params === "conversaciones" ? "hist" : "live";
+      const mode = params === "historial" || params === "conversaciones" || params === "eventos" ? "hist" : "live";
       if (mode !== S.mode) { this.mount(root, params); }
       try {
         if (S.mode === "hist" && S.hist.view === "conv") {
           if (!Object.keys(DEALER_NAMES).length) { const d = await safe(() => window.api.rec("dealers")); if (d.ok) for (const p of arr(d.v.personas || d.v)) if (p && p.id) DEALER_NAMES[p.id] = p.name; }
+          const dr = await safe(() => window.api.decisions());
+          if (dr.ok) S.conv.decs = arr(dr.v).map(normDec);
           await pullConversations(); renderConversations(root, DEALER_NAMES);
         } else if (S.mode === "hist") { await pullHistory(); renderHistory(root); }
         else await refreshLive(root, data);

@@ -265,7 +265,8 @@
     if (hi <= lo) { const pad = Math.max(1, Math.abs(hi) * 0.1); lo -= pad; hi += pad; }
     const pos = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
     const root = el("div", { class: ["pricebar", o.compact ? "compact" : "", o.noDeal ? "nodeal" : "", o.closed ? "closed" : ""] });
-    if (o.tint) root.style.setProperty("--pb-tint", o.tint);
+    // tint may be a colour or a type name ("compra", "venta", …) -> that type's colour
+    if (o.tint) root.style.setProperty("--pb-tint", /^[a-z]+$/.test(o.tint) && TYPES.includes(o.tint) ? "var(--t-" + o.tint + ")" : o.tint);
     const track = el("div", { class: "pb-track" });
     // Staggered label rows: Límite on its own row, Nosotros above the track, Ellos (and Cerrado) below.
     const limRow = el("div", { class: "pb-labels pb-lim" });
