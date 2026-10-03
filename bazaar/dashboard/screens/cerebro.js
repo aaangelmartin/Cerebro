@@ -378,7 +378,22 @@
   const setName = (n) => { try { localStorage.setItem(NAME_KEY, n); } catch (e) { /* private mode */ } };
   const msgList = (r) => (Array.isArray(r) ? r : r && Array.isArray(r.messages) ? r.messages : r && Array.isArray(r.items) ? r.items : []);
 
+  // The chat opens on its latest messages: after entering the screen (or a reload) scroll to the bottom once the
+  // messages are laid out; later renders keep the usual rule (follow only when already at the bottom).
+  function stickEnd() {
+    const go = () => {
+      const list = C.list;
+      if (!list || !list.isConnected || !C.needEnd) return;
+      if (!C.msgs.length && C.state !== "on") return;      // still loading: try again on the next render
+      list.scrollTop = list.scrollHeight;
+    };
+    const done = () => { go(); if (C.list && C.list.isConnected && (C.msgs.length || C.state === "on")) C.needEnd = false; };
+    requestAnimationFrame(() => { go(); requestAnimationFrame(go); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(go);
+    setTimeout(done, 350);
+  }
   function chatMount() {
+    C.needEnd = true;
     const list = el("div", { class: "cb-chat-list" });
     const input = el("textarea", { class: "cb-chat-in", rows: 2, placeholder: "Pregunta o pide algo al cerebro…" });
     const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar");
@@ -440,6 +455,7 @@
     }
     U().keepScroll(list.parentNode, () => list.replaceChildren(...kids));
     if (atEnd || C.forceEnd) { list.scrollTop = list.scrollHeight; C.forceEnd = false; }
+    if (C.needEnd) stickEnd();
   }
   // Thinking = the last message is ours (anyone's, also after a reload) and no brain reply came after it.
   function thinkingSince() {
@@ -504,6 +520,7 @@
         C.since = Math.max(C.since || 0, ...got.map((m) => +m.ts || 0));
         if (added) renderChat();
       } else if (C.state !== C.lastState) renderChat();
+      if (C.needEnd) stickEnd();
     } catch (e) {
       C.state = e && e.status === 404 ? "off" : "error"; C.err = e;
       renderChat();
