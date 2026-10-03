@@ -296,7 +296,7 @@
       el("div", { class: "sb-sec" },
         el("div", { class: "sb-line" }, el("span", null, "Bot"), pill(bText, bTone)),
         el("div", { class: "sb-sub" }, bSub + " · " + okN + "/" + procs.length + " procesos"),
-        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : paused ? "EN PAUSA" : "CERRADO", open ? "ok" : paused ? "warn" : "bad")),
+        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : paused ? "EN PAUSA" : "CERRADO", open ? "ok" : paused ? "pause" : "bad")),
         el("div", { class: "sb-sub" }, marketSub)),
       recorderBlock(d.recorder || {}),
       el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),

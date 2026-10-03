@@ -3,7 +3,7 @@
   --bg: #08090B; --s1: #0E1013; --s2: #14171B; --s3: #1C2026;
   --line: #1F2329; --line-2: #2D323A;
   --ink: #ECEEF0; --ink-2: #A4ABB3; --ink-3: #6A727B;
-  --ok: #45B883; --ok-soft: #45B8831A; --bad: #E2564D; --bad-soft: #E2564D1F; --warn: #E5BE4F; --warn-soft: #E5BE4F1A;
+  --ok: #45B883; --ok-soft: #45B8831A; --bad: #E2564D; --bad-soft: #E2564D1F; --warn: #E5BE4F; --warn-soft: #E5BE4F1A; --pause: #F08A3E; --pause-soft: #F08A3E1F;
   --live: #F0443A; --signal: #F4F1EA; --signal-soft: #F4F1EA14;
   --t-compra: #3FB97A; --t-venta: #E5534B; --t-cambio: #4C9BE0; --t-puja: #E3A33B; --t-duelo: #9B7FE6; --t-dealer: #35B5A8; --t-anuncio: #9AA4B1;
   --dom-mercado: var(--t-compra); --dom-duelos: var(--t-duelo); --dom-dealers: var(--t-dealer); --dom-broker: var(--t-cambio); --dom-lab: #8E99A6;
@@ -66,7 +66,7 @@ button, input, select { font: inherit; color: inherit; }
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; font-family: var(--font-num); font-size: 10px; font-weight: 600; letter-spacing: .04em; border: 1px solid currentColor; }
 .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .pill.tone-ok { color: var(--ok); background: var(--ok-soft); } .pill.tone-bad { color: var(--bad); background: var(--bad-soft); }
-.pill.tone-warn { color: var(--warn); background: var(--warn-soft); } .pill.tone-mute { color: var(--ink-3); }
+.pill.tone-warn { color: var(--warn); background: var(--warn-soft); } .pill.tone-pause { color: var(--pause); background: var(--pause-soft); border-color: var(--pause); } .pill.tone-mute { color: var(--ink-3); }
 
 .main-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .screen { flex: 1; overflow: auto; padding: 18px 20px 28px; }
@@ -245,3 +245,8 @@ select {
   background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
   padding-right: 26px !important;
 }
+
+/* Game paused by the organisers: orange, never red (red means closed or off). */
+.closed-card.is-paused { border-color: var(--pause); }
+.closed-card.is-paused h2 .ic-wrap { color: var(--pause); }
+.closed-card.is-paused .closed-sub { color: var(--pause); }
