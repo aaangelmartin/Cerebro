@@ -3,7 +3,11 @@
   if (window.T10D) return;
   const US = "t10";
   const TYPES = ["compra", "venta", "cambio", "puja", "duelo", "dealer", "anuncio"];
-  const TYPE_LABEL = { compra: "Compra", venta: "Venta", cambio: "Cambio", puja: "Puja", duelo: "Duelo", dealer: "Dealer", anuncio: "Anuncio" };
+  // interface texts: looked up on every read, so a language switch shows on the next paint
+  const T = (k, v) => (window.I18N ? window.I18N.t(k, v) : k);
+  const lang = () => (window.I18N && window.I18N.lang) || "es";
+  const TYPE_LABEL = {};
+  for (const k of TYPES) Object.defineProperty(TYPE_LABEL, k, { enumerable: true, get: () => T("home.type." + k) });
   const TYPE_COLOR = { compra: "var(--t-compra, #3fbf7f)", venta: "var(--t-venta, #e5534b)", cambio: "var(--t-cambio, #4c8dff)",
     puja: "var(--t-puja, #e8a33d)", duelo: "var(--t-duelo, #9b7bff)", dealer: "var(--t-dealer, #2bb3a3)", anuncio: "var(--t-anuncio, #8a8f98)" };
   const PERSONAS = { abuela: "Abuela", chato: "Chato" };
@@ -41,7 +45,7 @@
     if (PERSONAS[id]) return PERSONAS[id];
     if (names[id]) return names[id];
     const m = /^t(\d+)$/.exec(id); if (m) return "Team " + (+m[1]);
-    if (/^m[0-9a-f]{6,}$/.test(id)) return "Creador de mercado";
+    if (/^m[0-9a-f]{6,}$/.test(id)) return T("home.market_maker");
     return id;
   }
   const isTeam = (id) => /^t\d+$/.test(id || "");
@@ -128,57 +132,57 @@
         const flows = new Set(items.map((i) => i.frm));
         const cards = items.filter((i) => i.kind === "card");
         const ref = assetsLabel(items);
-        const where = p.venue ? " en " + venueName(p.venue) : "";
+        const where = p.venue ? T("home.ev.where", { venue: venueName(p.venue) }) : "";
         if (persona) {
           const team = parties.find((x) => x !== persona);
           const buy = items.some((i) => i.to === team);
           return { ...base, type: "dealer", actor: team, teams: [team], venue: null,
-            text: (buy ? "Compra " : "Vende ") + ref + (buy ? " a " : " a ") + teamName(persona), value: price != null ? fmtP(price) : "", price, items, kind: "settle" };
+            text: T(buy ? "home.ev.buys_from" : "home.ev.sells_to", { cards: ref, who: teamName(persona), where: "" }), value: price != null ? fmtP(price) : "", price, items, kind: "settle" };
         }
         if (flows.size > 1 && !price) {
           const [a, b] = parties;
-          return { ...base, type: "cambio", actor: a, teams: parties, venue: p.venue, text: "Cambian " + ref + where, value: items.length + " cartas", items, kind: "settle" };
+          return { ...base, type: "cambio", actor: a, teams: parties, venue: p.venue, text: T("home.ev.swap", { cards: ref, where }), value: T("home.ev.n_cards", { n: items.length }), items, kind: "settle" };
         }
         const buyer = (items[0] || {}).to, seller = (items[0] || {}).frm;
         const usSell = seller === US;
         const actor = usSell ? seller : buyer;
         return { ...base, type: usSell ? "venta" : "compra", actor, teams: [buyer, seller].filter(Boolean), venue: p.venue,
-          text: usSell ? "Vende " + ref + " a " + teamName(buyer) + where : "Compra " + ref + " a " + teamName(seller) + where,
+          text: usSell ? T("home.ev.sells_to", { cards: ref, who: teamName(buyer), where }) : T("home.ev.buys_from", { cards: ref, who: teamName(seller), where }),
           value: price != null ? fmtP(price) : "", price, items, cards, buyer, seller, kind: "settle", fee: p.fee };
       }
       case "offer.listed": {
         const o = p.offer || {}; const g = o.give || {}, w = o.want || {};
         const gA = g.assets || [], wA = w.assets || [];
-        const where = " en " + venueName(p.venue || o.venue);
+        const where = T("home.ev.where", { venue: venueName(p.venue || o.venue) });
         const actor = o.maker || e.actor;
-        if (gA.length && wA.length) return { ...base, type: "cambio", actor, teams: [actor], venue: p.venue, text: "Ofrece " + assetsLabel(gA) + " por " + assetsLabel(wA) + where, value: gA.length + " × " + wA.length, offer: o, kind: "offer" };
-        if (gA.length) return { ...base, type: "venta", actor, teams: [actor], venue: p.venue, text: "Pone a la venta " + assetsLabel(gA) + where, value: fmtP(w.cash), price: num(w.cash), assets: gA, offer: o, kind: "offer" };
-        if (wA.length || (w.types || []).length) return { ...base, type: "puja", actor, teams: [actor], venue: p.venue, text: "Puja por " + (assetsLabel(wA) || (w.types || []).map((t) => (typeof t === "string" ? t.replace(/^card:/, "") : t.ref || t.set || t.rarity || JSON.stringify(t))).join(", ")) + where, value: "≤ " + fmtP(g.cash), price: num(g.cash), assets: wA, offer: o, kind: "offer" };
-        return { ...base, type: "anuncio", actor, teams: [actor], text: "Publica una oferta" + where, value: "", offer: o, kind: "offer" };
+        if (gA.length && wA.length) return { ...base, type: "cambio", actor, teams: [actor], venue: p.venue, text: T("home.ev.offers_swap", { give: assetsLabel(gA), want: assetsLabel(wA), where }), value: gA.length + " × " + wA.length, offer: o, kind: "offer" };
+        if (gA.length) return { ...base, type: "venta", actor, teams: [actor], venue: p.venue, text: T("home.ev.lists", { cards: assetsLabel(gA), where }), value: fmtP(w.cash), price: num(w.cash), assets: gA, offer: o, kind: "offer" };
+        if (wA.length || (w.types || []).length) return { ...base, type: "puja", actor, teams: [actor], venue: p.venue, text: T("home.ev.bids", { cards: assetsLabel(wA) || (w.types || []).map((t) => (typeof t === "string" ? t.replace(/^card:/, "") : t.ref || t.set || t.rarity || JSON.stringify(t))).join(", "), where }), value: "≤ " + fmtP(g.cash), price: num(g.cash), assets: wA, offer: o, kind: "offer" };
+        return { ...base, type: "anuncio", actor, teams: [actor], text: T("home.ev.posts", { where }), value: "", offer: o, kind: "offer" };
       }
       case "offer.cancelled": return null;
       case "thread.message": {
         const team = p.team; const who = p.sender === team ? teamName(team) : teamName(p.sender);
-        const off = p.offer && (p.offer.give || p.offer.want) ? " · con oferta" : "";
+        const off = p.offer && (p.offer.give || p.offer.want) ? T("home.ev.with_offer") : "";
         return { ...base, type: "dealer", actor: team, teams: [team], text: who + " → " + (p.sender === team ? teamName(p.with) : teamName(team)) + ": " + (p.text || "").slice(0, 120) + off, value: "", kind: "thread" };
       }
-      case "thread.opened": return { ...base, type: "dealer", actor: p.team, teams: [p.team], text: "Abre conversación con " + teamName(p.with), value: "nueva", kind: "thread" };
+      case "thread.opened": return { ...base, type: "dealer", actor: p.team, teams: [p.team], text: T("home.ev.opens_thread", { who: teamName(p.with) }), value: T("home.ev.new"), kind: "thread" };
       case "duel.closed": {
-        const st = p.status === "deal" ? "Duelo cerrado con acuerdo" : p.status === "no_deal" ? "Duelo cerrado sin acuerdo" : "Duelo cerrado (" + (p.status || "?") + ")";
+        const st = p.status === "deal" ? T("home.ev.duel_deal") : p.status === "no_deal" ? T("home.ev.duel_no_deal") : T("home.ev.duel_other", { status: p.status || "?" });
         const teams = [p.buyer, p.seller, p.a, p.b, ...(p.teams || []), ...(p.parties || [])].filter(isTeam);
         return { ...base, type: "duelo", actor: teams[0] || "", teams, text: st + (p.item ? " · " + p.item : "") + (p.duel ? " · #" + p.duel : ""), value: num(p.price) != null ? fmtP(p.price) : "", kind: "duel" };
       }
-      case "pack.opened": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Abre un sobre" + (p.best ? " · mejor: " + (p.best.ref || p.best.name || "") : ""), value: "", kind: "info" };
-      case "gift.given": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Regalo de " + teamName(e.actor) + ": " + [...(p.cards || []), ...(p.packs || [])].join(", ") + (p.cash ? " " + fmtP(p.cash) : ""), value: "", kind: "info" };
-      case "level.unlocked": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Nivel " + p.level + " desbloqueado con " + (p.persona_name || teamName(p.persona)), value: "nivel " + p.level, kind: "info" };
-      case "persona.open_to_all": return { ...base, type: "anuncio", actor: "org", teams: [], text: (p.name || teamName(p.persona)) + " abierto a todos (nivel " + p.level + ")", value: "", kind: "info" };
-      case "venue.fee_announced": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: "Comisión " + fmt((p.fee_bps || 0) / 100, 1) + " %" + (p.fee_per_card ? " + " + p.fee_per_card + " P/carta" : "") + " en " + venueName(p.venue) + " desde tick " + p.effective_tick, value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
-      case "venue.fee_changed": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: "Nueva comisión en " + venueName(p.venue), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
+      case "pack.opened": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.opens_pack") + (p.best ? T("home.ev.best", { card: p.best.ref || p.best.name || "" }) : ""), value: "", kind: "info" };
+      case "gift.given": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.gift", { who: teamName(e.actor), items: [...(p.cards || []), ...(p.packs || [])].join(", ") + (p.cash ? " " + fmtP(p.cash) : "") }), value: "", kind: "info" };
+      case "level.unlocked": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.level", { level: p.level, who: p.persona_name || teamName(p.persona) }), value: T("home.ev.level_short", { level: p.level }), kind: "info" };
+      case "persona.open_to_all": return { ...base, type: "anuncio", actor: "org", teams: [], text: T("home.ev.open_all", { who: p.name || teamName(p.persona), level: p.level }), value: "", kind: "info" };
+      case "venue.fee_announced": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: T("home.ev.fee", { pct: fmt((p.fee_bps || 0) / 100, 1), per_card: p.fee_per_card ? T("home.ev.fee_per_card", { n: p.fee_per_card }) : "", venue: venueName(p.venue), tick: p.effective_tick }), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
+      case "venue.fee_changed": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: T("home.ev.fee_new", { venue: venueName(p.venue) }), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
       case "venue.announcement": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: (p.name || venueName(p.venue)) + ": " + (p.text || ""), value: "", kind: "venue" };
-      case "announcement": return { ...base, type: "anuncio", actor: "org", teams: [], text: p.text || "Anuncio", value: "", kind: "info" };
+      case "announcement": return { ...base, type: "anuncio", actor: "org", teams: [], text: p.text || T("home.type.anuncio"), value: "", kind: "info" };
       default: {
         if (/^venue\./.test(e.type || "")) return { ...base, type: "anuncio", actor: p.venue || "", teams: [], text: (e.type || "") + " · " + venueName(p.venue), value: "", kind: "venue" };
-        return { ...base, type: "anuncio", actor: e.actor || "org", teams: isTeam(p.team) ? [p.team] : [], text: (e.type || "evento") + (p.text ? " · " + p.text : ""), value: "", kind: "info" };
+        return { ...base, type: "anuncio", actor: e.actor || "org", teams: isTeam(p.team) ? [p.team] : [], text: (e.type || T("home.ev.event")) + (p.text ? " · " + p.text : ""), value: "", kind: "info" };
       }
     }
   }
@@ -193,7 +197,14 @@
   });
 
   // feed rows (normalised, no skips), re-normalising venue names lazily is not needed
-  const events = () => feed.rows.filter((r) => !r.skip);
+  // the texts of a row are written when it is read: write them again when the language changes
+  let feedLang = lang();
+  function relang() {
+    if (feedLang === lang()) return;
+    feedLang = lang();
+    feed.rows = feed.rows.map((r) => normalize(r.raw) || { skip: true, raw: r.raw, ts: evTs(r.raw), evType: r.raw.type });
+  }
+  const events = () => { relang(); return feed.rows.filter((r) => !r.skip); };
   // events of the latest day that has data (today, or Friday when today has nothing yet)
   function dayEvents() {
     const ev = events(); if (!ev.length) return { rows: [], day: null, today: true };
@@ -264,13 +275,13 @@
   function teamTag(id) {
     if (!id) return el("span", { class: "t10-muted" }, "—");
     if (isTeam(id) && window.ui && ui.teamTag) return ui.teamTag(id, { us: id === US });
-    return el("span", { class: "t10-who" + (id === US ? " t10-us" : "") }, id === US ? "Team 10 · Nosotros" : (id === "org" ? "Organización" : teamName(id) || venueName(id)));
+    return el("span", { class: "t10-who" + (id === US ? " t10-us" : "") }, id === US ? T("home.us_full") : (id === "org" ? T("home.org") : teamName(id) || venueName(id)));
   }
   const state = (kind, text) => {
     if (window.ui) { if (kind === "loading" && ui.loading) return ui.loading(); if (kind === "error" && ui.error) return ui.error(text); if (kind === "empty" && ui.empty) return ui.empty(text); }
-    return el("div", { class: "t10-state" }, kind === "loading" ? "Cargando…" : kind === "error" ? "Error: " + ((text && text.message) || text) : text);
+    return el("div", { class: "t10-state" }, kind === "loading" ? T("home.loading") : kind === "error" ? T("home.error", { err: (text && text.message) || text }) : text);
   };
-  const errText = (e) => (e && e.status === 404 ? "Este dato aún no está disponible en la API." : "No se pudo leer: " + ((e && e.message) || e));
+  const errText = (e) => (e && e.status === 404 ? T("home.err_404") : T("home.err_read", { err: (e && e.message) || e }));
   function replace(node, ...kids) { if (!node) return; node.replaceChildren(...kids.flat().filter((k) => k != null)); }
 
   async function prime() {

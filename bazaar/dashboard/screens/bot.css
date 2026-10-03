@@ -173,7 +173,7 @@
 .scr-bot .bot-ptotal { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--bx-line); }
 .scr-bot .bot-pres { margin-top: 6px; line-height: 1.4; }
 .scr-bot .bot-brow-h > span:nth-child(2) { margin-left: 8px; }
-.scr-bot .bot-brain-line { display: flex; align-items: baseline; gap: 4px; font-size: 13px; color: inherit; text-decoration: none; padding: 8px 10px; border: 1px solid var(--bx-line); background: var(--bx-s2); }
+.scr-bot .bot-brain-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; font-size: 13px; color: inherit; text-decoration: none; padding: 8px 10px; border: 1px solid var(--bx-line); background: var(--bx-s2); }
 .scr-bot .bot-brain-line:hover { border-color: var(--bx-muted); }
 .scr-bot .bot-brain-go { margin-left: auto; color: var(--bx-muted); font-size: 12px; }
 
