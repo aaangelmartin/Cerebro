@@ -47,6 +47,25 @@ class CollectorIsADealerTest(unittest.TestCase):
             self.assertFalse(dom._loved("pilar", "uncommon", "MAL"))
 
 
+class HigherLevelFirstTest(unittest.TestCase):
+    def test_spare_is_kept_for_the_higher_dealer_with_empty_slots(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            dom = DealersDomain.__new__(DealersDomain)
+            dom.store = ProfileStore(Path(d) / "m.json")
+            dealers = {"abuela": {"level": 1, "menu": {"buys": [{"rarity": "uncommon", "sets": "released"}]}},
+                       "chato": {"level": 2, "menu": {"buys": [{"rarity": "uncommon", "sets": "released"}]}},
+                       "pilar": {"level": 3, "menu": {"buys": [{"rarity": "uncommon", "sets": ["SAL", "RET"]}]}}}
+            plan = SimpleNamespace(dealers=dealers)
+            self.assertEqual(dom._higher_slot_wants(plan, 1, "uncommon", "SAL"), "pilar")
+            self.assertEqual(dom._higher_slot_wants(plan, 1, "uncommon", "MAL"), "chato")
+            self.assertEqual(dom._higher_slot_wants(plan, 1, "common", "MAL"), "")
+            self.assertEqual(dom._higher_slot_wants(plan, 3, "uncommon", "SAL"), "")
+            for i in range(3):                      # level 3 full: SAL uncommons now go to Chato
+                dom.store.record_deal("pilar", 3, "sell:uncommon", "SAL-08", 16, 19, 19.0, False, 5.0, thread=i)
+            self.assertEqual(dom._higher_slot_wants(plan, 1, "uncommon", "SAL"), "chato")
+
+
 class LadderReportTest(unittest.TestCase):
     def test_slots_and_points_missing(self):
         with tempfile.TemporaryDirectory() as d:

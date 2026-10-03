@@ -327,6 +327,19 @@ class DealersDomain:
             return f"sell:{rarity}:loved"
         return f"{v.side}:{rarity}"
 
+    def _higher_slot_wants(self, plan: Plan, level: int, rarity: str, set_id: str) -> str:
+        """Id of a dealer above `level` that buys this rarity/set and still has an empty ladder slot ("" if none).
+        Higher levels weigh more on the ladder and each needs three deals, so a card we can sell goes there first."""
+        for d2, p in sorted(plan.dealers.items(), key=lambda kv: -int(kv[1].get("level") or 1)):
+            l2 = int(p.get("level") or 1)
+            if l2 <= level or 0.0 not in self.store.ladder(l2):
+                continue
+            for e in (p.get("menu") or {}).get("buys") or []:
+                sets = e.get("sets")
+                if e.get("rarity") == rarity and (not isinstance(sets, list) or set_id in sets):
+                    return d2
+        return ""
+
     def _loved(self, dealer: str, rarity: str, set_id: str) -> bool:
         """The dealer's menu names this set for this rarity AND also buys the rarity in general: a collector's
         favourite (Pilar: SAL, RET; Chato: MAL rares). It opens and stops higher for these, so they get their
@@ -449,6 +462,10 @@ class DealersDomain:
             if v.buying and _avoided(v.item, _g(ctx, "control") or {}):
                 ok, why = False, "we no longer buy this set"
                 force = "we no longer buy this set: close the thread"
+            if not v.buying and not v.is_pack and not v.final and not ok:
+                up = self._higher_slot_wants(plan, level, values.rarity(v.item) or "", values.set_of(v.item))
+                if up:
+                    force = f"keep this spare for {up}: its ladder slots are empty and weigh more"
             if force:
                 move = Move("close", None, force)
             pts = 0.0
@@ -580,6 +597,8 @@ class DealersDomain:
                 sets = buys[a["rarity"]].get("sets")
                 if isinstance(sets, list) and values.set_of(ref) not in sets:
                     continue
+                if self._higher_slot_wants(plan, level, a["rarity"], values.set_of(ref)):
+                    continue        # a spare is scarce: keep it for the higher dealer whose ladder slots are empty
                 skind = f"sell:{a['rarity']}" + (":loved" if self._loved(d, a["rarity"], values.set_of(ref)) else "")
                 add({"sell": {"assets": [aid]}}, skind, ref, a.get("name") or ref,
                     values.asset_value(aid), buys[a["rarity"]].get("list_price"))
