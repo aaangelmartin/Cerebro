@@ -1042,9 +1042,10 @@ class World:
                 "rank": None}
 
     def me_view(self) -> dict:
+        assets = [self.asset_view(a) for a in self.assets.values()]
         return {"id": TEAM, "name": "Team 10", "cash": self.cash, "level": self.level, "unlocked": list(self.unlocked),
-                "badges": [], "frozen": False, "affinity": dict(AFFINITY),
-                "assets": [self.asset_view(a) for a in self.assets.values()], "score": self.score(),
+                "badges": [], "frozen": False, "affinity": dict(AFFINITY), "assets": assets,
+                "collection_value": round(sum(float(a.get("your_value") or 0) for a in assets), 1), "score": self.score(),
                 "venue": self.my_venue, "starter_broker_key": BROKER_KEY, "tick": self.tick}
 
     def _snapshot_leaderboard(self) -> None:

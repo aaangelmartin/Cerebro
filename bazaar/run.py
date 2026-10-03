@@ -53,6 +53,7 @@ COUNCIL_SHARE = 0.80             # the council may run until this share of the t
 COUNCIL_MIN_S = 4.0              # ...and only if at least this many seconds remain
 DROP_PCT = 0.05                  # breaker: score or portfolio down 5 % ...
 DROP_WINDOW = 10                 # ...within 10 ticks -> cautious (no buys) for CAUTIOUS_TICKS
+VENUE_BOND = 250
 CAUTIOUS_TICKS = 10
 REFUSALS_TO_PAUSE = 3            # consecutive refusals of one domain -> pause it PAUSE_TICKS
 PAUSE_TICKS = 10
@@ -396,7 +397,9 @@ class Runner:
 
     def breakers(self, sit: Situation):
         me = sit.me or {}
-        portfolio = float(me.get("cash") or 0) + float(me.get("collection_value") or 0)
+        # The venue bond (250 P) is refundable: count it, or opening our venue would trip the breaker.
+        portfolio = (float(me.get("cash") or 0) + float(me.get("collection_value") or 0)
+                     + (VENUE_BOND if me.get("venue") else 0))
         if self.history and self.history[-1][0] == sit.tick:
             self.history.pop()
         self.history.append((sit.tick, sit.score, portfolio))
