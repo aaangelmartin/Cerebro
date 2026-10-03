@@ -314,6 +314,29 @@ def hold_rule(v: DuelView, mv: Move, opp: dict, p=PARAMS) -> tuple[Move, list[st
                 **keep), [f"finish step to margin {floor:.0f}"]
 
 
+def rival_unchanged(v: DuelView) -> bool:
+    """The rival answered our last priced offer with the very terms it already had on the table."""
+    ro = v.rival_offers()
+    last_ours = max((m.tick for m in v.messages if m.ours and m.price is not None), default=None)
+    if len(ro) < 2 or last_ours is None:
+        return False
+    before = [o for o in ro if o.tick is not None and o.tick <= last_ours]
+    return bool(before) and (ro[-1].price, ro[-1].days) == (before[-1].price, before[-1].days)
+
+
+def hold_vs_unmoved_rival(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list[str]]:
+    """Claude's moves too: a rival that repeats its exact terms after our step has not paid for another
+    one. A new offer from us would only add a round of decay and bid against ourselves (duel 2420: the
+    rival sat on one price five times while we walked from 18 to 1). Wait instead; accepting stays free,
+    and the last FINAL_TICKS ticks are left to the normal finish."""
+    if mv.action != "offer" or v.ticks_left <= p["FINAL_TICKS"] or not v.our_offers():
+        return mv, []
+    if not rival_unchanged(v):
+        return mv, []
+    return Move("wait", reason="hold: the rival repeated its price since our last offer; no new step",
+                source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), ["hold: rival price unchanged"]
+
+
 def hold_if_rival_unchanged(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list[str]]:
     """Code fallback only: if the rival's price has not changed since our last offer (it repeated the same
     terms), stepping again is bidding against ourselves. Hold until it moves or the last ticks."""
@@ -323,8 +346,7 @@ def hold_if_rival_unchanged(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list
     last_ours = max((m.tick for m in v.messages if m.ours and m.price is not None), default=None)
     if len(ro) < 2 or last_ours is None:
         return mv, []
-    before = [o for o in ro if o.tick is not None and o.tick <= last_ours]
-    if before and (ro[-1].price, ro[-1].days) == (before[-1].price, before[-1].days):
+    if rival_unchanged(v):
         return Move("wait", reason="hold: the rival repeated its price since our last offer; no new step",
                     source=mv.source), ["hold: rival price unchanged"]
     # the rival moved: concede at most half of its last move (min 1 P), never the whole time schedule

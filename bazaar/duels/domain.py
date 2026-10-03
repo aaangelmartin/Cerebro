@@ -20,7 +20,8 @@ from ..core.types import Action, Outcome
 from ..lab import feedback
 from .model import MIN_SURPLUS, DuelView, parse_duel, points
 from .opponent import OpponentMemory
-from .policy import PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_if_rival_unchanged, hold_rule, plan
+from .policy import (PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_if_rival_unchanged, hold_rule,
+                     hold_vs_unmoved_rival, plan)
 from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
 log = logging.getLogger("bazaar.duels")
@@ -326,6 +327,8 @@ class DuelsDomain:
                 if safe is not base and safe.source == mv.source and not safe.lesson_ids:
                     safe.lesson_ids = list(mv.lesson_ids)
                 safe, hnotes = hold_rule(v, safe, opp)
+                if not hnotes:
+                    safe, hnotes = hold_vs_unmoved_rival(v, safe)
                 notes = notes + hnotes
                 if notes:
                     self.last_notes[v.id] = notes
