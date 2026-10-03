@@ -281,6 +281,48 @@
     return card;
   }
 
+  // an offer attached to a message, as a small card: what they give, what they want, price and status
+  const OFFER_ST = { open: ["abierta", "ok"], cancelled: ["retirada", "mute"], expired: ["caducada", "mute"], accepted: ["aceptada", "ok"], filled: ["aceptada", "ok"], settled: ["aceptada", "ok"], rejected: ["rechazada", "bad"] };
+  function sideTxt(s2) {
+    const parts = [];
+    if (s2 && s2.cash) parts.push(fmtP(s2.cash));
+    for (const a of (s2 && s2.assets) || []) parts.push(a.ref || "#" + a.id);
+    for (const t of (s2 && s2.types) || []) parts.push(String(t).replace(/^card:/, ""));
+    return parts.join(" + ") || "nada";
+  }
+  function offerCard(o) {
+    const [stl, tone] = OFFER_ST[o.status] || [o.status || "—", "mute"];
+    const kind = o.give && o.give.cash && !((o.give.assets || []).length + (o.give.types || []).length) ? "compra" : o.want && o.want.cash ? "venta" : "cambio";
+    const c = h("div", { class: "mk-offer mk-t-" + kind }, typeChip(kind, kind === "compra" ? "Quiere comprar" : kind === "venta" ? "Quiere vender" : "Propone cambio"),
+      h("span", null, "da ", h("b", null, sideTxt(o.give))), h("span", null, "pide ", h("b", null, sideTxt(o.want))),
+      h("span", { class: "mk-grow" }), h("span", { class: "mk-muted mk-mono" }, "#" + o.id + (o.venue ? " · " + o.venue : "") + (o.expires_tick != null ? " · vence " + tclock(o.expires_tick) : "")),
+      h("span", { class: "tag res tone-" + tone }, stl));
+    return c;
+  }
+  // one conversation with another team: who, where, when, how it stands, every message and its offer
+  function teamCard(t) {
+    const other = t.with === US ? t.team : t.with;
+    const weOpened = t.team === US;
+    const msgs = arr(t.messages).slice().sort((a, b) => (a.tick || 0) - (b.tick || 0) || (a.id || 0) - (b.id || 0));
+    const e = threadEnd(t);
+    const tp = t.topic || {};
+    const about = t.item || (tp.buy && (tp.buy.card || tp.buy.pack)) || (tp.sell && (tp.sell.card || (tp.sell.assets || []).map((a) => "#" + a).join(", "))) || "";
+    const card = h("article", { class: "mk-chat mk-team" + (e.cls === "is-live" ? "" : " is-ended") + (S.focusThread === t.id ? " is-focus" : "") },
+      h("header", { class: "mk-chat-h" }, U().teamTag ? U().teamTag(other) : h("b", null, teamName(other)),
+        h("span", { class: "mk-muted" }, weOpened ? "la abrimos nosotros" : "nos escribió"),
+        h("span", { class: "mk-grow" }), h("span", { class: "mk-status mk-end " + e.cls }, e.cls === "is-closed" ? "Cerrada" : e.text), h("span", { class: "mk-end-when mk-muted" }, e.when)),
+      h("div", { class: "mk-chat-sub" }, h("span", null, about ? (tp.buy ? "Quieren " : tp.sell ? "Ofrecen " : "") + about : "Sin tema"),
+        h("span", { class: "mk-muted" }, `#${t.id}` + (t.venue ? " · " + t.venue : "") + ` · ${msgs.length} mensaje${msgs.length === 1 ? "" : "s"}` + (t.closed_reason ? " · " + t.closed_reason : ""))),
+      h("div", { class: "mk-msgs" }, msgs.length ? msgs.map((m) => {
+        const us = m.sender === US;
+        return h("div", { class: "mk-msg" + (us ? " is-us" : "") },
+          h("div", { class: "mk-msg-h" }, h("span", null, us ? "Nosotros" : teamName(m.sender)), h("b", null, ""), h("span", { class: "mk-muted", title: "tick " + m.tick }, tclock(m.tick))),
+          h("div", { class: "mk-msg-t" }, String(m.text || "").replace(/<\/?untrusted[^>]*>/g, "")),
+          m.offer ? offerCard(m.offer) : null);
+      }) : stateBox("empty", "Sin mensajes grabados.")));
+    return card;
+  }
+
   // ---------- live: side ----------
   function tapeRow(e) {
     const row = h("div", { class: "mk-tape-row mk-t-" + e.type + (e.us ? " is-us" : "") },
@@ -394,6 +436,21 @@
         sig: (t) => JSON.stringify([arr(t.messages).length, t.status, arr(t.messages).map((m) => m.offer && m.offer.status), arr(t.standing_offers).map((o) => [o.id, o.status]), decisionsFor(decs, t).length]),
         render: (t) => markState(renderChat(t, decs, dealerNames), t), inner: ".mk-msgs", stickEnd: true,
         tail: full.length ? [] : [stateBox("empty", "Todavía no hemos tenido ninguna conversación.")] });
+      // conversations with other teams: always their own block (open first, then the latest ones)
+      const teamsAll = all.filter((t) => t.kind === "team" || /^t\d+$/.test(String(t.with === US ? t.team : t.with)));
+      const tOpen = teamsAll.filter((t) => !t.status || t.status === "open").sort((a, b) => act(b) - act(a));
+      const tRest = teamsAll.filter((t) => t.status && t.status !== "open").sort((a, b) => act(b) - act(a) || b.id - a.id);
+      const tShow = tOpen.concat(tRest.slice(0, Math.max(8 - tOpen.length, 0)));
+      if (S.focusThread != null && !tShow.some((t) => t.id === S.focusThread)) { const ft = teamsAll.find((t) => t.id === S.focusThread); if (ft) tShow.push(ft); }
+      const tFull = await Promise.all(tShow.map((t) => detail(t, !(!t.status || t.status === "open"))));
+      const tHost = root.querySelector(".mk-teams-list");
+      root.querySelector(".mk-teams-sub").textContent = `${tOpen.length} abiertas · ${teamsAll.length} en total` + (teamsAll.length > tShow.length ? ` · se ven las últimas ${tShow.length}` : "");
+      U().keyedList(tHost, tFull, { key: (t) => "tm" + t.id,
+        sig: (t) => JSON.stringify([arr(t.messages).length, t.status, arr(t.messages).map((m) => m.offer && m.offer.status), S.focusThread === t.id]),
+        render: teamCard, inner: ".mk-msgs",
+        tail: [tFull.length ? null : stateBox("empty", "Ningún equipo nos ha escrito todavía, ni nosotros a ellos."),
+          teamsAll.length > tShow.length ? h("a", { class: "mk-btn mk-more", href: "#mercado/conversaciones" }, `Ver las ${teamsAll.length} en el historial`) : null] });
+      if (S.focusThread != null) { const n = tHost.querySelector('[data-key="tm' + S.focusThread + '"]'); if (n && !S.focusDone) { n.scrollIntoView({ block: "center" }); S.focusDone = true; } }
     }
     renderSide(root, ctx);
   }
@@ -594,6 +651,10 @@
     root.replaceChildren(h("div", { class: "scr-mercado" },
       h("div", { class: "mk-main" },
         h("div", { class: "mk-head" }, h("h1", null, "Mercado"), h("span", { class: "mk-muted mk-head-sub" }, "")),
+        h("section", { class: "mk-teams" },
+          h("div", { class: "mk-head mk-teams-h" }, h("h2", null, "Conversaciones con equipos"), h("span", { class: "mk-muted mk-teams-sub" }, "")),
+          h("div", { class: "mk-teams-list" }, stateBox("loading"))),
+        h("div", { class: "mk-head mk-teams-h mk-dealers-h" }, h("h2", null, "Conversaciones con dealers")),
         h("div", { class: "mk-chats" }, stateBox("loading"))),
       h("aside", { class: "mk-side" }, stateBox("loading"))));
   }
@@ -603,6 +664,7 @@
     title: "Mercado",
     mount(root, params) {
       S.mode = params === "historial" || params === "conversaciones" || params === "eventos" ? "hist" : "live";
+      const fm = /^hilo-(\d+)$/.exec(params || ""); S.focusThread = fm ? +fm[1] : null; S.focusDone = false;
       if (params === "conversaciones") S.hist.view = "conv";
       if (params === "eventos") S.hist.view = "eventos";
       S.live.filter = null;

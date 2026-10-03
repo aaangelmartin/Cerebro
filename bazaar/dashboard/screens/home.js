@@ -460,6 +460,9 @@
     const body = el("div", { class: "scr-home h-detail" },
       el("div", { class: "h-detail-head" }, D.chip(r.type), " ", actorCell(r)),
       el("p", {}, r.text),
+      // a conversation between teams that involves us: open it in Mercado
+      (/^thread\./.test(raw.type || "") && p.thread != null && /^t\d+$/.test(String(p.with || "")) && (p.team === US || p.with === US))
+        ? el("a", { class: "h-golink", href: "#mercado/hilo-" + p.thread, onclick: () => { if (window.ui.closeDrawer) window.ui.closeDrawer(); } }, "Ver la conversación en Mercado →") : null,
       kv("Hora", hhmmss(r.ts)), kv("Tick", raw.tick != null ? String(raw.tick) : null), kv("Tipo de evento", raw.type),
       kv("Valor", r.value), kv("Tienda", p.venue ? D.venueName(p.venue) : null), kv("Comisión", p.fee != null ? fmtP(p.fee) : null),
       kv("Equipos", (r.teams || []).filter(Boolean).map((t) => t === US ? "Team 10 · Nosotros" : D.teamName(t)).join(", ")),

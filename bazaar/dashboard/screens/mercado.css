@@ -127,3 +127,16 @@
 .scr-mercado .mk-end-when { font-family: var(--font-num); font-size: 11px; margin-left: 6px; white-space: nowrap; }
 .scr-mercado .mk-chat.is-ended { opacity: .88; }
 .scr-mercado .mk-chat.is-ended .mk-chat-f { display: none; }
+
+/* Conversaciones con equipos */
+.scr-mercado .mk-teams { margin: 4px 0 18px; }
+.scr-mercado .mk-dealers-h { margin-bottom: 10px; }
+.scr-mercado .mk-team .mk-msgs { max-height: 220px; }
+.scr-mercado .mk-teams-h h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.scr-mercado .mk-teams-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+@media (max-width: 1400px) { .scr-mercado .mk-teams-list { grid-template-columns: minmax(0, 1fr); } }
+.scr-mercado .mk-team { border-top-color: var(--t-cambio); }
+.scr-mercado .mk-team.is-focus { outline: 2px solid var(--signal); outline-offset: -1px; }
+.scr-mercado .mk-team .mk-msgs { max-height: 320px; }
+.scr-mercado .mk-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--line-2); border-left: 3px solid var(--tc, var(--line-2)); background: var(--bg); font-size: 12.5px; }
+.scr-mercado .mk-teams-list > .mk-more { grid-column: 1 / -1; text-align: center; text-decoration: none; }
