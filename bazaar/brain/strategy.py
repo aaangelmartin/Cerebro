@@ -164,6 +164,7 @@ def sanitize(raw: Any) -> dict:
         "accept_offers": accepts,
         "post_offers": _post_offers(raw.get("post_offers")),
         "dealer_orders": _dealer_orders(raw.get("dealer_orders")),
+        "team_messages": _team_messages(raw.get("team_messages")),
         "workshop_orders": _workshop_orders(raw.get("workshop_orders")),
         "whatsapp_replies": [{"reply_to": _clean(x.get("reply_to"), 60), "text": _clean(x.get("text"), 1500),
                               "why": _clean(x.get("why"), 400), "conclusion": _clean(x.get("conclusion"), 600)}
@@ -267,6 +268,26 @@ def _post_offers(raw) -> list[dict]:
                     "to": to if to and re.match(r"^t\d{2}$", to) else None,
                     "venue": _clean(x.get("venue"), 12) or "rastro", "why": _clean(x.get("why"), 200)})
     return out
+
+
+def _team_messages(raw) -> list[dict]:
+    """Threads the brain wants opened with another team's agent: {to: 't05', text, venue?, why?}. For what an
+    offer cannot say; a price or a card still goes in post_offers."""
+    out = []
+    for x in (raw or [])[:2] if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        to, text = str(x.get("to") or "").strip(), _clean(x.get("text"), 500)
+        if not re.match(r"^t\d{2}$", to) or not text:
+            continue
+        venue = _clean(x.get("venue"), 12) or "rastro"
+        out.append({"to": to, "text": text, "venue": "rastro" if venue == "v07" else venue,
+                    "why": _clean(x.get("why"), 200)})
+    return out
+
+
+def team_messages(live: Path | None = None) -> list[dict]:
+    return list(_plan(live).get("team_messages") or [])
 
 
 def post_offers(live: Path | None = None) -> list[dict]:

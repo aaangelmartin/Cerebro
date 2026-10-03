@@ -186,8 +186,8 @@ def _is_team(who) -> bool:
 
 
 def _texts_from_others(sit: Situation) -> list[str]:
-    """Texts that reach our prompts this tick, one per counterparty. Team threads are closed unread (no prompt
-    sees them), so a rival flooding them cannot push us into code-only mode."""
+    """Texts that reach our prompts this tick, one per counterparty. Team threads are answered by bazaar.teamtalk
+    (at most two open, one model call per tick), so a rival flooding them cannot push us into code-only mode."""
     me = (sit.me or {}).get("id")
     out, seen = [], set()
     for t in sit.threads:
@@ -617,16 +617,19 @@ class Runner:
                 out.append(venue.open_action(sit))
         except Exception as e:  # noqa: BLE001
             self._err("venue.should_open", e)
-        for t in sit.threads or []:
-            tid = t.get("id") or t.get("thread")
-            if (tid is not None and _is_team(t.get("with")) and (t.get("status") or "open") == "open"
-                    and tid not in self.closed_team_threads):
-                if self.can_write(ctx.control if ctx is not None else self.control()):
-                    self.closed_team_threads.add(tid)
-                who = t.get("team") if t.get("team") not in (None, (sit.me or {}).get("id")) else t.get("with")
-                out.append(Action(kind="close_thread", params={"thread": tid}, domain="market", source="code",
-                                  reason=f"Close the thread {who} opened with us: it holds one of our 6 "
-                                         "thread slots and the bot trades with teams through offers."))
+        try:                                                    # threads with other teams' agents: read, answer,
+            from bazaar.brain import strategy as _st            # offer; close after a decline or 6 quiet ticks
+            if getattr(self, "teamtalk", None) is None:
+                from bazaar.teamtalk import TeamTalk
+                self.teamtalk = TeamTalk(live=getattr(self, "live", None))
+            control = ctx.control if ctx is not None else self.control()
+            rails = getattr(self, "rails", None)
+            out.extend(self.teamtalk.actions(
+                sit, ctx, team_messages=_st.team_messages(getattr(self, "live", None)),
+                can_write=self.can_write(control),
+                check=(lambda a: rails.check(a, sit, ctx)) if rails is not None and ctx is not None else None))
+        except Exception as e:  # noqa: BLE001
+            self._err("teamtalk", e)
         vid = _own_venue(sit)
         if (vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H
                 and sit.tick >= getattr(self, "announce_retry_tick", -1)):
