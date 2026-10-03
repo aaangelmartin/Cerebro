@@ -413,6 +413,10 @@ class MarketDomain:
         bid_room = max(0, min(MAX_OWN_BIDS - kinds.count("bid"), room_total))
         bids = proto.bid_candidates(values, counts, venues, cash_room, wanted, bid_room) if bid_room else []
         bids = [b for b in bids if b.max_price <= per_deal]
+        from bazaar.core.goal import pending as _goal_pending
+        goal = _goal_pending(sit, control, values)  # cash is saved for these: bid only on them
+        if goal:
+            bids = [b for b in bids if b.ref in goal]
 
         # swaps: our duplicates / low-affinity cards for cards we lack, aimed at teams that value what we give
         swap_room = max(0, min(MAX_OWN_SWAPS - kinds.count("swap"), room_total))
@@ -429,6 +433,12 @@ class MarketDomain:
         swaps = proto.swap_candidates(values, counts, pool, venues, wanted, fans_of, swap_room) if swap_room else []
 
         stale = proto.stale_offers(own_market, values, counts, CANCELS_PER_TICK)
+        if goal:                                    # free the cash locked in bids for other cards
+            seen = {o.get("id") for o, _ in stale}
+            for o in own_market:
+                if (offer_kind(o) == "bid" and o.get("id") not in seen
+                        and not (set(want_cards(o)) & set(goal))):
+                    stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,

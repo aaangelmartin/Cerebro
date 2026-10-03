@@ -9,7 +9,7 @@ GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -89,6 +89,12 @@ def apply_control(live: Path, body: dict) -> dict:
             if body[key] not in options:
                 raise ValueError(f"{key} must be one of {sorted(options)}")
             change[key] = body[key]
+    if "goal_buys" in body:
+        g = body["goal_buys"]
+        if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                                              for v in g.values()):
+            raise ValueError("goal_buys must be an object of card -> max price")
+        change["goal_buys"] = {str(k).upper(): int(v) for k, v in g.items()}
     for key in ("protected", "paused_domains"):
         if key in body:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):

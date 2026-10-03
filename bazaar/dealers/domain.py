@@ -398,6 +398,8 @@ class DealersDomain:
         # our open buy bids: if the dealers took them all at once they must still fit in cash - reserve
         bids = {v.id: int(v.last_ours) for v in views if v.buying and v.last_ours}
         committed = 0
+        from bazaar.core.goal import pending as _goal_pending
+        goal_now = _goal_pending(sit, _g(ctx, "control") or {}, values)
         for v in views:
             if v.dealer not in self.store.data["menus"] and v.dealer not in dealers:
                 continue
@@ -410,6 +412,9 @@ class DealersDomain:
                 value_limit = haggle.buy_max(value)
                 if v.is_pack:       # cannot open packs yet: only a clear edge on the real catalog's value
                     value_limit = min(value_limit, self._pack_max(value)) if plan.values.catalog else 0
+                g_ref = str(getattr(v, "item", None) or "").upper()
+                if g_ref in goal_now:   # a goal card: the team approved paying up to its max (still below value)
+                    value_limit = max(value_limit, min(goal_now[g_ref], int(value) - 1))
                 limit = min(value_limit, own_cap)
                 budget_bound = own_cap < value_limit
                 if cautious:
@@ -472,6 +477,8 @@ class DealersDomain:
                   for a in ((o.get("give") or {}).get("assets") or [])}
         in_threads = {i for info in plan.infos for i in info.view.asset_ids}
         counts = {ref: len(cs) for ref, cs in values.held.items()}
+        from bazaar.core.goal import pending as _goal_pending
+        goal = _goal_pending(sit, control, values)  # cash is saved for these: no other buys until they are held
         for d in plan.free:
             p = plan.dealers[d]
             menu = p.get("menu") or {}
@@ -510,6 +517,8 @@ class DealersDomain:
 
             for entry in menu.get("sells") or []:
                 if entry.get("pack"):
+                    if goal:
+                        continue
                     pid = entry["pack"]
                     per_h = int(entry.get("per_team_per_hour") or FRIDAY_QUOTAS.get(d, {}).get("packs", 2))
                     if self.store.deals_last_hour(d, packs_only=True) >= per_h:
@@ -526,8 +535,11 @@ class DealersDomain:
                     for ref in values.released_refs(r):
                         if isinstance(sets, list) and values.set_of(ref) not in sets:
                             continue
+                        if goal and ref not in goal:
+                            continue
                         add({"buy": {"card": ref}}, f"buy:{r}", ref, (values.cards.get(ref) or {}).get("name", ref),
-                            values.next_copy(ref), entry.get("list_price"))
+                            values.next_copy(ref), entry.get("list_price"),
+                            max_price=min(goal[ref], int(values.next_copy(ref)) - 1) if ref in goal else None)
             buys = {e.get("rarity"): e for e in menu.get("buys") or [] if e.get("rarity")}
             for a in me.get("assets") or []:
                 if a.get("kind", "card") != "card" or a.get("rarity") not in buys:
