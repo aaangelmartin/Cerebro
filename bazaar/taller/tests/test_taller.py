@@ -56,8 +56,9 @@ class ClaudeEnvTest(unittest.TestCase):
 class FakeSh:
     """Records git/test commands and answers like a happy repository."""
 
-    def __init__(self, tests_ok=True, changed=("bazaar/intel/__init__.py",)):
+    def __init__(self, tests_ok=True, changed=("bazaar/intel/__init__.py",), on_origin=False, reject_push=0):
         self.calls, self.tests_ok, self.changed = [], tests_ok, list(changed)
+        self.on_origin, self.reject_push = on_origin, reject_push      # reject_push: how many pushes origin refuses
 
     def __call__(self, args, cwd=None, timeout=300, check=False, env=None):
         self.calls.append(list(args))
@@ -76,6 +77,11 @@ class FakeSh:
             out = T.BRANCH
         if "unittest" in args and not self.tests_ok:
             rc, out = 1, "FAILED (failures=1)"
+        if args[:3] == ["git", "merge-base", "--is-ancestor"]:
+            rc = 0 if self.on_origin else 1
+        if args[:2] == ["git", "push"] and self.reject_push > 0:
+            self.reject_push -= 1
+            return subprocess.CompletedProcess(args, 1, "", "! [rejected] (fetch first)")
         return subprocess.CompletedProcess(args, rc, out, "")
 
 
@@ -162,6 +168,37 @@ class ForkModeTest(JobTest):
         self.assertTrue(any(c[:3] == ["git", "push", "-q"] and c[-1].endswith(":refs/heads/" + T.BRANCH)
                             for c in sh.calls))
         self.assertEqual(self.box.get(job["id"])["status"], "done")
+
+    def test_finish_skips_the_push_when_the_commit_is_already_on_origin(self):
+        sh = FakeSh(changed=["bazaar/broker/engine.py"], on_origin=True)
+        t = self.make(sh)
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "done")
+        self.assertFalse(any(c[:2] == ["git", "push"] for c in sh.calls))
+        self.assertEqual(self.restarted, ["broker"])
+        self.assertEqual(self.box.get(job["id"])["status"], "done")
+
+    def test_finish_republishes_on_fresh_origin_when_the_push_is_rejected(self):
+        sh = FakeSh(changed=["bazaar/broker/engine.py"], reject_push=1)
+        t = self.make(sh)
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "done")
+        self.assertTrue(any(c[:2] == ["git", "cherry-pick"] for c in sh.calls))
+        pushes = [c for c in sh.calls if c[:2] == ["git", "push"]]
+        self.assertEqual(len(pushes), 2)
+        self.assertTrue(all("--force" not in c and "-f" not in c and not any(a.startswith("+") for a in c)
+                            for c in pushes))
+        self.assertEqual(pushes[-1][-1], "HEAD:refs/heads/" + T.BRANCH)
+
+    def test_finish_gives_up_without_forcing_when_origin_keeps_rejecting(self):
+        sh = FakeSh(changed=["bazaar/broker/engine.py"], reject_push=5)
+        t = self.make(sh)
+        job = t.next_job()
+        res = t.finish_job(job["id"], "abc1234")
+        self.assertEqual(res["result"], "push_failed")
+        self.assertEqual(self.restarted, [])
 
     def test_finish_with_red_tests_reverts_locally_and_reopens(self):
         sh = FakeSh(tests_ok=False)

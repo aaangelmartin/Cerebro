@@ -526,6 +526,50 @@ class Taller:
         self.finish(iid, "failed", f"no aplicado: {reason[:500]}", status="open", reason=reason[:300])
         return {"id": iid, "result": "failed"}
 
+    def _publish(self, iid: str, full: str) -> tuple[bool, str]:
+        """Put the job's commit on origin/feat/bazaar-v2 without ever forcing. Other agents push to the same
+        branch, so: (1) if the commit is already contained in origin, there is nothing to push; (2) a plain push
+        of the commit; (3) if origin moved, cherry-pick the commit onto fresh origin in a clean temporary
+        worktree, test it there and push that (the main working tree and its uncommitted files are not touched)."""
+        self.sh(["git", "fetch", "-q", REMOTE, BRANCH])
+        if self.sh(["git", "merge-base", "--is-ancestor", full, f"{REMOTE}/{BRANCH}"]).returncode == 0:
+            self.log(iid, "already_on_origin", commit=full[:7])
+            return True, ""
+        r = self.sh(["git", "push", "-q", REMOTE, f"{full}:refs/heads/{BRANCH}"])
+        if r.returncode == 0:
+            self.log(iid, "pushed", commit=full[:7])
+            return True, ""
+        first = (r.stderr or "")[-300:]
+        self.log(iid, "push_rejected", error=first)
+        wt = self.work / f"push-{iid}"
+        if wt.exists():
+            self.sh(["git", "worktree", "remove", "--force", str(wt)])
+        self.sh(["git", "fetch", "-q", REMOTE, BRANCH])
+        a = self.sh(["git", "worktree", "add", "--detach", str(wt), f"{REMOTE}/{BRANCH}"])
+        if a.returncode != 0:
+            return False, (a.stderr or first)
+        try:
+            cp = self.sh(["git", "cherry-pick", full], cwd=wt)
+            if cp.returncode != 0:
+                self.sh(["git", "cherry-pick", "--abort"], cwd=wt)
+                return False, "conflicts with what is now on origin: " + (cp.stderr or cp.stdout or "")[-200:]
+            friday = self.repo / "bazaar" / "data" / "friday"
+            if friday.exists() and (wt / "bazaar").exists():
+                (wt / "bazaar" / "data").mkdir(parents=True, exist_ok=True)
+                if not (wt / "bazaar" / "data" / "friday").exists():
+                    (wt / "bazaar" / "data" / "friday").symlink_to(friday, target_is_directory=True)
+            ok, tail = self._tests(wt)
+            if not ok:
+                return False, "tests fail on top of the new origin: " + tail[-200:]
+            p = self.sh(["git", "push", "-q", REMOTE, f"HEAD:refs/heads/{BRANCH}"], cwd=wt)   # never forced
+            if p.returncode != 0:
+                return False, (p.stderr or first)
+            new = self.sh(["git", "rev-parse", "--short", "HEAD"], cwd=wt).stdout.strip()
+            self.log(iid, "pushed_rebased", commit=full[:7], as_commit=new)
+            return True, ""
+        finally:
+            self.sh(["git", "worktree", "remove", "--force", str(wt)])
+
     def finish_job(self, iid: str, commit: str) -> dict:
         """The fork committed its change locally: test it on a clean checkout, push, deploy, watch, revert on errors."""
         item = self.box.get(iid)
@@ -564,14 +608,12 @@ class Taller:
             self.finish(iid, "failed", f"los tests fallan con {full[:7]} (revertido en local): {tail[-300:]}",
                         status="open")
             return {"id": iid, "result": "failed", "tests": tail[-300:]}
-        r = self.sh(["git", "push", "-q", REMOTE, f"{full}:refs/heads/{BRANCH}"])
-        if r.returncode != 0:
-            self.log(iid, "push_failed", error=(r.stderr or "")[-300:])
+        pushed, err = self._publish(iid, full)
+        if not pushed:
+            self.log(iid, "push_failed", error=err[-300:])
             return {"id": iid, "result": "push_failed",
-                    "error": "origin/feat/bazaar-v2 moved: `git pull --rebase origin feat/bazaar-v2` (no stash) and run "
-                             "--finish again with the new hash"}
+                    "error": "could not publish on origin/feat/bazaar-v2 without forcing: " + err[-300:]}
         head = full[:7]
-        self.log(iid, "pushed", commit=head)
         services = services_for(files)
         errors = self._deploy(iid, services)
         if errors:
