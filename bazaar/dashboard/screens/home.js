@@ -346,21 +346,28 @@
     const delta = num(t.delta_1h);
     const neg = num(t.negotiating) != null ? num(t.negotiating) : num(me.negotiating);
     const mkt = num(t.market) != null ? num(t.market) : num(me.market);
-    const leadNeg = Math.max(0, ...teams.map((x) => num(x.negotiating) || 0));
-    const leadMkt = Math.max(0, ...teams.map((x) => num(x.market) || 0));
+    // the leader of each part (same colours as the split in Rivales: negotiation teal, market blue)
+    const leaderOf = (k) => teams.reduce((b, x) => ((num(x[k]) || 0) > ((b && num(b[k])) || 0) ? x : b), null);
+    const lNeg = leaderOf("negotiating"), lMkt = leaderOf("market");
+    const NEG_C = "var(--t-dealer,#2bb3a3)", MKT_C = "var(--t-cambio,#4c8dff)";
     const idx = teams.findIndex((x) => x.team === US);
     const ladder = idx < 0 ? teams.slice(0, 4) : teams.slice(Math.max(0, idx - 2), Math.max(0, idx - 2) + 4);
     const ser = D.series(US);
-    const bar = (label, v, lead) => el("div", { class: "h-bar" }, el("span", { class: "h-bar-l" }, label),
-      el("span", { class: "h-bar-track" }, el("span", { class: "h-bar-fill", style: `width:${Math.min(100, ((v || 0) / 30) * 100)}%` }),
-        lead ? el("span", { class: "h-bar-lead", title: "líder: " + fmt(lead, 1), style: `left:${Math.min(100, (lead / 30) * 100)}%` }) : null),
-      el("span", { class: "h-bar-v num" }, fmt(v, 1) + "/30"));
+    const bar = (label, v, leader, key, color) => {
+      const lead = leader ? num(leader[key]) : null;
+      const who = leader ? (leader.team === US ? "Nosotros" : leader.name || D.teamName(leader.team)) : "";
+      return el("div", { class: "h-bar" }, el("span", { class: "h-bar-l" }, el("i", { class: "h-sq", style: "background:" + color }), label),
+        el("span", { class: "h-bar-track" }, el("span", { class: "h-bar-fill", style: `width:${Math.min(100, ((v || 0) / 30) * 100)}%;background:${color}` }),
+          lead ? el("span", { class: "h-bar-lead", title: `líder: ${who} · ${fmt(lead, 1)}`, style: `left:${Math.min(100, (lead / 30) * 100)}%` }) : null),
+        el("span", { class: "h-bar-v num" }, fmt(v, 1) + "/30"),
+        lead ? el("span", { class: "h-bar-sub num" }, `líder ${who} ${fmt(lead, 1)}` + (leader.team === US ? "" : ` · −${fmt(Math.max(0, lead - (v || 0)), 1)}`)) : null);
+    };
     D.replace(box,
       el("div", { class: "h-score-l" },
         el("div", { class: "h-big num" }, fmt(score, 1), el("span", { class: "h-of" }, " / 60")),
         el("div", { class: "h-delta num " + (delta > 0 ? "t10-up" : delta < 0 ? "t10-down" : "") }, delta == null ? "sin cambio medido en la última hora" : (delta > 0 ? "+" : "") + fmt(delta, 1) + " en la última hora"),
         el("div", { class: "h-spark" }, D.spark(ser.slice(-120), { w: 220, h: 34 })),
-        bar("Negociación", neg, leadNeg), bar("Mercado", mkt, leadMkt)),
+        bar("Negociación", neg, lNeg, "negotiating", NEG_C), bar("Mercado", mkt, lMkt, "market", MKT_C)),
       el("div", { class: "h-ladder" }, ladder.map((x) => {
         const d = num(x.score) != null && score != null ? num(x.score) - score : null;
         return el("div", { class: "h-lad" + (x.team === US ? " t10-usrow" : "") },

@@ -80,3 +80,8 @@ div.scr-home { display: flex; flex-direction: column; gap: 16px; }
 .scr-home .h-tl .t10-svgtxt { font-size: 10px; }
 .scr-home .h-bar { grid-template-columns: minmax(0, 1fr) 52px; row-gap: 3px; }
 .scr-home .h-bar-l { grid-column: 1 / -1; }
+/* Negociación / Mercado bars: colours shared with Rivales' split, leader marker and gap */
+.scr-home .h-bar-l { display: flex; align-items: center; gap: 6px; }
+.scr-home .h-sq { width: 8px; height: 8px; display: inline-block; flex: none; }
+.scr-home .h-bar-lead { background: var(--ink, #eee); }
+.scr-home .h-bar-sub { grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; color: var(--ink-3, #777); margin-top: -3px; }
