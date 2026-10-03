@@ -9,9 +9,10 @@
   const A = () => window.api;
   const el = (...a) => U().el(...a);
   const when = (ts) => (ts ? U().fmtTime(ts) : "—");
+  const tr = (k, v) => window.I18N.t(k, v);
   const SRC = { boletin: ["Boletín", "anuncio", "var(--t-cambio)"], radio: ["Radio Rastro", "bell", "var(--t-puja)"], tablon: ["El Tablón", "coleccion", "var(--t-dealer)"] };
   const SRC_IDS = Object.keys(SRC);
-  const ST = { confirmada: ["Confirmada", "ok"], falsa: ["Falsa", "bad"], pendiente: ["Pendiente", "warn"], sin_verificar: ["Sin verificar", "mute"] };
+  const ST = { confirmada: ["radio.st.confirmed", "ok"], falsa: ["radio.st.false", "bad"], pendiente: ["radio.st.pending", "warn"], sin_verificar: ["radio.st.unverified", "mute"] };
   const R = { items: [], sources: {}, state: "idle", err: null, at: 0, busy: false, seen: null, feedSeq: 0, feedItems: [], origin: "", sent: {}, chatAt: 0 };
   const SENT_KEY = "bazaar.dash.newsSent";
   try { R.sent = JSON.parse(localStorage.getItem(SENT_KEY) || "{}") || {}; } catch (e) { R.sent = {}; }
@@ -88,9 +89,9 @@
       await A().brainSay(text, by);
       R.sent[keyOf(x)] = { ts: Date.now() / 1000, by };
       try { localStorage.setItem(SENT_KEY, JSON.stringify(R.sent)); } catch (e) { /* private mode */ }
-      U().toast({ type: "deal", title: "Noticia enviada al cerebro", text: (x.head || x.body).slice(0, 120), href: "#cerebro" });
+      U().toast({ type: "deal", title: tr("radio.toast.sent"), text: (x.head || x.body).slice(0, 120), href: "#cerebro" });
       render();
-    } catch (e) { btn.disabled = false; U().toast({ type: "error", title: "No se pudo enviar al cerebro", text: (e && e.message) || "Error" }); }
+    } catch (e) { btn.disabled = false; U().toast({ type: "error", title: tr("radio.toast.fail"), text: (e && e.message) || "Error" }); }
   }
   // new actionable items since the last look (for the toast); the first load never toasts
   function fresh() {
@@ -107,7 +108,7 @@
     c.style.setProperty("--tc", color);
     return c;
   }
-  const stChip = (st) => { const [l, t] = ST[st] || ST.sin_verificar; return el("span", { class: "tag res tone-" + t }, l); };
+  const stChip = (st) => { const [l, t] = ST[st] || ST.sin_verificar; return el("span", { class: "tag res tone-" + t }, tr(l)); };
   function reliability() {
     return SRC_IDS.map((k) => {
       const s = R.sources[k] || {};
@@ -115,43 +116,43 @@
       const ok = s.confirmed ?? items.filter((x) => x.st === "confirmada").length;
       const bad = s.false ?? s.falsas ?? items.filter((x) => x.st === "falsa").length;
       const judged = ok + bad;
-      return { k, label: SRC[k][0], n: s.n ?? items.length, text: judged ? `${ok}/${judged} ciertas` : "—", tone: !judged ? "mute" : ok / judged >= 0.75 ? "ok" : ok / judged >= 0.4 ? "warn" : "bad" };
+      return { k, label: SRC[k][0], n: s.n ?? items.length, text: judged ? tr("radio.rel.true", { ok, judged }) : "—", tone: !judged ? "mute" : ok / judged >= 0.75 ? "ok" : ok / judged >= 0.4 ? "warn" : "bad" };
     });
   }
   function row(x, compact) {
     const pred = x.prediction && (x.prediction.text || x.prediction.claim);
     const n = el("div", { class: "rd-row" + (x.actionable ? " is-act" : "") + (compact ? " is-compact" : "") },
       el("div", { class: "rd-h" }, el("span", { class: "num rd-time" }, when(x.ts)), srcChip(x.src), stChip(x.st),
-        x.actionable ? el("span", { class: "tag rd-act" }, U().icon("bell", 12), "Hay que actuar") : null,
+        x.actionable ? el("span", { class: "tag rd-act" }, U().icon("bell", 12), tr("radio.act")) : null,
         x.tick != null && !compact ? el("span", { class: "num rd-muted" }, "tick " + x.tick) : null),
       x.head ? el("div", { class: "rd-title" }, x.head) : null,
       el("div", { class: "rd-text" + (compact ? " is-clip" : "") }, x.body),
-      compact ? null : pred ? el("div", { class: "rd-sub" }, el("b", {}, "Predice: "), pred,
-        x.prediction.deadline_h != null ? el("span", { class: "num rd-muted" }, " · antes de h" + U().fmtNum(x.prediction.deadline_h, 2)) : null,
-        " · ", el("span", { class: "rd-" + x.st }, x.st === "confirmada" ? "se cumplió" : x.st === "falsa" ? "no se cumplió" : x.st === "pendiente" ? "aún por ver" : "sin comprobar")) : null,
-      x.note ? el("div", { class: "rd-sub" }, el("b", {}, "El cerebro: "), x.note) : null,
+      compact ? null : pred ? el("div", { class: "rd-sub" }, el("b", {}, tr("radio.predicts") + " "), pred,
+        x.prediction.deadline_h != null ? el("span", { class: "num rd-muted" }, " · " + tr("radio.before", { h: U().fmtNum(x.prediction.deadline_h, 2) })) : null,
+        " · ", el("span", { class: "rd-" + x.st }, x.st === "confirmada" ? tr("radio.pred.true") : x.st === "falsa" ? tr("radio.pred.false") : x.st === "pendiente" ? tr("radio.pred.pending") : tr("radio.pred.unchecked"))) : null,
+      x.note ? el("div", { class: "rd-sub" }, el("b", {}, tr("radio.brain") + " "), x.note) : null,
       compact ? null : sendBox(x));
     n.style.setProperty("--tc", (SRC[x.src] || SRC.radio)[2]);
     return n;
   }
   function sendBox(x) {
     const sent = R.sent[keyOf(x)];
-    const note = el("input", { class: "rd-note", placeholder: "Nota para el cerebro (opcional)" });
-    const btn = el("button", { type: "button", class: "rd-send" }, U().icon("cerebro", 13), sent ? "Volver a pasar" : "Pasar al cerebro");
+    const note = el("input", { class: "rd-note", placeholder: tr("radio.note.ph") });
+    const btn = el("button", { type: "button", class: "rd-send" }, U().icon("cerebro", 13), sent ? tr("radio.resend") : tr("radio.send"));
     btn.addEventListener("click", () => sendToBrain(x, note.value.trim(), btn));
     note.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); btn.click(); } });
-    return el("div", { class: "rd-sendbox" }, sent ? el("span", { class: "rd-sent" }, U().icon("check", 12), `enviada al cerebro a las ${when(sent.ts)}` + (sent.by ? " por " + sent.by : "")) : null,
+    return el("div", { class: "rd-sendbox" }, sent ? el("span", { class: "rd-sent" }, U().icon("check", 12), sent.by ? tr("radio.sentBy", { time: when(sent.ts), by: sent.by }) : tr("radio.sentAt", { time: when(sent.ts) })) : null,
       el("span", { class: "rd-sp" }), note, btn);
   }
   // Home panel: the five latest
   function homePanel(host) {
     if (!host) return;
     const sub = host.querySelector(".rd-home-sub"), list = host.querySelector(".rd-home-list");
-    if (R.state === "off") { sub.textContent = ""; list.replaceChildren(U().empty("Radio Rastro aún no está activa.")); return; }
+    if (R.state === "off") { sub.textContent = ""; list.replaceChildren(U().empty(tr("radio.offline"))); return; }
     if (R.state === "error") { list.replaceChildren(U().error(R.err)); return; }
     if (R.state === "idle") { list.replaceChildren(U().loading()); return; }
     sub.textContent = reliability().map((r) => r.label + " " + r.text).join(" · ");
-    if (!R.items.length) { list.replaceChildren(U().empty("Sin noticias todavía.")); return; }
+    if (!R.items.length) { list.replaceChildren(U().empty(tr("radio.empty"))); return; }
     U().keyedList(list, R.items.slice(0, 5), { key: (x) => String(x.id ?? x.ts), sig: (x) => x.st + "|" + x.note, render: (x) => row(x, true) });
   }
 
@@ -160,17 +161,17 @@
   function render() {
     const root = S.root; if (!root) return;
     const head = root.querySelector(".rd-rel"), list = root.querySelector(".rd-list"), fbHost = root.querySelector(".rd-fb");
-    if (R.state === "off") { head.replaceChildren(); fbHost.replaceChildren(); list.replaceChildren(U().empty("Radio Rastro aún no está activa.")); return; }
+    if (R.state === "off") { head.replaceChildren(); fbHost.replaceChildren(); list.replaceChildren(U().empty(tr("radio.offline"))); return; }
     if (R.state === "error") { list.replaceChildren(U().error(R.err)); return; }
     if (R.state === "idle") { list.replaceChildren(U().loading()); return; }
-    root.querySelector(".panel-sub").textContent = `${R.items.length} noticias · todas, la más reciente arriba` + (R.origin === "feed" ? " · leídas del feed del juego (el cerebro aún no las ha verificado)" : "");
-    head.replaceChildren(...reliability().map((r) => el("div", { class: "rd-relbox tone-" + r.tone }, srcChip(r.k), el("b", { class: "num" }, r.text), el("span", { class: "rd-muted" }, r.n + " noticias"))));
+    root.querySelector(".panel-sub").textContent = tr("radio.sub.count", { n: R.items.length }) + (R.origin === "feed" ? " · " + tr("radio.sub.feed") : "");
+    head.replaceChildren(...reliability().map((r) => el("div", { class: "rd-relbox tone-" + r.tone }, srcChip(r.k), el("b", { class: "num" }, r.text), el("span", { class: "rd-muted" }, tr("radio.n", { n: r.n })))));
     const counts = {}; for (const x of R.items) counts[x.src] = (counts[x.src] || 0) + 1;
     const stCounts = {}; for (const x of R.items) stCounts[x.st] = (stCounts[x.st] || 0) + 1;
     if (!S.fb) {
-      S.fb = U().filterBar({ types: SRC_IDS, counts, search: true, placeholder: "Buscar en las noticias…", chip: (t, n) => { const c = srcChip(t); c.append(el("span", { class: "chip-count num" }, String(n))); return c; },
-        extraRows: [{ key: "estado", label: "Estado", options: Object.keys(ST).map((k) => ({ id: k, label: ST[k][0], count: stCounts[k] || 0 })) },
-          { key: "solo", label: "Mostrar", options: [{ id: "act", label: "Solo las que piden actuar", icon: "bell" }] }],
+      S.fb = U().filterBar({ types: SRC_IDS, counts, search: true, placeholder: tr("radio.search"), chip: (t, n) => { const c = srcChip(t); c.append(el("span", { class: "chip-count num" }, String(n))); return c; },
+        extraRows: [{ key: "estado", label: tr("radio.f.status"), options: Object.keys(ST).map((k) => ({ id: k, label: tr(ST[k][0]), count: stCounts[k] || 0 })) },
+          { key: "solo", label: tr("radio.f.show"), options: [{ id: "act", label: tr("radio.f.onlyAct"), icon: "bell" }] }],
         onChange: (st) => { S.st = st; render(); } });
       S.st = S.fb.state; fbHost.replaceChildren(S.fb);
     } else S.fb.setCounts(counts, Object.fromEntries(Object.keys(ST).map((k) => ["estado/" + k, stCounts[k] || 0])));
@@ -179,17 +180,17 @@
     const rows = R.items.filter((x) => st.types.has(x.src) && (!est || !est.size || est.has(x.st)) && (!solo || !solo.has("act") || x.actionable)
       && (!q || `${x.head} ${x.body} ${x.note} ${(x.prediction || {}).text || ""}`.toLowerCase().includes(q)));
     U().keyedList(list, rows.slice(0, 200), { key: (x) => String(x.id ?? x.ts), sig: (x) => x.st + "|" + x.note + "|" + x.actionable + "|" + ((R.sent[keyOf(x)] || {}).ts || ""), render: (x) => row(x, false),
-      tail: rows.length ? [] : [U().empty(R.items.length ? "Nada coincide con el filtro." : "Sin noticias todavía.")] });
+      tail: rows.length ? [] : [U().empty(R.items.length ? tr("radio.noMatch") : tr("radio.empty"))] });
   }
 
   window.RadioNews = { pull, fresh, homePanel, state: () => R };
   window.Screens.noticias = {
-    title: "Noticias",
+    get title() { return tr("radio.title"); },
     mount(root) {
       S.root = root; S.fb = null;
       root.replaceChildren(el("div", { class: "scr-radio" },
-        el("section", { class: "panel" }, el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Noticias"),
-          el("span", { class: "panel-sub" }, "noticias y rumores del juego · qué predicen, si se cumplen y qué hizo el cerebro")),
+        el("section", { class: "panel" }, el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, tr("radio.title")),
+          el("span", { class: "panel-sub" }, tr("radio.sub"))),
           el("div", { class: "rd-rel" }), el("div", { class: "rd-fb" }), el("div", { class: "rd-list" }, U().loading()))));
     },
     async refresh(root, data, params, opts) { S.root = root; await pull(opts && opts.force); render(); },

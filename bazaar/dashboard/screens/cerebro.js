@@ -14,28 +14,30 @@
   // DOM append that skips null/false (Element.append would print "null")
   const add = (node, ...kids) => { for (const k of kids.flat(Infinity)) if (k !== null && k !== undefined && k !== false) node.append(k); return node; };
 
-  const DOMAINS = [["market", "Mercado", "mercado"], ["dealers", "Dealers", "dealer"], ["duels", "Duelos", "duelo"], ["broker", "Broker", "flask"]];
+  const tr = (k, v) => window.I18N.t(k, v);
+  // labels in the tables below are i18n keys, resolved with tr() when rendered
+  const DOMAINS = [["market", "cerebro.domain.market", "mercado"], ["dealers", "cerebro.domain.dealers", "dealer"], ["duels", "cerebro.domain.duels", "duelo"], ["broker", "cerebro.domain.broker", "flask"]];
   // finding topics: label, icon, colour
   const TOPICS = {
-    self_review: ["Autorrevisión", "check", "var(--t-puja)"], rivals: ["Rivales", "rivales", "var(--t-duelo)"],
-    gap: ["Distancia", "trend", "var(--t-cambio)"], idle: ["Bot parado", "alert", "var(--t-venta)"],
-    llm: ["Claves y gasto", "cloud", "var(--t-venta)"], offers: ["Ofertas", "anuncio", "var(--t-puja)"],
-    venues: ["Tiendas", "mercado", "var(--t-dealer)"], goals: ["Objetivos", "target", "var(--t-compra)"],
-    events: ["Evento", "bell", "var(--t-dealer)"], general: ["General", "supervision", "var(--t-anuncio)"],
+    self_review: ["cerebro.topic.self_review", "check", "var(--t-puja)"], rivals: ["cerebro.topic.rivals", "rivales", "var(--t-duelo)"],
+    gap: ["cerebro.topic.gap", "trend", "var(--t-cambio)"], idle: ["cerebro.topic.idle", "alert", "var(--t-venta)"],
+    llm: ["cerebro.topic.llm", "cloud", "var(--t-venta)"], offers: ["cerebro.topic.offers", "anuncio", "var(--t-puja)"],
+    venues: ["cerebro.topic.venues", "mercado", "var(--t-dealer)"], goals: ["cerebro.topic.goals", "target", "var(--t-compra)"],
+    events: ["cerebro.topic.events", "bell", "var(--t-dealer)"], general: ["cerebro.topic.general", "supervision", "var(--t-anuncio)"],
   };
   const topicOf = (t) => TOPICS[t] || TOPICS.general;
   function topicChip(t, count) {
-    const [label, ic, color] = topicOf(t);
+    const [lk, ic, color] = topicOf(t); const label = tr(lk);
     const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label),
       count !== undefined && count !== null ? el("span", { class: "chip-count num" }, String(count)) : null);
     c.style.setProperty("--tc", color);
     return c;
   }
   function statusChip(st) {
-    const map = { aplicado: ["Aplicado", "ok"], consejo: ["Aplicado · consejo", "ok"], pendiente: ["Pendiente de consejo", "warn"],
-      rechazado: ["Rechazado", "bad"], visto: ["Anotado", "mute"] };
+    const map = { aplicado: ["cerebro.status.applied", "ok"], consejo: ["cerebro.status.council", "ok"], pendiente: ["cerebro.status.pending", "warn"],
+      rechazado: ["cerebro.status.rejected", "bad"], visto: ["cerebro.status.noted", "mute"] };
     const [label, tone] = map[st] || map.visto;
-    return el("span", { class: "tag res tone-" + tone }, label);
+    return el("span", { class: "tag res tone-" + tone }, tr(label));
   }
   // status of what a plan document decided: council outcome of its big changes
   function planStatus(doc) {
@@ -79,20 +81,20 @@
     const cur = d.cur || {};
     const nextT = num((cur.plan || {}).next_check_in_ticks);
     const spentStrategy = d.spend && d.spend.by_purpose ? d.spend.by_purpose.strategy : st.spent_today;
-    const pill = el("span", { class: "pill tone-" + (on ? "ok" : "bad") }, el("span", { class: "dot" }), on ? "ENCENDIDO" : "APAGADO");
+    const pill = el("span", { class: "pill tone-" + (on ? "ok" : "bad") }, el("span", { class: "dot" }), on ? tr("cerebro.on") : tr("cerebro.off"));
     const kpis = el("div", { class: "cb-kpis" },
-      U().kpi({ label: "Estado", value: pill, sub: on ? "latido hace " + U().fmtDur(age) : age === null ? "sin latido todavía" : "último latido " + U().fmtAgo(st.updated) }),
-      U().kpi({ label: "Último plan", value: cur.updated ? when(cur.updated) : "—", sub: cur.tick != null ? "tick " + cur.tick + (cur.reason ? " · " + cur.reason : "") : "" }),
-      U().kpi({ label: "Siguiente revisión", value: nextT ? "en " + nextT + " ticks" : "—", sub: "antes si pasa algo (evento)" }),
-      U().kpi({ label: "Modelo", value: (cur.model || "claude-opus-5-5").replace("claude-", "").replace(/-/g, " "), sub: "esfuerzo medio" }),
-      U().kpi({ label: "Gasto hoy", value: (d.budget && num(d.budget.spent_today) != null) ? U().fmtUsd(d.budget.spent_today) : spentStrategy != null ? U().fmtUsd(spentStrategy) : "—",
-        sub: (d.budget && d.budget.cap_today) ? "tope " + U().fmtUsd(d.budget.cap_today) : st.day_cap ? "tope " + U().fmtUsd(st.day_cap) : (st.calls != null ? st.calls + " llamadas" : "") }));
+      U().kpi({ label: tr("cerebro.st.state"), value: pill, sub: on ? tr("cerebro.st.beatAgo", { d: U().fmtDur(age) }) : age === null ? tr("cerebro.st.noBeat") : tr("cerebro.st.lastBeat", { ago: U().fmtAgo(st.updated) }) }),
+      U().kpi({ label: tr("cerebro.st.lastPlan"), value: cur.updated ? when(cur.updated) : "—", sub: cur.tick != null ? "tick " + cur.tick + (cur.reason ? " · " + cur.reason : "") : "" }),
+      U().kpi({ label: tr("cerebro.st.next"), value: nextT ? tr("cerebro.st.inTicks", { n: nextT }) : "—", sub: tr("cerebro.st.nextSub") }),
+      U().kpi({ label: tr("cerebro.st.model"), value: (cur.model || "claude-opus-5-5").replace("claude-", "").replace(/-/g, " "), sub: tr("cerebro.st.effort") }),
+      U().kpi({ label: tr("cerebro.st.spend"), value: (d.budget && num(d.budget.spent_today) != null) ? U().fmtUsd(d.budget.spent_today) : spentStrategy != null ? U().fmtUsd(spentStrategy) : "—",
+        sub: (d.budget && d.budget.cap_today) ? tr("cerebro.st.cap", { v: U().fmtUsd(d.budget.cap_today) }) : st.day_cap ? tr("cerebro.st.cap", { v: U().fmtUsd(st.day_cap) }) : (st.calls != null ? tr("cerebro.st.calls", { n: st.calls }) : "") }));
 
     const errs = (st.errors || []).slice(-3);
-    const p = U().panel("Cerebro", { sub: "Opus piensa, investiga y decide; el consejo vota los cambios grandes", cls: "cb-status" });
+    const p = U().panel(tr("cerebro.title"), { sub: tr("cerebro.sub"), cls: "cb-status" });
     const sit = (cur.plan || {}).situation;
     add(p.body, kpis,
-      sit ? el("div", { class: "cb-situation" }, el("div", { class: "cb-cap" }, "Situación"), el("p", {}, sit)) : null,
+      sit ? el("div", { class: "cb-situation" }, el("div", { class: "cb-cap" }, tr("cerebro.situation")), el("p", {}, sit)) : null,
       errs.length ? el("div", { class: "cb-errs" }, errs.map((e) => el("div", { class: "cb-err" }, U().icon("alert", 13), el("span", { class: "num" }, when(e.ts)), " ", e.error || String(e)))) : null);
     return p;
   }
@@ -105,41 +107,41 @@
     const me = (window.__cbMe || {});
     for (const a of me.assets || []) if (a && a.ref) held.add(String(a.ref).toUpperCase());
     const keys = Object.keys(goals);
-    if (!keys.length) return el("div", { class: "cb-muted" }, "Sin objetivos de compra ahora.");
+    if (!keys.length) return el("div", { class: "cb-muted" }, tr("cerebro.goals.none"));
     return el("div", { class: "cb-goals" }, keys.map((ref) => {
       const got = held.has(ref.toUpperCase());
       const dropped = num(goals[ref]) === 0;
       return el("div", { class: "cb-goal" + (got ? " is-done" : "") + (dropped ? " is-dropped" : "") },
         U().icon(got ? "check" : "target", 14), el("b", { class: "num" }, ref),
-        el("span", { class: "cb-muted" }, dropped ? "descartado" : "máx " + fmtP(goals[ref])),
-        el("span", { class: "cb-goal-st" }, got ? "conseguido" : dropped ? "" : "buscando"),
+        el("span", { class: "cb-muted" }, dropped ? tr("cerebro.goals.dropped") : tr("cerebro.goals.max", { p: fmtP(goals[ref]) })),
+        el("span", { class: "cb-goal-st" }, got ? tr("cerebro.goals.got") : dropped ? "" : tr("cerebro.goals.looking")),
         manual[ref] != null ? el("span", { class: "tag res tone-mute" }, "manual") : null);
     }));
   }
 
   function planPanel(d) {
-    const p = U().panel("Plan actual", { sub: d.cur && d.cur.tick != null ? "tick " + d.cur.tick : "" });
+    const p = U().panel(tr("cerebro.plan.title"), { sub: d.cur && d.cur.tick != null ? "tick " + d.cur.tick : "" });
     const plan = (d.cur && d.cur.plan) || null;
-    if (!plan) { add(p.body, U().empty("El cerebro aún no ha publicado su plan.")); return p; }
+    if (!plan) { add(p.body, U().empty(tr("cerebro.plan.none"))); return p; }
     const pri = (plan.priorities || []);
     const cp = plan.cash_policy || {};
     add(p.body, 
-      el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Prioridades"),
-        pri.length ? el("ol", { class: "cb-pri" }, pri.map((x) => el("li", {}, x))) : el("div", { class: "cb-muted" }, "Sin prioridades.")),
+      el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.priorities")),
+        pri.length ? el("ol", { class: "cb-pri" }, pri.map((x) => el("li", {}, x))) : el("div", { class: "cb-muted" }, tr("cerebro.plan.noPriorities"))),
       el("div", { class: "cb-two" },
-        el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Objetivos de compra"), goalsBlock(plan, d.control)),
-        el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Política de caja"),
-          el("div", { class: "cb-kv" }, el("span", {}, "Reserva"), el("b", { class: "num" }, cp.reserve != null ? fmtP(cp.reserve) : "por defecto")),
-          el("div", { class: "cb-kv" }, el("span", {}, "Trato pequeño máx. (con objetivo)"), el("b", { class: "num" }, cp.max_small_deal != null ? fmtP(cp.max_small_deal) : "por defecto")),
-          plan.duel_claude_mode ? el("div", { class: "cb-kv" }, el("span", {}, "Modo de duelos"), el("b", {}, plan.duel_claude_mode)) : null,
-          (plan.pause_domains || []).length ? el("div", { class: "cb-kv" }, el("span", {}, "Dominios en pausa"), el("b", { class: "cb-bad" }, plan.pause_domains.join(", "))) : null)),
-      el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Indicaciones por dominio"),
+        el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.goals")), goalsBlock(plan, d.control)),
+        el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.cash")),
+          el("div", { class: "cb-kv" }, el("span", {}, tr("cerebro.plan.reserve")), el("b", { class: "num" }, cp.reserve != null ? fmtP(cp.reserve) : tr("cerebro.plan.default"))),
+          el("div", { class: "cb-kv" }, el("span", {}, tr("cerebro.plan.smallDeal")), el("b", { class: "num" }, cp.max_small_deal != null ? fmtP(cp.max_small_deal) : tr("cerebro.plan.default"))),
+          plan.duel_claude_mode ? el("div", { class: "cb-kv" }, el("span", {}, tr("cerebro.plan.duelMode")), el("b", {}, plan.duel_claude_mode)) : null,
+          (plan.pause_domains || []).length ? el("div", { class: "cb-kv" }, el("span", {}, tr("cerebro.plan.paused")), el("b", { class: "cb-bad" }, plan.pause_domains.join(", "))) : null)),
+      el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.guidance")),
         el("div", { class: "cb-guid" }, DOMAINS.map(([k, label, ic]) => el("div", { class: "cb-guid-item" },
-          el("div", { class: "cb-guid-h" }, U().icon(ic, 14), label),
-          el("p", {}, (plan.guidance || {})[k] || el("span", { class: "cb-muted" }, "Sin indicaciones.")))))),
-      (plan.risks || []).length ? el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Riesgos"),
+          el("div", { class: "cb-guid-h" }, U().icon(ic, 14), tr(label)),
+          el("p", {}, (plan.guidance || {})[k] || el("span", { class: "cb-muted" }, tr("cerebro.plan.noGuidance"))))))),
+      (plan.risks || []).length ? el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.risks")),
         el("ul", { class: "cb-risks" }, plan.risks.map((x) => el("li", {}, U().icon("alert", 13), el("span", {}, x))))) : null,
-      (plan.cancel_offers || []).length ? el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, "Ofertas que retira"),
+      (plan.cancel_offers || []).length ? el("div", { class: "cb-sec" }, el("div", { class: "cb-cap" }, tr("cerebro.plan.cancels")),
         el("div", { class: "cb-muted num" }, plan.cancel_offers.map((x) => "#" + x).join(" · "))) : null);
     return p;
   }
@@ -148,12 +150,13 @@
   // "level X: state a -> b", "schedule added: ...", "t06 score 11.1 -> 15.1",
   // "novelty <kind>: <untrusted source='game'>{json}</untrusted>". Parsed into {kind, text}.
   const EV_KIND = {
-    offer: ["Oferta", "anuncio", "var(--t-puja)"], level: ["Nivel", "trend", "var(--t-compra)"],
-    schedule: ["Calendario", "bell", "var(--t-cambio)"], score: ["Puntos", "competicion", "var(--t-duelo)"],
-    dealer: ["Dealer", "dealer", "var(--t-dealer)"], venue: ["Tienda", "mercado", "var(--t-dealer)"],
-    news: ["Noticia", "anuncio", "var(--t-anuncio)"], other: ["Evento", "bell", "var(--t-anuncio)"],
+    offer: ["cerebro.evk.offer", "anuncio", "var(--t-puja)"], level: ["cerebro.evk.level", "trend", "var(--t-compra)"],
+    schedule: ["cerebro.evk.schedule", "bell", "var(--t-cambio)"], score: ["cerebro.evk.score", "competicion", "var(--t-duelo)"],
+    dealer: ["cerebro.evk.dealer", "dealer", "var(--t-dealer)"], venue: ["cerebro.evk.venue", "mercado", "var(--t-dealer)"],
+    news: ["cerebro.evk.news", "anuncio", "var(--t-anuncio)"], other: ["cerebro.evk.other", "bell", "var(--t-anuncio)"],
   };
-  const ACTION_ES = { day_closes: "cierre", day_opens: "apertura", bench: "Market Test", duels: "duelos", round: "ronda" };
+  const ACTION_KEY = { day_closes: "cerebro.action.day_closes", day_opens: "cerebro.action.day_opens", bench: "cerebro.action.bench", duels: "cerebro.action.duels", round: "cerebro.action.round" };
+  const actionName = (a) => (ACTION_KEY[a] ? tr(ACTION_KEY[a]) : a);
   function parseEvent(raw) {
     let t = typeof raw === "string" ? raw : (raw && (raw.text || raw.event)) || JSON.stringify(raw);
     const m = t.match(/^novelty ([\w.]+):\s*<untrusted[^>]*>([\s\S]*?)(<\/untrusted>|$)/);
@@ -162,25 +165,25 @@
       let j = null; try { j = JSON.parse(m[2]); } catch (e) { j = null; }
       if (kind === "schedule" && j) {
         const when = j.at_hours != null ? "h" + fmtNum(j.at_hours, 2) : "";
-        return { kind: "schedule", text: `Calendario: ${ACTION_ES[j.action] || j.action} ${when}${j.note ? " · " + j.note : ""}` };
+        return { kind: "schedule", text: tr("cerebro.ev.schedule", { action: actionName(j.action), when }) + (j.note ? " · " + j.note : "") };
       }
       if (j && j.type) {
         const ex = j.example || {}; const p = ex.payload || {};
         const head = p.headline || p.title || p.text || "";
         const k = /news/.test(j.type) ? "news" : /persona|dealer/.test(j.type) ? "dealer" : /venue/.test(j.type) ? "venue" : "other";
-        return { kind: k, text: `Nuevo tipo de evento «${j.type}»${ex.actor ? " de " + ex.actor : ""}${head ? ": " + head : ""}` };
+        return { kind: k, text: (ex.actor ? tr("cerebro.ev.newTypeBy", { type: j.type, actor: ex.actor }) : tr("cerebro.ev.newType", { type: j.type })) + (head ? ": " + head : "") };
       }
-      return { kind: /persona|dealer/.test(kind) ? "dealer" : /venue/.test(kind) ? "venue" : "other", text: "Novedad " + kind + (j ? "" : ": " + m[2].slice(0, 160)) };
+      return { kind: /persona|dealer/.test(kind) ? "dealer" : /venue/.test(kind) ? "venue" : "other", text: tr("cerebro.ev.novelty", { kind }) + (j ? "" : ": " + m[2].slice(0, 160)) };
     }
-    if (/^offer /.test(t)) return { kind: "offer", text: t.replace(/^offer #(\d+) addressed to us by (\S+)/, "Oferta #$1 dirigida a nosotros por $2") };
-    if (/^level /.test(t)) return { kind: /persona|dealer|chato|abuela|pilar/i.test(t) ? "dealer" : "level", text: t.replace(/^level /, "Nivel/dealer ").replace("state", "estado") };
+    if (/^offer /.test(t)) return { kind: "offer", text: t.replace(/^offer #(\d+) addressed to us by (\S+)/, tr("cerebro.ev.offerToUs", { id: "$1", by: "$2" })) };
+    if (/^level /.test(t)) return { kind: /persona|dealer|chato|abuela|pilar/i.test(t) ? "dealer" : "level", text: t.replace(/^level /, tr("cerebro.ev.level") + " ").replace("state", tr("cerebro.ev.state")) };
     if (/^schedule (added|removed)/.test(t)) {
       const added = /added/.test(t);
-      const items = t.replace(/^schedule [^:]*:\s*/, "").split(/,\s*/).map((x) => { const [h, a] = x.split("|"); return (ACTION_ES[a] || a || "?") + " h" + h; });
-      return { kind: "schedule", text: (added ? "Calendario añade: " : "Calendario quita: ") + items.join(", ") };
+      const items = t.replace(/^schedule [^:]*:\s*/, "").split(/,\s*/).map((x) => { const [h, a] = x.split("|"); return (actionName(a) || "?") + " h" + h; });
+      return { kind: "schedule", text: tr(added ? "cerebro.ev.schedAdds" : "cerebro.ev.schedRemoves", { items: items.join(", ") }) };
     }
     const sc = t.match(/^(t\d+) score ([\d.]+) -> ([\d.]+)/);
-    if (sc) return { kind: "score", text: `${U().teamName ? U().teamName(sc[1]) : sc[1]}: ${fmtNum(+sc[2], 1)} → ${fmtNum(+sc[3], 1)} puntos (${+sc[3] >= +sc[2] ? "+" : ""}${fmtNum(+sc[3] - +sc[2], 1)})` };
+    if (sc) return { kind: "score", text: tr("cerebro.ev.score", { team: U().teamName ? U().teamName(sc[1]) : sc[1], from: fmtNum(+sc[2], 1), to: fmtNum(+sc[3], 1), delta: (+sc[3] >= +sc[2] ? "+" : "") + fmtNum(+sc[3] - +sc[2], 1) }) };
     if (/venue/.test(t)) return { kind: "venue", text: t };
     return { kind: "other", text: t.replace(/<\/?untrusted[^>]*>/g, "") };
   }
@@ -194,7 +197,7 @@
     return hit || (r.i === 0 ? pri[0] || ((r.doc && r.doc.plan) || {}).situation : "");
   }
   function evChip(kind) {
-    const [label, ic, color] = EV_KIND[kind] || EV_KIND.other;
+    const [lk, ic, color] = EV_KIND[kind] || EV_KIND.other; const label = tr(lk);
     const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label));
     c.style.setProperty("--tc", color);
     return c;
@@ -203,8 +206,8 @@
     const rows = [];
     for (const doc of d.history) (doc.events || []).forEach((e, i) => { const pe = parseEvent(e); rows.push({ ts: doc.updated, tick: doc.tick, i, ...pe, doc }); });
     rows.sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.i - b.i);
-    const p = U().panel("Eventos detectados", { sub: rows.length ? rows.length + " eventos" : "" });
-    if (!rows.length) { add(p.body, U().empty("Aún no ha detectado eventos (dealer nuevo, nivel, calendario, tiendas, saltos de puntos).")); return p; }
+    const p = U().panel(tr("cerebro.events.title"), { sub: rows.length ? tr("cerebro.events.n", { n: rows.length }) : "" });
+    if (!rows.length) { add(p.body, U().empty(tr("cerebro.events.empty"))); return p; }
     const host = el("div", { class: "cb-list cb-events" });
     U().keyedList(host, rows.slice(0, 80), {
       key: (r) => (r.ts || 0) + "|" + r.i, sig: () => "",
@@ -213,7 +216,7 @@
           el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(r.ts)), evChip(r.kind),
             el("span", { class: "num cb-muted" }, r.tick != null ? "tick " + r.tick : ""), el("span", { class: "cb-sp" }), statusChip(planStatus(r.doc))),
           el("div", { class: "cb-rowt", title: r.text }, short(r.text, 240)),
-          evConcl(r) ? el("div", { class: "cb-rows" }, "Conclusión del cerebro: " + short(evConcl(r), 240)) : null);
+          evConcl(r) ? el("div", { class: "cb-rows" }, tr("cerebro.events.concl", { text: short(evConcl(r), 240) })) : null);
         n.style.setProperty("--tc", (EV_KIND[r.kind] || EV_KIND.other)[2]);
         return n;
       },
@@ -241,12 +244,12 @@
     const counts = {};
     for (const r of all) { const t = TOPICS[r.topic] ? r.topic : "general"; counts[t] = (counts[t] || 0) + 1; }
     const topics = Object.keys(TOPICS).filter((t) => counts[t]);
-    const p = U().panel("Hallazgos y autorrevisión", { sub: all.length ? all.length + " hallazgos" : "" });
+    const p = U().panel(tr("cerebro.find.title"), { sub: all.length ? tr("cerebro.find.n", { n: all.length }) : "" });
     const tkey = topics.join(",");
     if (!S.fb || S.fbKey !== tkey) {
       const prev = S.fbState;
       S.fbKey = tkey;
-      S.fb = U().filterBar({ types: topics, counts, search: true, placeholder: "Buscar en hallazgos…",
+      S.fb = U().filterBar({ types: topics, counts, search: true, placeholder: tr("cerebro.find.search"),
         selected: prev ? topics.filter((t) => prev.types.has(t) || !S.fbKnown || !S.fbKnown.has(t)) : topics,
         chip: (t, n) => topicChip(t, n),
         onChange: (st) => { S.fbState = st; renderFindings(); } });
@@ -264,15 +267,15 @@
     const q = (st.q || "").toLowerCase();
     const rows = (S.findAll || []).filter((r) => (!st.types || st.types.has(TOPICS[r.topic] ? r.topic : "general"))
       && (!q || `${r.finding || ""} ${r.evidence || ""} ${r.fix || ""}`.toLowerCase().includes(q)));
-    if (!rows.length) { U().keyedList(host, [], { key: () => "", render: () => el("div"), tail: [U().empty(S.findAll && S.findAll.length ? "Nada coincide con el filtro." : "Aún no hay hallazgos. El cerebro los publica en cada revisión.")] }); return; }
+    if (!rows.length) { U().keyedList(host, [], { key: () => "", render: () => el("div"), tail: [U().empty(S.findAll && S.findAll.length ? tr("cerebro.find.noMatch") : tr("cerebro.find.empty"))] }); return; }
     U().keyedList(host, rows.slice(0, 150), {
       key: (r) => (r.ts || 0) + "|" + (r.topic || "") + "|" + (r.finding || "").slice(0, 40), sig: () => "",
       render: (r) => U().row({ cls: "cb-t-" + (TOPICS[r.topic] ? r.topic : "general"), cols: "86px 150px minmax(0,1fr) auto auto", cells: [
         { v: el("span", { class: "num" }, when(r.ts)), cls: "cb-time" },
         topicChip(r.topic),
         { v: el("div", {}, el("div", { class: "cb-rowt" }, r.finding || ""),
-          r.evidence ? el("div", { class: "cb-rows" }, "Prueba: " + r.evidence) : null,
-          r.fix ? el("div", { class: "cb-rows" }, "Arreglo: " + r.fix) : null), cls: "wrap" },
+          r.evidence ? el("div", { class: "cb-rows" }, tr("cerebro.find.evidence", { text: r.evidence })) : null,
+          r.fix ? el("div", { class: "cb-rows" }, tr("cerebro.find.fix", { text: r.fix })) : null), cls: "wrap" },
         r.doc ? planSource(r.doc) : U().sourceTag("opus"),
         statusChip(r.status || (r.doc ? planStatus(r.doc) : "visto"))] }),
     });
@@ -280,8 +283,8 @@
 
   function councilPanel(d) {
     const votes = d.history.filter((h) => h.council && Array.isArray(h.council.votes)).slice().reverse();
-    const p = U().panel("Votos del consejo sobre el cerebro", { sub: votes.length ? votes.length + " votaciones" : "" });
-    if (!votes.length) { add(p.body, U().empty("Todavía no ha hecho falta votar: no hubo cambios grandes.")); return p; }
+    const p = U().panel(tr("cerebro.council.title"), { sub: votes.length ? tr("cerebro.council.n", { n: votes.length }) : "" });
+    if (!votes.length) { add(p.body, U().empty(tr("cerebro.council.empty"))); return p; }
     const host = el("div", { class: "cb-list" });
     U().keyedList(host, votes.slice(0, 30), {
       key: (h) => String(h.updated), sig: () => "",
@@ -290,9 +293,9 @@
         const box = el("div", { class: "cb-vote " + (c.ok ? "is-ok" : "is-bad") },
           el("div", { class: "cb-vote-h" }, el("span", { class: "num" }, when(h.updated)), el("span", { class: "num cb-muted" }, "tick " + (h.tick ?? "?")),
             U().sourceTag("consejo", `${c.yes ?? 0}/${(c.votes || []).length}`), statusChip(c.ok ? "consejo" : "rechazado")),
-          el("div", { class: "cb-rows" }, "Cambios: " + ((h.big_changes || []).join(" · ") || "—")),
+          el("div", { class: "cb-rows" }, tr("cerebro.council.changes", { text: (h.big_changes || []).join(" · ") || "—" })),
           (c.votes || []).map((v) => el("div", { class: "cb-voter" },
-            el("span", { class: "tag res tone-" + (v.verdict === "reject" ? "bad" : "ok") }, v.verdict === "reject" ? "En contra" : "A favor"),
+            el("span", { class: "tag res tone-" + (v.verdict === "reject" ? "bad" : "ok") }, v.verdict === "reject" ? tr("cerebro.council.against") : tr("cerebro.council.for")),
             el("b", {}, roleName(v.role)), el("span", {}, v.reason || ""))));
         return box;
       },
@@ -300,7 +303,8 @@
     add(p.body, host);
     return p;
   }
-  const roleName = (r) => ({ auditor: "Auditor", negotiator: "Negociador", analyst: "Analista", judge: "Juez" }[r] || r || "—");
+  const ROLE = { auditor: "cerebro.role.auditor", negotiator: "cerebro.role.negotiator", analyst: "cerebro.role.analyst", judge: "cerebro.role.judge" };
+  const roleName = (r) => (ROLE[r] ? tr(ROLE[r]) : r || "—");
 
   // history: each plan with what changed against the previous one
   function diffPlans(a, b) {
@@ -308,23 +312,23 @@
     const out = [];
     const ga = pa.goal_buys || {}, gb = pb.goal_buys || {};
     for (const k of new Set([...Object.keys(ga), ...Object.keys(gb)])) {
-      if (!(k in ga)) out.push(["add", `Objetivo ${k} hasta ${fmtP(gb[k])}`]);
-      else if (!(k in gb)) out.push(["del", `Quita objetivo ${k}`]);
-      else if (num(ga[k]) !== num(gb[k])) out.push(["chg", `Objetivo ${k}: ${fmtP(ga[k])} → ${fmtP(gb[k])}`]);
+      if (!(k in ga)) out.push(["add", tr("cerebro.diff.goalAdd", { ref: k, max: fmtP(gb[k]) })]);
+      else if (!(k in gb)) out.push(["del", tr("cerebro.diff.goalDel", { ref: k })]);
+      else if (num(ga[k]) !== num(gb[k])) out.push(["chg", tr("cerebro.diff.goalChg", { ref: k, from: fmtP(ga[k]), to: fmtP(gb[k]) })]);
     }
     const ca = pa.cash_policy || {}, cb = pb.cash_policy || {};
-    for (const k of ["reserve", "max_small_deal"]) if (num(ca[k]) !== num(cb[k])) out.push(["chg", `${k === "reserve" ? "Reserva" : "Trato pequeño"}: ${ca[k] != null ? fmtP(ca[k]) : "—"} → ${cb[k] != null ? fmtP(cb[k]) : "—"}`]);
-    if ((pa.duel_claude_mode || "") !== (pb.duel_claude_mode || "") && pb.duel_claude_mode) out.push(["chg", `Duelos: ${pa.duel_claude_mode || "—"} → ${pb.duel_claude_mode}`]);
+    for (const k of ["reserve", "max_small_deal"]) if (num(ca[k]) !== num(cb[k])) out.push(["chg", tr(k === "reserve" ? "cerebro.diff.reserve" : "cerebro.diff.smallDeal", { from: ca[k] != null ? fmtP(ca[k]) : "—", to: cb[k] != null ? fmtP(cb[k]) : "—" })]);
+    if ((pa.duel_claude_mode || "") !== (pb.duel_claude_mode || "") && pb.duel_claude_mode) out.push(["chg", tr("cerebro.diff.duels", { from: pa.duel_claude_mode || "—", to: pb.duel_claude_mode })]);
     const pda = (pa.pause_domains || []).join(","), pdb = (pb.pause_domains || []).join(",");
-    if (pda !== pdb) out.push(["chg", `Pausa: ${pda || "ninguno"} → ${pdb || "ninguno"}`]);
+    if (pda !== pdb) out.push(["chg", tr("cerebro.diff.pause", { from: pda || tr("cerebro.diff.none"), to: pdb || tr("cerebro.diff.none") })]);
     const ta = (pa.priorities || [])[0], tb = (pb.priorities || [])[0];
-    if (tb && ta !== tb) out.push(["pri", "Nueva prioridad 1: " + tb]);
+    if (tb && ta !== tb) out.push(["pri", tr("cerebro.diff.newPri", { text: tb })]);
     return out;
   }
   function historyPanel(d) {
     const h = d.history;
-    const p = U().panel("Historial de planes", { sub: h.length ? h.length + " planes" : "" });
-    if (!h.length) { add(p.body, U().empty("Sin planes todavía.")); return p; }
+    const p = U().panel(tr("cerebro.hist.title"), { sub: h.length ? tr("cerebro.hist.n", { n: h.length }) : "" });
+    if (!h.length) { add(p.body, U().empty(tr("cerebro.hist.empty"))); return p; }
     const items = h.map((doc, i) => ({ doc, diff: diffPlans(i ? h[i - 1] : null, doc) })).reverse();
     const host = el("div", { class: "cb-timeline" });
     U().keyedList(host, items.slice(0, 40), {
@@ -339,11 +343,11 @@
             x.doc.cost_usd != null ? el("span", { class: "num cb-muted" }, U().fmtUsd(x.doc.cost_usd)) : null,
             U().icon("chevron", 13)),
           el("div", { class: "cb-diff" }, x.diff.length ? x.diff.map(([k, t]) => el("div", { class: "cb-d cb-d-" + k }, k === "add" ? "+ " : k === "del" ? "− " : "~ ", t))
-            : el("div", { class: "cb-muted" }, "Sin cambios de ajustes respecto al plan anterior.")),
+            : el("div", { class: "cb-muted" }, tr("cerebro.hist.noDiff"))),
           open ? el("div", { class: "cb-tl-body" },
             plan.situation ? el("p", {}, plan.situation) : null,
             el("ol", { class: "cb-pri" }, (plan.priorities || []).map((t) => el("li", {}, t))),
-            x.doc.proposed ? el("div", { class: "cb-rows cb-bad" }, "Propuesta rechazada por el consejo: " + ((x.doc.big_changes || []).join(" · ") || "—")) : null) : null);
+            x.doc.proposed ? el("div", { class: "cb-rows cb-bad" }, tr("cerebro.hist.rejected", { text: (x.doc.big_changes || []).join(" · ") || "—" })) : null) : null);
       },
     });
     add(p.body, host);
@@ -359,9 +363,9 @@
     U().keepScroll(wrap, () => {
       const top = wrap.querySelector(".cb-top"), mid = wrap.querySelector(".cb-mid"), bot = wrap.querySelector(".cb-bot");
       if (d.err && !d.cur && !(d.sv && d.sv.situation)) {
-        const p = U().panel("Plan actual");
+        const p = U().panel(tr("cerebro.plan.title"));
         add(p.body, U().empty(d.err.status === 404
-          ? "El cerebro aún no ha publicado su plan." : "No se pudo leer el plan: " + (d.err.message || d.err)));
+          ? tr("cerebro.plan.none") : tr("cerebro.plan.readFail", { err: d.err.message || d.err })));
         top.replaceChildren(statusPanel(d));
         mid.replaceChildren(p);
         bot.replaceChildren();
@@ -399,8 +403,8 @@
   function chatMount() {
     C.needEnd = true;
     const list = el("div", { class: "cb-chat-list" });
-    const input = el("textarea", { class: "cb-chat-in", rows: 2, placeholder: "Pregunta o pide algo al cerebro…" });
-    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar");
+    const input = el("textarea", { class: "cb-chat-in", rows: 2, placeholder: tr("cerebro.chat.ph") });
+    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), tr("cerebro.chat.send"));
     // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition never sends
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
@@ -409,7 +413,7 @@
     send.addEventListener("click", (e) => { e.preventDefault(); chatSend(); });
     const nameBox = el("div", { class: "cb-chat-name" });
     const host = el("aside", { class: "cb-chat" },
-      el("header", { class: "cb-chat-h" }, U().icon("cerebro", 15), el("b", {}, "Habla con el cerebro"), el("span", { class: "cb-chat-st" })),
+      el("header", { class: "cb-chat-h" }, U().icon("cerebro", 15), el("b", {}, tr("cerebro.chat.title")), el("span", { class: "cb-chat-st" })),
       list, nameBox, el("div", { class: "cb-chat-f" }, input, send));
     C.host = host; C.list = list; C.input = input; C.nameBox = nameBox; C.send = send;
     renderName(); renderChat();
@@ -418,25 +422,25 @@
   function renderName() {
     const box = C.nameBox; if (!box) return;
     const n = getName();
-    if (n) { box.replaceChildren(el("span", { class: "cb-muted" }, "Escribes como "), el("b", {}, n), " ",
-      el("button", { type: "button", class: "cb-link", onclick: () => { setName(""); renderName(); } }, "cambiar")); return; }
-    const inp = el("input", { class: "cb-q", placeholder: "Tu nombre (por defecto: equipo)" });
+    if (n) { box.replaceChildren(el("span", { class: "cb-muted" }, tr("cerebro.chat.as") + " "), el("b", {}, n), " ",
+      el("button", { type: "button", class: "cb-link", onclick: () => { setName(""); renderName(); } }, tr("cerebro.chat.change"))); return; }
+    const inp = el("input", { class: "cb-q", placeholder: tr("cerebro.chat.namePh") });
     const ok = () => { setName(inp.value.trim() || "equipo"); renderName(); };
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") ok(); });
-    box.replaceChildren(inp, el("button", { type: "button", class: "cb-seg", onclick: ok }, "Guardar"));
+    box.replaceChildren(inp, el("button", { type: "button", class: "cb-seg", onclick: ok }, tr("cerebro.save")));
   }
   function renderChat() {
     const list = C.list; if (!list) return;
     const st = C.host.querySelector(".cb-chat-st");
     const since = thinkingSince();
     C.waiting = since != null;
-    if (st) st.textContent = C.state === "off" ? "inactivo" : since != null ? "pensando…" : "";
+    if (st) st.textContent = C.state === "off" ? tr("cerebro.chat.inactive") : since != null ? tr("cerebro.chat.thinking") : "";
     const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 12;
     const kids = [];
-    if (C.state === "off") kids.push(U().empty("El chat del cerebro aún no está activo."));
+    if (C.state === "off") kids.push(U().empty(tr("cerebro.chat.off")));
     else if (C.state === "error") kids.push(U().error(C.err));
     else if (!C.msgs.length && C.state === "idle") kids.push(U().loading());
-    else if (!C.msgs.length) kids.push(U().empty("Aún no hay mensajes. Pregúntale qué está pensando o por qué tomó una decisión."));
+    else if (!C.msgs.length) kids.push(U().empty(tr("cerebro.chat.empty")));
     const shown = [];
     for (const m of C.msgs) {
       // the same role + author + text within 15 s is one message (a double send or a local copy plus the server copy)
@@ -445,14 +449,14 @@
       shown.push(m);
       const me = m.role !== "brain";
       kids.push(el("div", { class: "cb-msg " + (me ? "is-user" : "is-brain") + (m.pending ? " is-pending" : "") },
-        el("div", { class: "cb-msg-h" }, el("b", {}, me ? (m.by || "equipo") : "Cerebro"), el("span", { class: "num" }, m.ts ? when(m.ts) : "")),
+        el("div", { class: "cb-msg-h" }, el("b", {}, me ? (m.by || "equipo") : tr("cerebro.chat.brain")), el("span", { class: "num" }, m.ts ? when(m.ts) : "")),
         el("div", { class: "cb-msg-t" }, m.text || ""),
         Array.isArray(m.refs) && m.refs.length ? el("div", { class: "cb-msg-refs num" }, m.refs.map((x) => typeof x === "string" ? x : (x.id || x.ref || JSON.stringify(x))).join(" · ")) : null));
     }
     C.thinkEl = null;
     if (since != null) {
       C.thinkEl = el("div", { class: "cb-msg is-brain is-thinking" },
-        el("div", { class: "cb-think-h" }, U().icon("cerebro", 13), el("span", {}, "El cerebro está pensando… "), el("span", { class: "num cb-think-since" }, "(desde " + when(since) + ")")),
+        el("div", { class: "cb-think-h" }, U().icon("cerebro", 13), el("span", {}, tr("cerebro.think.title") + " "), el("span", { class: "num cb-think-since" }, tr("cerebro.think.since", { time: when(since) }))),
         el("div", { class: "cb-think-sub" }));
       kids.push(C.thinkEl);
       updateThinking();
@@ -483,16 +487,16 @@
     // 12 s-5 min old means it is planning right now; an explicit thinking_since (if the backend adds it) wins
     const busySince = +st.thinking_since || +st.planning_since || 0;
     let sub;
-    if (busySince) sub = ["ok", "pensando ahora · desde " + when(busySince)];
-    else if (beatAge == null) sub = ["mute", "esperando al cerebro"];
-    else if (beatAge > 300) sub = ["bad", "el cerebro no da señales de vida desde " + when(beat)];
-    else if (beatAge > 12 && beat < since - 1) sub = ["mute", "terminando una revisión anterior (desde " + when(beat) + "); tu mensaje va justo después"];
-    else if (beatAge > 12) sub = ["ok", "pensando ahora · desde " + when(beat)];
-    else sub = ["mute", "en cola · lo leerá en su próxima revisión (unos segundos)"];
+    if (busySince) sub = ["ok", tr("cerebro.think.now", { time: when(busySince) })];
+    else if (beatAge == null) sub = ["mute", tr("cerebro.think.waiting")];
+    else if (beatAge > 300) sub = ["bad", tr("cerebro.think.dead", { time: when(beat) })];
+    else if (beatAge > 12 && beat < since - 1) sub = ["mute", tr("cerebro.think.finishing", { time: when(beat) })];
+    else if (beatAge > 12) sub = ["ok", tr("cerebro.think.now", { time: when(beat) })];
+    else sub = ["mute", tr("cerebro.think.queued")];
     const slow = age > 180;
     const box = n.querySelector(".cb-think-sub");
     const kids = [el("span", { class: "cb-think-" + sub[0] }, sub[1]), " · ", el("span", { class: "num" }, U().fmtDur(age))];
-    if (slow) kids.push(el("span", { class: "cb-think-slow" }, " · tarda más de lo normal"));
+    if (slow) kids.push(el("span", { class: "cb-think-slow" }, " · " + tr("cerebro.think.slow")));
     box.replaceChildren(...kids);
   }
   async function brainStatus() {
@@ -551,7 +555,7 @@
     } catch (e) {
       C.lastSent = null;
       const i = C.msgs.indexOf(mine); if (i >= 0) C.msgs.splice(i, 1);
-      U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "El chat del cerebro aún no está activo." : (e && e.message) || "Error" });
+      U().toast({ type: "error", title: tr("cerebro.sendFail"), text: e && e.status === 404 ? tr("cerebro.chat.off") : (e && e.message) || "Error" });
     } finally {
       C.sending = false; C.send.disabled = false; C.input.disabled = false; C.input.focus();
       renderChat(); chatPull();
@@ -567,15 +571,15 @@
   // ---------- "Para el equipo": what the brain decided but people must do (outbox) ----------
   // GET outbox -> {items:[...]} with kind code | promo | task; POST outbox/<id> {status, note}
   const O = { items: [], state: "idle", err: null, tab: "code", open: new Set(), host: null, busy: false, at: 0, sig: "" };
-  const OB_TABS = [["code", "Cambios de código", "bot"], ["task", "Tareas", "check"]];   // messages have their own section
-  const SEV = { critical: ["Crítico", "var(--bad)", "alert"], high: ["Alto", "var(--t-venta)", "alert"], medium: ["Medio", "var(--t-puja)", "alert"],
-    low: ["Bajo", "var(--t-anuncio)", "alert"] };
-  const OB_STATUS = { open: ["Abierto", "warn"], accepted: ["Aceptado", "ok"], done: ["Hecho", "ok"], rejected: ["Rechazado", "bad"],
-    draft: ["Borrador", "warn"], sent: ["Enviado", "ok"], discarded: ["Descartado", "mute"] };
+  const OB_TABS = [["code", "cerebro.ob.tab.code", "bot"], ["task", "cerebro.ob.tab.task", "check"]];   // messages have their own section
+  const SEV = { critical: ["cerebro.sev.critical", "var(--bad)", "alert"], high: ["cerebro.sev.high", "var(--t-venta)", "alert"], medium: ["cerebro.sev.medium", "var(--t-puja)", "alert"],
+    low: ["cerebro.sev.low", "var(--t-anuncio)", "alert"] };
+  const OB_STATUS = { open: ["cerebro.obst.open", "warn"], accepted: ["cerebro.obst.accepted", "ok"], done: ["cerebro.obst.done", "ok"], rejected: ["cerebro.obst.rejected", "bad"],
+    draft: ["cerebro.obst.draft", "warn"], sent: ["cerebro.obst.sent", "ok"], discarded: ["cerebro.obst.discarded", "mute"] };
   const isOpen = (x) => x.status === "open" || x.status === "draft" || x.status === "accepted";
   const kindOf = (x) => x.kind || (x.channel ? "promo" : x.task ? "task" : "code");
   function obChip(label, color, ic) { const c = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, label)); c.style.setProperty("--tc", color); return c; }
-  function obStatus(st) { const [l, t] = OB_STATUS[st] || [st || "—", "mute"]; return el("span", { class: "tag res tone-" + t }, l); }
+  function obStatus(st) { const [l, t] = OB_STATUS[st] || [null, "mute"]; return el("span", { class: "tag res tone-" + t }, l ? tr(l) : st || "—"); }
 
   function outboxMount() {
     const host = el("section", { class: "panel cb-outbox" });
@@ -601,7 +605,7 @@
       const i = O.items.findIndex((x) => x.id === item.id); if (i >= 0) O.items[i] = { ...nx, kind: kindOf(nx) };
       O.sig = ""; obRender();
       if (window.__pollOutbox) window.__pollOutbox();
-    } catch (e) { U().toast({ type: "error", title: "No se pudo guardar", text: (e && e.message) || "Error" }); }
+    } catch (e) { U().toast({ type: "error", title: tr("cerebro.saveFail"), text: (e && e.message) || "Error" }); }
   }
   async function copyText(t) {
     try { await navigator.clipboard.writeText(t); return true; } catch (e) {
@@ -613,35 +617,35 @@
   function obHead(x) {
     if (x.kind === "code") {
       const [l, c, ic] = SEV[x.severity] || SEV.low;
-      return [obChip(l, c, ic), el("div", { class: "cb-ob-title" }, x.title || "Cambio de código"),
-        x.occurrences > 1 ? el("span", { class: "tag res tone-" + (x.recurred ? "bad" : "mute") }, (x.recurred ? "vuelve a pasar · " : "") + "×" + x.occurrences) : null];
+      return [obChip(tr(l), c, ic), el("div", { class: "cb-ob-title" }, x.title || tr("cerebro.ob.codeChange")),
+        x.occurrences > 1 ? el("span", { class: "tag res tone-" + (x.recurred ? "bad" : "mute") }, (x.recurred ? tr("cerebro.ob.recurs") + " · " : "") + "×" + x.occurrences) : null];
     }
-    if (x.kind === "promo") return [obChip(x.channel === "whatsapp" ? "WhatsApp" : "En el juego", x.channel === "whatsapp" ? "var(--t-compra)" : "var(--t-cambio)", "anuncio"),
+    if (x.kind === "promo") return [obChip(x.channel === "whatsapp" ? "WhatsApp" : tr("cerebro.inGame"), x.channel === "whatsapp" ? "var(--t-compra)" : "var(--t-cambio)", "anuncio"),
       el("div", { class: "cb-ob-title" }, short(x.text, 140))];
-    return [obChip("Tarea", "var(--t-dealer)", "check"), el("div", { class: "cb-ob-title" }, x.task || "Tarea"),
+    return [obChip(tr("cerebro.ob.task"), "var(--t-dealer)", "check"), el("div", { class: "cb-ob-title" }, x.task || tr("cerebro.ob.task")),
       x.occurrences > 1 ? el("span", { class: "tag res tone-mute" }, "×" + x.occurrences) : null];
   }
   function obDetail(x) {
     const ev = Array.isArray(x.evidence) ? x.evidence : x.evidence ? [x.evidence] : [];
     const sec = (cap, body) => body ? el("div", { class: "cb-ob-sec" }, el("div", { class: "cb-cap" }, cap), body) : null;
     const txt = (t) => t ? el("p", {}, t) : null;
-    const note = el("input", { class: "cb-q cb-ob-note", placeholder: "Nota (opcional)", value: "" });
+    const note = el("input", { class: "cb-q cb-ob-note", placeholder: tr("cerebro.ob.notePh"), value: "" });
     const btn = (label, status, tone) => el("button", { type: "button", class: "cb-ob-btn tone-" + tone, onclick: (e) => { e.stopPropagation(); obSet(x, status, note.value.trim()); } }, label);
     let actions;
     if (x.kind === "promo") {
-      const cp = el("button", { type: "button", class: "cb-ob-btn", onclick: async (e) => { e.stopPropagation(); const ok = await copyText(x.text || ""); cp.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { cp.textContent = "Copiar texto"; }, 1500); } }, "Copiar texto");
-      actions = [cp, btn("Marcar enviado", "sent", "ok"), btn("Descartar", "discarded", "bad")];
-    } else if (x.kind === "code") actions = [btn("Aceptar", "accepted", "warn"), btn("Hecho", "done", "ok"), btn("Rechazar", "rejected", "bad")];
-    else actions = [btn("Hecho", "done", "ok"), btn("Rechazar", "rejected", "bad")];
+      const cp = el("button", { type: "button", class: "cb-ob-btn", onclick: async (e) => { e.stopPropagation(); const ok = await copyText(x.text || ""); cp.textContent = ok ? tr("cerebro.copied") : tr("cerebro.copyFail"); setTimeout(() => { cp.textContent = tr("cerebro.ob.copyText"); }, 1500); } }, tr("cerebro.ob.copyText"));
+      actions = [cp, btn(tr("cerebro.markSent"), "sent", "ok"), btn(tr("cerebro.discard"), "discarded", "bad")];
+    } else if (x.kind === "code") actions = [btn(tr("cerebro.ob.accept"), "accepted", "warn"), btn(tr("cerebro.obst.done"), "done", "ok"), btn(tr("cerebro.ob.reject"), "rejected", "bad")];
+    else actions = [btn(tr("cerebro.obst.done"), "done", "ok"), btn(tr("cerebro.ob.reject"), "rejected", "bad")];
     return el("div", { class: "cb-ob-detail", onclick: (e) => e.stopPropagation() },
-      x.kind === "promo" ? sec("Texto", el("pre", { class: "cb-ob-text" }, x.text || "")) : null,
-      sec("Por qué", txt(x.why)),
-      sec("Diagnóstico", txt(x.diagnosis)),
-      sec("Pruebas", ev.length ? el("ul", { class: "cb-ob-ev" }, ev.map((e) => el("li", {}, typeof e === "string" ? e : JSON.stringify(e)))) : null),
-      sec("Cambio propuesto", txt(x.proposed_change)),
-      sec("Esbozo del parche", x.patch_sketch ? el("pre", { class: "cb-ob-code" }, x.patch_sketch) : null),
-      sec("Impacto", txt(x.impact)),
-      x.human_note ? sec("Nota del equipo", txt(x.human_note)) : null,
+      x.kind === "promo" ? sec(tr("cerebro.ob.text"), el("pre", { class: "cb-ob-text" }, x.text || "")) : null,
+      sec(tr("cerebro.ob.why"), txt(x.why)),
+      sec(tr("cerebro.ob.diagnosis"), txt(x.diagnosis)),
+      sec(tr("cerebro.ob.evidence"), ev.length ? el("ul", { class: "cb-ob-ev" }, ev.map((e) => el("li", {}, typeof e === "string" ? e : JSON.stringify(e)))) : null),
+      sec(tr("cerebro.ob.proposed"), txt(x.proposed_change)),
+      sec(tr("cerebro.ob.patch"), x.patch_sketch ? el("pre", { class: "cb-ob-code" }, x.patch_sketch) : null),
+      sec(tr("cerebro.ob.impact"), txt(x.impact)),
+      x.human_note ? sec(tr("cerebro.ob.teamNote"), txt(x.human_note)) : null,
       el("div", { class: "cb-ob-actions" }, note, actions));
   }
   function obRender() {
@@ -652,18 +656,18 @@
     if (sig === O.sig) return; O.sig = sig;
     const totalOpen = Object.values(counts).reduce((a, b) => a + b, 0);
     const tabs = el("div", { class: "cb-ob-tabs" }, OB_TABS.map(([k, label, ic]) => el("button", { type: "button", class: "cb-ob-tab" + (O.tab === k ? " on" : ""),
-      onclick: () => { O.tab = k; obRender(); } }, U().icon(ic, 14), label, el("span", { class: "num cb-ob-n" + (counts[k] ? " has" : "") }, String(counts[k])))));
-    const head = el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Para el equipo"),
-      el("span", { class: "panel-sub" }, O.state === "on" ? (totalOpen ? totalOpen + " pendientes · cambios de código y tareas que decidió el cerebro" : "nada pendiente") : ""));
+      onclick: () => { O.tab = k; obRender(); } }, U().icon(ic, 14), tr(label), el("span", { class: "num cb-ob-n" + (counts[k] ? " has" : "") }, String(counts[k])))));
+    const head = el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, tr("cerebro.ob.title")),
+      el("span", { class: "panel-sub" }, O.state === "on" ? (totalOpen ? tr("cerebro.ob.sub", { n: totalOpen }) : tr("cerebro.ob.nothing")) : ""));
     const list = el("div", { class: "cb-list cb-ob-list" });
     let body;
     if (O.state === "idle") body = U().loading();
-    else if (O.state === "off") body = U().empty("La bandeja del cerebro aún no está activa.");
+    else if (O.state === "off") body = U().empty(tr("cerebro.ob.off"));
     else if (O.state === "error") body = U().error(O.err);
     else {
       const rows = O.items.filter((x) => inTab(x, O.tab))
         .sort((a, b) => (isOpen(b) - isOpen(a)) || ((+b.updated || +b.ts || 0) - (+a.updated || +a.ts || 0)));
-      if (!rows.length) body = U().empty(O.tab === "code" ? "Sin cambios de código propuestos." : "Sin tareas.");
+      if (!rows.length) body = U().empty(O.tab === "code" ? tr("cerebro.ob.noCode") : tr("cerebro.ob.noTasks"));
       else {
         U().keyedList(list, rows, {
           key: (x) => String(x.id), sig: (x) => [x.status, x.updated, x.occurrences, O.open.has(String(x.id))].join("|"),
@@ -691,11 +695,11 @@
   // drafts = outbox items kind promo (channel whatsapp | in_game); replies carry reply_to {external_id, author, team}
   // received = POST/GET brain/external records {id, ts, received_at, by, author, team, text, types, entities, actionable, brain_conclusion, reply_outbox_id}
   const X = { items: [], state: "idle", err: null, host: null, busy: false, at: 0, sig: "", sending: false, hist: { sent: false, discarded: false } };
-  const XT = { request: ["Petición", "puja", "var(--t-puja)"], offer: ["Oferta", "venta", "var(--t-compra)"], tip: ["Pista", "target", "var(--t-cambio)"],
-    complaint: ["Queja", "alert", "var(--t-venta)"], promo: ["Promo", "anuncio", "var(--t-anuncio)"], news: ["Noticia", "bell", "var(--t-dealer)"],
-    offer_ref: ["Oferta", "venta", "var(--t-compra)"], organiser: ["Organización", "bell", "var(--t-dealer)"], alliance: ["Alianza", "rivales", "var(--t-cambio)"],
-    question: ["Pregunta", "search", "var(--t-puja)"], other: ["Otro", "anuncio", "var(--t-anuncio)"] };
-  function xChip(t) { const [l, ic, c] = XT[t] || [t, "anuncio", "var(--t-anuncio)"]; const n = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, l)); n.style.setProperty("--tc", c); return n; }
+  const XT = { request: ["cerebro.xt.request", "puja", "var(--t-puja)"], offer: ["cerebro.xt.offer", "venta", "var(--t-compra)"], tip: ["cerebro.xt.tip", "target", "var(--t-cambio)"],
+    complaint: ["cerebro.xt.complaint", "alert", "var(--t-venta)"], promo: ["cerebro.xt.promo", "anuncio", "var(--t-anuncio)"], news: ["cerebro.xt.news", "bell", "var(--t-dealer)"],
+    offer_ref: ["cerebro.xt.offer", "venta", "var(--t-compra)"], organiser: ["cerebro.org", "bell", "var(--t-dealer)"], alliance: ["cerebro.xt.alliance", "rivales", "var(--t-cambio)"],
+    question: ["cerebro.xt.question", "search", "var(--t-puja)"], other: ["cerebro.xt.other", "anuncio", "var(--t-anuncio)"] };
+  function xChip(t) { const [l, ic, c] = XT[t] || [null, "anuncio", "var(--t-anuncio)"]; const n = el("span", { class: "chip type cb-chip" }, U().icon(ic, 13), el("span", { class: "chip-label" }, l ? tr(l) : t)); n.style.setProperty("--tc", c); return n; }
   const replyKey = (o) => (o && o.reply_to ? (o.reply_to.external_id ?? o.reply_to.record ?? null) : null);
   const isReply = (o) => !!(o && o.kind === "promo" && o.reply_to);
   const promos = () => O.items.filter((o) => o.kind === "promo");
@@ -719,26 +723,26 @@
   const TEAM_KEY = "bazaar.dash.waTeam";
   // prominent "who" line on top of every message card: team tag (us white) + person
   function whoLine(team, person, prefix) {
-    const tag = team === "org" ? el("span", { class: "tag team cb-org" }, U().icon("bell", 12), "Organización")
-      : team ? tTeam(team) : el("span", { class: "tag team cb-unk" }, "Equipo sin identificar");
+    const tag = team === "org" ? el("span", { class: "tag team cb-org" }, U().icon("bell", 12), tr("cerebro.org"))
+      : team ? tTeam(team) : el("span", { class: "tag team cb-unk" }, tr("cerebro.x.unknownTeam"));
     return el("div", { class: "cb-who" }, prefix ? el("span", { class: "cb-who-pre" }, prefix) : null, tag,
       person ? el("span", { class: "cb-who-person" }, person) : null);
   }
   const teamFromText = (t) => { const m = String(t || "").match(/team\s*(\d{1,2})/i); return m ? "t" + m[1].padStart(2, "0") : null; };
 
   function externalMount() {
-    const ta = el("textarea", { class: "cb-chat-in cb-x-in", rows: 3, placeholder: "Pega aquí sus mensajes del grupo de WhatsApp (uno o varios)…" });
+    const ta = el("textarea", { class: "cb-chat-in cb-x-in", rows: 3, placeholder: tr("cerebro.x.pastePh") });
     // who sent the pasted messages: required choice, remembered for the next paste
-    const sel = el("select", { class: "fb-select cb-x-team", "aria-label": "Equipo que lo envía", required: "required" },
-      el("option", { value: "", disabled: "disabled" }, "Elige quién lo envía…"));
-    for (let i = 1; i <= 18; i++) { const id = "t" + String(i).padStart(2, "0"); sel.append(el("option", { value: id }, (U().teamName ? U().teamName(id) : id) + (id === "t10" ? " · Nosotros" : ""))); }
-    sel.append(el("option", { value: "org" }, "Organización"), el("option", { value: "auto" }, "No lo sé (que lo detecte el cerebro)"));
+    const sel = el("select", { class: "fb-select cb-x-team", "aria-label": tr("cerebro.x.teamAria"), required: "required" },
+      el("option", { value: "", disabled: "disabled" }, tr("cerebro.x.choose")));
+    for (let i = 1; i <= 18; i++) { const id = "t" + String(i).padStart(2, "0"); sel.append(el("option", { value: id }, (U().teamName ? U().teamName(id) : id) + (id === "t10" ? " · " + tr("cerebro.x.us") : ""))); }
+    sel.append(el("option", { value: "org" }, tr("cerebro.org")), el("option", { value: "auto" }, tr("cerebro.x.auto")));
     let saved = ""; try { saved = localStorage.getItem(TEAM_KEY) || ""; } catch (e) { saved = ""; }
     sel.value = saved; if (sel.value !== saved) sel.value = "";
     const markSel = () => sel.classList.toggle("is-empty", !sel.value);
     sel.addEventListener("change", () => { try { localStorage.setItem(TEAM_KEY, sel.value); } catch (e) { /* private mode */ } markSel(); });
     markSel();
-    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), "Enviar al cerebro");
+    const send = el("button", { type: "button", class: "cb-chat-send" }, U().icon("arrow", 14), tr("cerebro.x.send"));
     const go = async () => {
       const text = ta.value.trim(); if (!text || X.sending) return;
       if (!sel.value) { sel.classList.add("is-missing"); sel.focus(); setTimeout(() => sel.classList.remove("is-missing"), 1500); return; }
@@ -746,10 +750,10 @@
       try {
         const r = await A().externalAdd(text, getName() || "equipo", sel.value === "auto" ? undefined : sel.value);
         const n = ((r && r.added) || []).length, dup = (r && r.duplicates) || 0;
-        U().toast({ type: "dealer", title: "Mensajes enviados al cerebro", text: `${n} nuevos${dup ? " · " + dup + " repetidos" : ""}` });
+        U().toast({ type: "dealer", title: tr("cerebro.x.sentToast"), text: tr("cerebro.x.new", { n }) + (dup ? " · " + tr("cerebro.x.dup", { n: dup }) : "") });
         ta.value = ""; X.at = 0; extPull(true);
       } catch (e) {
-        U().toast({ type: "error", title: "No se pudo enviar", text: e && e.status === 404 ? "La entrada de mensajes aún no está activa." : (e && e.message) || "Error" });
+        U().toast({ type: "error", title: tr("cerebro.sendFail"), text: e && e.status === 404 ? tr("cerebro.x.off") : (e && e.message) || "Error" });
       } finally { X.sending = false; send.disabled = false; }
     };
     send.addEventListener("click", go);
@@ -762,8 +766,8 @@
     X.histBox = el("div", { class: "cb-m-hist" });
     // two columns, each scrolls on its own: received (with the paste box) | to send (+ history)
     X.colL = el("div", { class: "cb-m-col" }, X.recvHead,
-      el("div", { class: "cb-x-form" }, el("label", { class: "cb-x-who" }, el("span", { class: "cb-cap" }, "Lo envía"), sel), ta,
-        el("div", { class: "cb-x-side" }, el("span", { class: "cb-muted" }, "⌘/Ctrl + Enter para enviar"), send)), X.recvList);
+      el("div", { class: "cb-x-form" }, el("label", { class: "cb-x-who" }, el("span", { class: "cb-cap" }, tr("cerebro.x.sentBy")), sel), ta,
+        el("div", { class: "cb-x-side" }, el("span", { class: "cb-muted" }, tr("cerebro.x.shortcut")), send)), X.recvList);
     X.colR = el("div", { class: "cb-m-col" }, X.sendHead, X.toSend, X.histBox);
     const host = el("section", { class: "panel cb-msgs" }, X.head, el("div", { class: "cb-m-cols" }, X.colL, X.colR));
     X.host = host; X.sig = "";
@@ -781,7 +785,7 @@
   function entityChips(en) {
     if (!en) return [];
     const out = [];
-    for (const o of en.offer_ids || []) out.push(el("span", { class: "tag res tone-mute num" }, "oferta #" + o));
+    for (const o of en.offer_ids || []) out.push(el("span", { class: "tag res tone-mute num" }, tr("cerebro.x.offerN", { id: o })));
     for (const c of en.cards || []) out.push(el("span", { class: "tag res tone-mute num" }, c));
     for (const v of en.venues || []) out.push(el("span", { class: "tag res tone-mute num" }, v));
     for (const p of en.prices || []) out.push(el("span", { class: "tag res tone-mute num" }, fmtP(p)));
@@ -798,55 +802,55 @@
   }
   function recipientWho(o) {
     // explicit recipient fields (to_team, to_person, audience) win for replies and proactive drafts alike
-    const pre = isReply(o) ? "Respuesta para" : "Para";
+    const pre = isReply(o) ? tr("cerebro.x.replyFor") : tr("cerebro.x.for");
     if (o.audience === "team" && o.to_team) return whoLine(o.to_team, o.to_person || null, pre);
     if (o.audience === "person" && (o.to_person || o.to_team)) return whoLine(o.to_team || null, o.to_person || null, pre);
     if (o.audience === "group") return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, pre),
-      el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? "Todos (en el juego)" : "Todo el grupo de WhatsApp"));
+      el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? tr("cerebro.x.everyoneGame") : tr("cerebro.x.wholeGroup")));
     const rt = o.reply_to || {};
     const ctxRec = extById(replyKey(o));
     if (isReply(o)) {
       const team = rt.team || (ctxRec && ctxRec.team) || teamFromText(rt.record) || teamFromText(ctxRec && ctxRec.text);
       const person = rt.author && rt.author !== "equipo" && rt.author !== (ctxRec && ctxRec.by) ? rt.author : null;
-      return whoLine(team, person, "Respuesta para");
+      return whoLine(team, person, tr("cerebro.x.replyFor"));
     }
     // explicit fields first (to_team, to_person, audience), then older to/recipient, then a guess from the text
     const toTeam = o.to_team || (/^t\d+$/.test(o.to || "") ? o.to : null) || (/^t\d+$/.test(o.recipient || "") ? o.recipient : null);
     const toPerson = o.to_person || (o.to && !/^t\d+$/.test(o.to) ? o.to : null) || (o.recipient && !/^t\d+$/.test(o.recipient) ? o.recipient : null);
     if (o.audience !== "group") {
-      if (toTeam || toPerson) return whoLine(toTeam, toPerson, "Para");
+      if (toTeam || toPerson) return whoLine(toTeam, toPerson, tr("cerebro.x.for"));
       const g = guessAddressee(o.text);
-      if (g.team || g.person) return whoLine(g.team, g.person, "Para");
+      if (g.team || g.person) return whoLine(g.team, g.person, tr("cerebro.x.for"));
     }
-    return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, "Para"), el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? "Todos (en el juego)" : "Todo el grupo de WhatsApp"));
+    return el("div", { class: "cb-who" }, el("span", { class: "cb-who-pre" }, tr("cerebro.x.for")), el("span", { class: "tag team cb-group" }, U().icon("rivales", 12), o.channel === "in_game" ? tr("cerebro.x.everyoneGame") : tr("cerebro.x.wholeGroup")));
   }
   function recipient(o) {
     const rt = o.reply_to || {};
     const ctxRec = extById(replyKey(o));
     const team = rt.team || (ctxRec && ctxRec.team);
     const author = rt.author && rt.author !== "equipo" && rt.author !== (ctxRec && ctxRec.by) ? rt.author : null;
-    if (isReply(o)) return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Respuesta a"), author ? el("b", {}, author) : null,
-      team ? tTeam(team) : (author ? null : el("b", {}, "su mensaje")),
-      el("span", { class: "cb-muted" }, o.channel === "in_game" ? "en el juego" : "en el grupo de WhatsApp"));
+    if (isReply(o)) return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, tr("cerebro.x.replyTo")), author ? el("b", {}, author) : null,
+      team ? tTeam(team) : (author ? null : el("b", {}, tr("cerebro.x.theirMsg"))),
+      el("span", { class: "cb-muted" }, o.channel === "in_game" ? tr("cerebro.x.inGameLc") : tr("cerebro.x.inGroup")));
     const who = o.to || o.recipient;
-    if (o.channel === "in_game") return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Para"), who ? (/^t\d+$/.test(who) ? tTeam(who) : el("b", {}, who)) : el("b", {}, "todos (en el juego)"));
-    return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, "Para"), who ? (/^t\d+$/.test(who) ? tTeam(who) : el("b", {}, who)) : el("b", {}, "el grupo de WhatsApp"));
+    if (o.channel === "in_game") return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, tr("cerebro.x.for")), who ? (/^t\d+$/.test(who) ? tTeam(who) : el("b", {}, who)) : el("b", {}, tr("cerebro.x.everyoneGameLc")));
+    return el("span", { class: "cb-m-to" }, el("span", { class: "cb-muted" }, tr("cerebro.x.for")), who ? (/^t\d+$/.test(who) ? tTeam(who) : el("b", {}, who)) : el("b", {}, tr("cerebro.x.theGroup")));
   }
-  function channelChip(o) { return o.channel === "in_game" ? obChip("En el juego", "var(--t-cambio)", "mercado") : obChip("WhatsApp", "var(--t-compra)", "anuncio"); }
+  function channelChip(o) { return o.channel === "in_game" ? obChip(tr("cerebro.inGame"), "var(--t-cambio)", "mercado") : obChip("WhatsApp", "var(--t-compra)", "anuncio"); }
   function sendCard(o, compact) {
     const ctx = isReply(o) ? extById(replyKey(o)) : null;
-    const cp = el("button", { type: "button", class: "cb-ob-btn cb-m-copy" }, U().icon("copy", 13), "Copiar");
-    cp.addEventListener("click", async () => { const ok = await copyText(o.text || ""); cp.lastChild.textContent = ok ? "Copiado" : "No se pudo copiar"; setTimeout(() => { cp.lastChild.textContent = "Copiar"; }, 1500); });
+    const cp = el("button", { type: "button", class: "cb-ob-btn cb-m-copy" }, U().icon("copy", 13), tr("cerebro.copy"));
+    cp.addEventListener("click", async () => { const ok = await copyText(o.text || ""); cp.lastChild.textContent = ok ? tr("cerebro.copied") : tr("cerebro.copyFail"); setTimeout(() => { cp.lastChild.textContent = tr("cerebro.copy"); }, 1500); });
     const act = (label, status, tone) => { const b = el("button", { type: "button", class: "cb-ob-btn tone-" + tone }, label); b.addEventListener("click", () => obSet(o, status, "")); return b; };
     const n = el("div", { class: "cb-m-card" + (compact ? " is-compact" : "") },
       recipientWho(o),
       el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+o.updated || +o.ts)), channelChip(o),
-        el("span", { class: "cb-muted" }, o.channel === "in_game" ? "se envía en el juego" : "se envía en el grupo de WhatsApp"), el("span", { class: "cb-sp" }), obStatus(o.status)),
-      ctx ? el("div", { class: "cb-m-ctx" }, el("div", { class: "cb-cap" }, "Su mensaje · " + when(+ctx.received_at || +ctx.ts)), el("div", {}, short(ctx.text, 400))) : null,
+        el("span", { class: "cb-muted" }, o.channel === "in_game" ? tr("cerebro.x.goesGame") : tr("cerebro.x.goesGroup")), el("span", { class: "cb-sp" }), obStatus(o.status)),
+      ctx ? el("div", { class: "cb-m-ctx" }, el("div", { class: "cb-cap" }, tr("cerebro.x.theirMsgCap") + " · " + when(+ctx.received_at || +ctx.ts)), el("div", {}, short(ctx.text, 400))) : null,
       el("pre", { class: "cb-m-text" }, o.text || ""),
-      o.why && !compact ? el("div", { class: "cb-rows" }, "Por qué: " + o.why) : null,
-      o.human_note ? el("div", { class: "cb-rows" }, "Nota: " + o.human_note) : null,
-      el("div", { class: "cb-ob-actions" }, cp, compact ? null : act("Marcar enviado", "sent", "ok"), compact ? null : act("Descartar", "discarded", "bad")));
+      o.why && !compact ? el("div", { class: "cb-rows" }, tr("cerebro.x.why", { text: o.why })) : null,
+      o.human_note ? el("div", { class: "cb-rows" }, tr("cerebro.x.note", { text: o.human_note })) : null,
+      el("div", { class: "cb-ob-actions" }, cp, compact ? null : act(tr("cerebro.markSent"), "sent", "ok"), compact ? null : act(tr("cerebro.discard"), "discarded", "bad")));
     n.style.setProperty("--tc", o.channel === "in_game" ? "var(--t-cambio)" : "var(--t-compra)");
     return n;
   }
@@ -856,16 +860,16 @@
     const person = x.author && x.author !== x.by && x.author !== "equipo" && x.author !== (U().teamName ? U().teamName(x.team) : x.team) ? x.author : null;
     const r = replyFor(x);
     const n = el("div", { class: "cb-x-item" + (x.actionable ? " is-act" : "") },
-      whoLine(x.team || teamFromText(x.text), person, "De"),
+      whoLine(x.team || teamFromText(x.text), person, tr("cerebro.x.from")),
       el("div", { class: "cb-ev-h" }, el("span", { class: "num cb-time" }, when(+x.received_at || +x.ts)),
-        x.actionable ? el("span", { class: "tag cb-x-act" }, U().icon("bell", 12), "Hay que actuar") : null,
-        (x.types || []).map(xChip), x.about_us ? el("span", { class: "tag res tone-warn" }, "Sobre nosotros") : null,
-        el("span", { class: "cb-sp" }), el("span", { class: "cb-muted" }, "pegado por " + (x.by || "equipo"))),
+        x.actionable ? el("span", { class: "tag cb-x-act" }, U().icon("bell", 12), tr("cerebro.x.act")) : null,
+        (x.types || []).map(xChip), x.about_us ? el("span", { class: "tag res tone-warn" }, tr("cerebro.x.aboutUs")) : null,
+        el("span", { class: "cb-sp" }), el("span", { class: "cb-muted" }, tr("cerebro.x.pastedBy", { by: x.by || "equipo" }))),
       el("div", { class: "cb-x-text" }, x.text || ""),
       entityChips(x.entities).length ? el("div", { class: "cb-x-ents" }, entityChips(x.entities)) : null,
-      concl ? el("div", { class: "cb-x-concl" }, el("b", {}, x.actionable ? "Qué hacer: " : "Conclusión del cerebro: "), concl) : null,
+      concl ? el("div", { class: "cb-x-concl" }, el("b", {}, (x.actionable ? tr("cerebro.x.todo") : tr("cerebro.x.concl")) + " "), concl) : null,
       r ? el("div", { class: "cb-rows" }, U().icon(r.status === "sent" ? "check" : "arrow", 12),
-        r.status === "sent" ? " Respuesta enviada" : r.status === "discarded" ? " Respuesta descartada" : " Respuesta preparada en «Por enviar»") : null);
+        " " + (r.status === "sent" ? tr("cerebro.x.replySent") : r.status === "discarded" ? tr("cerebro.x.replyDiscarded") : tr("cerebro.x.replyReady"))) : null);
     n.style.setProperty("--tc", x.actionable ? "var(--warn)" : (XT[(x.types || [])[0]] || [0, 0, "var(--t-anuncio)"])[2]);
     return n;
   }
@@ -882,26 +886,26 @@
     const recv = X.items.slice().sort((a, b) => (!!b.actionable - !!a.actionable) || ((+b.received_at || +b.ts || 0) - (+a.received_at || +a.ts || 0)));
     const keepCols = (fn) => U().keepScroll(X.colL, () => U().keepScroll(X.colR, fn));
     keepCols(() => {
-      X.head.replaceChildren(el("h2", { class: "panel-title" }, "Mensajes"),
-        el("span", { class: "panel-sub" }, `${drafts.length} por enviar · ${recv.length} recibidos · ${sent.length} enviados`));
+      X.head.replaceChildren(el("h2", { class: "panel-title" }, tr("cerebro.x.title")),
+        el("span", { class: "panel-sub" }, tr("cerebro.x.sub", { drafts: drafts.length, recv: recv.length, sent: sent.length })));
       // 1) Por enviar
       const sendList = X.toSend.querySelector(":scope > .cb-m-list") || el("div", { class: "cb-m-list" });
       let sendBody;
-      if (O.state === "off") sendBody = U().empty("La bandeja del cerebro aún no está activa.");
+      if (O.state === "off") sendBody = U().empty(tr("cerebro.ob.off"));
       else if (O.state === "idle") sendBody = U().loading();
-      else if (!drafts.length) sendBody = U().empty("Nada por enviar ahora.");
+      else if (!drafts.length) sendBody = U().empty(tr("cerebro.x.nothingToSend"));
       else { U().keyedList(sendList, drafts, { key: (o) => String(o.id), sig: (o) => [o.status, o.updated, o.text, isReply(o) && !!extById(replyKey(o))].join("|"), render: (o) => sendCard(o) }); sendBody = sendList; }
-      X.sendHead.replaceChildren(U().icon("arrow", 14), el("b", {}, "Por enviar"),
+      X.sendHead.replaceChildren(U().icon("arrow", 14), el("b", {}, tr("cerebro.x.toSend")),
         el("span", { class: "num cb-ob-n" + (drafts.length ? " has" : "") }, String(drafts.length)),
-        el("span", { class: "cb-muted cb-m-hint" }, "copiad, enviad y marcad como enviado"));
+        el("span", { class: "cb-muted cb-m-hint" }, tr("cerebro.x.sendHint")));
       if (sendBody !== sendList || !sendList.isConnected) X.toSend.replaceChildren(sendBody);
       // 2) Mensajes recibidos
-      X.recvHead.replaceChildren(U().icon("anuncio", 14), el("b", {}, "Mensajes recibidos"), el("span", { class: "num cb-ob-n" }, String(recv.length)),
-        el("span", { class: "cb-muted cb-m-hint" }, "otros equipos en WhatsApp; el cerebro saca conclusiones"));
+      X.recvHead.replaceChildren(U().icon("anuncio", 14), el("b", {}, tr("cerebro.x.received")), el("span", { class: "num cb-ob-n" }, String(recv.length)),
+        el("span", { class: "cb-muted cb-m-hint" }, tr("cerebro.x.recvHint")));
       if (X.state === "idle") X.recvList.replaceChildren(U().loading());
-      else if (X.state === "off") X.recvList.replaceChildren(U().empty("La entrada de mensajes aún no está activa."));
+      else if (X.state === "off") X.recvList.replaceChildren(U().empty(tr("cerebro.x.off")));
       else if (X.state === "error") X.recvList.replaceChildren(U().error(X.err));
-      else if (!recv.length) X.recvList.replaceChildren(U().empty("Aún no habéis pegado mensajes."));
+      else if (!recv.length) X.recvList.replaceChildren(U().empty(tr("cerebro.x.noRecv")));
       else {
         const list = X.recvList.querySelector(".cb-list") || el("div", { class: "cb-list cb-x-list" });
         U().keyedList(list, recv.slice(0, 120), { key: (x) => String(x.id),
@@ -911,12 +915,12 @@
       // 3) history, collapsed
       const hist = (key, label, items) => {
         const d = el("details", { class: "cb-m-det" }, el("summary", {}, U().icon("chevron", 13), el("b", {}, label), el("span", { class: "num cb-ob-n" }, String(items.length))),
-          items.length ? el("div", { class: "cb-m-list" }, items.slice(0, 60).map((o) => sendCard(o, true))) : el("div", { class: "cb-muted cb-m-pad" }, "Ninguno."));
+          items.length ? el("div", { class: "cb-m-list" }, items.slice(0, 60).map((o) => sendCard(o, true))) : el("div", { class: "cb-muted cb-m-pad" }, tr("cerebro.x.noneHist")));
         d.open = X.hist[key];
         d.addEventListener("toggle", () => { X.hist[key] = d.open; });
         return d;
       };
-      X.histBox.replaceChildren(hist("sent", "Enviados", sent), hist("discarded", "Descartados", disc));
+      X.histBox.replaceChildren(hist("sent", tr("cerebro.x.histSent"), sent), hist("discarded", tr("cerebro.x.histDiscarded"), disc));
     });
   }
 
@@ -926,37 +930,35 @@
   //   settings:{interval_ticks, wake_kinds, wake_on_score_drop, min_gap_s}, history:[{ts, level, mode, reason}]}
   // POST control {brain_intensity, brain_intensity_mode:"manual"} | {brain_intensity_mode:"auto"}
   const I = { host: null, data: null, state: "idle", err: null, dragging: false, busy: false, at: 0, n: {} };
-  const WAKE = { chat: "mensajes del equipo", external: "mensajes de WhatsApp", official: "avisos de la organización", bargain: "gangas en el mercado",
-    dealer: "dealers nuevos o que abren", level: "cambios de nivel", set: "sets nuevos", schedule: "cambios de calendario", novelty: "novedades del juego",
-    review: "revisión de cada hora", duel: "duelos", bench: "Market Test", score: "saltos de puntos", offer: "ofertas dirigidas a nosotros", venue: "tiendas" };
-  // the backend writes level-change reasons as short English phrases joined by ";": show them in Spanish, numbers kept
+  const WAKE = { chat: "cerebro.wake.chat", external: "cerebro.wake.external", official: "cerebro.wake.official", bargain: "cerebro.wake.bargain", dealer: "cerebro.wake.dealer", level: "cerebro.wake.level", set: "cerebro.wake.set", schedule: "cerebro.wake.schedule", novelty: "cerebro.wake.novelty", review: "cerebro.wake.review", duel: "cerebro.wake.duel", bench: "cerebro.wake.bench", score: "cerebro.wake.score", offer: "cerebro.wake.offer", venue: "cerebro.wake.venue" };
+  // the backend writes level-change reasons as short English phrases joined by ";": shown in the active language, numbers kept
   const REASON_RX = [
-    [/^([\d.]+) \$ left for ([\d.]+) h -> ([\d.]+) \$\/h$/i, (m) => `quedan ${es(m[1])} $ para ${es(m[2])} h → ${es(m[3])} $/h`],
-    [/^bench within (\d+) min$/i, (m) => `Market Test en ${m[1]} min`],
-    [/^bench (running|live|now)$/i, () => "Market Test en curso"],
-    [/^duels? within (\d+) min$/i, (m) => `duelos en ${m[1]} min`],
-    [/^duels? (running|live|now)$/i, () => "duelos en curso"],
-    [/^team message$/i, () => "mensaje del equipo"],
-    [/^session live$/i, () => "sesión en curso (duelos o Market Test)"],
-    [/^(external|whatsapp) message$/i, () => "mensaje de WhatsApp"],
-    [/^game paused$/i, () => "juego en pausa"],
-    [/^doors closed$/i, () => "juego cerrado"],
-    [/^behind (the )?pace$/i, () => "vamos por detrás del ritmo de gasto"],
-    [/^ahead of (the )?pace$/i, () => "vamos por delante del ritmo de gasto"],
-    [/^over (the )?pace$/i, () => "gastamos por encima del ritmo"],
-    [/^bargain.*$/i, () => "ganga en el mercado"],
-    [/^new dealer.*$/i, () => "dealer nuevo"],
-    [/^score drop.*$/i, () => "caída de nuestra puntuación"],
-    [/^quiet.*$/i, () => "sin novedades"],
-    [/^cap reached.*$/i, () => "tope de gasto alcanzado"],
-    [/^manual.*$/i, () => "puesto a mano"],
-    [/^set by the team.*$/i, () => "puesto por el equipo"],
-    [/^keys? .*down.*$/i, () => "claves caídas"],
+    [/^([\d.]+) \$ left for ([\d.]+) h -> ([\d.]+) \$\/h$/i, "cerebro.why.left", (m) => ({ left: es(m[1]), hours: es(m[2]), rate: es(m[3]) })],
+    [/^bench within (\d+) min$/i, "cerebro.why.benchIn", (m) => ({ min: m[1] })],
+    [/^bench (running|live|now)$/i, "cerebro.why.benchLive"],
+    [/^duels? within (\d+) min$/i, "cerebro.why.duelsIn", (m) => ({ min: m[1] })],
+    [/^duels? (running|live|now)$/i, "cerebro.why.duelsLive"],
+    [/^team message$/i, "cerebro.why.teamMsg"],
+    [/^session live$/i, "cerebro.why.session"],
+    [/^(external|whatsapp) message$/i, "cerebro.why.waMsg"],
+    [/^game paused$/i, "cerebro.why.paused"],
+    [/^doors closed$/i, "cerebro.why.closed"],
+    [/^behind (the )?pace$/i, "cerebro.why.behind"],
+    [/^ahead of (the )?pace$/i, "cerebro.why.ahead"],
+    [/^over (the )?pace$/i, "cerebro.why.over"],
+    [/^bargain.*$/i, "cerebro.why.bargain"],
+    [/^new dealer.*$/i, "cerebro.why.newDealer"],
+    [/^score drop.*$/i, "cerebro.why.scoreDrop"],
+    [/^quiet.*$/i, "cerebro.why.quiet"],
+    [/^cap reached.*$/i, "cerebro.why.cap"],
+    [/^manual.*$/i, "cerebro.why.manual"],
+    [/^set by the team.*$/i, "cerebro.why.team"],
+    [/^keys? .*down.*$/i, "cerebro.why.keys"],
   ];
-  const es = (x) => String(x).replace(".", ",");
+  const es = (x) => (window.I18N.lang === "en" ? String(x) : String(x).replace(".", ","));
   function reasonEs(text) {
     return String(text || "").split(/\s*;\s*/).filter(Boolean).map((p) => {
-      for (const [rx, fn] of REASON_RX) { const m = p.match(rx); if (m) return fn(m); }
+      for (const [rx, key, vars] of REASON_RX) { const m = p.match(rx); if (m) return tr(key, vars ? vars(m) : undefined); }
       return p;
     }).join(" · ");
   }
@@ -972,11 +974,11 @@
   }
   function intensityMount() {
     const n = I.n = {};
-    n.auto = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity_mode: "auto" }, "Cerebro en automático") }, "Auto");
-    n.manual = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Cerebro en manual · nivel " + n.slider.value) }, "Manual");
-    n.slider = el("input", { type: "range", min: "0", max: "100", step: "1", class: "cb-range", "aria-label": "Intensidad del cerebro" });
+    n.auto = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity_mode: "auto" }, tr("cerebro.int.autoSet")) }, "Auto");
+    n.manual = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, tr("cerebro.int.manualSet", { level: n.slider.value })) }, "Manual");
+    n.slider = el("input", { type: "range", min: "0", max: "100", step: "1", class: "cb-range", "aria-label": tr("cerebro.int.title") });
     n.slider.addEventListener("input", () => { I.dragging = true; estimate(+n.slider.value); });
-    n.slider.addEventListener("change", () => { I.dragging = false; setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, "Intensidad del cerebro: " + n.slider.value); });
+    n.slider.addEventListener("change", () => { I.dragging = false; setIntensity({ brain_intensity: +n.slider.value, brain_intensity_mode: "manual" }, tr("cerebro.int.levelSet", { level: n.slider.value })); });
     n.level = el("b", { class: "num cb-i-level" }, "—");
     n.rate = el("b", { class: "num cb-i-rate" }, "—");
     n.every = el("span", { class: "cb-muted num" }, "");
@@ -987,18 +989,18 @@
     // where the brain reasons: on the Mac (Claude Code subscription, no API cost), on the API, or automatic
     n.be = {};
     for (const [id, label] of [["mac", "Mac"], ["api", "API"], ["auto", "Auto"]])
-      n.be[id] = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_backend: id }, "El cerebro razona con: " + label) }, label);
+      n.be[id] = el("button", { type: "button", class: "cb-seg", onclick: () => setIntensity({ brain_backend: id }, tr("cerebro.int.backendSet", { label })) }, label);
     n.beState = el("span", { class: "cb-i-bestate" });
-    n.macCap = el("input", { type: "number", min: "0", step: "1", inputmode: "numeric", class: "cb-q cb-i-cap-in", "aria-label": "Llamadas por hora en el Mac" });
+    n.macCap = el("input", { type: "number", min: "0", step: "1", inputmode: "numeric", class: "cb-q cb-i-cap-in", "aria-label": tr("cerebro.int.capAria") });
     const saveCap = el("button", { type: "button", class: "cb-seg", onclick: async () => {
       const v = Number(n.macCap.value);
-      if (!isFinite(v) || v < 0 || n.macCap.value === "") { U().toast({ type: "error", title: "Número no válido" }); return; }
-      if (await U().confirm({ title: `¿Dejar ${v} llamadas por hora en el Mac?`, text: "Es el máximo de planes por hora que el cerebro hace con la suscripción del Mac; por encima usa la API.", confirmLabel: "Sí, cambiar" }))
-        setIntensity({ mac_calls_per_hour: v }, "Tope del Mac: " + v + " llamadas/h");
-    } }, "Guardar");
-    n.backend = el("div", { class: "cb-i-backend", hidden: true }, el("span", { class: "cb-cap cb-i-cap" }, "Razona con"),
+      if (!isFinite(v) || v < 0 || n.macCap.value === "") { U().toast({ type: "error", title: tr("cerebro.int.badNumber") }); return; }
+      if (await U().confirm({ title: tr("cerebro.int.capAsk", { n: v }), text: tr("cerebro.int.capText"), confirmLabel: tr("cerebro.int.capYes") }))
+        setIntensity({ mac_calls_per_hour: v }, tr("cerebro.int.capSet", { n: v }));
+    } }, tr("cerebro.save"));
+    n.backend = el("div", { class: "cb-i-backend", hidden: true }, el("span", { class: "cb-cap cb-i-cap" }, tr("cerebro.int.reasonsWith")),
       el("div", { class: "cb-i-mode" }, n.be.mac, n.be.api, n.be.auto), n.beState, el("span", { class: "cb-sp" }),
-      el("label", { class: "cb-i-caplab" }, el("span", { class: "cb-muted" }, "tope por hora en el Mac"), n.macCap, saveCap));
+      el("label", { class: "cb-i-caplab" }, el("span", { class: "cb-muted" }, tr("cerebro.int.capLabel")), n.macCap, saveCap));
     n.body = el("div", { class: "cb-i-body" },
       n.backend,
       el("div", { class: "cb-i-top" }, el("div", { class: "cb-i-mode" }, n.auto, n.manual),
@@ -1006,8 +1008,8 @@
         el("div", { class: "cb-i-est" }, el("span", { class: "cb-muted" }, "≈"), n.rate, n.every)),
       n.why, el("div", { class: "cb-i-two" }, n.wake, n.hist));
     n.off = el("div", { class: "cb-i-off cb-muted", hidden: true }, "");
-    I.host = el("section", { class: "panel cb-intensity" }, el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, "Intensidad del cerebro"), n.sub,
-      el("div", { class: "panel-actions" }, el("a", { class: "cb-link", href: "#bot" }, "presupuesto en Bot"))), n.body, n.off);
+    I.host = el("section", { class: "panel cb-intensity" }, el("header", { class: "panel-head" }, el("h2", { class: "panel-title" }, tr("cerebro.int.title")), n.sub,
+      el("div", { class: "panel-actions" }, el("a", { class: "cb-link", href: "#bot" }, tr("cerebro.int.budgetLink")))), n.body, n.off);
     intensityPaint();
     return I.host;
   }
@@ -1015,24 +1017,24 @@
     const n = I.n, li = levelInfo(level);
     n.level.textContent = String(level);
     n.rate.textContent = li ? fmtNum(li.usd_per_hour, 2) + " $/h" : "—";
-    n.every.textContent = li ? `planifica cada ${li.interval_ticks} tick${li.interval_ticks === 1 ? "" : "s"}` : "";
+    n.every.textContent = li ? tr(li.interval_ticks === 1 ? "cerebro.int.everyOne" : "cerebro.int.every", { n: li.interval_ticks }) : "";
   }
   function intensityPaint() {
     const n = I.n, d = I.data; if (!I.host) return;
     const off = !d;
     n.off.hidden = !(I.state === "off" || I.state === "error");
-    n.off.textContent = I.state === "error" ? "No se pudo leer la intensidad: " + ((I.err && I.err.message) || "") : "El control de intensidad aún no está activo.";
+    n.off.textContent = I.state === "error" ? tr("cerebro.int.readFail", { err: (I.err && I.err.message) || "" }) : tr("cerebro.int.off");
     n.body.classList.toggle("is-off", off);
     for (const x of [n.slider, n.auto, n.manual, n.be.mac, n.be.api, n.be.auto, n.macCap]) x.disabled = off || I.busy;
-    if (!d) { n.sub.textContent = I.state === "idle" ? "cargando…" : ""; return; }
+    if (!d) { n.sub.textContent = I.state === "idle" ? tr("cerebro.loading") : ""; return; }
     const auto = d.mode !== "manual";
     n.auto.classList.toggle("on", auto); n.manual.classList.toggle("on", !auto);
-    n.sub.textContent = (auto ? "automático: sube con los eventos y baja cuando no pasa nada" : "manual: se queda donde lo pongas") + " · nivel " + d.level;
+    n.sub.textContent = tr(auto ? "cerebro.int.subAuto" : "cerebro.int.subManual", { level: d.level });
     if (!I.dragging && document.activeElement !== n.slider) {
       n.slider.value = String(d.level ?? 0); estimate(+n.slider.value);
       if (num(d.usd_per_hour_now) != null) n.rate.textContent = fmtNum(d.usd_per_hour_now, 2) + " $/h";
       const st = d.settings || {};
-      if (st.interval_ticks) n.every.textContent = `planifica cada ${st.interval_ticks} ticks`;
+      if (st.interval_ticks) n.every.textContent = tr("cerebro.int.every", { n: st.interval_ticks });
     }
     // backend line (only when the API reports it)
     const mb = d.mac_backend || {};
@@ -1042,36 +1044,37 @@
       for (const k of ["mac", "api", "auto"]) n.be[k].classList.toggle("on", be === k);
       const stt = d.mac_backend_state || mb.state || "";
       const calls = num(d.mac_calls_last_hour) ?? num(mb.calls_last_hour), cap = num(d.mac_calls_per_hour) ?? num(mb.calls_per_hour);
-      const ST_ES = { ok: ["OK", "ok"], cooling: ["en espera", "warn"], backoff: ["en espera", "warn"], off: ["apagado", "mute"], error: ["con errores", "bad"], unavailable: ["no disponible", "bad"] };
-      const [stl, stt2] = ST_ES[stt] || [stt || "—", "mute"];
-      const now = be === "api" ? "API (de pago)" : be === "mac" ? "Mac (suscripción)" : (stt === "ok" && (cap == null || calls < cap) ? "Mac (suscripción) · API si el Mac no puede" : "API ahora · Mac cuando vuelva");
-      replace(n.beState, el("b", {}, now), calls != null ? el("span", { class: "num cb-muted" }, ` · ${calls}${cap != null ? "/" + cap : ""} llamadas esta hora`) : null,
-        el("span", { class: "cb-muted" }, " · estado "), el("span", { class: "tag res tone-" + stt2 }, stl),
-        mb.backoff_until ? el("span", { class: "cb-muted num" }, " · vuelve " + when(mb.backoff_until)) : null,
-        mb.last_error ? el("span", { class: "cb-muted", title: mb.last_error }, " · último error " + when(mb.last_error_ts)) : null,
-        num(mb.last_latency_s) != null ? el("span", { class: "cb-muted num" }, ` · ${fmtNum(mb.last_latency_s, 0)} s el último plan`) : null);
+      const ST_KEY = { ok: ["cerebro.be.ok", "ok"], cooling: ["cerebro.be.waiting", "warn"], backoff: ["cerebro.be.waiting", "warn"], off: ["cerebro.be.off", "mute"], error: ["cerebro.be.error", "bad"], unavailable: ["cerebro.be.unavailable", "bad"] };
+      const [stk, stt2] = ST_KEY[stt] || [null, "mute"];
+      const stl = stk ? tr(stk) : stt || "—";
+      const now = be === "api" ? tr("cerebro.be.api") : be === "mac" ? tr("cerebro.be.mac") : (stt === "ok" && (cap == null || calls < cap) ? tr("cerebro.be.macFirst") : tr("cerebro.be.apiNow"));
+      replace(n.beState, el("b", {}, now), calls != null ? el("span", { class: "num cb-muted" }, " · " + tr("cerebro.be.calls", { n: calls + (cap != null ? "/" + cap : "") })) : null,
+        el("span", { class: "cb-muted" }, " · " + tr("cerebro.be.state") + " "), el("span", { class: "tag res tone-" + stt2 }, stl),
+        mb.backoff_until ? el("span", { class: "cb-muted num" }, " · " + tr("cerebro.be.back", { time: when(mb.backoff_until) })) : null,
+        mb.last_error ? el("span", { class: "cb-muted", title: mb.last_error }, " · " + tr("cerebro.be.lastError", { time: when(mb.last_error_ts) })) : null,
+        num(mb.last_latency_s) != null ? el("span", { class: "cb-muted num" }, " · " + tr("cerebro.be.latency", { s: fmtNum(mb.last_latency_s, 0) })) : null);
       if (document.activeElement !== n.macCap) n.macCap.value = cap == null ? "" : String(cap);
     }
     const hist = (Array.isArray(d.history) ? d.history : []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const prev = hist.length > 1 ? hist[hist.length - 2] : null;
     const from = prev && prev.level != null ? prev.level : null;
-    replace(n.why, el("span", { class: "cb-cap cb-i-cap" }, auto ? "Por qué está en " + d.level : "Último cambio"),
-      d.reason ? el("b", {}, (from != null && d.level > from ? "sube: " : from != null && d.level < from ? "baja: " : "") + reasonEs(d.reason)) : el("span", { class: "cb-muted" }, "sin motivo registrado"),
+    replace(n.why, el("span", { class: "cb-cap cb-i-cap" }, auto ? tr("cerebro.int.whyAt", { level: d.level }) : tr("cerebro.int.lastChange")),
+      d.reason ? el("b", {}, (from != null && d.level > from ? tr("cerebro.int.up") + " " : from != null && d.level < from ? tr("cerebro.int.down") + " " : "") + reasonEs(d.reason)) : el("span", { class: "cb-muted" }, tr("cerebro.int.noReason")),
       d.changed ? el("span", { class: "cb-muted num" }, (from != null ? ` · ${from} → ${d.level}` : "") + " · " + when(d.changed)) : null);
     const st = d.settings || {};
-    const kinds = (st.wake_kinds || []).map((k) => WAKE[k] || k);
-    if (st.wake_on_score_drop) kinds.push("caída de nuestra puntuación");
-    replace(n.wake, el("div", { class: "cb-cap" }, "Qué lo despierta a este nivel"),
-      kinds.length ? el("div", { class: "cb-i-chips" }, kinds.map((k) => el("span", { class: "tag res tone-mute" }, k))) : el("div", { class: "cb-muted" }, "Solo el intervalo fijo."),
-      st.min_gap_s ? el("div", { class: "cb-rows" }, `Como mucho un plan cada ${Math.round(st.min_gap_s)} s.`) : null);
+    const kinds = (st.wake_kinds || []).map((k) => (WAKE[k] ? tr(WAKE[k]) : k));
+    if (st.wake_on_score_drop) kinds.push(tr("cerebro.why.scoreDrop"));
+    replace(n.wake, el("div", { class: "cb-cap" }, tr("cerebro.int.wakes")),
+      kinds.length ? el("div", { class: "cb-i-chips" }, kinds.map((k) => el("span", { class: "tag res tone-mute" }, k))) : el("div", { class: "cb-muted" }, tr("cerebro.int.onlyInterval")),
+      st.min_gap_s ? el("div", { class: "cb-rows" }, tr("cerebro.int.minGap", { s: Math.round(st.min_gap_s) })) : null);
     const rows = hist.slice(-8).reverse();
-    replace(n.hist, el("div", { class: "cb-cap" }, "Últimos cambios de nivel"),
+    replace(n.hist, el("div", { class: "cb-cap" }, tr("cerebro.int.history")),
       rows.length ? rows.map((h, i) => { const before = hist[hist.indexOf(h) - 1];
         const up = before && h.level > before.level, down = before && h.level < before.level;
         return el("div", { class: "cb-i-hrow" }, el("span", { class: "num cb-time" }, when(h.ts)),
           el("b", { class: "num " + (up ? "cb-i-up" : down ? "cb-i-down" : "") }, (before ? before.level + " → " : "") + h.level),
           el("span", { class: "tag res tone-mute" }, h.mode === "manual" ? "manual" : "auto"), el("span", { class: "cb-i-hwhy", title: reasonEs(h.reason) }, reasonEs(h.reason))); })
-        : el("div", { class: "cb-muted" }, "Sin cambios registrados."));
+        : el("div", { class: "cb-muted" }, tr("cerebro.int.noHistory")));
   }
   function replace(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
   async function intensityPull(force) {
@@ -1085,12 +1088,12 @@
     if (I.busy) return;
     I.busy = true; intensityPaint();
     try { await A().control(body); U().toast({ type: "deal", title: done }); }
-    catch (e) { U().toast({ type: "error", title: "No se pudo aplicar", text: (e && e.message) || String(e) }); }
+    catch (e) { U().toast({ type: "error", title: tr("cerebro.int.applyFail"), text: (e && e.message) || String(e) }); }
     finally { I.busy = false; I.at = 0; await intensityPull(true); }
   }
 
   window.Screens.cerebro = {
-    title: "Cerebro",
+    get title() { return tr("cerebro.title"); },
     mount(root) {
       S.root = root;
       root.replaceChildren(el("div", { class: "cb-layout" },
