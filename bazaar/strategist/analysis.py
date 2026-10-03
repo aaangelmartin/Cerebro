@@ -556,6 +556,10 @@ def broker(live: Path, now: float | None = None) -> dict:
                          "vs_stall": round(float(sc["bench_efficiency"]) - float(r["stall_efficiency"]), 4)
                          if sc.get("bench_efficiency") is not None and r.get("stall_efficiency") is not None else None})
     out["sessions_vs_stall"] = sessions[-6:]
+    # same replay scale for both: ours and the stall's on the session's own book. A lower official efficiency
+    # with ours == stall means a harder session (less attainable surplus), not a worse broker.
+    out["replay_vs_stall"] = [{"run": h.get("run"), "ours": h.get("ours"), "stall": h.get("stall"),
+                               "below": h.get("below")} for h in ((st.get("vs_stall") or {}).get("history") or [])[-6:]]
     try:
         from bazaar.broker import policy_overlay as PO
         cur = PO.load(Path(live) / "broker_policy.json")
@@ -574,6 +578,45 @@ def broker(live: Path, now: float | None = None) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return out
+
+
+def venue_mix(feed: list[dict], venue_list: list[dict], our_venue: str | None, top: int = 5) -> dict:
+    """What gets listed and filled on each team venue today: public vs addressed listings, swaps, who lists and
+    who trades. Only fills between OTHER teams on a venue score for its owner, and only public (unaddressed)
+    listings can be taken by third parties or paired by a broker."""
+    owner = {v.get("venue"): v.get("owner") for v in venue_list}
+    mix: dict[str, dict] = {}
+    for r in feed:
+        p = r.get("payload") or {}
+        v = p.get("venue")
+        if not v or v == "rastro":
+            continue
+        m = mix.setdefault(v, {"venue": v, "owner": owner.get(v), "listed": 0, "public": 0, "addressed": 0,
+                               "swaps": 0, "fills": 0, "volume": 0.0, "makers": {}, "traders": {}})
+        if r.get("type") == "offer.listed":
+            o = p.get("offer") or {}
+            m["listed"] += 1
+            m["addressed" if o.get("to") else "public"] += 1
+            g, w = o.get("give") or {}, o.get("want") or {}
+            if (g.get("assets") or g.get("types")) and (w.get("assets") or w.get("types")):
+                m["swaps"] += 1
+            mk = o.get("maker") or r.get("actor")
+            m["makers"][mk] = m["makers"].get(mk, 0) + 1
+        elif r.get("type") == "settlement":
+            m["fills"] += 1
+            m["volume"] += float(p.get("price") or p.get("cash") or 0)
+            for t in p.get("parties") or []:
+                m["traders"][t] = m["traders"].get(t, 0) + 1
+    rows = []
+    for m in mix.values():
+        m["public_share"] = round(m["public"] / m["listed"], 2) if m["listed"] else None
+        m["makers"] = sorted(m["makers"].items(), key=lambda x: -x[1])[:4]
+        m["traders"] = sorted(m["traders"].items(), key=lambda x: -x[1])[:5]
+        m["volume"] = round(m["volume"], 1)
+        rows.append(m)
+    rows.sort(key=lambda m: (-m["fills"], -m["public"]))
+    ours = next((m for m in rows if m["venue"] == our_venue), None)
+    return {"ours": ours, "top": [m for m in rows if m["venue"] != our_venue][:top]}
 
 
 # --------------------------------------------------------------------------- growing our venue
@@ -767,6 +810,7 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600)),
                      ("broker", lambda: broker(live, now)),
                      ("our_venue_growth", lambda: venue_growth(record, feed, venue_list, me, our_venue, now)),
+                     ("venue_listing_mix_today", lambda: venue_mix(feed, venue_list, our_venue)),
                      ("dealer_ladder", lambda: dealer_ladder(record, live, me, feed, now)),
                      ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
