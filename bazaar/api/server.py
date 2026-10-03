@@ -7,6 +7,8 @@ GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
 GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
 GET  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
+GET  /brain/external?since=   POST /brain/external {"text", "by", "team_hint"?}   (pasted WhatsApp messages)
+GET  /outbox?kind=code|promo|task&status=&since=   POST /outbox/<id> {"status", "note"}   (what the brain asks humans)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
@@ -198,6 +200,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(self.dashboard / "screens" / m.group(1), STATIC_TYPES[m.group(2)])
         if path.startswith("/brain/"):
             return self._get_brain(path, q)
+        if path == "/outbox":
+            from ..outbox import Outbox
+            try:
+                since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else None
+            except ValueError:
+                return self._send(400, {"error": "bad_query", "message": "since must be a number"})
+            return self._send(200, {"items": Outbox().list(q.get("kind") or None, q.get("status") or None, since)})
         if path.startswith("/rec/") or path == "/notifications":
             try:
                 return self._get_rec(path, q)
@@ -273,6 +282,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"items": B.chat_since(live, since, limit)})
         if path == "/brain/events":
             return self._send(200, {"items": B.read_rows(live / "brain_events.jsonl", since, limit)})
+        if path == "/brain/external":
+            from ..intel import external
+            handled = _read_json(live / "external_handled.json", {}) or {}
+            items = [{**r, **({k: handled[r.get("id")].get(k) for k in ("brain_conclusion", "reply_outbox_id")}
+                              if r.get("id") in handled else {"brain_conclusion": None, "reply_outbox_id": None})}
+                     for r in external.load(live, since=since)]
+            return self._send(200, {"items": items})
         if path == "/brain/memory":
             return self._send(200, B.memory(live))
         if path == "/brain/findings":
@@ -373,6 +389,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._stop(body)
             if path == "/control":
                 return self._send(200, apply_control(self.live, body))
+            m = re.fullmatch(r"/outbox/([A-Za-z0-9_.:\-]+)", path)
+            if m:
+                from ..outbox import Outbox
+                try:
+                    return self._send(200, {"item": Outbox().update(m.group(1), body.get("status"), body.get("note"))})
+                except KeyError:
+                    return self._send(404, {"error": "not_found", "message": m.group(1)})
+            if path == "/brain/external":
+                from ..intel import external
+                if not str(body.get("text") or "").strip():
+                    raise ValueError("text is empty")
+                return self._send(200, external.ingest(body["text"], by=str(body.get("by") or ""), live_dir=self.live,
+                                                       team_hint=body.get("team_hint"), use_llm=True))
             if path == "/brain/chat":
                 from ..strategist import brainio as B
                 return self._send(200, B.chat_post(self.live, body.get("text"), by=str(body.get("by") or "equipo")))

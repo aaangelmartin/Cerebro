@@ -202,7 +202,10 @@ class MarketDomain:
             if not copies:
                 continue
             a = copies[0]
-            params = {"venue": p.get("venue") or "rastro", "give": {"assets": [a["id"]]},
+            venue = p.get("venue") or "rastro"
+            if venue in {str(v) for v in control.get("avoid_post_venues") or []}:
+                venue = "rastro"
+            params = {"venue": venue, "give": {"assets": [a["id"]]},
                       "want": {"cards": [p["want_card"]]} if p.get("want_card") else {"cash": int(p["want_cash"])},
                       "expires_in_ticks": SWAP_EXPIRES if p.get("want_card") else LIST_EXPIRES}
             if p.get("to"):
@@ -420,6 +423,10 @@ class MarketDomain:
 
         # ---------------------------------------------------------------- accepts
         books, venues = self._books(sit, ctx)
+        skip_venues = {str(v) for v in control.get("avoid_post_venues") or []}   # the brain's alliance policy
+        if skip_venues:
+            books = [(v, o) for v, o in books if venue_id(v) not in skip_venues]
+            venues = [v for v in venues if venue_id(v) not in skip_venues]
         by_vid = {venue_id(v): v for v in venues}
         sources = [(v, offers, False) for v, offers in books]
         for o in addressed:
@@ -576,6 +583,9 @@ class MarketDomain:
             seen = {o.get("id") for o, _ in stale}
             stale += [(o, "the brain flagged it (far from value/market or outbid)") for o in own_market
                       if o.get("id") in flagged and o.get("id") not in seen]
+        seen = {o.get("id") for o, _ in stale}
+        stale += [(o, "the brain stopped posting on this venue (alliance reciprocity)") for o in own_market
+                  if o.get("id") not in seen and str(o.get("venue")) in skip_venues]
         seen = {o.get("id") for o, _ in stale}
         stale += [(o, "we no longer buy this set") for o in own_market if o.get("id") not in seen
                   and offer_kind(o) in ("bid", "swap") and any(_avoided(r, control) for r in want_cards(o))]

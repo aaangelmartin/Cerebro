@@ -153,8 +153,65 @@ def sanitize(raw: Any) -> dict:
         **({"avoid_buy_sets": avoid} if avoid is not None else {}),
         "accept_offers": accepts,
         "post_offers": _post_offers(raw.get("post_offers")),
+        "whatsapp_replies": [{"reply_to": _clean(x.get("reply_to"), 60), "text": _clean(x.get("text"), 1500),
+                              "why": _clean(x.get("why"), 400), "conclusion": _clean(x.get("conclusion"), 600)}
+                             for x in (raw.get("whatsapp_replies") or [])[:6]
+                             if isinstance(x, dict) and x.get("reply_to") and (x.get("text") or x.get("conclusion"))]
+        if isinstance(raw.get("whatsapp_replies"), list) else [],
+        **({"budgets": _budgets(raw.get("budgets"))} if isinstance(raw.get("budgets"), dict) else {}),
+        **({"avoid_post_venues": sorted({_clean(v, 12) for v in raw.get("avoid_post_venues") or []
+                                         if re.match(r"^v\d{2}$", str(v).strip())})}
+           if isinstance(raw.get("avoid_post_venues"), list) else {}),
+        "lesson_changes": [{"id": _clean(x.get("id"), 20), "status": x.get("status"), "why": _clean(x.get("why"), 300)}
+                           for x in (raw.get("lesson_changes") or [])[:6]
+                           if isinstance(x, dict) and x.get("id") and x.get("status") in LESSON_STATUSES]
+        if isinstance(raw.get("lesson_changes"), list) else [],
+        "code_requests": [{k: _clean(x.get(k), n) for k, n in (("title", 200), ("severity", 10), ("diagnosis", 1500),
+                                                              ("proposed_change", 1500), ("impact", 500),
+                                                              ("patch_sketch", 2000))}
+                          | {"evidence": [_clean(e, 400) for e in (x.get("evidence") or [])[:6]]
+                             if isinstance(x.get("evidence"), list) else [_clean(x.get("evidence"), 400)]}
+                          for x in (raw.get("code_requests") or [])[:4] if isinstance(x, dict) and x.get("title")]
+        if isinstance(raw.get("code_requests"), list) else [],
+        "promo_drafts": [{"text": _clean(x.get("text"), 2000), "why": _clean(x.get("why"), 400),
+                          "channel": x.get("channel") if x.get("channel") in ("whatsapp", "in_game") else "whatsapp"}
+                         for x in (raw.get("promo_drafts") or [])[:2] if isinstance(x, dict) and x.get("text")]
+        if isinstance(raw.get("promo_drafts"), list) else [],
+        "human_tasks": [{"task": _clean(x.get("task"), 400), "why": _clean(x.get("why"), 600)}
+                        for x in (raw.get("human_tasks") or [])[:4] if isinstance(x, dict) and x.get("task")]
+        if isinstance(raw.get("human_tasks"), list) else [],
         **({"duel_claude_mode": duel_mode} if duel_mode in DUEL_MODES else {}),
     }
+
+
+LESSON_STATUSES = ("shadow", "canary", "active", "retired")
+LLM_PURPOSES = ("council", "duels", "dealers", "market", "lab", "strategy", "external_intel")
+BUDGET_BOUNDS = {"max_spend_per_deal": (10, 120), "max_spend_per_hour": (20, 300)}
+LLM_CAP_BOUNDS = (0.5, 40.0)        # USD per purpose per day; the router's per-key 100 $ caps stay on top
+
+
+def _budgets(raw: dict) -> dict:
+    out = {}
+    for k, (lo, hi) in BUDGET_BOUNDS.items():
+        v = _int(raw.get(k), lo, hi)
+        if v is not None:
+            out[k] = v
+    caps = raw.get("llm_usd_per_day") if isinstance(raw.get("llm_usd_per_day"), dict) else {}
+    llm = {}
+    for p, v in caps.items():
+        f = _float(v)
+        if p in LLM_PURPOSES and f is not None:
+            llm[p] = max(LLM_CAP_BOUNDS[0], min(LLM_CAP_BOUNDS[1], f))
+    if llm:
+        out["llm_usd_per_day"] = llm
+    return out
+
+
+def llm_cap(purpose: str, live: Path | None = None) -> float | None:
+    """The brain's day cap for one LLM purpose (None = no cap of its own)."""
+    caps = ((_plan(live).get("budgets") or {}).get("llm_usd_per_day")) or {}
+    v = caps.get(purpose)
+    return float(v) if isinstance(v, (int, float)) else None
 
 
 def _post_offers(raw) -> list[dict]:
@@ -219,6 +276,10 @@ def big_changes(old: dict | None, new: dict) -> list[str]:
         out.append(f"pause {new['pause_domains']}")
     if "avoid_buy_sets" in new and sorted(new.get("avoid_buy_sets") or []) != sorted(old.get("avoid_buy_sets") or []):
         out.append(f"avoid buying sets {old.get('avoid_buy_sets') or []} -> {new.get('avoid_buy_sets') or []}")
+    if (new.get("budgets") or {}) != (old.get("budgets") or {}) and new.get("budgets"):
+        out.append(f"budgets {old.get('budgets') or {}} -> {new['budgets']}")
+    if "avoid_post_venues" in new and sorted(new["avoid_post_venues"]) != sorted(old.get("avoid_post_venues") or []):
+        out.append(f"stop posting on venues {new['avoid_post_venues']} (was {old.get('avoid_post_venues') or []})")
     fresh = sorted(set(new.get("accept_offers") or []) - set(old.get("accept_offers") or []))
     if fresh:
         out.append(f"accept offers addressed to us {fresh} (may give a last copy)")
@@ -246,6 +307,11 @@ def merge_accepted(old: dict | None, new: dict, council_ok: bool) -> dict:
     out["goal_buys"] = goals
     out["cash_policy"] = dict(old.get("cash_policy") or {})
     out["pause_domains"] = list(old.get("pause_domains") or [])
+    for k in ("budgets", "avoid_post_venues"):
+        if k in old:
+            out[k] = old[k]
+        else:
+            out.pop(k, None)
     if "avoid_buy_sets" in old:
         out["avoid_buy_sets"] = list(old["avoid_buy_sets"])
     else:
@@ -313,6 +379,11 @@ def overlay(control: dict, live: Path | None = None) -> dict:
         out["goal_small_deal_p"] = int(cp["max_small_deal"])
     if "duel_claude_mode" not in out and plan.get("duel_claude_mode") in DUEL_MODES:
         out["duel_claude_mode"] = plan["duel_claude_mode"]
+    for k, v in (plan.get("budgets") or {}).items():
+        if k in BUDGET_BOUNDS and k not in out:
+            out[k] = v
+    if plan.get("avoid_post_venues"):
+        out["avoid_post_venues"] = sorted(set(out.get("avoid_post_venues") or []) | set(plan["avoid_post_venues"]))
     if plan.get("avoid_buy_sets"):                   # union: the operator's list always stays
         out["avoid_buy_sets"] = sorted({str(x).upper() for x in out.get("avoid_buy_sets") or []}
                                        | {str(x).upper() for x in plan["avoid_buy_sets"]})

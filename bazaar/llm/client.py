@@ -160,6 +160,7 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
         deadline: float | None = None, temperature: float | None = None,
         _abandoned: threading.Event | None = None, effort: str | None = None) -> LLMResult:
     r = router()
+    _check_purpose_cap(r, purpose)
     used = r.resolve(model)
     if model and used != model:
         _log({"purpose": purpose, "event": "degraded", "asked": model, "model": used, "day_usd": r.day_spent()})
@@ -220,6 +221,21 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
               "late": bool(deadline and time.time() > deadline), "abandoned": bool(_abandoned and _abandoned.is_set())})
         return LLMResult(text, calls, used, label, usage, cost, latency, stop)
     raise LLMUnavailable(f"{purpose}: {MAX_ATTEMPTS} attempts failed ({last_err})")
+
+
+def _check_purpose_cap(r, purpose: str) -> None:
+    """The brain may cap one purpose's day spend (brain.strategy budgets.llm_usd_per_day); over it, the caller
+    falls back to code (LLMUnavailable). Never raises for any other reason."""
+    try:
+        from bazaar.brain.strategy import llm_cap
+        cap = llm_cap(purpose)
+        if cap is None:
+            return
+        spent = float((r.summary().get("by_purpose") or {}).get(purpose) or 0.0)
+    except Exception:  # noqa: BLE001
+        return
+    if spent >= cap:
+        raise LLMUnavailable(f"{purpose}: the brain's day cap {cap} $ is spent ({spent:.2f} $)")
 
 
 def race(*, models: list[str], valid: Callable[[LLMResult], bool] | None = None, **kw) -> LLMResult:

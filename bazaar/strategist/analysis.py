@@ -355,10 +355,12 @@ def scoreboard(record: Path, now: float | None = None) -> dict:
     teams = {}
     for tid, t in cur.items():
         row = {k: t.get(k) for k in COMPONENTS}
+        keys = COMPONENTS if tid == US else ("score", "negotiating", "market", "deals")
+        row = {k: row[k] for k in keys}
         for label, past in (("d1h", h1), ("d2h", h2)):
             p = past.get(tid) or {}
-            row[label] = {k: round(float(t.get(k) or 0) - float(p.get(k) or 0), 2) for k in COMPONENTS
-                          if p.get(k) is not None}
+            row[label] = {k: round(float(t.get(k) or 0) - float(p.get(k) or 0), 2) for k in keys
+                          if p.get(k) is not None and k != "deals" or (k == "deals" and p.get(k) is not None)}
         row["rank"] = t.get("rank")
         teams[tid] = row
     gainers = {}
@@ -427,6 +429,32 @@ def venue_flow(feed: list[dict], venue: str | None, since_ts: float) -> dict:
             "fills": len(fills), "last_fills": fills[-6:]}
 
 
+def alliances(feed: list[dict], allies: dict, our_venue: str | None, my_offers: list[dict], since_ts: float) -> dict:
+    """Measured benefit of each alliance: trades the ally closed on OUR venue vs trades we closed on THEIRS, their
+    listings on our venue (addressed vs public), and our open offers sitting on their venue."""
+    out = {}
+    for venue, team in (allies or {}).items():
+        d = {"ally": team, "their_venue": venue, "their_fills_on_our_venue": 0, "our_fills_on_their_venue": 0,
+             "their_listings_on_our_venue": {"addressed": 0, "public": 0},
+             "our_open_offers_on_their_venue": sum(1 for o in my_offers if o.get("maker") == US
+                                                   and o.get("venue") == venue and o.get("status", "open") == "open")}
+        for r in feed:
+            if float(r.get("ts") or 0) < since_ts:
+                continue
+            p = r.get("payload") or {}
+            if r.get("type") == "settlement":
+                parties = p.get("parties") or []
+                if p.get("venue") == our_venue and team in parties:
+                    d["their_fills_on_our_venue"] += 1
+                if p.get("venue") == venue and US in parties:
+                    d["our_fills_on_their_venue"] += 1
+            elif r.get("type") == "offer.listed" and p.get("venue") == our_venue and r.get("actor") == team:
+                d["their_listings_on_our_venue"]["addressed" if (p.get("offer") or {}).get("to") else "public"] += 1
+        d["reciprocal"] = d["their_fills_on_our_venue"] > 0 or d["our_fills_on_their_venue"] == 0
+        out[venue] = d
+    return out
+
+
 def _allies() -> dict:
     try:
         from bazaar.market.protocol import ALLIED_VENUES
@@ -453,7 +481,8 @@ def summarise(record: Path, live: Path, me: dict, leaderboard: dict, catalog: di
                      ("offers_not_posted_by_our_bot", lambda: unknown_offers(my_offers, live)),
                      ("scoreboard", lambda: scoreboard(record, now)),
                      ("our_buys_by_set_last_3h", lambda: buy_impact(feed, me, now - 3 * 3600)),
-                     ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600))):
+                     ("our_venue_flow_last_2h", lambda: venue_flow(feed, our_venue, now - hours * 3600)),
+                     ("alliances_today", lambda: alliances(feed, _allies(), our_venue, my_offers, now - 14 * 3600))):
         try:
             out[name] = fn()
         except Exception as e:  # noqa: BLE001 - one broken analysis must not stop the plan
