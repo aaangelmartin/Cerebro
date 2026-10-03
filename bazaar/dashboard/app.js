@@ -1,511 +1,412 @@
-// Supervisor dashboard for the Bazaar bot. No build step: plain DOM, polls api/overview every 3 s.
-// URLs are relative so the same page works at 127.0.0.1:8791/ and behind the gateway at /v2/.
-"use strict";
+/* app.js — hash router, 3 s refresh, top bar, menu with status box, notifications (toasts + bell), global states. */
+(function () {
+  "use strict";
+  const { el, icon, iconSvg, fmtNum, fmtP, fmtTime, fmtDur, fmtAgo } = window.ui;
+  const api = window.api;
+  window.Screens = window.Screens || {};
 
-const POLL_MS = 3000;
-const KEEP_ROWS = 150;
-const $ = (id) => document.getElementById(id);
+  const NAV = [
+    ["home", "Home", "home"], ["coleccion", "Colección", "coleccion"], ["mercado", "Mercado", "mercado"],
+    ["duelos", "Duelos", "duelo"], ["competicion", "Competición", "competicion"], ["rivales", "Rivales", "rivales"],
+    ["supervision", "Supervisión", "supervision"], ["laboratorio", "Laboratorio", "laboratorio"], ["bot", "Bot", "bot"],
+  ];
+  const IDS = NAV.map((n) => n[0]);
+  const EVENT_NAMES = { bench: "Market Test", duels: "Duelos", duel_session: "Duelos", round: "Ronda", set_release: "Nuevo set",
+    level: "Nivel", persona: "Nuevo dealer", venue: "Tiendas", fee: "Comisiones", day_opens: "Apertura", day_closes: "Cierre" };
 
-const state = {
-  lastId: null,        // last decision id we have
-  rows: new Map(),     // decision id -> row
-  data: null,          // last overview
-  lastOk: 0,           // epoch ms of the last good poll
-  failing: false,
-  confirm: null,       // pending confirmation action
-  busy: false,
-  seen: new Set(),     // row keys already shown (for the "new" flash)
-};
+  const $ = (id) => document.getElementById(id);
+  const S = {
+    route: null, screen: null, params: "", mounted: false, data: null, apiDown: false, lastOk: 0, inflight: false,
+    rec: { me: null, leaderboard: null, clock: null, venues: null, my_offers: null, dealers: null }, recAt: 0,
+    dealerUse: {}, dealerAt: 0, notif: [], notifSince: null, notifInit: false, closedDismissed: false,
+  };
 
-// ------------------------------------------------------------------ formatting
-const nf = (n, d = 1) => (n === null || n === undefined || Number.isNaN(+n)) ? "—"
-  : (+n).toLocaleString("es-ES", { maximumFractionDigits: d, minimumFractionDigits: 0 });
-const nf2 = (n) => (n === null || n === undefined) ? "—"
-  : (+n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const P = (n) => `${nf(n, 1)} P`;
-const signed = (n, d = 1) => (n > 0 ? "+" : n < 0 ? "−" : "±") + nf(Math.abs(n), d);
-const hhmmss = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "—";
-const hhmm = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
-function ago(s) {
-  if (s === null || s === undefined) return "sin datos";
-  s = Math.max(0, Math.round(s));
-  if (s < 90) return `hace ${s} s`;
-  if (s < 5400) return `hace ${Math.round(s / 60)} min`;
-  return `hace ${nf(s / 3600, 1)} h`;
-}
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined && text !== null) e.textContent = text;
-  return e;
-}
-function chip(text, tone) { return el("span", `chip chip--${tone}`, text); }
-
-// ------------------------------------------------------------------ plain-Spanish phrasing
-const DOMAINS = { duels: "Duelos", dealers: "Dealers", market: "Mercado", broker: "Broker", lab: "Laboratorio", venue: "Tienda" };
-const SOURCES = {
-  opus: ["Opus", "ai"], sonnet: ["Sonnet", "ai"], haiku: ["Haiku", "ai"], council: ["Consejo", "warn"],
-  fallback: ["Reserva", "muted"], code: ["Código", "muted"],
-};
-const MODES = { auto: "automático", observe: "solo observa", manual: "manual" };
-const EVENTS = {
-  bench: "Market Test", duels: "duelos", grant_all: "reparto de P", day_opens: "abren puertas", day_closes: "cierran puertas",
-  round: "nueva ronda", set_release: "nueva colección", persona: "nuevo dealer", announce: "anuncio", end_round: "fin de ronda",
-};
-const RAILS = {
-  council: "el consejo", breaker_cautious: "el modo prudente (no compra)", stop: "el STOP",
-  armed: "estar desarmado", cash: "el raíl de caja", value: "el raíl de valor", pace: "el límite de ritmo",
-  arbiter: "el árbitro (otra acción tenía prioridad)", cards: "el raíl de cartas protegidas", duel: "el raíl de duelos",
-  fair_play: "el juego limpio", fresh: "la oferta cambió antes de aceptar", late: "llegar tarde al tick",
-  pack: "el raíl de sobres", rails_error: "un error en los raíles", rails_missing: "faltar los raíles",
-};
-const dealerName = (w) => w ? String(w).charAt(0).toUpperCase() + String(w).slice(1) : "";
-
-function side(x) {
-  if (!x || typeof x !== "object") return "nada";
-  const parts = [];
-  if (x.cash) parts.push(P(x.cash));
-  for (const a of x.assets || []) parts.push(typeof a === "object" ? (a.ref || `carta #${a.id}`) : `carta #${a}`);
-  for (const t of x.types || []) parts.push(typeof t === "object" ? (t.ref || t.type || JSON.stringify(t)) : String(t));
-  return parts.length ? parts.join(" + ") : "nada";
-}
-
-function phrase(r, threads) {
-  const p = r.params || {};
-  const who = (t) => threads[String(t)] ? dealerName(threads[String(t)]) : `conversación ${t}`;
-  const days = (p.days !== undefined && p.days !== null && p.days !== 0) ? ` · ${p.days} días` : "";
-  switch (r.kind) {
-    case "duel_message": return `Ofrece ${P(p.price)}${days} · duelo ${p.duel}`;
-    case "duel_accept": return `Acepta ${P((p.expect || {}).price)} · duelo ${p.duel}`;
-    case "thread_message": return `Ofrece ${P(p.price)} a ${who(p.thread)}`;
-    case "open_thread": {
-      const topic = typeof p.topic === "string" ? p.topic : (p.topic && (p.topic.ref || p.topic.kind || p.topic.card)) || "";
-      return `Abre conversación con ${dealerName(p.with)}${topic ? ` por ${topic}` : ""}`;
-    }
-    case "close_thread": return `Cierra la conversación con ${who(p.thread)}`;
-    case "accept_offer": return `Acepta la oferta ${p.offer}${p.expect ? `: da ${side(p.expect.want)}, recibe ${side(p.expect.give)}` : ""}`;
-    case "post_offer": {
-      const where = p.venue === "rastro" ? "El Rastro" : (p.venue || "mercado");
-      const to = p.to ? ` para ${p.to}` : "";
-      return `Publica en ${where}${to}: da ${side(p.give)} por ${side(p.want)}`;
-    }
-    case "cancel_offer": return `Retira la oferta ${p.offer}`;
-    case "venue_open": return `Abre la tienda «${p.name || "board"}» (comisión ${nf((p.fee_bps || 0) / 100, 2)} %)`;
-    case "venue_patch": return `Cambia la tienda${p.fee_bps !== undefined ? ` · comisión ${nf(p.fee_bps / 100, 2)} %` : ""}`;
-    case "broker_match": return `Empareja ${p.sell} con ${p.buy} a ${P(p.price)}`;
-    case "broker_announce": return `Anuncia en la tienda: «${String(p.text || "").slice(0, 80)}»`;
-    case "noop": return "Espera sin hacer nada";
-    default: return `${r.kind || "acción"} ${JSON.stringify(p).slice(0, 80)}`;
+  // ------------------------------------------------------------------ prefs (localStorage, never required)
+  const PREF_KEY = "bazaar.dash.notif";
+  const NOTIF_GROUPS = [
+    ["aprobar", "Pendientes de aprobar"], ["breaker", "Disyuntores y errores"], ["gran", "Grandes operaciones"],
+    ["novedad", "Nuevos dealers y novedades"], ["duelo", "Sesiones de duelos"], ["broker", "Broker y Market Test"],
+    ["lab", "Laboratorio"], ["limite", "Cambios de límites"],
+  ];
+  function loadPrefs() {
+    let p = {};
+    try { p = JSON.parse(localStorage.getItem(PREF_KEY) || "{}") || {}; } catch (e) { p = {}; }
+    return Object.assign({ toasts: true, muteUntil: 0, types: { limite: false, lab: false }, readTs: 0 }, p);
   }
-}
+  let prefs = loadPrefs();
+  function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* private mode */ } }
+  function groupOf(type) {
+    const t = String(type || "").toLowerCase();
+    if (t.startsWith("aprobar") || t.startsWith("pendiente")) return "aprobar";
+    if (t.startsWith("breaker") || t.startsWith("error") || t.startsWith("alerta") || t.startsWith("disyuntor")) return "breaker";
+    if (t.startsWith("gran") || t.startsWith("deal") || t.startsWith("outcome")) return "gran";
+    if (t.startsWith("novedad") || t.startsWith("novelty") || t.startsWith("dealer")) return "novedad";
+    if (t.startsWith("duel")) return "duelo";
+    if (t.startsWith("broker")) return "broker";
+    if (t.startsWith("limite")) return "limite";
+    return "lab";
+  }
 
-function result(r) {
-  const v = r.verdict || {};
-  if (v.ok === false) {
-    const rail = RAILS[v.rail] || (v.rail ? `el raíl «${v.rail}»` : "los raíles");
-    return { label: "Vetado", tone: "bad", why: `Vetado por ${rail}${v.detail ? `: ${v.detail}` : ""}.` };
-  }
-  const o = r.outcome;
-  if (!o) {
-    return r.dry_run ? { label: "Sin enviar", tone: "muted", why: "Bot desarmado: solo lo registra." }
-      : { label: "Pendiente", tone: "muted" };
-  }
-  switch (o.status) {
-    case "sent": return { label: "Enviado", tone: "ok" };
-    case "deal": return { label: "Acuerdo", tone: "ok" };
-    case "vetoed": return { label: "Vetado", tone: "bad" };
-    case "refused": case "error": case "expired": case "no_deal":
-      return { label: "Rechazado", tone: "bad", why: `El juego respondió ${o.error || o.status}${o.message ? `: ${o.message}` : ""}.` };
-    default: return { label: o.status, tone: "muted" };
-  }
-}
-
-function alertText(a) {
-  const t = String(a.text || "");
-  let m;
-  if (a.kind === "breaker") {
-    if ((m = t.match(/^(\w+) paused (\d+) ticks after (\d+) refusals/))) return `${m[3]} rechazos seguidos en ${DOMAINS[m[1]] || m[1]}: pausado ${m[2]} ticks.`;
-    if ((m = t.match(/^(\w+) fell from ([\d.]+) to ([\d.]+)/))) return `La cartera bajó de ${nf(+m[2])} a ${nf(+m[3])}: modo prudente, no compra.`;
-    if ((m = t.match(/^injection flood \((\d+) texts\): code only for (\d+) ticks/))) return `Muchos textos con inyección (${m[1]}): solo código durante ${m[2]} ticks.`;
-    return `Disyuntor: ${t}`;
-  }
-  if (a.kind === "novelty") {
-    const raw = a.raw || {};
-    const d = raw.detail;
-    switch (a.where) {
-      case "limits": return `Cambian los límites del juego: ${Object.entries(d || {}).map(([k, v]) => `${k} ${v[0]} → ${v[1]}`).join(", ")}.`;
-      case "tick_seconds": return `El tick pasa de ${d[0]} s a ${d[1]} s.`;
-      case "schedule": return `Nuevo evento en el calendario: ${EVENTS[raw.action] || raw.action || ""} a la hora ${nf(raw.at_hours, 2)}.`;
-      case "feed_gap": return `Hueco en el feed público: ${t}`;
-      default: return `Novedad (${a.where}): ${t}`;
+  // ------------------------------------------------------------------ shell
+  function buildNav() {
+    const nav = $("nav-list");
+    nav.innerHTML = "";
+    for (const [id, label, ic] of NAV) {
+      nav.appendChild(el("a", { href: "#" + id, class: "nav-item", dataset: { id } }, icon(ic, 16), el("span", null, label),
+        el("span", { class: "nav-badge num", id: "nav-badge-" + id, hidden: true })));
     }
   }
-  if (a.kind === "perceive") return `Error leyendo el juego: ${t}`;
-  return `Error en ${a.where || "?"}: ${t}`;
-}
-
-// ------------------------------------------------------------------ network
-async function api(path, opts = {}) {
-  const res = await fetch(`api/${path}`, { cache: "no-store", ...opts });
-  let body = null;
-  try { body = await res.json(); } catch (_) { /* not json */ }
-  if (!res.ok) {
-    const err = new Error((body && (body.message || body.error)) || `HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
+  function parseHash() {
+    const h = decodeURIComponent((location.hash || "").replace(/^#\/?/, ""));
+    const i = h.indexOf("/");
+    let id = i < 0 ? h : h.slice(0, i);
+    const params = i < 0 ? "" : h.slice(i + 1);
+    if (!IDS.includes(id)) id = "home";
+    return { id, params };
   }
-  return body;
-}
-const write = (path, method, body) => api(path, {
-  method, headers: { "X-Dashboard": "1", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined,
-});
-
-async function poll() {
-  try {
-    const q = state.lastId !== null ? `?since=${state.lastId}` : "";
-    const d = await api(`overview${q}`);
-    state.data = d;
-    state.lastOk = Date.now();
-    state.failing = false;
-    // A journal rotated or restarted: start again from scratch.
-    if (state.lastId !== null && d.last_id !== null && d.last_id < state.lastId) { state.rows.clear(); state.lastId = null; }
-    for (const r of d.activity || []) state.rows.set(`d${r.id}`, r);
-    if (d.last_id !== null && d.last_id !== undefined) state.lastId = d.last_id;
-    if (state.rows.size > KEEP_ROWS) {
-      const keys = [...state.rows.keys()].sort((a, b) => (+a.slice(1)) - (+b.slice(1)));
-      for (const k of keys.slice(0, state.rows.size - KEEP_ROWS)) state.rows.delete(k);
-    }
-  } catch (e) {
-    state.failing = true;
-    state.error = e.message;
-  }
-  render();
-}
-
-// ------------------------------------------------------------------ render
-function render() {
-  const d = state.data;
-  renderTop(d);
-  if (!d) return;
-  renderKpis(d);
-  renderActivity(d);
-  renderDuels(d);
-  renderAlerts(d);
-  renderLab(d);
-  renderProcs(d);
-  if (Date.now() < (state.flashUntil || 0)) return;
-  $("foot").textContent = state.failing
-    ? `Sin conexión con la API · último dato ${hhmmss(state.lastOk / 1000)}`
-    : `Actualizado ${hhmmss(d.now)} · se refresca solo cada 3 s`;
-}
-
-function renderTop(d) {
-  const pill = $("state-pill"), text = $("state-text"), banner = $("banner");
-  const st = d && d.status, ck = d && d.clock;
-  let tone = "muted", label = "Cargando…";
-  const banners = [];
-  if (state.failing) {
-    tone = "bad"; label = "API CAÍDA";
-    const since = state.lastOk ? ` desde las ${hhmmss(state.lastOk / 1000)}` : "";
-    banners.push(["bad", `API caída: no responde${since}. Se reintenta sola cada 3 s. ${state.error || ""}`]);
-  } else if (st) {
-    const mode = MODES[(st.control || {}).mode] || (st.control || {}).mode || "";
-    if (st.stop_file) { tone = "bad"; label = "STOP ACTIVO"; }
-    else if (st.armed) { tone = "ok"; label = `ARMADO · ${mode}`; }
-    else { tone = "warn"; label = `DESARMADO · ${mode}`; }
-    if (!st.present) banners.push(["warn", "El bot todavía no ha escrito su estado (status.json). ¿Está arrancado?"]);
-    if (st.stop_file) banners.push(["bad", "STOP activo: el bot no envía nada al juego (existe el archivo bazaar/STOP).", "unstop"]);
-    if (st.allow_real === false) banners.push(["warn", "El bot corre sin BAZAAR_ALLOW_REAL=1: aunque se arme, no escribirá en el juego."]);
-    if (ck && (ck.doors !== "open" || ck.paused)) {
-      banners.push(["warn", ck.paused && ck.doors === "open" ? "Juego en pausa: el bot espera." :
-        `Puertas cerradas hasta las ${ck.opens_at || "09:00"}. El bot espera; no habrá decisiones hasta entonces.`]);
-    }
-  }
-  pill.className = `pill pill--${tone}`;
-  text.textContent = label;
-
-  banner.replaceChildren();
-  banner.hidden = !banners.length;
-  if (banners.length) {
-    const worst = banners.find((b) => b[0] === "bad") ? "bad" : "warn";
-    banner.className = `banner${worst === "warn" ? " banner--warn" : ""}`;
-    banners.forEach(([, msg, act], i) => {
-      const p = el("p", null, msg);
-      if (act === "unstop") {
-        const b = el("button", "btn", "Quitar STOP");
-        b.type = "button";
-        b.onclick = () => ask("unstop");
-        p.append(b);
+  function route() {
+    const { id, params } = parseHash();
+    if (S.route === id && S.mounted) {
+      if (params !== S.params) {
+        S.params = params;
+        const sc = window.Screens[id];
+        if (sc && sc.onParams) { try { sc.onParams($("screen"), params); } catch (e) { console.error(e); } }
+        else remount(id, params);
+        refreshScreen();
       }
-      if (i) p.style.marginTop = "4px";
-      banner.append(p);
+      return;
+    }
+    remount(id, params);
+  }
+  function remount(id, params) {
+    const root = $("screen");
+    const old = S.screen;
+    if (old && old.unmount) { try { old.unmount(root); } catch (e) { console.error(e); } }
+    window.ui.closeDrawer(true);
+    root.innerHTML = "";
+    root.className = "screen scr-" + id;
+    root.scrollTop = 0;
+    S.route = id; S.params = params; S.screen = window.Screens[id] || null; S.mounted = true;
+    document.querySelectorAll(".nav-item").forEach((a) => a.classList.toggle("active", a.dataset.id === id));
+    const label = (NAV.find((n) => n[0] === id) || [])[1] || id;
+    document.title = label + " · Bazaar";
+    if (!S.screen) {
+      root.appendChild(el("div", { class: "placeholder" }, el("h1", null, label), el("p", null, "En construcción.")));
+      return;
+    }
+    try { S.screen.mount(root, params); } catch (e) { console.error(e); root.appendChild(window.ui.error(e)); }
+    if (S.data) refreshScreen();
+  }
+  async function refreshScreen() {
+    const sc = S.screen;
+    if (!sc || !sc.refresh || !S.data) return;
+    const route = S.route;
+    try { await sc.refresh($("screen"), S.data, S.params); }
+    catch (e) { if (route === S.route) console.error("refresh " + route, e); }
+  }
+
+  // ------------------------------------------------------------------ loop
+  async function tick() {
+    if (S.inflight) return;
+    S.inflight = true;
+    try {
+      const data = await api.overview();
+      S.data = data; S.lastOk = Date.now(); S.apiDown = false;
+      window.ui.setClock(data.clock, data.now);
+      await loadRec(false);
+      renderTop(data);
+      renderStatus(data);
+      renderBanners(data);
+      await refreshScreen();
+    } catch (e) {
+      S.apiDown = true;
+      renderBanners(S.data);
+    } finally { S.inflight = false; }
+    pollNotifications();
+  }
+  async function loadRec(force) {
+    const now = Date.now();
+    if (!force && now - S.recAt < 10000) return;
+    S.recAt = now;
+    const names = ["me", "leaderboard", "clock", "venues", "my_offers", "dealers"];
+    const got = await Promise.allSettled(names.map((n) => api.rec(n)));
+    got.forEach((r, i) => { if (r.status === "fulfilled") S.rec[names[i]] = r.value; });
+    if (now - S.dealerAt > 30000) {
+      S.dealerAt = now;
+      try {
+        const out = await api.outcomes(null, 800);
+        const since = Date.now() / 1000 - 3600;
+        const use = {};
+        for (const o of (out && out.items) || []) {
+          if (o.domain !== "dealers" || (Number(o.ts) || 0) < since) continue;
+          if (!["deal", "sent"].includes(o.status) || !/accept|buy|sell|deal/.test(String(o.kind || ""))) continue;
+          const who = (o.params && (o.params.with || o.params.dealer || o.params.persona)) || o.with || o.dealer;
+          if (who) use[who] = (use[who] || 0) + 1;
+        }
+        S.dealerUse = use;
+      } catch (e) { /* keep last */ }
+    }
+  }
+
+  // ------------------------------------------------------------------ top bar
+  function stat(label, value, sub) {
+    return el("div", { class: "tb-stat" }, el("div", { class: "tb-label" }, label),
+      el("div", { class: "tb-value num" }, value, sub ? el("span", { class: "tb-sub" }, " " + sub) : null));
+  }
+  function myTeam() {
+    const lb = S.rec.leaderboard;
+    const teams = lb && (lb.teams || (lb.data && lb.data.teams));
+    if (!Array.isArray(teams)) return null;
+    return teams.find((t) => t.team === "t10") || null;
+  }
+  function renderTop(d) {
+    const st = d.status || {}, team = d.team || {}, spend = d.spend || {};
+    const me = S.rec.me || {}, lbMe = myTeam() || {};
+    const cash = st.cash !== undefined && st.cash !== null ? st.cash : me.cash;
+    const assets = Array.isArray(me.assets) ? me.assets : [];
+    const value = assets.reduce((a, x) => a + (Number(x.your_value) || 0), 0);
+    const hasVenue = !!(team.venue || lbMe.venue);
+    const level = lbMe.level !== undefined ? lbMe.level : me.level;
+    const unlocked = Array.isArray(me.unlocked) ? me.unlocked.length : null;
+    const g = $("tb-stats");
+    g.replaceChildren(
+      el("div", { class: "tb-group" }, stat("Puntos", fmtNum(team.score, 1), team.rank ? team.rank + ".º de " + (team.teams || "—") : "")),
+      el("div", { class: "tb-group" }, stat("Dinero", fmtP(cash), hasVenue ? "+" + fmtNum(d.bond || 250) + " fianza" : ""),
+        stat("Valor colección", assets.length ? fmtP(value) : "—")),
+      el("div", { class: "tb-group" }, stat("Nivel", level !== undefined && level !== null ? String(level) : "—", unlocked !== null ? unlocked + " dealers" : ""),
+        stat("Álbum", lbMe.album_slots ? lbMe.album_filled + "/" + lbMe.album_slots : (assets.length ? String(assets.length) : "—"),
+          lbMe.pages_complete !== undefined ? lbMe.pages_complete + " págs" : "")),
+      el("div", { class: "tb-group" }, stat("API hoy", spend.usd !== undefined && spend.usd !== null ? fmtNum(spend.usd, 2) + " $" : "—", spend.cap ? "de " + fmtNum(spend.cap, 0) : "")),
+    );
+    renderClock();
+  }
+  function evName(a) { return EVENT_NAMES[a] || (a ? String(a).replace(/_/g, " ") : "—"); }
+  function renderClock() {
+    const d = S.data; if (!d) return;
+    const c = d.clock || {};
+    const ageS = (Date.now() / 1000) - (d.now || Date.now() / 1000);
+    const nextTick = c.next_tick_in !== null && c.next_tick_in !== undefined ? Math.max(0, c.next_tick_in - ageS) : null;
+    let ev = "—";
+    const ne = c.next_event;
+    if (ne) {
+      if (ne.at) ev = [evName(ne.action), " · ", fmtTime(ne.at, false), " ", el("span", { class: "tb-accent" }, "en " + fmtDur(ne.at - Date.now() / 1000))];
+      else ev = evName(ne.action) + (ne.at_hours !== undefined ? " · h" + fmtNum(ne.at_hours, 1) : "");
+    }
+    $("tb-clock").replaceChildren(
+      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Tick"), el("span", { class: "num" }, c.tick !== undefined && c.tick !== null ? String(c.tick) : "—")),
+      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Sig."), el("span", { class: "num" }, nextTick !== null ? fmtDur(nextTick) : "—")),
+      el("div", { class: "tb-cell" }, el("span", { class: "tb-label" }, "Próx."), el("span", { class: "num" }, ev)),
+    );
+  }
+
+  // ------------------------------------------------------------------ status box (bottom of the menu)
+  function pill(text, tone) { return el("span", { class: "pill tone-" + tone }, el("span", { class: "dot" }), text); }
+  function opensAt() {
+    const rc = S.rec.clock || {};
+    const iso = rc.next_opens || null;
+    const t = iso ? Date.parse(iso) : NaN;
+    return isNaN(t) ? null : t / 1000;
+  }
+  function closesAt(d) {
+    const rc = S.rec.clock || {};
+    if (d.clock && d.clock.closes_at) return d.clock.closes_at;
+    const t = rc.closes ? Date.parse(rc.closes) : NaN;
+    return isNaN(t) ? null : t / 1000;
+  }
+  function degraded(d) {
+    const now = Date.now() / 1000;
+    return (d.alerts || []).some((a) => (Number(a.ts) || 0) > now - 600 &&
+      /529|overload|anthropic|rate.?limit/i.test(String(a.text || "") + " " + String(a.where || "")));
+  }
+  function botState(d) {
+    const st = d.status || {};
+    if (!st.present) return ["PARADO", "bad", "sin latido del bot"];
+    if (st.stop_file) return ["PARADO", "bad", "STOP activo"];
+    if (!st.armed) return ["PARADO", "bad", "apagado"];
+    if (d.clock && d.clock.doors !== "open") return ["ESPERA", "warn", "encendido · arranca al abrir"];
+    if (degraded(d)) return ["DEGRADADO", "warn", "modo Código · sin Opus"];
+    return ["LIVE", "ok", null];
+  }
+  function dealerShort(p) {
+    const n = String(p.name || p.id || "");
+    const words = n.split(/\s+/).filter((w) => !/^(el|la|los|las|don|doña)$/i.test(w));
+    if (/abuela/i.test(n)) return "Abuela";
+    return words[words.length > 1 && p.id && words.some((w) => w.toLowerCase() === p.id) ? words.findIndex((w) => w.toLowerCase() === p.id) : 0] || n;
+  }
+  function renderStatus(d) {
+    const box = $("status-box");
+    const procs = d.processes || [];
+    const okN = procs.filter((p) => p.ok).length;
+    const [bText, bTone, bSub] = botState(d);
+    const open = d.clock && d.clock.doors === "open" && !d.clock.paused;
+    const ca = closesAt(d), oa = opensAt();
+    const marketSub = open ? "abiertas · cierra " + (ca ? fmtTime(ca, false) : "—")
+      : "abre " + (oa ? fmtTime(oa, false) + " · en " + fmtDur(oa - Date.now() / 1000) : (d.clock && d.clock.opens_at) || "—");
+    // This tick
+    const limits = (S.rec.clock && S.rec.clock.limits) || {};
+    const tickNo = d.clock && d.clock.tick;
+    const accepted = (d.activity || []).filter((a) => a.tick === tickNo && /accept/.test(String(a.kind || "")) &&
+      a.outcome && ["sent", "deal"].includes(a.outcome.status)).length;
+    const threads = Object.keys(d.threads || {}).length;
+    const offers = ((S.rec.my_offers && S.rec.my_offers.offers) || []).filter((o) => o.maker === "t10" && o.status === "open").length;
+    // Dealer quotas
+    const me = S.rec.me || {};
+    const personas = (S.rec.dealers && S.rec.dealers.personas) || [];
+    const unlocked = new Set(me.unlocked || []);
+    const dealerRows = personas.filter((p) => unlocked.has(p.id)).map((p) => {
+      const max = (p.menu && p.menu.deals_per_team_per_hour) || 0;
+      const used = S.dealerUse[p.id] || 0;
+      const segs = el("span", { class: "segs" });
+      for (let i = 0; i < Math.min(max, 12); i++) segs.appendChild(el("span", { class: i < used ? "seg on" : "seg" }));
+      return el("div", { class: "sb-line" }, el("span", { class: "sb-name" }, dealerShort(p)), segs, el("span", { class: "num" }, used + "/" + (max || "—")));
     });
+    // Own venue
+    const vid = (d.team && d.team.venue) || (myTeam() || {}).venue;
+    const venues = (S.rec.venues && S.rec.venues.venues) || [];
+    const v = vid ? venues.find((x) => x.venue === vid) : null;
+    const venueBlock = v
+      ? [el("div", { class: "sb-line" }, el("span", null, "Tienda " + v.venue), pill(v.status === "open" ? "ABIERTA" : String(v.status || "—").toUpperCase(), v.status === "open" ? "ok" : "bad")),
+         el("div", { class: "sb-sub" }, fmtNum((v.fee_bps || 0) / 100, (v.fee_bps || 0) % 100 ? 1 : 0) + " % comisión · " + fmtNum(v.trades || 0) + " op.")]
+      : [el("div", { class: "sb-sub" }, vid ? "Tienda " + vid : "Sin tienda propia")];
+
+    box.replaceChildren(
+      el("div", { class: "sb-sec" },
+        el("div", { class: "sb-line" }, el("span", null, "Bot"), pill(bText, bTone)),
+        el("div", { class: "sb-sub" }, (bSub || "encendido") + (bTone === "ok" || !bSub ? " · " + okN + "/" + procs.length + " procesos" : "")),
+        el("div", { class: "sb-line" }, el("span", null, "Mercado"), pill(open ? "ABIERTO" : "CERRADO", open ? "ok" : "bad")),
+        el("div", { class: "sb-sub" }, marketSub)),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Este tick"),
+        window.ui.meter({ label: "Aceptar", value: accepted, max: limits.accepts_per_team_per_tick }),
+        window.ui.meter({ label: "Conversac.", value: threads, max: limits.max_open_threads_per_team }),
+        window.ui.meter({ label: "Ofertas", value: offers, max: limits.max_open_offers_per_team })),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Cupos dealers · esta hora"), dealerRows.length ? dealerRows : el("div", { class: "sb-sub" }, "—")),
+      el("div", { class: "sb-sec" }, el("div", { class: "sb-head" }, "Tienda propia"), venueBlock),
+    );
   }
 
-  // buttons
-  const arm = $("btn-arm"), stop = $("btn-stop");
-  if (!st || state.failing) { arm.disabled = stop.disabled = true; arm.textContent = st && st.armed ? "Desarmar" : "Armar"; }
-  else {
-    arm.textContent = st.armed ? "Desarmar" : "Armar";
-    arm.className = st.armed ? "btn" : "btn btn--primary";
-    arm.disabled = state.busy || (!st.armed && st.stop_file);
-    arm.title = (!st.armed && st.stop_file) ? "Quita antes el STOP" : "";
-    stop.disabled = state.busy;
-  }
-
-  // clock
-  if (!ck) return;
-  $("c-tick").textContent = ck.tick ?? "—";
-  $("c-next").textContent = ck.next_tick_in !== null && ck.next_tick_in !== undefined ? `en ${Math.round(ck.next_tick_in)} s` : "—";
-  $("c-doors").textContent = ck.doors === "open" && !ck.paused
-    ? `abiertas${ck.closes_at ? ` · cierran ${hhmm(ck.closes_at)}` : ""}`
-    : ck.paused && ck.doors === "open" ? "en pausa" : `cerradas · abren ${ck.opens_at || "09:00"}`;
-  const ev = ck.next_event;
-  $("c-event").textContent = ev ? `${ev.at ? hhmm(ev.at) : `hora ${nf(ev.at_hours, 2)}`} · ${EVENTS[ev.action] || ev.action}` : "—";
-}
-
-function renderKpis(d) {
-  const t = d.team || {}, s = d.status || {}, sp = d.spend || {}, b = d.broker || {};
-  $("k-score").textContent = t.score !== null && t.score !== undefined ? nf(t.score, 1) : "—";
-  const sub = $("k-score-sub");
-  const parts = [];
-  if (t.rank) parts.push(`${t.rank}.º de ${t.teams || "?"}`);
-  if (t.delta_1h !== null && t.delta_1h !== undefined) parts.push(`${signed(t.delta_1h)} última hora`);
-  sub.textContent = parts.join(" · ") || "sin clasificación todavía";
-  sub.className = `kpi__sub ${t.delta_1h > 0 ? "is-ok" : t.delta_1h < 0 ? "is-bad" : ""}`;
-
-  $("k-neg").textContent = t.negotiating !== null && t.negotiating !== undefined ? `${nf(t.negotiating)} · ${nf(t.market)}` : "—";
-  $("k-neg-sub").textContent = t.round || "negociación · mercado";
-
-  $("k-cash").textContent = s.cash !== null && s.cash !== undefined ? P(s.cash) : "—";
-  $("k-cash-sub").textContent = t.venue ? `+ ${P(d.bond)} de fianza (tienda ${t.venue})` : "sin tienda propia todavía";
-
-  const usd = +sp.usd || 0, cap = +sp.cap || 100, pct = Math.min(100, (usd / cap) * 100);
-  $("k-spend").textContent = sp.usd !== undefined && sp.usd !== null ? `${nf2(usd)} $` : "—";
-  const model = String(sp.model_now || "").replace("claude-", "").split("-")[0];
-  $("k-spend-sub").textContent = `de ${nf(cap, 0)} $${model ? ` · ${model.charAt(0).toUpperCase() + model.slice(1)}` : ""}${sp.calls ? ` · ${sp.calls} llamadas` : ""}`;
-  const bar = $("k-spend-bar");
-  bar.style.width = `${pct}%`;
-  bar.className = `bar__fill${pct >= 90 ? " is-bad" : pct >= (+sp.degrade_at || 80) ? " is-warn" : ""}`;
-
-  const real = b.last_result && b.last_result.score && b.last_result.score.bench_efficiency;
-  const est = b.efficiency_estimate;
-  const val = real ?? est;
-  $("k-mt").textContent = val !== null && val !== undefined ? nf2(val) : "—";
-  const mtParts = [];
-  if (real !== null && real !== undefined) mtParts.push(`último ${b.last_result.session || ""}`.trim());
-  else if (est !== null && est !== undefined) mtParts.push(`estimada · ${b.session || "sesión"}`);
-  if (b.stall_efficiency !== null && b.stall_efficiency !== undefined) mtParts.push(`puesto gratis ${nf2(b.stall_efficiency)}`);
-  if (!mtParts.length) mtParts.push(b.updated ? "sin sesión todavía" : "broker sin datos");
-  const mtSub = $("k-mt-sub");
-  mtSub.textContent = mtParts.join(" · ");
-  mtSub.className = `kpi__sub ${val !== null && val !== undefined && b.stall_efficiency ? (val >= b.stall_efficiency ? "is-ok" : "is-bad") : ""}`;
-}
-
-function labRows(d) {
-  return ((d.lab || {}).notices || []).map((n, i) => ({
-    _key: `n${n.ts}-${i}`, ts: n.ts, domain: "lab", lab: true, text: n.text || n.kind,
-  }));
-}
-
-function renderActivity(d) {
-  const list = $("activity");
-  const threads = d.threads || {};
-  const rows = [...state.rows.entries()].map(([k, r]) => ({ ...r, _key: k })).concat(labRows(d))
-    .sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 120);
-  if (!rows.length) {
-    const ck = d.clock || {};
-    const why = ck.doors !== "open" ? `Puertas cerradas hasta las ${ck.opens_at || "09:00"}: todavía no hay decisiones.`
-      : "Aún no hay decisiones. Aparecerán aquí en cuanto el bot actúe.";
-    list.replaceChildren(el("li", "empty", why));
-    return;
-  }
-  const frag = document.createDocumentFragment();
-  const first = state.seen.size === 0;
-  for (const r of rows) {
-    const li = el("li", "row");
-    if (!first && !state.seen.has(r._key)) li.classList.add("is-new");
-    state.seen.add(r._key);
-    li.append(el("span", "row__time", hhmmss(r.ts)));
-    li.append(el("span", "row__domain", DOMAINS[r.domain] || r.domain || "—"));
-    const what = el("div", "row__what");
-    const chips = el("span", "row__chips");
-    if (r.lab) {
-      what.append(el("p", "row__action", r.text));
-      chips.append(chip("Código", "muted"), chip("Aviso", "warn"));
-    } else {
-      const res = result(r);
-      what.append(el("p", "row__action", phrase(r, threads)));
-      const why = [];
-      if (r.council && r.council.result === "veto") why.push(`El consejo vetó: ${r.council.why || ""}`);
-      else if (r.council && r.council.result) why.push(`Consejo: ${r.council.result === "approved" ? "aprobado" : r.council.result}${r.council.why ? ` (${r.council.why})` : ""}`);
-      if (r.reason) why.push(r.reason);
-      if (res.why && !(r.council && r.council.result === "veto" && (r.verdict || {}).rail === "council")) why.push(res.why);
-      if (why.length) what.append(el("p", "row__why", why.join(" · ")));
-      const [lbl, tone] = SOURCES[r.source] || [r.source || "?", "muted"];
-      chips.append(chip(lbl, tone), chip(res.label, res.tone));
+  // ------------------------------------------------------------------ global states
+  function renderBanners(d) {
+    const host = $("banners");
+    const items = [];
+    if (S.apiDown) {
+      items.push(el("div", { class: "banner tone-bad" }, icon("off", 18), el("div", null,
+        el("strong", null, "Sin conexión con la API del dashboard"),
+        el("div", null, S.lastOk ? "Último dato hace " + fmtAgo(S.lastOk / 1000) + ". Reintento automático cada 3 s; lo que ves puede estar desfasado." : "Reintentando cada 3 s."))));
+    } else if (d && degraded(d)) {
+      const a = (d.alerts || []).find((x) => /529|overload|anthropic|rate.?limit/i.test(String(x.text || "") + " " + String(x.where || "")));
+      items.push(el("div", { class: "banner tone-bad" }, icon("cloud", 18), el("div", null,
+        el("strong", null, "API de Anthropic con problemas" + (a && a.ts ? " desde " + fmtTime(a.ts, false) : "")),
+        el("div", null, "El bot sigue en modo Código: sin Opus ni Consejo, solo reglas y raíles. " + (a ? String(a.text || "").slice(0, 160) : ""))),
+        el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
     }
-    li.append(what, chips);
-    frag.append(li);
-  }
-  list.replaceChildren(frag);
-  if (state.seen.size > 2000) state.seen = new Set(rows.map((r) => r._key));
-}
-
-function line(left, right, tone) {
-  const li = el("li", "line");
-  li.append(el("span", "line__left", left), el("span", `line__right${tone ? ` is-${tone}` : ""}`, right || ""));
-  return li;
-}
-
-function renderDuels(d) {
-  const du = d.duels || {}, live = du.live || [];
-  $("h-duels").textContent = `Duelos en vivo${live.length ? ` · ${live.length}` : ""}`;
-  const out = [];
-  for (const x of live) {
-    const role = x.role === "buyer" ? "Compra" : x.role === "seller" ? "Vende" : "Duelo";
-    const lim = x.role === "seller" ? `coste ${nf(x.limit)}` : `límite ${nf(x.limit)}`;
-    const left = `${role} · ${x.rival || "rival"} · ${lim}${x.item ? ` · ${x.item}` : ""}`;
-    if (x.rival_price === null || x.rival_price === undefined) {
-      out.push(line(left, `sin oferta${x.silent_ticks ? ` · ${x.silent_ticks} ticks` : ""}`, "warn"));
-    } else {
-      const m = x.margin;
-      out.push(line(left, `${P(x.rival_price)} · ronda ${x.rounds ?? 0}${m !== null && m !== undefined ? ` · ${signed(m, 0)}` : ""}`,
-        m > 0 ? "ok" : m < 0 ? "bad" : null));
+    if (d && d.status && d.status.stop_file) {
+      items.push(el("div", { class: "banner tone-bad" }, icon("alert", 18), el("div", null, el("strong", null, "STOP activo"),
+        el("div", null, "El bot no envía nada al juego hasta quitar el STOP y encenderlo en la pantalla Bot.")),
+        el("a", { class: "btn", href: "#bot" }, "Ver Bot ", icon("arrow", 12))));
     }
+    host.replaceChildren(...items);
+    // Doors closed: dim the screen with a centred card (can be dismissed to keep working).
+    const closed = d && d.clock && (d.clock.doors === "closed" || d.clock.paused);
+    if (!closed) S.closedDismissed = false;
+    const ov = $("closed-overlay");
+    if (closed && !S.closedDismissed && S.route !== "bot" && S.route !== "supervision") {
+      const oa = opensAt();
+      const lbMe = myTeam() || {};
+      ov.hidden = false;
+      ov.replaceChildren(el("div", { class: "closed-card" },
+        el("h2", null, icon("lock", 18), "Mercado cerrado"),
+        el("div", { class: "closed-sub num" }, oa ? "abre el " + new Date(oa * 1000).toLocaleDateString("es-ES", { weekday: "long" }) + " a las " + fmtTime(oa, false) : "abre " + ((d.clock && d.clock.opens_at) || "—")),
+        el("div", { class: "closed-count num" }, oa ? fmtDur(oa - Date.now() / 1000) : "—"),
+        el("p", null, "Mientras está cerrado el bot no hace nada; al abrir arranca solo si está encendido."),
+        el("div", { class: "closed-foot num" }, "Hoy: " + fmtNum(d.team && d.team.score, 1) + " pts" + (d.team && d.team.rank ? " · " + d.team.rank + ".º de " + d.team.teams : "") +
+          (lbMe.album_slots ? " · álbum " + lbMe.album_filled + "/" + lbMe.album_slots : "")),
+        el("button", { type: "button", class: "btn", onclick: () => { S.closedDismissed = true; ov.hidden = true; } }, "Ver el dashboard igualmente")));
+    } else ov.hidden = true;
   }
-  if (!live.length) out.push(el("li", "empty", "No hay duelos abiertos ahora."));
-  const today = du.today || {};
-  out.push(line(`Hoy: ${today.accepted || 0} aceptados · ${today.messages || 0} ofertas enviadas`, ""));
-  $("duels").replaceChildren(...out);
-}
 
-function renderAlerts(d) {
-  const a = d.alerts || [];
-  const out = a.map((x) => line(alertText(x), hhmm(x.ts), x.level === "bad" ? "bad" : "warn"));
-  const br = (d.status || {}).breakers || {};
-  if (br.cautious) out.unshift(line("Modo prudente activo: el bot no compra.", `hasta tick ${br.cautious_until}`, "bad"));
-  for (const [dom, until] of Object.entries(br.paused_until || {})) {
-    if ((d.clock || {}).tick !== null && until > (d.clock || {}).tick) out.unshift(line(`${DOMAINS[dom] || dom} en pausa por rechazos.`, `hasta tick ${until}`, "bad"));
-  }
-  $("alerts").replaceChildren(...(out.length ? out : [el("li", "empty", "Sin alertas. Todo en orden.")]));
-}
-
-function renderLab(d) {
-  const lab = d.lab || {}, c = lab.counts || {};
-  const parts = [["active", "lab-active"], ["canary", "lab-canary"], ["shadow", "lab-shadow"], ["proposed", "lab-proposed"]];
-  const total = parts.reduce((s, [k]) => s + (c[k] || 0), 0);
-  $("lab-bar").replaceChildren(...parts.filter(([k]) => c[k]).map(([k, tok]) => {
-    const s = el("span");
-    s.style.flex = String(c[k]);
-    s.style.background = `var(--${tok})`;
-    s.title = `${k}: ${c[k]}`;
-    return s;
-  }));
-  const out = [];
-  out.push(line(total ? `${c.active || 0} activas · ${c.canary || 0} canary · ${c.shadow || 0} en sombra · ${c.proposed || 0} propuestas`
-    : "Sin lecciones todavía.", lab.spent_today !== undefined && lab.spent_today !== null ? `${nf2(lab.spent_today)} $ hoy` : ""));
-  for (const n of (lab.notices || []).slice(0, 3)) out.push(line(n.text || n.kind, hhmm(n.ts)));
-  $("lab").replaceChildren(...out);
-}
-
-function renderProcs(d) {
-  const out = (d.processes || []).map((p) => {
-    const li = el("li", "proc");
-    const tone = p.ok ? (p.warn ? "warn" : "ok") : "bad";
-    li.append(el("span", `dot is-${tone}`), el("span", "proc__name", p.name));
-    let txt;
-    if (p.name === "Pasarela") txt = p.ok ? `responde · ${p.latency_ms} ms` : "no responde";
-    else if (p.name === "Laboratorio") txt = p.age_s === null || p.age_s === undefined ? "sin datos" : `ciclo ${ago(p.age_s)}`;
-    else txt = p.age_s === null || p.age_s === undefined ? "sin latido" : `latido ${ago(p.age_s)}`;
-    li.append(el("span", `line__right${p.ok ? "" : " is-bad"}`, txt));
-    return li;
-  });
-  out.push((() => { const li = el("li", "proc"); li.append(el("span", "dot is-ok"), el("span", "proc__name", "API"),
-    el("span", "line__right", state.failing ? "no responde" : "responde")); if (state.failing) li.firstChild.className = "dot is-bad"; return li; })());
-  $("procs").replaceChildren(...out);
-}
-
-// ------------------------------------------------------------------ controls (in-page confirmation)
-const ACTIONS = {
-  arm: {
-    title: "¿Armar el bot?",
-    body: "Empezará a enviar mensajes, ofertas y aceptaciones al juego real por su cuenta.",
-    yes: "Sí, armar", tone: "primary",
-    run: () => write("control", "POST", { armed: true, by: "dashboard" }), done: "Bot armado.",
-  },
-  stop: {
-    title: "¿Parar en seco?",
-    body: "Desarma el bot y crea el archivo bazaar/STOP: no saldrá ninguna escritura al juego hasta quitarlo. "
-      + "Sin dashboard se hace igual desde la terminal del Mac: touch bazaar/STOP (y rm bazaar/STOP para quitarlo).",
-    yes: "Sí, STOP", tone: "danger",
-    run: async () => {
-      try { return await write("stop", "POST", { by: "dashboard" }); }
-      catch (e) {
-        if (e.status !== 404) throw e;   // older API without /stop: at least disarm
-        await write("control", "POST", { armed: false, by: "dashboard" });
-        throw new Error("Desarmado, pero esta API no sabe crear bazaar/STOP: hazlo a mano con touch bazaar/STOP");
+  // ------------------------------------------------------------------ notifications
+  async function pollNotifications() {
+    let res;
+    try { res = await api.notifications(S.notifSince); } catch (e) { return; }
+    const items = (res && res.items) || [];
+    if (res && res.now && !S.notifInit) { /* first load: fill the bell, no toasts */ }
+    const known = new Set(S.notif.map((n) => n.id));
+    const fresh = items.filter((n) => !known.has(n.id));
+    if (fresh.length) {
+      S.notif = fresh.concat(S.notif).sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0)).slice(0, 80);
+      S.notifSince = Math.max(...S.notif.map((n) => Number(n.ts) || 0));
+    }
+    const now = Date.now() / 1000;
+    if (S.notifInit && prefs.toasts && now > (prefs.muteUntil || 0) && S.route !== "supervision") {
+      for (const n of fresh.slice(0, 4).reverse()) {
+        if (prefs.types[groupOf(n.type)] === false) continue;
+        if ((Number(n.ts) || 0) < now - 600) continue;
+        window.ui.toast({ type: n.type, title: n.title, text: n.text, href: n.href || "#supervision/" + n.id, ts: n.ts });
       }
-    },
-    done: "STOP activado y bot desarmado.",
-  },
-  unstop: {
-    title: "¿Quitar el STOP?",
-    body: "Borra bazaar/STOP. El bot sigue desarmado: para que vuelva a enviar hay que pulsar Armar.",
-    yes: "Sí, quitar STOP", tone: "primary",
-    run: () => write("stop", "DELETE"), done: "STOP quitado. El bot sigue desarmado.",
-  },
-};
-
-function ask(kind) {
-  const a = ACTIONS[kind];
-  state.confirm = kind;
-  $("confirm-title").textContent = a.title;
-  $("confirm-body").textContent = a.body;
-  const yes = $("confirm-yes");
-  yes.textContent = a.yes;
-  yes.className = `btn btn--${a.tone}`;
-  $("confirm").hidden = false;
-  yes.focus();
-}
-
-function closeConfirm() { state.confirm = null; $("confirm").hidden = true; }
-
-async function run(kind) {
-  const a = ACTIONS[kind];
-  state.busy = true;
-  render();
-  try {
-    await a.run();
-    flash(a.done);
-  } catch (e) {
-    flash(`No se pudo: ${e.message}`, true);
-  } finally {
-    state.busy = false;
-    await poll();
+    }
+    S.notifInit = true;
+    renderBell();
   }
-}
+  function unread() { return S.notif.filter((n) => (Number(n.ts) || 0) > (prefs.readTs || 0) && prefs.types[groupOf(n.type)] !== false).length; }
+  function renderBell() {
+    const n = unread();
+    const b = $("bell-count");
+    b.textContent = n > 99 ? "99+" : String(n);
+    b.hidden = n === 0;
+    const sup = S.notif.filter((x) => groupOf(x.type) === "aprobar" && (Number(x.ts) || 0) > (prefs.readTs || 0)).length;
+    const nb = $("nav-badge-supervision"); if (nb) { nb.textContent = String(sup); nb.hidden = !sup; }
+    if (!$("bell-panel").hidden) renderBellPanel();
+  }
+  function toggle(on, onChange, label) {
+    const b = el("button", { type: "button", class: ["switch", on ? "on" : ""], role: "switch", "aria-checked": on ? "true" : "false", "aria-label": label });
+    b.addEventListener("click", () => onChange(!b.classList.contains("on")));
+    return b;
+  }
+  function renderBellPanel() {
+    const p = $("bell-panel");
+    const muted = Date.now() / 1000 < (prefs.muteUntil || 0);
+    const set = (fn) => (v) => { fn(v); savePrefs(); renderBell(); renderBellPanel(); };
+    const list = S.notif.filter((n) => prefs.types[groupOf(n.type)] !== false).slice(0, 30).map((n) =>
+      el("a", { class: ["bell-item", (Number(n.ts) || 0) > (prefs.readTs || 0) ? "unread" : "", "tone-" + groupOf(n.type)], href: n.href || "#supervision/" + n.id,
+        onclick: () => { p.hidden = true; } },
+        el("div", { class: "bell-item-head" }, icon(({ aprobar: "bell", breaker: "alert", gran: "trend", novedad: "dealer", duelo: "duelo", broker: "flask", lab: "laboratorio", limite: "shield" })[groupOf(n.type)], 14),
+          el("strong", null, n.title || ""), el("span", { class: "num muted" }, fmtAgo(n.ts))),
+        n.text ? el("div", { class: "bell-item-text" }, n.text) : null));
+    p.replaceChildren(
+      el("header", { class: "bell-head" }, el("strong", null, "Avisos"),
+        el("button", { type: "button", class: "link-btn", onclick: () => { prefs.readTs = Date.now() / 1000; savePrefs(); renderBell(); } }, "Marcar leídos")),
+      el("div", { class: "bell-sec" },
+        el("div", { class: "bell-opt" }, el("div", null, "Mostrar avisos emergentes", el("div", { class: "muted small" }, "no se muestran en Supervisión")),
+          toggle(prefs.toasts, set((v) => { prefs.toasts = v; }), "Mostrar avisos emergentes")),
+        el("div", { class: "bell-opt" }, el("div", null, "Silenciar 30 min", muted ? el("div", { class: "muted small num" }, "hasta " + fmtTime(prefs.muteUntil, false)) : null),
+          toggle(muted, set((v) => { prefs.muteUntil = v ? Date.now() / 1000 + 1800 : 0; }), "Silenciar 30 min"))),
+      el("div", { class: "bell-sec" }, el("div", { class: "sb-head" }, "Por tipo"),
+        NOTIF_GROUPS.map(([k, label]) => el("div", { class: "bell-opt" }, el("span", null, label),
+          toggle(prefs.types[k] !== false, set((v) => { prefs.types[k] = v; }), label)))),
+      el("div", { class: "bell-list" }, list.length ? list : window.ui.empty("Sin avisos.")),
+      el("a", { class: "bell-foot", href: "#supervision", onclick: () => { p.hidden = true; } }, "Las aprobaciones se hacen en Supervisión", icon("arrow", 12)),
+    );
+  }
 
-function flash(msg, bad) {
-  const f = $("foot");
-  f.textContent = msg;
-  f.className = `foot ${bad ? "is-bad" : "is-ok"}`;
-  state.flashUntil = Date.now() + 8000;
-  setTimeout(() => { f.className = "foot"; }, 8000);
-}
-
-$("btn-arm").onclick = () => {
-  const st = state.data && state.data.status;
-  if (!st) return;
-  if (st.armed) run("disarm_now");
-  else ask("arm");
-};
-ACTIONS.disarm_now = { run: () => write("control", "POST", { armed: false, by: "dashboard" }), done: "Bot desarmado." };
-$("btn-stop").onclick = () => ask("stop");
-$("confirm-yes").onclick = () => { const k = state.confirm; closeConfirm(); if (k) run(k); };
-$("confirm-no").onclick = closeConfirm;
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.confirm) closeConfirm(); });
-
-// ------------------------------------------------------------------ go
-poll();
-setInterval(() => { if (!state.busy) poll(); }, POLL_MS);
+  // ------------------------------------------------------------------ boot
+  function boot() {
+    buildNav();
+    $("bell").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = $("bell-panel");
+      p.hidden = !p.hidden;
+      if (!p.hidden) renderBellPanel();
+    });
+    document.addEventListener("click", (e) => {
+      const p = $("bell-panel");
+      if (!p.hidden && !p.contains(e.target) && !e.target.closest("#bell")) p.hidden = true;
+    });
+    window.addEventListener("hashchange", route);
+    route();
+    tick();
+    setInterval(tick, 3000);
+    setInterval(() => { renderClock(); if (S.data) { const ov = $("closed-overlay"); const c = ov.querySelector(".closed-count"); const oa = opensAt(); if (c && oa) c.textContent = fmtDur(oa - Date.now() / 1000); } }, 1000);
+  }
+  window.app = { state: S, refresh: tick, route, groupOf, reloadRec: () => loadRec(true) };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();

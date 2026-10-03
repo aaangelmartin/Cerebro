@@ -219,15 +219,20 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
     tick_s = _num(status.get("tick_seconds")) or 60.0
     open_ = status.get("doors") == "open" and not status.get("paused")
     lab_st = _read_json(lab / "lab_status.json", {}) or {}
+    rec_st = _read_json(live / "recorder_status.json", {}) or {}
     out = []
     for name, upd, ticks in (("Bot", status.get("updated"), 3), ("Broker", broker.get("updated"), 2),
-                             ("Laboratorio", lab_st.get("updated"), None)):
+                             ("Laboratorio", lab_st.get("updated"), None), ("Grabadora", rec_st.get("updated"), 3)):
         age = _age(upd, now)
         limit = max(ticks * tick_s, 0 if open_ else 60.0) if ticks else 600.0
         out.append({"name": name, "age_s": age, "ok": age is not None and age <= limit,
                     "warn": age is not None and limit / 2 < age <= limit})
+    lanes = rec_st.get("lanes") or {}
+    keyed = lanes.get("keyed") or {}
     out.append({"name": "Pasarela", "age_s": None, "ok": gateway.get("ok"), "warn": False,
-                "latency_ms": gateway.get("latency_ms")})
+                "latency_ms": gateway.get("latency_ms"),
+                "recorder_rps": {k: (v or {}).get("rps_60s") for k, v in lanes.items()},
+                "keyed_down_since": keyed.get("down_since")})
     return out
 
 

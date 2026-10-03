@@ -6,80 +6,52 @@
 <title>Bazaar · Supervisor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="static/styles.css">
+<link rel="stylesheet" href="screens/home.css">
+<link rel="stylesheet" href="screens/coleccion.css">
+<link rel="stylesheet" href="screens/mercado.css">
+<link rel="stylesheet" href="screens/duelos.css">
+<link rel="stylesheet" href="screens/competicion.css">
+<link rel="stylesheet" href="screens/rivales.css">
+<link rel="stylesheet" href="screens/supervision.css">
+<link rel="stylesheet" href="screens/laboratorio.css">
+<link rel="stylesheet" href="screens/bot.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <h1>Bazaar · Team 10</h1>
-    <span id="state-pill" class="pill pill--muted"><span class="dot"></span><span id="state-text">Cargando…</span></span>
-  </div>
-  <dl class="clock" id="clock">
-    <div><dt>Tick</dt><dd id="c-tick">—</dd></div>
-    <div><dt>Siguiente</dt><dd id="c-next">—</dd></div>
-    <div><dt>Puertas</dt><dd id="c-doors">—</dd></div>
-    <div><dt>Próximo evento</dt><dd id="c-event">—</dd></div>
-  </dl>
-  <div class="actions">
-    <button id="btn-arm" class="btn" type="button" disabled>…</button>
-    <button id="btn-stop" class="btn btn--danger" type="button" disabled>■ STOP</button>
-  </div>
+  <a class="brand" href="#home"><span class="brand-mark">B</span><span class="brand-name">Bazaar</span></a>
+  <div class="tb-stats" id="tb-stats"></div>
+  <div class="tb-clock" id="tb-clock"></div>
+  <button id="bell" class="bell" type="button" aria-label="Avisos">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+    <span id="bell-count" class="bell-count num" hidden>0</span>
+  </button>
 </header>
-
-<div id="banner" class="banner" hidden></div>
-
-<section id="confirm" class="confirm" hidden aria-live="assertive">
-  <div class="confirm__text">
-    <strong id="confirm-title"></strong>
-    <p id="confirm-body"></p>
+<div id="bell-panel" class="bell-panel" hidden></div>
+<div class="layout">
+  <nav class="sidenav" aria-label="Menú">
+    <div id="nav-list" class="nav-list"></div>
+    <div id="status-box" class="status-box"></div>
+  </nav>
+  <div class="main-wrap">
+    <div id="banners" class="banners"></div>
+    <main id="screen" class="screen"></main>
+    <div id="closed-overlay" class="closed-overlay" hidden></div>
   </div>
-  <div class="confirm__buttons">
-    <button id="confirm-yes" class="btn btn--danger" type="button">Sí</button>
-    <button id="confirm-no" class="btn" type="button">Cancelar</button>
-  </div>
-</section>
-
-<main class="body">
-  <section class="kpis" aria-label="Indicadores">
-    <article class="kpi"><h3>Puntuación de hoy</h3><p class="kpi__value" id="k-score">—</p><p class="kpi__sub" id="k-score-sub">&nbsp;</p></article>
-    <article class="kpi"><h3>Negociación · mercado</h3><p class="kpi__value" id="k-neg">—</p><p class="kpi__sub" id="k-neg-sub">&nbsp;</p></article>
-    <article class="kpi"><h3>Caja</h3><p class="kpi__value" id="k-cash">—</p><p class="kpi__sub" id="k-cash-sub">&nbsp;</p></article>
-    <article class="kpi"><h3>Gasto de API hoy</h3><p class="kpi__value" id="k-spend">—</p><p class="kpi__sub" id="k-spend-sub">&nbsp;</p><div class="bar"><div class="bar__fill" id="k-spend-bar"></div></div></article>
-    <article class="kpi"><h3>Market Test</h3><p class="kpi__value" id="k-mt">—</p><p class="kpi__sub" id="k-mt-sub">&nbsp;</p></article>
-  </section>
-
-  <div class="main">
-    <section class="panel panel--activity" aria-labelledby="h-activity">
-      <header class="panel__head">
-        <h2 id="h-activity">Qué está haciendo el bot</h2>
-        <div class="legend"><span class="chip chip--ai">Opus</span><span class="chip chip--warn">Consejo</span><span class="chip chip--muted">Reserva</span><span class="chip chip--muted">Código</span></div>
-      </header>
-      <ol id="activity" class="activity"><li class="empty">Cargando…</li></ol>
-    </section>
-
-    <aside class="side">
-      <section class="panel" aria-labelledby="h-duels">
-        <h2 id="h-duels">Duelos en vivo</h2>
-        <ul id="duels" class="lines"><li class="empty">Cargando…</li></ul>
-      </section>
-      <section class="panel" aria-labelledby="h-alerts">
-        <h2 id="h-alerts">Alertas</h2>
-        <ul id="alerts" class="lines"><li class="empty">Cargando…</li></ul>
-      </section>
-      <section class="panel" aria-labelledby="h-lab">
-        <h2 id="h-lab">Laboratorio</h2>
-        <div id="lab-bar" class="stack"></div>
-        <ul id="lab" class="lines"><li class="empty">Cargando…</li></ul>
-      </section>
-      <section class="panel" aria-labelledby="h-proc">
-        <h2 id="h-proc">Procesos</h2>
-        <ul id="procs" class="lines"><li class="empty">Cargando…</li></ul>
-      </section>
-    </aside>
-  </div>
-  <footer class="foot" id="foot">&nbsp;</footer>
-</main>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="static/ui.js"></script>
+<script src="static/api.js"></script>
+<script src="screens/home.js"></script>
+<script src="screens/coleccion.js"></script>
+<script src="screens/mercado.js"></script>
+<script src="screens/duelos.js"></script>
+<script src="screens/competicion.js"></script>
+<script src="screens/rivales.js"></script>
+<script src="screens/supervision.js"></script>
+<script src="screens/laboratorio.js"></script>
+<script src="screens/bot.js"></script>
 <script src="static/app.js"></script>
 </body>
 </html>

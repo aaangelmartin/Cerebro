@@ -6,6 +6,9 @@ GET  /                (the supervisor dashboard for browsers; JSON health otherw
 GET  /overview?since=  (everything the dashboard shows, in one read)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
+GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
+GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
+GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
 POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign"}   header X-Dashboard: 1
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
@@ -26,11 +29,12 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import config
 
-JOURNALS = {"decisions", "outcomes", "council", "events", "novelty", "attribution", "leaderboard", "llm"}
+JOURNALS = {"control", "decisions", "outcomes", "council", "events", "novelty", "attribution", "leaderboard", "llm"}
 MODES = {"auto", "observe", "manual"}
 LESSON_STATUSES = {"proposed", "shadow", "canary", "active", "retired"}
 DASHBOARD_DIR = config.ROOT / "dashboard"
 STATIC_RX = re.compile(r"/static/([\w-]+\.(js|css|svg|png|ico))")
+SCREEN_RX = re.compile(r"(?:/static)?/screens/([a-z0-9_-]+\.(js|css))")
 STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8", "svg": "image/svg+xml",
                 "png": "image/png", "ico": "image/x-icon", "html": "text/html; charset=utf-8"}
 CORS_RX = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
@@ -111,6 +115,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "bazaar-api/1"
     live: Path = config.LIVE
     lab: Path = config.LAB
+    record: Path = config.DATA / "record"
     stop_file: Path = config.STOP_FILE
     dashboard: Path = DASHBOARD_DIR
 
@@ -172,6 +177,16 @@ class Handler(BaseHTTPRequestHandler):
         m = STATIC_RX.fullmatch(path)
         if m:
             return self._send_file(self.dashboard / m.group(1), STATIC_TYPES[m.group(2)])
+        m = SCREEN_RX.fullmatch(path)
+        if m:
+            return self._send_file(self.dashboard / "screens" / m.group(1), STATIC_TYPES[m.group(2)])
+        if path.startswith("/rec/") or path == "/notifications":
+            try:
+                return self._get_rec(path, q)
+            except ValueError:
+                return self._send(400, {"error": "bad_query", "message": "since/since_seq/limit/tail must be numbers"})
+            except Exception as e:  # noqa: BLE001
+                return self._send(500, {"error": "server_error", "message": str(e)[:200]})
         try:
             since = int(q["since"]) if q.get("since") not in (None, "") else None
             limit = max(1, min(2000, int(q.get("limit") or 200)))
@@ -216,8 +231,40 @@ class Handler(BaseHTTPRequestHandler):
             from . import overview
             return self._send(200, overview.build(live, self.lab, self.stop_file, since))
         name = path.lstrip("/")
+        if name == "control-log":
+            name = "control"
         if name in JOURNALS:
             return self._send(200, {"items": _tail(live / f"{name}.jsonl", since, limit)})
+        return self._send(404, {"error": "not_found", "message": path})
+
+    def _get_rec(self, path: str, q: dict):
+        from . import rec
+        record = self.record
+        if path == "/notifications":
+            since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else None
+            return self._send(200, rec.notifications(self.live, self.lab, record, since))
+        if path == "/rec/index":
+            return self._send(200, _read_json(record / "index.json", {}) or {})
+        if path.startswith("/rec/latest/"):
+            doc = rec.latest(record, path[len("/rec/latest/"):])
+            return self._send(200, doc) if doc is not None else self._send(404, {"error": "not_found", "message": path})
+        m = re.fullmatch(r"/rec/stream/([a-z_]+)", path)
+        if m:
+            def num(k):
+                v = q.get(k)
+                return int(v) if v not in (None, "", "null", "undefined") else None
+            limit = max(1, min(5000, num("limit") or 500))
+            tail = num("tail")
+            out = rec.stream(record, m.group(1), num("since_seq"), limit, max(1, tail) if tail else None)
+            return self._send(200, out) if out is not None else self._send(404, {"error": "no_such_stream", "message": m.group(1)})
+        if path == "/rec/duels":
+            return self._send(200, rec.duels(record))
+        if path == "/rec/threads":
+            return self._send(200, rec.threads(record))
+        m = re.fullmatch(r"/rec/(duels|threads)/([^/]+)", path)
+        if m:
+            doc = (rec.duel if m.group(1) == "duels" else rec.thread)(record, m.group(2))
+            return self._send(200, doc) if doc is not None else self._send(404, {"error": "not_found", "message": path})
         return self._send(404, {"error": "not_found", "message": path})
 
     def _lessons(self) -> dict:
@@ -303,8 +350,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(port: int = config.API_PORT, live: Path | None = None, lab: Path | None = None,
-                host: str = "127.0.0.1", stop_file: Path | None = None) -> ThreadingHTTPServer:
-    handler = type("BoundHandler", (Handler,), {"live": Path(live or config.LIVE), "lab": Path(lab or config.LAB),
+                host: str = "127.0.0.1", stop_file: Path | None = None, record: Path | None = None) -> ThreadingHTTPServer:
+    live = Path(live or config.LIVE)
+    record = Path(record) if record else (config.DATA / "record" if live == config.LIVE else live.parent / "record")
+    handler = type("BoundHandler", (Handler,), {"live": live, "lab": Path(lab or config.LAB), "record": record,
                                                 "stop_file": Path(stop_file or config.STOP_FILE)})
     srv = ThreadingHTTPServer((host, port), handler)
     srv.daemon_threads = True
@@ -315,8 +364,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m bazaar.api.server")
     ap.add_argument("--port", type=int, default=config.API_PORT)
     ap.add_argument("--live", default=None, help="data dir to serve (default config.LIVE)")
+    ap.add_argument("--record", default=None, help="recorder dir (default config.DATA/record)")
     args = ap.parse_args(argv)
-    srv = make_server(args.port, Path(args.live) if args.live else None)
+    srv = make_server(args.port, Path(args.live) if args.live else None, record=Path(args.record) if args.record else None)
     print(f"bazaar api on http://127.0.0.1:{args.port}", flush=True)
     try:
         srv.serve_forever()
