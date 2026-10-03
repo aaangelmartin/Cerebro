@@ -111,6 +111,7 @@ class Plan:
     slots: int = 0
     orders: list[dict] = field(default_factory=list)      # the brain's dealer_orders in force
     frees: list[Action] = field(default_factory=list)     # our own offers cancelled to free a spare for an order
+    quota_left: dict[str, int] = field(default_factory=dict)   # threads left this hour per dealer (deals, conversations)
 
 
 def _g(obj: Any, name: str, default: Any = None) -> Any:
@@ -331,7 +332,14 @@ class DealersDomain:
                                  name=(values.cards.get(ref) or {}).get("name", ref), value=round(value, 2),
                                  limit=int(limit), est_open=round(est_open, 1), est_limit=float(limit),
                                  exp_price=float(limit), exp_capture=0.0, points=ORDER_PRIORITY, level=level))
+        # one thread per dealer per tick and a quota per hour: the order worth most (ladder slot, value) opens first
+        out.sort(key=lambda c: -self._order_worth(c))
         return out
+
+    def _order_worth(self, c: Candidate) -> float:
+        """Expected gain of opening this ordered thread: value gained plus an empty ladder slot at its level."""
+        gain = (max(c.limit, c.est_open) - c.value) if c.kind.startswith("sell:") else (c.value - c.limit)
+        return gain + (10.0 * c.level if 0.0 in self.store.ladder(c.level) else 0.0)
 
     @staticmethod
     def _offers_holding(sit, ref: str, except_asset) -> list[dict]:
@@ -398,6 +406,13 @@ class DealersDomain:
             self._note_order(o, "opened" if sent else str(outcome.status),
                              "" if sent else (code or str(getattr(outcome, "detail", "") or ""))[:160],
                              getattr(outcome, "tick", None))
+        if meta.get("kind") == "open_thread" and dealer:
+            said = re.search(r"at most (\d+) conversations per hour", f"{outcome.response} {getattr(outcome, 'detail', '')}")
+            if said:                                    # the game's own number: no more threads with it this hour
+                self.store.learn_conv_quota(dealer, int(said.group(1)))
+                self.store.set_quota_hit(dealer)
+            elif outcome.status in ("sent", "deal"):
+                self.store.note_open(dealer)
         if code == "cooloff" or "cooloff" in code:
             until = (outcome.response or {}).get("until_tick") if isinstance(outcome.response, dict) else None
             self.store.set_cooloff(dealer, until)
@@ -760,15 +775,21 @@ class DealersDomain:
                 continue
             quota = int(((dealers[d].get("menu") or {}).get("deals_per_team_per_hour"))
                         or FRIDAY_QUOTAS.get(d, {}).get("deals", 6))
-            if self.store.deals_last_hour(d) >= quota:
+            plan.quota_left[d] = self.store.quota_left(d, quota)
+            if plan.quota_left[d] <= 0:
                 continue
             plan.free.append(d)
         budget = self._spend_cap(sit, ctx, committed=max(committed, sum(bids.values())))
         ordered = self._order_candidates(plan, sit, ctx, budget if not cautious else 0)
         if plan.free and plan.slots > 0:
             taken = {c.dealer for c in ordered}
+            waiting: dict[str, int] = {}                # the brain's orders not finished yet keep their share of the quota
+            for o in plan.orders:
+                if self._order_done.get((o["dealer"], o["action"], o["ref"])) != int(o["bound"]):
+                    waiting[o["dealer"]] = waiting.get(o["dealer"], 0) + 1
             plan.candidates = ordered + [c for c in self._candidates(plan, sit, ctx, budget if not cautious else 0)
-                                         if c.dealer not in taken]
+                                         if c.dealer not in taken
+                                         and plan.quota_left.get(c.dealer, 1) > waiting.get(c.dealer, 0)]
             self._refresh_exact(values, [c.item for c in plan.candidates if c.kind.startswith("buy:")
                                          and not c.kind.endswith("pack")][:3])
         return plan
@@ -1036,7 +1057,8 @@ class DealersDomain:
                           "traits": wrap(json.dumps(p.get("traits") or self.store.traits(d), ensure_ascii=False,
                                                     default=str), f"dealer:{d}"),
                           "deals_last_hour": self.store.deals_last_hour(d),
-                          "quota_per_hour": (p.get("menu") or {}).get("deals_per_team_per_hour")}
+                          "quota_per_hour": (p.get("menu") or {}).get("deals_per_team_per_hour"),
+                          "threads_left_this_hour": plan.quota_left.get(d)}
         threads = []
         for i in plan.infos:
             v = i.view

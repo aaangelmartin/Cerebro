@@ -85,6 +85,7 @@ SEEDS_ONCE = {"sat-feed-1": SATURDAY_SEED, "sat-picaros-1": PICAROS_SEED}
 
 # Hourly quotas measured Friday (the menu says it too).
 FRIDAY_QUOTAS = {"abuela": {"deals": 8, "packs": 3}, "chato": {"deals": 6, "packs": 2}}
+CONV_QUOTA = 10                  # conversations a dealer opens with one team per hour (the game's refusal says so)
 DEFAULT_LIST = {"common": 10, "uncommon": 25, "rare": 77, "epic": 190, "legendary": 480}
 
 
@@ -268,6 +269,30 @@ class ProfileStore:
             return tick < int(c["until_tick"])
         return time.time() < c.get("until", 0)
 
+    # ---- conversations per hour: the game refuses the 11th thread with a dealer, deals or not
+    def note_open(self, dealer: str, now: float | None = None) -> None:
+        now = now or time.time()
+        with self.lock:
+            opens = [o for o in self.data.setdefault("opens", []) if now - o["at"] < 3600]
+            opens.append({"dealer": dealer, "at": now})
+            self.data["opens"] = opens
+            self.save()
+
+    def opens_last_hour(self, dealer: str, now: float | None = None) -> int:
+        return opens_last_hour(self.data, dealer, now)
+
+    def conv_quota(self, dealer: str) -> int:
+        return conv_quota(self.data, dealer)
+
+    def learn_conv_quota(self, dealer: str, n: int) -> None:
+        with self.lock:
+            self.data.setdefault("conv_quota", {})[dealer] = int(n)
+            self.save()
+
+    def quota_left(self, dealer: str, deals_quota: int, now: float | None = None) -> int:
+        """Threads we can still usefully open with this dealer in the rolling hour (deals and conversations)."""
+        return quota_left(self.data, dealer, deals_quota, now)
+
     def set_quota_hit(self, dealer: str) -> None:
         with self.lock:
             self.data["quota_hit"][dealer] = time.time()
@@ -281,6 +306,22 @@ class ProfileStore:
         caps = sorted((d["capture"] for d in self.data["deals"] if d.get("level") == level and d.get("negotiated")),
                       reverse=True)[:3]
         return caps + [0.0] * (3 - len(caps))
+
+
+def opens_last_hour(mem: dict, dealer: str, now: float | None = None) -> int:
+    now = now or time.time()
+    return sum(1 for o in mem.get("opens") or [] if o.get("dealer") == dealer and now - o.get("at", 0) < 3600)
+
+
+def conv_quota(mem: dict, dealer: str) -> int:
+    return int((mem.get("conv_quota") or {}).get(dealer) or CONV_QUOTA)
+
+
+def quota_left(mem: dict, dealer: str, deals_quota: int, now: float | None = None) -> int:
+    """min(deals left, conversations left) in the rolling hour; works on the raw dealer_memory.json too."""
+    now = now or time.time()
+    deals = sum(1 for d in mem.get("deals") or [] if d.get("dealer") == dealer and now - d.get("at", 0) < 3600)
+    return max(0, min(int(deals_quota) - deals, conv_quota(mem, dealer) - opens_last_hour(mem, dealer, now)))
 
 
 def capture(opening: int | None, price: int, limit_est: float | None, buying: bool) -> float:

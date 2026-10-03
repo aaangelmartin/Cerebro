@@ -644,6 +644,7 @@ class Strategist:
             k = d.get("dealer") if isinstance(d, dict) else None
             if k:
                 our_deals[k] = our_deals.get(k, 0) + 1
+        from bazaar.dealers import profiles as _dq   # rolling-hour thread quota per dealer
         personas = []
         for p in dealers.get("personas") or []:
             menu = p.get("menu") or {}
@@ -654,7 +655,10 @@ class Strategist:
                                                               "per_team_per_hour")} for e in menu.get("sells") or []],
                              "buys": [{k: e.get(k) for k in ("rarity", "sets")} for e in menu.get("buys") or []],
                              "deals_per_team_per_hour": menu.get("deals_per_team_per_hour"),
-                             "unlock": p.get("unlock"), "our_recorded_deals": our_deals.get(p.get("id"), 0)})
+                             "unlock": p.get("unlock"), "our_recorded_deals": our_deals.get(p.get("id"), 0),
+                             "threads_last_hour": _dq.opens_last_hour(mem, p.get("id")),
+                             "threads_left_this_hour": _dq.quota_left(
+                                 mem, p.get("id"), int(menu.get("deals_per_team_per_hour") or 6))})
         levels = [{k: x.get(k) for k in ("id", "kind", "name", "state", "how", "active_since_hours",
                                          "opens_to_all_at_hours", "open_to_all")}
                   | ({"teaser": _wrap(x.get("teaser"), "game")} if x.get("teaser") else {})
