@@ -87,6 +87,14 @@ class GatewayTest(unittest.TestCase):
                      "/plaza/api/match/m-0123456789/thread"):
             self.assertFalse(g.is_plaza(path), path)
         self.assertTrue(g.PLAZA_QUERY.fullmatch("session=" + "aB3_-" * 6))
+        for path in ("/plaza/api/agent/next", "/plaza/api/agent/cards", "/plaza/i18n.json"):
+            self.assertTrue(g.is_plaza(path), path)
+        for path in ("/plaza/api/agent/ack", "/plaza/api/me/settings", "/plaza/api/me/card/LAT-06",
+                     "/plaza/api/me/trade/m-0123456789"):
+            self.assertTrue(g.is_plaza(path, "POST"), path)
+            self.assertFalse(g.is_plaza(path), path)
+        for path in ("/plaza/api/me/card/lat-06", "/plaza/api/me/trade/x", "/plaza/api/me/limits", "/plaza/api/agent/x"):
+            self.assertFalse(g.is_plaza(path, "POST"), path)
         self.assertTrue(g.is_plaza_admin("/plaza/admin/api/matchmaker"))
         self.assertFalse(g.is_plaza("/plaza/admin/api/matchmaker"))
         self.assertEqual(g.PLAZA_COOKIE.search("a=1; plaza_session=" + "x" * 32 + "; other=secret").group(1),

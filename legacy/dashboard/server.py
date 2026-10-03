@@ -235,14 +235,15 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
 # login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
 PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
 PLAZA_RX = re.compile(
-    r"/plaza(?:/(?:agents\.md|cards\.json|static/(?:plaza\.css|plaza\.js|components\.js)"
+    r"/plaza(?:/(?:agents\.md|cards\.json|i18n\.json|static/(?:plaza\.css|plaza\.js|components\.js)"
     r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents|connect|me"
     r"|art/[A-Z]{3}-\d{2}\.svg"
     r"|api/(?:health|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}|card/[A-Z]{3}-\d{2}"
-    r"|connect/status|me|match/m-[0-9a-f]{10}))?)?")
+    r"|connect/status|me|match/m-[0-9a-f]{10}|agent/next|agent/cards))?)?")
 PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")
-PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent"
-                                   r"|match/m-[0-9a-f]{10}/message)"),
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent|agent/ack"
+                                   r"|match/m-[0-9a-f]{10}/message"
+                                   r"|me/(?:settings|card/[A-Z]{3}-\d{2}|trade/m-[0-9a-f]{10}))"),
                 "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
 PLAZA_COOKIE = re.compile(r"(?:^|;\s*)(plaza_session=[A-Za-z0-9_-]{20,64})(?:;|$)")   # the only cookie forwarded
 PLAZA_STREAM = "/plaza/api/floor/stream"
