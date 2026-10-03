@@ -17,6 +17,9 @@ A crashed service restarts after a short backoff (doubling up to 5 min). Heartbe
 the doors are open. The legacy gateway on :8787 is not managed here. Set BAZAAR_SUPERVISE_SKIP=lab,broker
 to leave services alone. Log: data/live/supervise.log.
 
+BAZAAR_SUPERVISE_ONLY=plaza runs a second supervisor for those services alone (its own lock,
+data/live/supervise-plaza.pid), so a service can be put under supervision without restarting the others.
+
 SIGTERM/SIGHUP/Ctrl-C stop every child (they run in their own sessions, so nobody else would). A service that
 stays alive and fresh for HEALTHY_RESET_S has its failure count reset. A bot reporting state="gateway_down"
 is waiting on the gateway, not hung, and is not restarted for it while that heartbeat stays fresh.
@@ -266,14 +269,26 @@ def serve(sup: Supervisor, every: float = CHECK_EVERY_S, on_exit=None):
             on_exit()
 
 
+def chosen(env: dict | None = None) -> tuple[str, list[Service], set[str]]:
+    """(lock name, services, skipped) from BAZAAR_SUPERVISE_ONLY / BAZAAR_SUPERVISE_SKIP."""
+    env = os.environ if env is None else env
+    names = lambda key: {x.strip() for x in env.get(key, "").split(",") if x.strip()}   # noqa: E731
+    only, skip = names("BAZAAR_SUPERVISE_ONLY"), names("BAZAAR_SUPERVISE_SKIP")
+    services = [s for s in default_services() if s.name not in skip and (not only or s.name in only)]
+    if only and not services:
+        raise SystemExit(f"BAZAAR_SUPERVISE_ONLY names no known service: {sorted(only)}")
+    lock = "supervise-" + "-".join(sorted(s.name for s in services)) if only else "supervise"
+    return lock, services, skip
+
+
 def main():
+    lock, services, skip = chosen()
     try:
-        singleton("supervise")
+        singleton(lock)
     except AlreadyRunning as e:
         log(str(e))
         raise
-    skip = {x.strip() for x in os.environ.get("BAZAAR_SUPERVISE_SKIP", "").split(",") if x.strip()}
-    sup = Supervisor([s for s in default_services() if s.name not in skip])
+    sup = Supervisor(services)
     awake = None
     try:
         awake = subprocess.Popen(["caffeinate", "-dimsu", "-w", str(os.getpid())])
