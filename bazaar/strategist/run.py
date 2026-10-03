@@ -39,7 +39,13 @@ DAY_CAP_USD = float(config.ENV.get("BAZAAR_STRATEGY_DAY_CAP_USD", "40"))
 POLL_S = 5.0
 CHAT_GAP_S = 10.0               # a team chat message gets a plan this soon
 REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once an hour
-MAX_TOKENS = 12000              # medium effort thinks before the tool call: 3000 cut the plan
+MAX_TOKENS = 24000              # medium effort thinks before the tool call: 3000, then 12000, cut the plan
+COMPACT_RULE = ("\n\nKEEP THE PLAN COMPACT so it is never cut: urgent actions first (accept_offers, cancel_offers, "
+                "post_offers, goal_buys, cash_policy, chat_reply), at most 6 priorities, 4 findings, 2 promo_drafts, "
+                "2 code_requests and 2 human_tasks, each string under 300 characters.")
+CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing was published. Answer again with the "
+             "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, goal_buys, "
+             "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
 SCORE_DROP = 0.5
 
 SYSTEM = """You are "el cerebro" (the brain), the strategist and supervisor of Team 10 in The Bazaar, a live card-trading game between 18 AI-run teams \
@@ -867,15 +873,27 @@ class Strategist:
         except OSError:
             pass
         content = ("Why now: " + reason + events + retry + needs_block + outbox_block + extra + "\n\nPICTURE (JSON):\n"
-                   + json.dumps(slim, ensure_ascii=False, default=str) + "\n\nCall team_strategy once.")
-        self.calls += 1
-        with self.thinking(self._thinking_label(reason) + (" (re-ask)" if fix else "")):
-            res = llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": content}],
-                          tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS,
-                          max_tokens=MAX_TOKENS, deadline=self.now() + 200, effort="medium")
-        if getattr(res, "stop", None) == "max_tokens" or getattr(res, "stop_reason", None) == "max_tokens":
-            self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens: not published"})
-            return None
+                   + json.dumps(slim, ensure_ascii=False, default=str) + COMPACT_RULE
+                   + "\n\nCall team_strategy once.")
+
+        def call(text: str, label: str):
+            self.calls += 1
+            with self.thinking(label):
+                return llm.ask(purpose="strategy", system=system, messages=[{"role": "user", "content": text}],
+                               tools=[STRATEGY_TOOL], tool_choice={"type": "auto"}, model=config.OPUS,
+                               max_tokens=MAX_TOKENS, deadline=self.now() + 200, effort="medium")
+
+        def cut(r) -> bool:
+            return getattr(r, "stop", None) == "max_tokens" or getattr(r, "stop_reason", None) == "max_tokens"
+
+        label = self._thinking_label(reason) + (" (re-ask)" if fix else "")
+        res = call(content, label)
+        if cut(res):                               # never lose a planning cycle: ask once more for the compact plan
+            self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens: asking again for a compact plan"})
+            res = call(content + CUT_RETRY, label + " (compact)")
+            if cut(res):
+                self.errors.append({"ts": self.now(), "error": "plan cut at max_tokens twice: not published"})
+                return None
         for call in getattr(res, "tool_calls", None) or []:
             if call.get("name") == STRATEGY_TOOL["name"] and isinstance(call.get("input"), dict):
                 return {"raw": call["input"], "model": getattr(res, "model", ""), "cost": getattr(res, "cost_usd", 0.0)}
