@@ -117,6 +117,14 @@ class ReadersTest(unittest.TestCase):
         self.assertNotIn("haggle", S.prompt_block("market", self.live))
 
 
+class DuelsNeverCappedTest(unittest.TestCase):
+    def test_a_brain_cap_on_duels_never_cuts_the_model(self):
+        live = Path(tempfile.mkdtemp())
+        _write_plan(live, {"budgets": {"llm_usd_per_day": {"duels": 3.0, "dealers": 4.0}}})
+        self.assertIsNone(S.llm_cap("duels", live))              # a session in progress keeps its model
+        self.assertIsNotNone(S.llm_cap("dealers", live))         # the other purposes keep the brain's cap
+
+
 class GoalPrecedenceTest(unittest.TestCase):
     class V:
         def __init__(self):

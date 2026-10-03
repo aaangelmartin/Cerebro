@@ -26,7 +26,8 @@ MID_KINDS = ("dealer", "level", "set", "schedule", "novelty", "review")
 HIGH_KINDS = ("score", "us", "offer", "venue")
 DEFAULT_PLAN_USD = 0.38          # used until llm.jsonl has enough plans to measure
 DEFAULT_COUNCIL_USD = 0.09
-RESERVE_DUELS_USD = 15.0         # a duel session still to come (66 duels with Opus)
+RESERVE_DUELS_USD = 20.0         # a duel session still to come: Duels II cost 5.1 $ for 68 duels with Opus, and
+                                 # Sunday has two sessions (Duels III and the Final): 40 $ kept for them
 RESERVE_BENCH_USD = 0.5          # per Market Test still to come (the brain plans around each)
 COUNCIL_USD_H = 2.0              # what the trading council costs per hour of play
 OTHER_USD_H = 1.5                # dealers + market + lab per hour of play
@@ -125,7 +126,10 @@ def event_plan(*, clock: dict, upcoming: list[dict] | None, days_spent: dict | N
     t = clock.get("t_hours")
     ups = [u for u in upcoming or [] if isinstance(u.get("at_hours"), (int, float))
            and (not isinstance(t, (int, float)) or u["at_hours"] >= t)]
-    close_at = min([u["at_hours"] for u in ups if u.get("action") == "day_closes"] or [float("inf")])
+    # Today's own close: the schedule may still list yesterday's (Saturday's is written at Sunday's opening
+    # hour, 16.65), and taking that one would count Sunday's duel sessions as "tomorrow" and drop them.
+    close_at = min([u["at_hours"] for u in ups if u.get("action") == "day_closes"
+                    and (u.get("params") or {}).get("day") in (None, today)] or [float("inf")])
     n = {"duels_today": 0, "bench_today": 0, "duels_tomorrow": 0, "bench_tomorrow": 0}
     for u in ups:
         if u.get("action") not in ("duels", "bench"):
@@ -142,17 +146,18 @@ def event_plan(*, clock: dict, upcoming: list[dict] | None, days_spent: dict | N
     w = w_today + w_tom
     left_today = res_today + (flex * w_today / w if w > 0 else (flex if not tom else 0.0))
     left_today = min(left_today, remaining, max(0.0, config.DAY_CAP_MAX_USD - spent_today))
-    running = COUNCIL_USD_H * h_today + OTHER_USD_H * h_today          # council + dealers + market + lab
+    fast = FAST_TICK_WEIGHT if tick_today <= 20 else 1.0               # 15 s ticks decide twice as often
+    running = (COUNCIL_USD_H + OTHER_USD_H) * h_today * fast            # council + dealers + market + lab
     duels_today = RESERVE_DUELS_USD * n["duels_today"] * scale
     brain_left = _clamp(left_today - duels_today - running, 0.0, BRAIN_SHARE_MAX * left_today)
     spent_brain = float(by_purpose.get("strategy") or 0.0)
-    third = OTHER_USD_H * h_today / 3.0
+    other = OTHER_USD_H * h_today * fast          # dealers took half of it on Saturday (8.7 of 14.7 $)
     caps = {"strategy": spent_brain + brain_left,
             "duels": float(by_purpose.get("duels") or 0.0) + duels_today,
-            "council": float(by_purpose.get("council") or 0.0) + COUNCIL_USD_H * h_today,
-            "dealers": float(by_purpose.get("dealers") or 0.0) + third,
-            "market": float(by_purpose.get("market") or 0.0) + third,
-            "lab": float(by_purpose.get("lab") or 0.0) + third}
+            "council": float(by_purpose.get("council") or 0.0) + COUNCIL_USD_H * h_today * fast,
+            "dealers": float(by_purpose.get("dealers") or 0.0) + other / 2.0,
+            "market": float(by_purpose.get("market") or 0.0) + other / 4.0,
+            "lab": float(by_purpose.get("lab") or 0.0) + other / 4.0}
     return {"day": today, "budget_total": round(total, 2), "spent_total": round(spent_total, 2),
             "remaining_total": round(remaining, 2), "spent_today": round(spent_today, 2),
             "plan_today": round(spent_today + left_today, 2), "left_today": round(left_today, 2),
@@ -163,7 +168,10 @@ def event_plan(*, clock: dict, upcoming: list[dict] | None, days_spent: dict | N
             "brain_left_today": round(brain_left, 2),
             "usd_per_hour_target": round(brain_left / h_today, 2) if h_today > 0 else 0.0,
             "day_usd_per_hour": round(left_today / h_today, 2) if h_today > 0 else 0.0,
-            "purpose_caps": {k: round(v, 2) for k, v in caps.items()}}
+            "purpose_caps": {k: round(v, 2) for k, v in caps.items()},
+            # The duels figure is a plan, never a cut: brain.strategy.llm_cap leaves duels without a
+            # purpose cap, so a session in progress keeps its model (only the day cap can stop it).
+            "uncapped_purposes": ["duels"]}
 
 
 def purpose_cap(purpose: str, live: Path | None = None) -> float | None:

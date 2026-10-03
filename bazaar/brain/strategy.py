@@ -241,8 +241,17 @@ def _budgets(raw: dict) -> dict:
     return out
 
 
+UNCAPPED_PURPOSES = ("duels",)
+
+
 def llm_cap(purpose: str, live: Path | None = None) -> float | None:
-    """The brain's day cap for one LLM purpose (None = no cap of its own)."""
+    """The brain's day cap for one LLM purpose (None = no cap of its own).
+
+    Duels never get one: a cap reached in the middle of a session hands every remaining duel to the code
+    fallback, and the split's reserve for a session ends the moment that session starts (the purpose cap
+    falls to what is already spent). The day cap still bounds the total."""
+    if purpose in UNCAPPED_PURPOSES:
+        return None
     caps = ((_plan(live).get("budgets") or {}).get("llm_usd_per_day")) or {}
     v = caps.get(purpose)
     if not isinstance(v, (int, float)):

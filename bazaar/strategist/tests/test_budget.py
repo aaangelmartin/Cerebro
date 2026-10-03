@@ -81,7 +81,7 @@ class EventPlanTest(unittest.TestCase):
         self.assertGreater(p["plan_tomorrow"], BG.RESERVE_DUELS_USD * 2)       # Sunday keeps its duel sessions
         self.assertGreater(p["plan_today"], 65.0)
         self.assertLessEqual(p["brain_left_today"], BG.BRAIN_SHARE_MAX * p["left_today"] + 0.01)
-        self.assertAlmostEqual(p["purpose_caps"]["duels"], 6.0 + 15.0, places=2)
+        self.assertAlmostEqual(p["purpose_caps"]["duels"], 6.0 + BG.RESERVE_DUELS_USD, places=2)
 
     def test_sunday_gets_everything_left(self):
         p = self.plan(clock=clock(hours_left=6, tick=15.0, today="sun"), upcoming=[{"at_hours": 8.0, "action": "duels"}],
@@ -89,6 +89,26 @@ class EventPlanTest(unittest.TestCase):
         self.assertEqual(p["remaining_total"], 70.0)
         self.assertEqual(p["plan_tomorrow"], 0.0)
         self.assertAlmostEqual(p["left_today"], 70.0, places=1)
+
+    def test_sunday_keeps_forty_dollars_for_its_two_duel_sessions(self):
+        # Sunday morning as it will be: 108 $ spent on Saturday, Duels III and the Final still to come.
+        p = self.plan(clock=clock(hours_left=6, tick=15.0, today="sun"), total=240.0,
+                      upcoming=[{"at_hours": 17.0, "action": "bench"}, {"at_hours": 18.65, "action": "duels"},
+                                {"at_hours": 21.65, "action": "duels"}],
+                      days_spent={"sat": {"usd": 108.0}, "sun": {"usd": 0.0, "by_purpose": {}}})
+        self.assertEqual(p["sessions"]["duels_today"], 2)
+        self.assertGreaterEqual(p["purpose_caps"]["duels"], 40.0)
+        # Saturday's close is still listed at Sunday's opening hour: it must not hide Sunday's sessions.
+        stale = self.plan(clock=clock(hours_left=6, tick=15.0, today="sun"), total=240.0,
+                          upcoming=[{"at_hours": 16.65, "action": "day_closes", "params": {"day": "sat"}},
+                                    {"at_hours": 18.65, "action": "duels"}, {"at_hours": 21.65, "action": "duels"},
+                                    {"at_hours": 22.65, "action": "day_closes", "params": {"day": "sun"}}],
+                          days_spent={"sat": {"usd": 108.0}, "sun": {"usd": 0.0, "by_purpose": {}}})
+        self.assertEqual(stale["sessions"]["duels_today"], 2)
+        self.assertGreaterEqual(stale["purpose_caps"]["duels"], 40.0)
+        self.assertLessEqual(sum(p["purpose_caps"].values()), p["left_today"] + 0.01)     # inside what is left
+        self.assertEqual(p["budget_total"], 240.0)
+        self.assertIn("duels", p["uncapped_purposes"])
 
     def test_unspent_saturday_carries_over(self):
         thrifty = self.plan(days_spent={"sat": {"usd": 40.0}})
