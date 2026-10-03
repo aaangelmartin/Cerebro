@@ -129,6 +129,29 @@ class BrainPostSkipsTest(unittest.TestCase):
         self.assertEqual([a.kind for a in acts], ["post_offer"])
         self.assertEqual(acts[0].params["want"], {"cash": 78})
 
+    def test_protected_offer_is_never_cancelled_for_a_new_post(self):
+        d = domain()
+        hand = {**self.OLD, "id": 12189, "to": "t08", "want": {"cash": 160, "types": []}, "created_tick": 798}
+        with mock.patch.object(S, "post_offers", return_value=[self.ASK]):
+            acts = d._brain_posts(self.ME10, [hand], lambda a, c: False, {"SAL-10": 1},
+                                  {"protected_offers": [12189]}, 800)
+        self.assertEqual(acts, [])                                           # no cancel, no post
+        self.assertIn("protected/human offer #12189", S.post_history()[-1]["detail"])
+
+    def test_hand_posted_offer_is_never_cancelled_for_a_new_post(self):
+        d = domain()
+        with mock.patch.object(S, "post_offers", return_value=[]):           # first tick: the bot adopts what is open
+            d._brain_posts(self.ME10, [], lambda a, c: True, {"SAL-10": 1}, {}, 790)
+        d._bot_rec([], {}, 790)
+        hand = {**self.OLD, "id": 12088, "to": "t08", "want": {"cash": 160, "types": []}, "created_tick": 793}
+        acts = self.run_once(d, [self.ASK], [hand], lambda a, c: False, tick=795)
+        self.assertEqual(acts, [])
+        self.assertIn("#12088", S.post_history()[-1]["detail"])
+        self.assertEqual(d._hands_off(hand, [hand], {}, 795), "human")
+        mine = {**self.OLD, "id": 500, "created_tick": 794}                  # an offer the bot posted itself
+        d._bot_offers["ids"].add("500")
+        self.assertEqual(d._hands_off(mine, [mine], {}, 795), "")
+
     def test_two_planned_offers_for_one_card_report_the_conflict(self):
         d = domain()
         swap = {"give": "SAL-10", "want_card": "LAV-11", "want_cash": None, "to": "t08", "venue": "rastro"}

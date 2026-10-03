@@ -188,6 +188,49 @@ class MarketDomain:
         acc, posts, state = self._prepare(sit, ctx)
         return self._brain_first(self._code_plan(acc, posts, state), state)
 
+    # --- offers a human posted with our key, or that the team protects ------------------
+    def _bot_rec(self, own_market: list[dict], control: dict, tick: int) -> dict:
+        """Ids of the market offers THIS bot posted (data/live/bot_posted_offers.json). First run: every offer
+        open now is adopted as ours, except the protected ones."""
+        rec = self.__dict__.get("_bot_offers")
+        if rec is None:
+            try:
+                rec = json.loads((config.LIVE / "bot_posted_offers.json").read_text())
+            except (OSError, ValueError):
+                rec = None
+            if not isinstance(rec, dict) or "ids" not in rec:
+                prot = {str(x) for x in control.get("protected_offers") or []}
+                rec = {"since_tick": int(tick or 0),
+                       "ids": [str(o.get("id")) for o in own_market if str(o.get("id")) not in prot]}
+                self._save_bot_rec(rec)
+            rec = {"since_tick": int(rec.get("since_tick") or 0), "ids": {str(x) for x in rec.get("ids") or []}}
+            rec["ids"] |= self.__dict__.pop("_bot_early", set())
+            self._bot_offers = rec
+        return rec
+
+    @staticmethod
+    def _save_bot_rec(rec: dict) -> None:
+        try:
+            p = config.LIVE / "bot_posted_offers.json"
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"since_tick": rec.get("since_tick") or 0,
+                                       "ids": sorted(str(x) for x in rec.get("ids") or [])[-4000:]}))
+            tmp.replace(p)
+        except OSError:
+            pass
+
+    def _hands_off(self, o: dict, own_market: list[dict], control: dict, tick: int) -> str:
+        """Why the bot must not cancel this offer by itself ("" = it may): the team protects it
+        (control.protected_offers) or a human posted it with our key (not in the bot's own record)."""
+        oid = str(o.get("id"))
+        if oid in {str(x) for x in control.get("protected_offers") or []}:
+            return "protected"
+        rec = self._bot_rec(own_market, control, tick)
+        ct = o.get("created_tick")
+        if oid not in rec["ids"] and ct is not None and int(ct) >= rec["since_tick"]:
+            return "human"
+        return ""
+
     def _brain_posts(self, me: dict, own_market: list[dict], can_give, counts: dict, control: dict,
                      tick_now: int = 0) -> list[Action]:
         """The brain's targeted offers (from the needs intel) not on the board yet: at most 2 per tick.
@@ -248,9 +291,15 @@ class MarketDomain:
                         return (tuple(a.get("ref") for a in (o.get("give") or {}).get("assets") or []),
                                 tuple(want_cards(o)), int((o.get("want") or {}).get("cash") or 0))
                     # free the card: withdraw an older offer of ours that the current plan no longer lists
+                    kept_by = [o for o in tied if self._hands_off(o, own_market, control, tick_now)]
                     stale = next((o for o in tied if o_board(o) not in planned
-                                  and o.get("id") not in cancelling), None)
-                    if stale is not None:
+                                  and o.get("id") not in cancelling and o not in kept_by), None)
+                    if stale is None and kept_by:   # never withdraw a protected or hand-posted offer for a post
+                        self._skip_brain_post(p, key, tick_now,
+                                              f"{p['give']} is held by a protected/human offer "
+                                              f"{', '.join('#' + str(o.get('id')) for o in kept_by)}: "
+                                              "not cancelled; drop this post or ask the team")
+                    elif stale is not None:
                         cancelling.add(stale.get("id"))
                         c = Action(kind="cancel_offer", params={"offer": stale.get("id")}, domain=self.name,
                                    source="council", priority=0.0,
@@ -394,6 +443,12 @@ class MarketDomain:
             oid = resp.get("id") if resp.get("id") is not None else (resp.get("offer") or {}).get("id")
             if oid is not None:
                 ttl = (meta.get("params") or {}).get("expires_in_ticks") or 40
+                rec = self.__dict__.get("_bot_offers")
+                if rec is not None:
+                    rec["ids"].add(str(oid))
+                    self._save_bot_rec(rec)
+                else:                                # not loaded yet: remember it for the first load
+                    self.__dict__.setdefault("_bot_early", set()).add(str(oid))
                 self._posted[str(oid)] = {"action": outcome.action_id, "lessons": meta.get("lessons") or [],
                                           "value_gain": exp.get("value_gain"), "spend": meta.get("spend") or 0,
                                           "expires_tick": resp.get("expires_tick") or (outcome.tick + int(ttl))}
@@ -820,6 +875,10 @@ class MarketDomain:
                 if offer_kind(o) == "bid" and o.get("id") not in seen:
                     stale.append((o, "saving cash for " + ", ".join(sorted(goal))))
 
+        # hands off protected offers; a hand-posted one goes only when the brain's plan names its id
+        stale = [(o, why) for o, why in stale
+                 if not (h := self._hands_off(o, own_market, control, tick))
+                 or (h == "human" and o.get("id") in flagged)]
         brain_posts = self._brain_posts(me, own_market, can_give, counts, control, tick)
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,
