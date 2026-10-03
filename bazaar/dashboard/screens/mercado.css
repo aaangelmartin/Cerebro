@@ -108,3 +108,13 @@
 .scr-mercado .mk-histview { margin-right: 8px; }
 @media (max-width: 1300px) { .scr-mercado .mk-conv-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .scr-mercado .mk-conv-list { grid-template-columns: minmax(0, 1fr); } }
+/* duelos · historial uses these same cards (screens/duelos.js) */
+.scr-mercado .mk-chat.mk-duel { border-top-color: var(--tc-duelo); cursor: pointer; }
+.scr-mercado .mk-duel .mk-msg { border-left-color: var(--tc-duelo); }
+.scr-mercado .mk-duel .mk-msg.is-us { border-left: 0; }
+.scr-mercado .mk-duel .mk-msg-h { color: var(--tc-duelo); }
+.scr-mercado .mk-duel .mk-msg.is-us .mk-msg-h { color: var(--m-ink); }
+.scr-mercado .mk-duel-f { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--m-line); font-size: 12px; }
+.scr-mercado .mk-chat-hist.mk-st-open .mk-status { color: var(--tc-duelo); background: color-mix(in srgb, var(--tc-duelo) 15%, transparent); }
+.scr-duelos .dl-hist .dl-score { margin: 0; }
+.scr-mercado .mk-duel .pb-nodeal { display: none; } /* the status chip already says it */
