@@ -21,7 +21,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import matcher, public
+from . import connect as connect_mod, deals as deals_mod, matcher, public
+from .connect import COOKIE, Connect
+from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
 from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store
@@ -39,7 +41,16 @@ STATIC = {"/plaza/static/plaza.css": ("plaza.css", "text/css; charset=utf-8"),
 ADMIN_STATIC = {"/plaza/admin/static/admin.js": ("admin.js", "text/javascript; charset=utf-8")}
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
-PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|floor|market|wall|agents)")   # deep links
+ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
+MATCH_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})")
+MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
+PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents"
+                       r"|connect|me)")                                                              # deep links
+TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)
+LOCAL_BASE = "http://127.0.0.1:8787/plaza"
+VERIFY_EVERY_S = 3.0
+HOURS_KEPT = 72
+PROPOSED_ON_FLOOR = 8                      # a rebuild that proposes more than this does not flood the floor
 TICK_S = 2.0                               # how often the game feed is read for the live floor
 STREAM_MAX_S = 600.0                       # an SSE connection is closed after this; the page reconnects
 STREAMS_MAX, STREAMS_PER_CLIENT = 80, 4
@@ -83,12 +94,57 @@ class Board:
         self.floor = Floor(self.live / "plaza_floor.jsonl")
         self.report_fn = report_fn
         self.lock = threading.Lock()
+        self.feed_lock = threading.Lock()
         self.snap: dict = {"built": 0.0, "sheets": {}, "matches": [], "cat": {}, "stats": {}, "tick": None,
-                           "offers": [], "fees": {}}
+                           "offers": [], "fees": {}, "art": set(), "hidden": (set(), set()), "candidates": 0}
         self.metrics: dict[str, dict] = {}
         self.started = time.time()
         self.streams: dict[str, int] = {}
         self.token = ""
+        self.connect = Connect(self.live / "plaza_connect.json", host=host)
+        self.deals = Deals(self.live / "plaza_matches.json", VENUE)
+        self.hourly: dict[str, dict] = self._load_hours()
+        self.verified_at = 0.0
+        self.art: tuple[float, dict] = (0.0, {})
+
+    # ---- hourly counters for our panel
+    def _load_hours(self) -> dict:
+        try:
+            data = json.loads((self.live / "plaza_hourly.json").read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def hour(self, name: str, n: int = 1) -> None:
+        key = time.strftime("%Y-%m-%dT%H")
+        with self.lock:
+            h = self.hourly.setdefault(key, {})
+            h[name] = h.get(name, 0) + n
+            if len(self.hourly) > HOURS_KEPT:
+                for k in sorted(self.hourly)[:-HOURS_KEPT]:
+                    self.hourly.pop(k, None)
+
+    def save_hours(self) -> None:
+        with self.lock:
+            body = json.dumps(self.hourly)
+        try:
+            tmp = self.live / "plaza_hourly.tmp"
+            tmp.write_text(body, encoding="utf-8")
+            os.replace(tmp, self.live / "plaza_hourly.json")
+        except OSError:
+            pass
+
+    def card_art(self) -> dict:
+        """ref -> the SVG the dashboard already draws for that card."""
+        path = WEB.parent.parent / "dashboard" / "cards.json"
+        try:
+            mtime = path.stat().st_mtime
+            if mtime != self.art[0]:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.art = (mtime, {k: v for k, v in data.items() if isinstance(v, str) and v.startswith("<svg")})
+        except (OSError, ValueError):
+            pass
+        return self.art[1]
 
     def start_feed(self) -> None:
         """Reads what the game already said and seeds the floor with the recent part."""
@@ -96,11 +152,11 @@ class Board:
         self.floor.load(list(self.feed.items)[-300:])
 
     def tick_feed(self) -> int:
-        new = self.feed.refresh()
-        if new:
+        with self.feed_lock:
+            new = self.feed.refresh()
             self.floor.add_game(new)
-            with self.lock:
-                self.snap = {**self.snap, "built": 0.0}
+        if new:
+            self.stale()
         return len(new)
 
     def count(self, route: str, status: int) -> None:
@@ -109,6 +165,9 @@ class Board:
             m["requests"] += 1
             if status >= 400:
                 m["errors"] += 1
+        self.hour("requests")
+        if status >= 400:
+            self.hour("errors")
 
     def enabled(self) -> bool:
         try:
@@ -149,7 +208,9 @@ class Board:
     def _verify(self) -> None:
         """A team proves a claim by sending us, in the game, a thread message with its code."""
         codes = self.store.pending_codes()
-        if not codes:
+        sessions = self.connect.pending_codes()
+        self.verified_at = time.time()
+        if not codes and not sessions:
             return
         folder = self.record / "threads"
         try:
@@ -166,8 +227,22 @@ class Board:
                     continue
                 for m in th.get("messages") or []:
                     sender = m.get("sender")
-                    if sender in codes and isinstance(m.get("text"), str):
+                    if not isinstance(m.get("text"), str):
+                        continue
+                    if sender in codes:
                         self.store.verify(sender, m["text"])
+                    if sender in sessions and self.connect.prove(sender, m["text"]):
+                        self.store.mark_verified(sender)
+                        self.hour("verified")
+                        self.stale()
+
+    def verify_soon(self) -> None:
+        """The Ready button is waiting: look at the recorded threads now, a few seconds apart at most."""
+        if time.time() - self.verified_at > VERIFY_EVERY_S:
+            try:
+                self._verify()
+            except Exception:  # noqa: BLE001
+                pass
 
     def rebuild(self) -> dict:
         report = self._report()
@@ -176,15 +251,38 @@ class Board:
             self._verify()
         except Exception:  # noqa: BLE001 - verification never takes the board down
             pass
-        sheets = public.merge(public.public_sheets(report, cat, self.host), self.store.declared())
-        self.feed.refresh()
+        declared = self.store.declared()
+        for team, c in self.connect.overview().items():        # a connected agent counts as a claimed sheet
+            d = declared.setdefault(team, {"declared": None, "claimed": False, "verified": False, "seen": None})
+            d["claimed"] = d["claimed"] or c["agent"]
+        sheets = public.merge(public.public_sheets(report, cat, self.host), declared)
+        with self.feed_lock:
+            self.floor.add_game(self.feed.refresh())
         fees = venue_fees(self.record)
-        snap = {"built": time.time(), "tick": self.feed.tick or report.get("tick"), "cat": cat, "sheets": sheets,
-                "matches": matcher.find(sheets, cat, self.host, VENUE), "stats": self._stats(),
+        tick = self.feed.tick or report.get("tick")
+        admin = self.store.admin()
+        cands = matcher.find(sheets, cat, self.host, VENUE)
+        events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
+                                 excluded_teams=frozenset(admin["excluded_teams"]),
+                                 excluded_matches=frozenset(admin["excluded_matches"]))
+        proposed = [e for e in events if e["state"] == "proposed"]
+        for e in events:
+            self.hour("match_" + e["state"])
+        self.floor.add_game([e for e in events if e["state"] != "proposed"]
+                            + (proposed if len(proposed) <= PROPOSED_ON_FLOOR else []))
+        hidden = set(admin["hidden_msgs"]), set(admin["blocked"])
+        snap = {"built": time.time(), "tick": tick, "cat": cat, "sheets": sheets, "candidates": len(cands),
+                "art": set(self.card_art()), "hidden": hidden,
+                "matches": [self.match_view(r, hidden) for r in self.deals.live()], "stats": self._stats(),
                 "offers": self.feed.open_offers(fees), "fees": fees}
         with self.lock:
             self.snap = snap
+        self.save_hours()
         return snap
+
+    def stale(self) -> None:
+        with self.lock:
+            self.snap = {**self.snap, "built": 0.0}
 
     def get(self) -> dict:
         with self.lock:
@@ -200,7 +298,42 @@ class Board:
     def card(self, ref: str, snap: dict) -> dict:
         c = snap["cat"].get(ref) or {}
         return {"ref": ref, "name": c.get("name") or ref, "rarity": c.get("rarity"), "set": c.get("set") or ref[:3],
-                "color": c.get("color")}
+                "color": c.get("color"), "art": f"/plaza/art/{ref}.svg" if ref in snap.get("art", ()) else None}
+
+    # ---- matches and their threads
+    def match_view(self, r: dict, hidden: tuple[set, set], full: bool = False) -> dict:
+        """A match as everyone reads it: its state, the terms on the table and the request that closes it."""
+        out = {k: v for k, v in r.items() if k not in ("messages", "history")}
+        if r["kind"] == "sale":
+            out["recipe"] = matcher.recipe(r["seller"], r["buyer"], r["ref"], r["price"], VENUE)
+            out["rastro_fee"] = matcher.rastro_fee(r["price"])
+        elif r["kind"] == "swap":
+            out["recipe"] = matcher.swap_recipe(r["seller"], r["buyer"], r["ref"], r["ref_back"], VENUE)
+        else:
+            out["recipe"] = {"note": f"three card-for-card offers on {VENUE}, each addressed to the next team; "
+                                     "no cash, no fee"}
+        msgs = [m for m in r.get("messages") or []
+                if f"{r['id']}:{m['n']}" not in hidden[0] and m["team"] not in hidden[1]]
+        out["messages"], out["last_message"] = len(msgs), (msgs[-1] if msgs else None)
+        out["teams"] = deals_mod.parties(r)
+        if full:
+            out["thread"], out["history"] = msgs, r.get("history") or []
+        return out
+
+    def trade_view(self, m: dict, snap: dict) -> dict:
+        """The same match, drawn: the cards each side puts on the table."""
+        card = lambda ref: self.card(ref, snap)   # noqa: E731
+        if m["kind"] == "sale":
+            sides = [{"team": m["seller"], "gives": [card(m["ref"])], "receives_cash": m["price"]},
+                     {"team": m["buyer"], "gives": [], "pays": m["price"]}]
+        elif m["kind"] == "swap":
+            sides = [{"team": m["seller"], "gives": [card(m["ref"])]}, {"team": m["buyer"], "gives": [card(m["ref_back"])]}]
+        else:
+            sides = [{"team": leg["from"], "to": leg["to"], "gives": [card(leg["ref"])]} for leg in m.get("legs") or []]
+        return {**m, "sides": sides, "name": self.card(m["ref"], snap)["name"]}
+
+    def trades_for(self, team: str, snap: dict) -> list[dict]:
+        return [self.trade_view(m, snap) for m in matcher.for_team(snap["matches"], team)]
 
     def offer_view(self, o: dict, snap: dict) -> dict:
         return {**o, **{k: v for k, v in self.card(o["ref"], snap).items() if k != "ref"},
@@ -241,11 +374,14 @@ class Board:
         for e in s["for_sale"]:
             available[e["ref"]] = {**available.get(e["ref"], {}), **e, "as": "for_sale"}
         looking = [{**e, "finishes_page": matcher.last_of_page(s, e["ref"])} for e in s["wants"]]
+        wanted = dress(looking)
         return {"team": team, "name": s["name"], "host": bool(s.get("host")), "pages": s.get("pages"),
                 "album": s.get("album"), "claimed": s["claimed"], "verified": s["verified"],
                 "declared_at": s.get("declared_at"), "wants": dress(s["wants"]), "spares": dress(s["spares"]),
                 "for_sale": dress(s["for_sale"]), "available": dress(list(available.values())),
-                "looking_for": dress(looking),
+                "wanted": wanted, "looking_for": wanted,
+                "agent_online": self.connect.online(team),
+                "trades": self.trades_for(team, snap),
                 "offers_for_you": [] if s.get("host") else self.offers_for(team, snap)}
 
     def offers_view(self, snap: dict, q: dict) -> dict:
@@ -268,6 +404,7 @@ class Board:
             rows.append(v)
         venues = sorted({o["venue"] for o in snap["offers"] if o.get("venue")})
         return {"tick": snap["tick"], "offers": rows[:400], "total": len(rows), "venues": venues,
+                **({"trades": self.trades_for(q["team"], snap)} if q.get("team") else {}),
                 "fees": {v: {"bps": f["bps"], "per_card": f["per_card"], "name": f["name"]}
                          for v, f in snap["fees"].items() if v in venues or v == VENUE}}
 
@@ -301,11 +438,17 @@ class Board:
             if m.get("src") == "agent":
                 last_post[m["team"]] = max(last_post.get(m["team"], 0), m.get("ts") or 0)
         teams = []
+        conn = self.connect.overview()
         for team, s in snap["sheets"].items():
             if s.get("host"):
                 continue
             d = declared.get(team) or {}
+            c = conn.get(team) or {}
             teams.append({"team": team, "claimed": bool(d.get("claimed")), "verified": bool(d.get("verified")),
+                          "connected": bool(c.get("connected")), "agent": bool(c.get("agent")),
+                          "online": bool(c.get("online")), "agent_last_seen": c.get("agent_last_seen"),
+                          "pending_sessions": c.get("pending", 0),
+                          "last_sync": (d.get("declared") or {}).get("updated"),
                           "declared_at": (d.get("declared") or {}).get("updated"), "last_seen": d.get("seen"),
                           "last_post": last_post.get(team), "blocked": team in admin["blocked"],
                           "wants": len(s["wants"]), "available": len(s["spares"]) + len(s["for_sale"]),
@@ -321,8 +464,11 @@ class Board:
         with self.lock:
             metrics = {k: dict(v) for k, v in self.metrics.items()}
         return {"enabled": self.enabled(), "tick": snap["tick"], "uptime_s": round(time.time() - self.started),
-                "teams": teams, "active_teams": sum(1 for t in teams if t["claimed"]),
+                "teams": teams, "active_teams": sum(1 for t in teams if t["claimed"] or t["agent"]),
                 "verified_teams": sum(1 for t in teams if t["verified"]),
+                "connected_teams": sum(1 for t in teams if t["connected"]),
+                "online_teams": sum(1 for t in teams if t["online"]),
+                "match_funnel": self.deals.funnel(), "hourly": self.hours(),
                 "funnel": {"matches_proposed": len(snap["matches"]), "open_offers_on_venue": len(on_venue),
                            "open_offers_following_a_match": len(followed),
                            "offers_listed_on_venue": self.feed.counts["venue_offers"],
@@ -335,6 +481,38 @@ class Board:
                 "requests": metrics,
                 "totals": {"requests": sum(m["requests"] for m in metrics.values()),
                            "errors": sum(m["errors"] for m in metrics.values())}}
+
+    def hours(self, last: int = 24) -> list[dict]:
+        with self.lock:
+            return [{"hour": k, **self.hourly[k]} for k in sorted(self.hourly)[-last:]]
+
+    def matchmaker(self, snap: dict) -> dict:
+        admin = self.store.admin()
+        return {**self.deals.queue(), "paused": admin["mm_paused"], "excluded_teams": admin["excluded_teams"],
+                "excluded_matches": admin["excluded_matches"], "candidates": snap.get("candidates", 0),
+                "rules": {"proposal_ticks": deals_mod.PROPOSAL_TICKS, "offer_ticks": deals_mod.OFFER_TICKS,
+                          "pass_ticks": deals_mod.PASS_TICKS, "stall_ticks": deals_mod.STALL_TICKS}}
+
+    def force(self, body: dict, snap: dict) -> dict:
+        """We propose a sale by hand; it still never involves us and never goes under the floor."""
+        seller, buyer, ref = body.get("seller"), body.get("buyer"), body.get("ref")
+        for t in (seller, buyer):
+            if not isinstance(t, str) or t not in snap["sheets"] or t == self.host:
+                raise PlazaError(400, "bad_request", "seller and buyer are two other teams")
+        if seller == buyer or not isinstance(ref, str) or ref not in snap["cat"]:
+            raise PlazaError(400, "bad_request", "name two different teams and a card of the catalog")
+        card = snap["cat"][ref]
+        price = body.get("price", card.get("book") or matcher.BOOK.get(card.get("rarity") or "", 0))
+        if isinstance(price, bool) or not isinstance(price, (int, float)) \
+                or price < matcher.FLOOR.get(card.get("rarity") or "", 1) or price > 2000:
+            raise PlazaError(400, "below_floor", "the price is a number at or above the floor of the rarity")
+        price = int(round(price))
+        m = {"kind": "sale", "seller": seller, "buyer": buyer, "ref": ref, "name": card.get("name"),
+             "rarity": card.get("rarity"), "price": price, "basis": "forced", "saves": matcher.rastro_fee(price),
+             "last_of_page": False, "priority": 0, "confidence": "forced", "score": 99.0,
+             "why": "proposed by the venue"}
+        m["id"] = matcher.match_id(m)
+        return self.deals.force(m)
 
     def activity(self, q: dict) -> dict:
         admin = self.store.admin()
@@ -451,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
     board: Board = None        # type: ignore[assignment]
     budget: Budget = None      # type: ignore[assignment]
     route = "other"
+    extra: tuple = ()
 
     def log_message(self, fmt, *args):   # quiet
         pass
@@ -469,6 +648,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
         for k, v in SECURITY.items():
+            self.send_header(k, v)
+        for k, v in self.extra:
             self.send_header(k, v)
         if cors:                                        # reads only: agents and pages elsewhere may read the board
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -507,6 +688,33 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get(ADMIN_HEADER) or ""
         return bool(self.board.token) and hmac.compare_digest(given, self.board.token)
 
+    def _actor(self, team: str | None = None) -> tuple[str, bool, bool]:
+        """Who writes: (team, verified, by token). An agent token from the connection flow, or the team PIN."""
+        token = self.headers.get(TOKEN_HEADER)
+        if token:
+            who, verified = self.board.connect.auth(token)
+            if team is not None and team != who:
+                raise PlazaError(403, "wrong_team", "this token writes for another team")
+            return who, verified, True
+        rec = self.board.store.check(team, self.headers.get("X-Plaza-Pin") or "")
+        return team, bool(rec.get("verified")), False
+
+    def _session(self, q: dict) -> str | None:
+        """The browser's connection session: the query parameter, else the cookie."""
+        if q.get("session"):
+            return q["session"]
+        m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
+        return m.group(1) if m else None
+
+    def _status(self, q: dict) -> dict:
+        board = self.board
+        board.verify_soon()
+
+        def listed(team: str) -> bool:
+            d = (board.store.declared().get(team) or {}).get("declared") or {}
+            return any(d.get(k) for k in ("wants", "spares", "for_sale"))
+        return board.connect.status(self._session(q), listed)
+
     def _filters(self, q: dict) -> dict:
         """Validated floor and board filters: anything else is a 400."""
         out: dict = {}
@@ -520,11 +728,15 @@ class Handler(BaseHTTPRequestHandler):
             out["ref"] = q["ref"]
         for key, rx in (("set", r"[A-Z]{3}"), ("rarity", r"common|uncommon|rare|epic|legendary"),
                         ("venue", r"rastro|v\d{2}"), ("side", r"ask|bid|swap"),
-                        ("kind", "|".join(KINDS) + r"|offer|deal|pack|craft|announce|agent|game")):
+                        ("kind", "|".join(KINDS) + r"|offer|deal|pack|craft|announce|agent|game|match|counter|pass|plaza")):
             if q.get(key) is not None:
                 if not re.fullmatch(rx, q[key]):
                     raise PlazaError(400, "bad_request", f"bad {key}")
                 out[key] = q[key]
+        if q.get("session") is not None:
+            if not connect_mod.TOKEN_RX.fullmatch(q["session"]):
+                raise PlazaError(400, "bad_request", "bad session")
+            out["session"] = q["session"]
         for key in ("since", "limit"):
             if q.get(key) is not None:
                 if not re.fullmatch(r"\d{1,9}", q[key]):
@@ -559,6 +771,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, body, "application/json; charset=utf-8", cache="public, max-age=3600")
         if path == "/plaza/agents.md":
             return self._send(200, agents_md().encode(), "text/markdown; charset=utf-8", cors=True)
+        m = ART_PATH.fullmatch(path)
+        if m:                                           # the card as the dashboard draws it
+            svg = self.board.card_art().get(m.group(1))
+            if not svg:
+                return self._error(404, "not_found", "no art for this card")
+            if "xmlns=" not in svg[:200]:
+                svg = svg.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ', 1)
+            return self._send(200, svg.encode(), "image/svg+xml; charset=utf-8", cache="public, max-age=3600", cors=True)
         if not path.startswith("/plaza/api/"):
             return self._error(404, "not_found", "no such page")
         self.route = path[len("/plaza/api/"):].split("/")[0]
@@ -573,6 +793,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e.status, e.code, e.message)
         if q.get("team") and q["team"] not in snap["sheets"]:
             return self._error(400, "bad_request", "no such team")
+        if self.headers.get(TOKEN_HEADER):               # an agent that reads with its token shows as online
+            try:
+                self.board.connect.auth(self.headers.get(TOKEN_HEADER))
+            except PlazaError:
+                pass
+        try:
+            if path == "/plaza/api/connect/status":
+                return self._json(200, self._status(q))
+            if path == "/plaza/api/me":                  # the connected browser: its team's view, read only
+                st = self._status(q)
+                if not st["verified"]:
+                    raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
+                team = st["team"]
+                return self._json(200, {"team": team, "read_only": True, "status": st, "tick": snap["tick"],
+                                        "venue": VENUE, "home": {**self.board.team_view(team, snap),
+                                                                 "matches": self.board.matches_view(snap, team)["matches"]}})
+            m = MATCH_PATH.fullmatch(path)
+            if m:
+                rec = self.board.deals.get(m.group(1))
+                view = self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True)
+                return self._json(200, {**self.board.trade_view(view, snap), "tick": snap["tick"], "venue": VENUE},
+                                  cors=True)
+        except PlazaError as e:
+            return self._error(e.status, e.code, e.message)
         if path == "/plaza/api/teams":
             return self._json(200, self.board.teams_view(snap), cors=True)
         m = TEAM_PATH.fullmatch(path)
@@ -604,9 +848,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _floor(self, q: dict) -> dict:
         admin = self.board.store.admin()
-        return self.board.floor.poll(q.get("since", 0), team=q.get("team"), ref=q.get("ref"), kind=q.get("kind"),
-                                     limit=q.get("limit", 100), hidden=set(admin["hidden"]),
-                                     blocked=set(admin["blocked"]))
+        blocked, gone = set(admin["blocked"]), set(admin["hidden_msgs"])
+        out = self.board.floor.poll(q.get("since", 0), team=q.get("team"), ref=q.get("ref"), kind=q.get("kind"),
+                                    limit=q.get("limit", 100), hidden=set(admin["hidden"]), blocked=blocked)
+        out["items"] = [i for i in out["items"] if not (i.get("src") == "plaza" and i.get("msg") is not None and (
+            i.get("team") in blocked or f"{i.get('match')}:{i['msg']}" in gone))]
+        return out
 
     def _stream(self, q: dict) -> None:
         """Server-sent events: the floor as it happens. One connection lasts at most STREAM_MAX_S."""
@@ -672,6 +919,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.board.overview(snap))
         if path == "/plaza/admin/api/activity":
             return self._json(200, self.board.activity(f))
+        if path == "/plaza/admin/api/matchmaker":
+            return self._json(200, self.board.matchmaker(snap))
         return self._error(404, "not_found", "no such endpoint")
 
     def _write(self):
@@ -694,7 +943,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.board.tick_feed()
                     self.board.rebuild()
                     return self._json(200, {"ok": True, "admin": self.board.store.admin()})
-                out = self.board.store.admin_do(str(action), body.get("team"), body.get("message"))
+                if action == "force":
+                    rec = self.board.force(body, self.board.get())
+                    self.board.rebuild()
+                    return self._json(200, {"ok": True, "match": rec["id"]})
+                if action == "expire":
+                    rec = self.board.deals.expire(body.get("match"))
+                    self.board.rebuild()
+                    return self._json(200, {"ok": True, "match": rec["id"], "state": rec["state"]})
+                out = self.board.store.admin_do(str(action), body.get("team"), body.get("message"), body.get("match"))
+                if action in ("pause", "resume", "exclude", "include", "hide", "unhide", "block", "unblock"):
+                    self.board.rebuild()
                 return self._json(200, {"ok": True, "admin": out})
             if not self.board.enabled():
                 return self._error(503, "closed", "the plaza is closed for now")
@@ -706,24 +965,66 @@ class Handler(BaseHTTPRequestHandler):
                 out["prove"] = (f"open a thread with {HOST} in the game and send the code as the message text; "
                                 "the sheet turns verified within a minute")
                 return self._json(200, out)
+            if self.command == "POST" and path in ("/plaza/api/connect/start", "/plaza/api/connect/agent"):
+                self.route = "connect"
+                if not isinstance(body, dict):
+                    raise PlazaError(400, "bad_request", "send a JSON object")
+                team = body.get("team")
+                if not isinstance(team, str) or team not in public.TEAMS:
+                    raise PlazaError(400, "bad_request", "team ids look like t04")
+                if path.endswith("/start"):
+                    out = self.board.connect.start(team, self._client())
+                    base = public_url(self.board.live) or LOCAL_BASE
+                    out["prompt"] = connect_mod.prompt(team, out["connect_code"], base, VENUE)
+                    out["agents_md"], out["status"] = base + "/agents.md", "/plaza/api/connect/status"
+                    secure = "; Secure" if self.headers.get("X-Plaza-Proto") == "https" else ""
+                    self.extra = (("Set-Cookie", f"{COOKIE}={out['session']}; Path=/plaza; Max-Age="
+                                                 f"{out['session_expires_in']}; HttpOnly; SameSite=Lax{secure}"),)
+                    self.board.hour("connect_start")
+                    return self._json(200, out)
+                known = bool((self.board.store.declared().get(team) or {}).get("verified"))
+                out = self.board.connect.agent(team, body.get("code"), self._client(), known)
+                out["next"] = (f"prove it is you: open a thread with {HOST} in the game and send the code as the "
+                               f"message text; then PUT /plaza/api/team/{team} with header {TOKEN_HEADER}")
+                self.board.hour("connect_agent")
+                self.board.stale()
+                return self._json(200, out)
+            m = MATCH_MSG_PATH.fullmatch(path)
+            if self.command == "POST" and m:
+                self.route = "match_post"
+                rec = self.board.deals.get(m.group(1))
+                given = body.pop("team", None) if isinstance(body, dict) else None
+                team, verified, _ = self._actor(given)
+                if team in self.board.store.admin()["blocked"]:
+                    raise PlazaError(403, "blocked", "this team cannot post for now")
+                rec, item, moved = self.board.deals.message(rec["id"], team, verified, body)
+                self.board.floor.add_game([item] + moved)
+                self.board.store.touch(team)
+                self.board.hour("match_messages")
+                self.board.stale()
+                snap = self.board.get()
+                return self._json(200, {"posted": item["msg"], "match": self.board.trade_view(
+                    self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True), snap)})
             if self.command == "POST" and path == "/plaza/api/floor":
                 self.route = "floor_post"
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
-                team = body.pop("team", None)
-                rec = self.board.store.check(team, self.headers.get("X-Plaza-Pin") or "")
+                team, verified, _ = self._actor(body.pop("team", None))
                 if team in self.board.store.admin()["blocked"]:
                     raise PlazaError(403, "blocked", "this team cannot post on the floor for now")
-                item = self.board.floor.post(team, bool(rec.get("verified")), body)
+                item = self.board.floor.post(team, verified, body)
                 self.board.store.touch(team)
+                self.board.hour("floor_posts")
                 return self._json(200, {"posted": item})
             m = TEAM_PATH.fullmatch(path)
             if self.command == "PUT" and m:
                 self.route = "declare"
-                declared = self.board.store.declare(m.group(1), self.headers.get("X-Plaza-Pin") or "", body)
-                with self.board.lock:
-                    self.board.snap = {**self.board.snap, "built": 0.0}     # show it on the next read
-                return self._json(200, {"team": m.group(1), "declared": declared})
+                team, _, by_token = self._actor(m.group(1))
+                declared = self.board.store.declare(team, None if by_token else self.headers.get("X-Plaza-Pin") or "",
+                                                    body)
+                self.board.hour("declares")
+                self.board.stale()                                           # show it on the next read
+                return self._json(200, {"team": team, "declared": declared})
             return self._error(404, "not_found", "no such endpoint")
         except PlazaError as e:
             return self._error(e.status, e.code, e.message)
@@ -812,6 +1113,7 @@ def main() -> None:
         board.rebuild()
     except Exception as e:  # noqa: BLE001
         print(f"plaza: first build failed: {type(e).__name__}: {e}", flush=True)
+    waiting = False
     while True:
         try:
             srv = make_server(board)
@@ -819,7 +1121,9 @@ def main() -> None:
         except OSError as e:                             # another copy already serves the port: stand by for it
             if e.errno not in (48, 98):
                 raise
-            print(f"plaza: port {PORT} is taken; standing by", flush=True)
+            if not waiting:
+                print(f"plaza: port {PORT} is taken; standing by", flush=True)
+            waiting = True
             time.sleep(30.0)
     board.token = admin_token(config.LIVE)                # only once we own the port
     threading.Thread(target=run_ticker, args=(board, threading.Event()), daemon=True).start()

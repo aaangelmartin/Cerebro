@@ -237,7 +237,7 @@ class ServerTest(unittest.TestCase):
         self.assertIn(("game", "deal"), kinds)
         self.assertTrue(next(m for m in got["items"] if m["kind"] == "deal" and m["ref"] == "LAT-03")["highlight"])
         self.assertEqual(self.call("GET", f"/plaza/api/floor?since={got['seq']}")[1]["items"], [])
-        self.assertEqual([m["src"] for m in self.call("GET", "/plaza/api/floor?team=t07")[1]["items"]], ["agent"])
+        self.assertEqual([m["src"] for m in self.call("GET", "/plaza/api/floor?team=t07&kind=agent")[1]["items"]], ["agent"])
         self.assertEqual([m["kind"] for m in self.call("GET", "/plaza/api/floor?kind=want")[1]["items"]], ["want"])
         self.assertEqual(len(self.call("GET", "/plaza/api/floor?ref=LAT-03")[1]["items"]), 2)      # the fixture's deal and this one
         self.assertEqual(self.call("GET", "/plaza/api/floor?since=abc")[0], 400)
