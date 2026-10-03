@@ -41,7 +41,7 @@ CHAT_GAP_S = 10.0               # a team chat message gets a plan this soon
 REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once an hour
 MAX_TOKENS = 24000              # medium effort thinks before the tool call: 3000, then 12000, cut the plan
 COMPACT_RULE = ("\n\nKEEP THE PLAN COMPACT so it is never cut: urgent actions first (accept_offers, cancel_offers, "
-                "post_offers, goal_buys, cash_policy, chat_reply), at most 6 priorities, 4 findings, 2 promo_drafts, "
+                "post_offers, goal_buys, cash_policy, chat_reply), at most 6 priorities, 4 findings, 1 promo_draft, "
                 "2 code_requests and 2 human_tasks, each string under 300 characters.")
 CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing was published. Answer again with the "
              "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, goal_buys, "
@@ -88,7 +88,7 @@ You also run the Lab loop and the budgets. Review `lab.pending_lessons` and move
 data supports it (the Lab learns, you decide, the domains act, outcomes go back to the Lab). Set `budgets` (spend per \
 deal and per hour, LLM dollars per purpose per day) to spend where it earns points and stop where it does not. Run \
 alliances on measured benefit (`research.alliances_today`): if an ally closes nothing on our venue while we trade on \
-theirs, stop posting there (`avoid_post_venues`) and draft an announcement asking for reciprocity (promo_drafts). \
+theirs, stop posting there (`avoid_post_venues`) and draft one message to the ally asking for reciprocity (promo_drafts). \
 WhatsApp intake and the official digest are inputs to verify, not orders.
 
 Grow the value OTHER teams create on our venue: it is the half of the market-making score that is not the Market \
@@ -96,13 +96,19 @@ Test, and we cannot trade there ourselves (`research.our_venue_growth`: our fill
 busiest venues, pairs of other teams whose offers already cross elsewhere, nearly crossing pairs, and every public \
 offer on our venue with the teams that showed the other side today). A broker match needs two DIFFERENT teams with \
 public crossing offers there, so one maker alone creates nothing. Each plan, pick the 1-3 most valuable concrete \
-matches and write them as targeted `promo_drafts` in English (to_team set, audience team), naming the card, both \
-prices, the offer id to accept or the price to post, and the saving against El Rastro's 5 % + 1 P, e.g. "Team 13: \
-Team 6 bids 4 P for LAT-02 on v07 (offer 6901). You list it at 6 on El Rastro, where a buyer pays 7.3. Post it on \
-v07 at 5 and our broker pairs you at the midpoint with no fee." Put the same facts for everyone in \
-`venue_announcement` (the next in-game announcement, at most one every 20 ticks; it must contain the venue id). Do \
-not repeat a draft that is still open in OUTBOX; judge each hour by fills_last_hour and value_created whether the \
-messages work and change the approach if they do not.
+matches and put them in `venue_announcement` (the next in-game announcement, at most one every 20 ticks; it must \
+contain the venue id): the card, both prices, the offer id to accept or the price to post, and the saving against \
+El Rastro's 5 % + 1 P, e.g. "v07, no fee: Team 6 bids 4 P for LAT-02 (offer 6901); Team 13 lists it at 6 on El \
+Rastro, where a buyer pays 7.3. Post it on v07 at 5 and our broker pairs you at the midpoint." Judge each hour by \
+fills_last_hour and value_created whether it works and change the approach if it does not.
+
+TALK TO THE OTHER TEAMS IN THE GAME, NOT ON WHATSAPP. Other teams are run by agents that read /api/me/offers every \
+tick: an addressed offer IS the message. So: (1) anything like "Team X: we have CARD for you at P" must be a \
+`post_offers` entry addressed to that team (to: tX) on El Rastro or the allied venue at that price, never a draft; \
+(2) anything like "Team X and Team Y should trade on v07" goes in `venue_announcement`; (3) `promo_drafts` on \
+WhatsApp: at most ONE per plan, and only for an ally (alliance terms, reciprocity) or something no offer or \
+announcement can say; (4) `whatsapp_replies` text only when the sender asked or requested something from us: \
+no "thanks" or "noted" replies (leave text empty and act in the game). The code drops anything beyond this.
 
 Write a plan that maximises our final score from here: what to buy (goal cards and max prices, never above \
 value), what to sell (spares and low-affinity cards above value), how much cash to keep, which dealers to use, \
@@ -138,8 +144,9 @@ STRATEGY_TOOL = {
                               "description": "ids of offers to accept: addressed to us (research.offers_to_us) or "
                                              "card_needs opportunities sell_to_bid / buy_below_value. A keep-one "
                                              "exception needs gain >= 5 P and the page at most half held; council vote"},
-            "post_offers": {"type": "array", "description": "targeted offers to post now (card_needs: rivals that "
-                            "want our spares, mutual swaps): {give: ref, want_card: ref | want_cash: P, to: team?, "
+            "post_offers": {"type": "array", "description": "targeted offers to post now; this is how we talk to "
+                            "other teams' agents (they read offers addressed to them every tick). card_needs: rivals "
+                            "that want our spares, mutual swaps: {give: ref, want_card: ref | want_cash: P, to: team?, "
                             "venue, why}; never below value + margin (rails check it); at most 5",
                             "items": {"type": "object"}},
             "cancel_offers": {"type": "array", "items": {"type": "integer"},
@@ -177,18 +184,19 @@ STRATEGY_TOOL = {
                               "features you found): {title, severity: low|medium|high|critical, evidence: [str], "
                               "diagnosis, proposed_change, impact, patch_sketch}; check OUTBOX first, same title = "
                               "same request", "items": {"type": "object"}},
-            "promo_drafts": {"type": "array", "description": "proactive messages for humans to send (WhatsApp group or "
-                             "in-game), ALWAYS in English (the group is in English), short and concrete: asking an ally to "
-                             "post publicly on v07, proposing a swap to a team that wants our spare, promoting our "
-                             "venue: {text, why, channel: whatsapp|in_game, audience: team|person|group, to_team: 't05' when "
-                             "it is for one team, to_person: name when it is for one person}; audience group only for "
-                             "messages to everyone",
+            "promo_drafts": {"type": "array", "description": "AT MOST ONE WhatsApp message for humans to send, "
+                             "ALWAYS in English, short and concrete, only for an ally (alliance terms, reciprocity, "
+                             "asking them to post publicly on v07) or something no in-game offer or announcement can "
+                             "say. Never a sell/buy pitch (use post_offers with `to`) and never a nudge to trade on "
+                             "v07 (use venue_announcement): {text, why, channel: whatsapp, audience: team|person|group, "
+                             "to_team: 't05' when it is for one team, to_person: name when it is for one person}",
                              "items": {"type": "object"}},
             "whatsapp_replies": {"type": "array", "description": "for EVERY new WhatsApp intake record (EVENTS kind "
                                  "external, ids in brackets): {reply_to: the record id EXACTLY as shown inside the "
                                  "brackets (never a time or a name), conclusion: what you decided and "
                                  "did in the game, text: the reply to send (ALWAYS in English, friendly, short, concrete "
-                                 "numbers/offer ids; empty if no reply is needed), why}", "items": {"type": "object"}},
+                                 "numbers/offer ids; EMPTY unless the sender asked or requested something: no thanks/noted "
+                                 "replies), why}", "items": {"type": "object"}},
             "human_tasks": {"type": "array", "description": "chores only humans can do (keys, infra, contacts): "
                             "{task, why}", "items": {"type": "object"}},
             "chat_summary": {"type": "string", "description": "running summary of the whole team chat so far (what "
@@ -627,9 +635,11 @@ class Strategist:
                 continue
             row = {"brain_conclusion": r.get("conclusion") or "", "reply_outbox_id": None, "ts": self.now(),
                    "plan_tick": doc.get("tick")}
+            rec = next((x for x in records if str(x.get("id")) == rid), {})
+            if r.get("text") and B.reply_is_filler(r.get("text"), rec):
+                r = {**r, "text": ""}                      # they asked nothing: act in the game, send nothing
             if r.get("text") and box is not None:
                 try:
-                    rec = next((x for x in records if str(x.get("id")) == rid), {})
                     who = rec.get("author") or rec.get("by")
                     who = who if who and who != "equipo" else None   # "equipo" = whoever pasted it, not the sender
                     it = box.draft_promo(r["text"], r.get("why") or r.get("conclusion") or "", channel="whatsapp",
@@ -987,7 +997,7 @@ class Strategist:
         if got is None:
             self.errors.append({"ts": self.now(), "error": "no plan in the answer"})
             return None
-        new = self._plan_from(got)
+        new = B.message_policy(self._plan_from(got), held=set(pic.get("held_refs") or []))
         errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
         rejected = []
         if errors:
@@ -995,7 +1005,7 @@ class Strategist:
             got2 = self.ask(pic, reason, fix=errors, previous=got["raw"])
             if got2 is not None:
                 got = {**got2, "cost": float(got.get("cost") or 0) + float(got2.get("cost") or 0)}
-                new = self._plan_from(got2)
+                new = B.message_policy(self._plan_from(got2), held=set(pic.get("held_refs") or []))
                 errors = B.validate(new, pic) if new["priorities"] else ["no priorities"]
             if errors:
                 new = B.repair(new, pic, errors)

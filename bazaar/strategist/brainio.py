@@ -14,6 +14,8 @@ Files in data/live (one JSON object per line unless noted):
 """
 from __future__ import annotations
 
+import re
+
 import json
 import threading
 import time
@@ -190,6 +192,118 @@ def looks_non_english(text: str) -> bool:
     words = [w.strip(".,;:!?()\"'") for w in t.split()]
     hits = sum(1 for w in words if w in _ES_WORDS)
     return hits >= 2 and hits / max(1, len(words)) > 0.06
+
+
+# --------------------------------------------------------------------------- messages: the game first
+# Other teams are run by agents that read /api/me/offers every tick: an addressed offer IS the message.
+# WhatsApp stays for alliances and for people who asked us something.
+_REF = re.compile(r"\b[A-Z]{3}-\d{2}\b")
+_PRICE = re.compile(r"\b(\d{1,3})\s*P\b")
+_OWN_VENUE = re.compile(r"\bv0?7\b", re.I)
+_WE_SELL = re.compile(r"\b(we have|we hold|our spare|we can sell|we sell|we are selling|we offer|for you at)\b", re.I)
+_FILLER = re.compile(r"^\W*(thanks|thank you|noted|got it|ok(ay)?|great|perfect|pleasure|cheers|done|all good)\b", re.I)
+MAX_WHATSAPP_DRAFTS = 1
+
+
+def is_pitch(text: str) -> bool:
+    """A sell/buy pitch or a nudge to trade on our venue: things an in-game offer or announcement says better."""
+    t = str(text or "")
+    return bool(_REF.search(t)) or bool(_OWN_VENUE.search(t))
+
+
+def reply_is_filler(text: str, record: dict | None = None) -> bool:
+    """A WhatsApp reply nobody needs: the sender asked nothing and the text is a courtesy."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    if record is not None:
+        asked = ("?" in str(record.get("text") or "") or bool(record.get("actionable"))
+                 or bool(_REF.search(str(record.get("text") or "")))      # a proposal about a card
+                 or bool(
+            {"request", "question", "complaint", "offer_ref"} & set(record.get("types") or [])))
+        if not asked:
+            return True                                   # they asked nothing: no reply needed
+        return bool(_FILLER.match(t)) and "?" not in t and len(t) < 120 and not _num_in(t)
+    return bool(_FILLER.match(t)) and "?" not in t and len(t) < 200 and not _num_in(t)
+
+
+def pitch_to_offer(draft: dict, held: set[str]) -> dict | None:
+    """'Team 9: we have MAL-02 for you at 6 P' -> an offer addressed to t09 (the rails still price-check it)."""
+    text = str(draft.get("text") or "")
+    refs = set(_REF.findall(text))
+    prices = _PRICE.findall(text)
+    to = draft.get("to_team")
+    if not to:
+        try:
+            from bazaar.outbox.store import recipient
+            to = recipient(text).get("to_team")
+        except Exception:  # noqa: BLE001
+            to = None
+    if (not to or not re.match(r"^t\d{2}$", str(to)) or len(refs) != 1 or len(prices) != 1
+            or not _WE_SELL.search(text) or _OWN_VENUE.search(text)):
+        return None
+    ref = next(iter(refs))
+    if ref not in held:
+        return None
+    return {"give": ref, "want_card": None, "want_cash": int(prices[0]), "to": to, "venue": "rastro",
+            "why": "addressed offer instead of a WhatsApp pitch"}
+
+
+def message_policy(plan: dict, held: set[str] | None = None, allies: set[str] | None = None) -> dict:
+    """Talk to the other teams' agents in the game, not on WhatsApp. Sell pitches become addressed offers,
+    venue nudges belong in the in-game announcement, and at most one proactive WhatsApp draft survives (allies
+    or something an offer cannot say). Courtesy replies lose their text. What was dropped is in `messages_dropped`."""
+    if allies is None:
+        try:
+            from bazaar.market.protocol import ALLIED_VENUES
+            allies = set(ALLIED_VENUES.values())
+        except Exception:  # noqa: BLE001
+            allies = set()
+    held = set(held or [])
+    out = dict(plan)
+    dropped, keep = [], []
+    posts = list(plan.get("post_offers") or [])
+    for d in plan.get("promo_drafts") or []:
+        text = str(d.get("text") or "")
+        to = d.get("to_team")
+        if not to:
+            try:
+                from bazaar.outbox.store import recipient
+                to = recipient(text).get("to_team")
+            except Exception:  # noqa: BLE001
+                to = None
+        if d.get("channel") == "in_game":
+            if not out.get("venue_announcement") and len(text) <= 280 and _OWN_VENUE.search(text):
+                out["venue_announcement"] = text
+            dropped.append({"text": text[:120], "why": "in-game text goes in venue_announcement"})
+            continue
+        if to in allies:
+            keep.append(d)
+            continue
+        if is_pitch(text):
+            offer = pitch_to_offer({**d, "to_team": to}, held)
+            same = offer and any(p.get("give") == offer["give"] and p.get("to") == offer["to"] for p in posts)
+            if offer and not same and len(posts) < 5:
+                posts.append(offer)
+            dropped.append({"text": text[:120], "why": "addressed offer posted instead" if offer else
+                            "pitch or venue nudge: use post_offers / venue_announcement"})
+            continue
+        keep.append(d)
+    keep.sort(key=lambda d: 0 if (d.get("to_team") in allies) else 1)
+    for d in keep[MAX_WHATSAPP_DRAFTS:]:
+        dropped.append({"text": str(d.get("text") or "")[:120], "why": "more than one WhatsApp draft in a plan"})
+    out["promo_drafts"] = keep[:MAX_WHATSAPP_DRAFTS]
+    out["post_offers"] = posts
+    reps = []
+    for r in plan.get("whatsapp_replies") or []:
+        if reply_is_filler(r.get("text")):
+            dropped.append({"text": str(r.get("text") or "")[:120], "why": "courtesy reply nobody asked for"})
+            r = {**r, "text": ""}
+        reps.append(r)
+    out["whatsapp_replies"] = reps
+    if dropped:
+        out["messages_dropped"] = dropped
+    return out
 
 
 def validate(plan: dict, pic: dict) -> list[str]:
