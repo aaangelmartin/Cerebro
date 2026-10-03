@@ -2,6 +2,26 @@
 
 Hallazgos con fecha y hora de Madrid, los más recientes arriba. La referencia consolidada está en [`BAZAAR.md`](BAZAAR.md).
 
+## 2026-10-03 04:50 — Bot auditado en 3 rondas y grabadora en marcha
+
+- **12 consultores independientes, en 3 rondas,** revisaron el bot nuevo: API real, seguridad, ensayos generales, Laboratorio, robustez de 20 h, duelos, mercado, revisión de código, regresiones y un equipo rojo. Los últimos votos son **listo**. Todos los fallos graves están arreglados con su test (457 tests).
+- **Fallos importantes encontrados y corregidos:**
+  - dealers y mercado arrancaban sin catálogo;
+  - el puesto gratis podía pasar por nuestra tienda y no se abría nunca;
+  - los duelos se podían pausar o perder la única aceptación del tick;
+  - el ciclo de aprendizaje no se cerraba;
+  - rivales podían bloquear nuestras 6 conversaciones;
+  - una subida de comisión tras aceptar costaba −226 P.
+- **Decisiones del equipo:**
+  - publicar solo en El Rastro, para no dar puntos de mercado a rivales;
+  - duelos en modo acotado (Claude propone, el código no le deja ceder de más);
+  - sobres solo si valen claramente más;
+  - cerrar rápido los regateos pequeños;
+  - la oferta final de un dealer gana la aceptación a un duelo que puede esperar.
+- **Grabadora:** guarda todo lo que pasa en el juego (feed sin huecos, libros de todos los mercados, clasificación, chats con dealers, historial completo de duelos, historial de cartas) en `bazaar/data/record/`.
+- **Ensayo general:** 140,7 puntos con Opus frente a 132,3 solo con código; tienda abierta en el tick de la paga; Market Test nunca por debajo del puesto gratis.
+- **Pendiente para las 09:00:** encender el bot y, tras la paga, comprobar en `/api/venues` que nuestra tienda es `board`.
+
 ## 2026-10-03 02:25 — Bot nuevo (`bazaar/`) listo para las 09:00
 
 - **Bot reescrito de cero** en `bazaar/` (rama `feat/bazaar-v2`). Lo explica todo [`bazaar/README.md`](../bazaar/README.md) y las interfaces están en [`bazaar/CONTRACTS.md`](../bazaar/CONTRACTS.md). El código del viernes pasa a `legacy/`.
