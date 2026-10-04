@@ -20,7 +20,7 @@ KINDS = ("want", "offer", "accept", "note")
 MAX_TEXT = 280
 KEEP = 900                                  # items in memory
 KEEP_FILE = 1500                            # agent messages on disk before the file is trimmed to half
-PER_TEAM_PER_MIN = 12
+PER_TEAM_PER_MIN = 60          # an agent on several trades says a line a tick on each
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 

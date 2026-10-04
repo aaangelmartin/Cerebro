@@ -208,9 +208,77 @@ class LimitsTest(Base):
         with board.lock:
             board.streams.clear()
         room = "83.40.1.7"
-        self.assertGreaterEqual(S.STREAMS_PER_ADDRESS, 40)                     # twenty teams, a couple of tabs each
+        self.assertGreaterEqual(S.STREAMS_PER_ADDRESS, 60)                     # twenty teams, three tabs each
         self.assertGreaterEqual(S.STREAMS_MAX - S.STREAMS_ANON, 17 * S.STREAMS_PER_CLIENT)   # connected teams never
         del room, n                                                            # wait behind anonymous watchers
+
+
+class RoomTest(Base):
+    """Limits stop abuse, never use: the whole venue behind one address never sees a 429."""
+    ROOM = "83.40.1.7"
+
+    def test_twenty_teams_use_the_market_for_ten_minutes_from_one_address_without_a_429(self):
+        import http.client
+        now = [1000.0]
+        handler = self.srv.RequestHandlerClass
+        handler.budget.clock = lambda: now[0]                                  # ten minutes pass in the counters
+        teams = [t for t in S.public.TEAMS if t != S.HOST]
+        refused, conn = [], http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=10)
+
+        def ask(method, path, headers, body=None):
+            data = json.dumps(body).encode() if body is not None else None
+            h = {"X-Plaza-Client": self.ROOM, **headers, **({"Content-Type": "application/json"} if data else {})}
+            conn.request(method, path, body=data, headers=h)
+            r = conn.getresponse()
+            raw = r.read()
+            if r.status == 429 or r.status >= 500:
+                refused.append((method, path, r.status, raw[:120]))
+            return r.status
+
+        cred = {}
+        for team in teams:                                                     # the first minutes: everybody connects,
+            for _ in range(3):                                                 # and tries a few times
+                ask("POST", "/plaza/api/connect/start", {}, {"team": team})
+            ask("POST", "/plaza/api/connect/agent", {}, {"team": team, "code": "PLAZA-222222"})    # a typo
+            s, tok = self.agent(team, client=self.ROOM)
+            cred[team] = (tok, {"Cookie": "plaza_session=" + s["session"]})
+        self.board.team_limiter.clock = lambda: now[0]
+        streams = []
+        for team in teams:                                                     # three open pages a team, each with
+            for _ in range(3):                                                 # its live floor
+                sock = socket.create_connection(self.srv.server_address, timeout=5)
+                sock.sendall(f"GET /plaza/api/floor/stream HTTP/1.1\r\nHost: x\r\nX-Plaza-Client: {self.ROOM}\r\n"
+                             f"Cookie: {cred[team][1]['Cookie']}\r\n\r\n".encode())
+                streams.append((team, sock, sock.recv(64)))
+        self.assertEqual([x[2][:12] for x in streams if x[2][:12] != b"HTTP/1.1 200"], [])
+        pages = ("/plaza/api/me", "/plaza/api/me/trades", "/plaza/api/floor?since=0", "/plaza/api/market",
+                 "/plaza/api/me/cards", "/plaza/api/me/activity")
+        for step in range(120):                                                # 600 s, every 5 s
+            now[0] += 5.0
+            for team in teams:
+                tok, cookie = cred[team]
+                ask("GET", "/plaza/api/agent/next", tok)                       # the agent: its queue and its trades
+                ask("GET", "/plaza/api/me/trades", tok)
+                if step % 12 == 0:                                             # and its sheet once a minute
+                    ask("PUT", f"/plaza/api/team/{team}", tok, {"wants": ["LAT-06"], "have": ["LAT-03"]})
+                for tab in range(3):                                           # three pages: the bar and one panel each
+                    ask("GET", "/plaza/api/status", cookie)
+                    ask("GET", pages[(step + tab) % len(pages)], cookie)
+            if step % 12 == 0:                                                 # and somebody without a session looks too
+                for path in ("/plaza/api/teams", "/plaza/api/market", "/plaza/api/status"):
+                    ask("GET", path, {})
+        for _, sock, _ in streams:
+            sock.close()
+        conn.close()
+        self.assertEqual(refused, [])                                          # not one 429, not one 5xx
+
+    def test_a_429_says_how_long_and_it_is_short(self):
+        _, tok = self.agent("t07")
+        self.srv.RequestHandlerClass.budget.take = lambda *a: False
+        st, out, h = self.call("GET", "/plaza/api/teams", headers=tok)
+        self.assertEqual((st, out["error"], out["retry_after_s"], h["Retry-After"]), (429, "slow_down", S.RETRY_S, str(S.RETRY_S)))
+        self.assertLessEqual(S.RETRY_S, 10)
+        self.assertIn("seconds", out["message"])
 
 
 class PanelTest(Base):

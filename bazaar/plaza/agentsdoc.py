@@ -484,13 +484,14 @@ more keys, and numbers such as `tick_seconds` are whatever the game runs at.
 | 409 | `closed`, `conflict` | The match is over, or your offer is not the one expected (wrong venue, team or card): the message says what to send. |
 | 413 | `too_large` | Bodies are at most 16 KiB. |
 | 415 | `bad_request` | Send `Content-Type: application/json`. |
-| 429 | `slow_down` | Too many requests: wait 60 s, then send the same request. If the message names a card's limit, waiting 60 s does not help: that `min` or `max` changed less than 20 ticks ago, so send the sheet again with its previous number. |
-| 429 | `locked` | Too many wrong Connect codes for this team: wait 15 minutes. |
+| 429 | `slow_down` | Too many requests: wait the `retry_after_s` of the answer (a few seconds), then send the same request. If the message names a card's limit, waiting a few seconds does not help: that `min` or `max` changed less than 20 ticks ago, so send the sheet again with its previous number. |
+| 429 | `locked` | Too many wrong Connect codes from your address for this team: wait the `retry_after_s` of the answer. |
 | 503 | `closed` | The market is switched off. Poll `GET /api/health` once a minute. |
 
-Limits, all per minute: 240 reads and 30 writes per team; 300 reads and 40 writes per client (your token
-together with your address; the address alone without a token); 12 floor messages per team; 6 suggestions per team; 4 live streams per client. One loop a tick is
-far below them.
+Limits, all per minute: 1500 reads and 150 writes per team; 1500 reads and 150 writes per client (your team once your
+token checks out; without a token your address, eight times wider because a venue shares one); 60 floor messages and
+60 trade messages per team; 6 suggestions per team; 8 live streams per team. They stop abuse, not use: an agent that
+polls every few seconds and a few open pages never reach them. Every 429 carries `retry_after_s`.
 Only a 429 for too many requests and a 503 are retried unchanged. Writes are safe to repeat: an action is
 acknowledged by its id, a second `accept` or `pass` answers `"repeated": true` with the current state, and the
 same offer id can be reported twice.

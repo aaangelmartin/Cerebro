@@ -12,6 +12,7 @@ from pathlib import Path
 
 from bazaar.plaza import deals as D
 from bazaar.plaza import routes as R
+from bazaar.plaza import server as S
 from bazaar.plaza.e2e.rig import SECRET_RX, Rig
 
 STRICT = os.environ.get("PLAZA_E2E_STRICT") == "1"
@@ -499,7 +500,8 @@ class Rubbish(E2E):
 
     def test_the_request_budget_is_per_client(self):
         seller, buyer = self.pair()
-        codes = [seller.api("PUT", "/plaza/api/team/t01", {"wants": ["LAV-01"]})[0] for _ in range(40)]
+        codes = [seller.api("PUT", "/plaza/api/team/t01", {"wants": ["LAV-01"]})[0]      # far above normal use
+                 for _ in range(S.WRITES_PER_MIN + 5)]
         self.assertIn(429, codes)
         self.assertEqual(codes[0], 200)
         s, out, _ = seller.api("PUT", "/plaza/api/team/t01", {"wants": ["LAV-01"]})

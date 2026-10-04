@@ -20,7 +20,7 @@ TOKEN_HEADER = "X-Plaza-Token"
 TEAM_PATH = re.compile(API + r"/team/(t\d{2})")
 ME_CARD_PATH = re.compile(API + r"/me/card/([A-Z]{3}-\d{2})")
 PRIVATE = "only your team sees your limits"
-READS_PER_MIN, WRITES_PER_MIN = 240, 30           # per team, on top of the server's budget per client address
+READS_PER_MIN, WRITES_PER_MIN = 1500, 150         # per team: far above an agent and a few open pages
 CARD_KEYS = {"op", "list", "ref", "price", "bid", "min", "max", "value"}
 LIMITS_OF = {"wants": ("max", "value"), "spares": ("min", "value"), "for_sale": ("min", "value"), "have": ()}
 
@@ -41,7 +41,7 @@ class Limiter:
                 q.append(now)
             self.hits[(team, kind)] = q
         if not ok:
-            raise PlazaError(429, "slow_down", "too many requests for this team; try again in a minute")
+            raise PlazaError(429, "slow_down", "too many requests for this team; try again in a few seconds")
 
 
 def attach(board) -> None:

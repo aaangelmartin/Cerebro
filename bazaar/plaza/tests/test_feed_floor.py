@@ -2,6 +2,8 @@
 import json
 import tempfile
 import unittest
+
+from bazaar.plaza.floor import PER_TEAM_PER_MIN
 from pathlib import Path
 
 from bazaar.plaza import feed as F
@@ -124,7 +126,7 @@ class FloorTest(unittest.TestCase):
         self.assertEqual(again.post("t07", False, {"kind": "note", "text": "x"})["id"], a["id"] + 1)
 
     def test_rate_and_retention(self):
-        for i in range(12):
+        for i in range(PER_TEAM_PER_MIN):
             self.floor.post("t07", False, {"kind": "note", "text": str(i)})
         with self.assertRaises(PlazaError) as c:
             self.floor.post("t07", False, {"kind": "note", "text": "13"})

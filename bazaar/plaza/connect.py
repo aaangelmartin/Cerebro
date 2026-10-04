@@ -27,10 +27,10 @@ ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
 # Every team at the venue sits behind one public address, so an address is a whole room: what is counted is one
 # address asking for one team, with a wide ceiling for the address. Nobody's share is spent by somebody else's team.
-STARTS_PER_PAIR, STARTS_PER_CLIENT = 6, 400         # per WINDOW_S: (client, team), and the client over every team
-TRIES_PER_PAIR, TRIES_PER_CLIENT = 10, 200          # wrong codes per WINDOW_S: the same two counts
+STARTS_PER_PAIR, STARTS_PER_CLIENT = 20, 600        # per WINDOW_S: (client, team), and the client over every team
+TRIES_PER_PAIR, TRIES_PER_CLIENT = 20, 400          # wrong codes per WINDOW_S: the same two counts
 MAX_SESSIONS, SESSIONS_PER_TEAM = 2000, 60          # unanswered ones; a client pushes out its own first (3 a team),
-SESSIONS_PER_PAIR = 3                               # so somebody else's starts do not push a real one out
+SESSIONS_PER_PAIR = 6                               # so somebody else's starts do not push a real one out
 MAX_HITS = 5000
 REPLACE_AFTER_S = 10 * 60.0                         # a verified team's agent this silent is replaced by a proof alone
 SAVE_SEEN_EVERY_S = 10.0

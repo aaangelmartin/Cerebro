@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from bazaar.plaza import floor as F
 from bazaar.plaza import server as S
 
 CATALOG = {"sets": [{"id": "LAT", "name": "La Latina", "color": "#F2A541", "released": True, "cards": [
@@ -280,8 +281,8 @@ class ServerTest(unittest.TestCase):
     def test_floor_rate_per_team(self):
         self.pin("t07")
         codes = [self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": f"n{i}"}, {"X-Plaza-Pin": "42424242"})[0]
-                 for i in range(13)]
-        self.assertEqual((codes[:12], codes[12]), ([200] * 12, 429))
+                 for i in range(F.PER_TEAM_PER_MIN + 1)]
+        self.assertEqual((codes[:-1], codes[-1]), ([200] * F.PER_TEAM_PER_MIN, 429))
 
     def test_floor_stream(self):
         import http.client

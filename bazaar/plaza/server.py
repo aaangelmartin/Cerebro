@@ -39,8 +39,12 @@ HOST = public.HOST
 VENUE = matcher.VENUE
 REFRESH_S = 15.0
 MAX_BODY = 16 * 1024
-READS_PER_MIN, WRITES_PER_MIN = 300, 40
-SHARED_READS = 8                           # anonymous reads are counted per address, which the venue shares
+# Limits stop plain abuse, never normal use: a team is one agent polling every few seconds plus a few open pages
+# that poll and stream, and about twenty teams sit behind ONE public address. Counted per team once its token or
+# session checks out; without a credential per address, with room for the whole venue.
+READS_PER_MIN, WRITES_PER_MIN = 1500, 150
+SHARED_READS = 8                           # no credential: counted per address, which the venue shares
+RETRY_S = 5                                # what a 429 for too many requests asks the caller to wait
 STATIC = {"/plaza/static/plaza.css": ("plaza.css", "text/css; charset=utf-8"),
           "/plaza/static/plaza.js": ("plaza.js", "text/javascript; charset=utf-8"),
           "/plaza/static/components.js": ("components.js", "text/javascript; charset=utf-8")}
@@ -68,8 +72,8 @@ HOURS_KEPT = 72
 PROPOSED_ON_FLOOR = 8                      # a rebuild that proposes more than this does not flood the floor
 TICK_S = 2.0                               # how often the game feed is read for the live floor
 STREAM_MAX_S = 600.0                       # an SSE connection is closed after this; the page reconnects
-STREAMS_MAX, STREAMS_PER_CLIENT = 200, 4   # per connected team; a whole room may share one address, so
-STREAMS_PER_ADDRESS, STREAMS_ANON = 60, 100 # anonymous watchers get a wider share per address and half the total
+STREAMS_MAX, STREAMS_PER_CLIENT = 400, 8   # per connected team; a whole room may share one address, so
+STREAMS_PER_ADDRESS, STREAMS_ANON = 120, 200  # anonymous watchers get a wider share per address and half the total
 SOCKET_TIMEOUT_S = 20.0                    # a request that stops sending is dropped, never parked
 SLOW_REBUILD_S, REBUILD_WAIT_S = 2.0, 2.0  # a board this slow to build is rebuilt less often; nobody waits longer
 THREADS_READ = 500                         # game threads looked at for a proof, newest first
@@ -352,6 +356,13 @@ class Board:
     def stale(self) -> None:
         with self.lock:
             self.snap = {**self.snap, "built": 0.0}
+
+    def tick_seconds(self) -> float | None:
+        """How long a tick lasts now, as the game's own clock says (15 s on Sunday): never a constant of ours."""
+        try:
+            return status_mod.status(self.record, VENUE, True, False).get("tick_seconds")
+        except Exception:  # noqa: BLE001
+            return None
 
     def now_tick(self, fallback=None):
         """The tick the game is at now, from the recorder's clock: the same every answer of the market gives."""
@@ -765,7 +776,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8", cors=cors)
 
     def _error(self, status: int, code: str, message: str) -> None:
-        self._json(status, {"error": code, "message": message})
+        body = {"error": code, "message": message}
+        if status == 429:                               # always says how long: short, unless it is a real hold
+            wait = int(connect_mod.WINDOW_S) if code == "locked" or "connection attempts" in message else \
+                int(private.COOL_TICKS * (self.board.tick_seconds() or 15)) if "ticks" in message else RETRY_S
+            body["retry_after_s"] = wait
+            self.extra = tuple(self.extra) + (("Retry-After", str(wait)),)
+        self._json(status, body)
 
     def _file(self, name: str, ctype: str, cache: str = "no-store") -> None:
         try:
@@ -913,7 +930,7 @@ class Handler(BaseHTTPRequestHandler):
         # The page's own files are cheap and every team at the venue may share one address: only the API is budgeted.
         if (path.startswith("/plaza/api/") or path.startswith("/plaza/admin/api/")) \
                 and not self.budget.take(self._budget_key(), "read"):
-            return self._error(429, "slow_down", "too many requests; try again in a minute")
+            return self._error(429, "slow_down", f"too many requests; try again in {RETRY_S} seconds")
         if path.startswith("/plaza/admin"):
             return self._admin_get(path, {k: v[-1] for k, v in parse_qs(u.query).items()})
         if path in ("/", "/plaza", "/plaza/") or PAGE_PATH.fullmatch(path):
@@ -1055,7 +1072,8 @@ class Handler(BaseHTTPRequestHandler):
                 busy = False
                 board.streams[client] = board.streams.get(client, 0) + 1
         if busy:
-            return self._error(429, "slow_down", "too many live connections; poll /plaza/api/floor?since= instead")
+            return self._error(429, "slow_down", "too many live connections; poll /plaza/api/floor?since= every few "
+                                                 "seconds instead")
         try:
             last = self.headers.get("Last-Event-ID") or ""
             since = int(last) if re.fullmatch(r"\d{1,9}", last) else q.get("since", max(0, board.floor.seq - 40))
@@ -1141,7 +1159,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         self.route = "write"
         if not self.budget.take(self._budget_key(), "write"):
-            return self._error(429, "slow_down", "too many requests; try again in a minute")
+            return self._error(429, "slow_down", f"too many requests; try again in {RETRY_S} seconds")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._error(415, "bad_request", "send Content-Type: application/json")
         if not self.headers.get(TOKEN_HEADER) and self._cross_site():
