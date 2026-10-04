@@ -917,15 +917,20 @@ class MarketDomain:
             bids = []
             # ...except the common/uncommon that completes a page: only a TEAM sale of it scores, so we bid for it
             team_goal = {r for r in goal if _team_only(values, control, r)}
+            goal_cash = 0                           # cash the goal bids of this tick already take
             for r in sorted(team_goal - wanted)[:bid_room] if not (self._funding or cautious) else []:
+                left = int(avail - committed - goal_cash)
                 if _off_page(values, r):            # an epic or a legendary: the goal price itself, below value
-                    price = min(int(goal[r]), int(_last_value(values, r)) - 1, per_deal, int(avail - committed))
+                    price = min(int(goal[r]), int(_last_value(values, r)) - 1, per_deal, left)
+                    if price < int(goal[r]) and price == left:
+                        continue                    # not enough free cash for the goal price: no cut-price bid
                 else:
                     price = min(int(goal[r]), int(values.book(r) * LAST_CARD_BID_BOOK), proto.MAX_BID_P, per_deal,
-                                int(avail - committed))
+                                left)
                 if price >= 1:
                     v = _last_value(values, r)
-                    bids.append(BidCand(id=f"g{len(bids) + 1}", ref=r, value=round(v, 1), min_price=1,
+                    goal_cash += price
+                    bids.append(BidCand(id=f"g{len(bids) + 1}", ref=r, value=round(v, 1), min_price=price,
                                         max_price=price, price=price, venue=proto.choose_venue(venues, price, 1),
                                         score=round(v - price, 2)))
 
@@ -978,6 +983,9 @@ class MarketDomain:
                                         tick)        # the brain's own post may sell a page-goal single; the code not
         state = {"tick": _g(sit, "tick"), "cash": cash, "spend_cap": spend_cap, "affinity": values.affinity,
                  "posts_left_this_tick": room_total, "bid_cash_room": cash_room,
+                 # a goal bid (the plan's card at the plan's price) has its own cash: BID_COMMIT_MAX is for the
+                 # protocol's speculative bids, and it kept every goal above 40 P unposted (code-73c02496)
+                 "_goal_cash": sum(b.price for b in bids if _is_goal_bid(b)),
                  "accept_candidates": [self._accept_row(c) for c in accepts],
                  "post_candidates": [{"id": p.id, "card": p.asset.get("ref"), "name": clean(p.asset.get("name") or "", 60),
                                       "our_value": p.value, "min_ask": p.min_ask, "max_ask": p.max_ask,
@@ -1090,6 +1098,7 @@ class MarketDomain:
         so many copies of a LAV/MAL/RET card in play (this accept + these posts) that the last could go."""
         out, assets, refs = [], set(), set()
         cash_room = float(state.get("bid_cash_room") or 0)
+        goal_cash = float(state.get("_goal_cash") or 0)
         avail = state.get("_avail") or {}
         given: dict[str, int] = {}
         for r in gone or []:
@@ -1131,9 +1140,16 @@ class MarketDomain:
                                           or "spare worth little to us"))
             elif kind == "bid":
                 price = max(c.min_price, min(c.max_price, _int(choice.get("price"), c.price)))
-                if c.ref in refs or price > cash_room:
+                if c.ref in refs:
                     continue
-                cash_room -= price
+                if _is_goal_bid(c):
+                    if price > goal_cash:
+                        continue
+                    goal_cash -= price
+                elif price > cash_room:
+                    continue
+                else:
+                    cash_room -= price
                 refs.add(c.ref)
                 out.append(self._act_bid(c, price, source, clean(choice.get("reason") or "", 200)))
             elif kind == "swap":
@@ -1353,6 +1369,9 @@ class MarketDomain:
                     continue
                 used.add((kind, c.id))
                 picks.append((kind, c, m))
+        # the plan's goal bids are not the model's to skip: post each one it left out, first in the tick
+        picks = [("bid", b, None) for b in state["_bids"]
+                 if _is_goal_bid(b) and ("bid", b.id) not in used] + picks
         gone = list(acc[pick].out_refs) if pick and pick in acc else []
         out.extend(self._emit(picks, state, "opus", gone))
         lids = feedback.cited(self._ctx, moves.get("lesson_ids"))
@@ -1361,6 +1380,11 @@ class MarketDomain:
                 a.lesson_ids = list(lids)
         self.last_notes = notes
         return out
+
+
+def _is_goal_bid(b: Any) -> bool:
+    """A bid for a goal card (the plan's or the operator's), built in _prepare with an id g<n>."""
+    return str(getattr(b, "id", "")).startswith("g")
 
 
 def _int(x: Any, default: int) -> int:

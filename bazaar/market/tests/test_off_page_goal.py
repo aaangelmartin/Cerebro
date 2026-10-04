@@ -81,6 +81,49 @@ class OffPageGoal(unittest.TestCase):
         self.assertEqual([b.ref for b in prepare({"LAV-11": 230})["_bids"]], ["LAV-11"])   # gone from the book
 
 
+def posted(goals, moves=None, cash=600, per_deal=240):
+    """The post_offer bids the market really emits this tick: the code plan, or the model's choice (moves)."""
+    sit = SimpleNamespace(tick=10, me=me((), cash), my_offers=[], threads=[], venues=[], feed_new=[], limits={},
+                          books={})
+    ctx = SimpleNamespace(control={"venue_reserve": False, "max_spend_per_deal": per_deal}, budget={},
+                          cautious=False, llm_ok=False)
+    d = MarketDomain(rivals=RivalModel(Path(tempfile.mkdtemp()) / "r.json", seed=False), catalog=CATALOG,
+                     use_llm=False)
+    with mock.patch.object(config, "LIVE", Path(tempfile.mkdtemp())), \
+            mock.patch.object(S, "dealer_orders", return_value=[]), \
+            mock.patch.object(S, "post_offers", return_value=[]), \
+            mock.patch.object(S, "reserved_refs", return_value=set()), \
+            mock.patch.object(S, "workshop_orders", return_value="auto"), \
+            mock.patch.object(S, "goal_buys", return_value=goals):
+        acc, posts, state = d._prepare(sit, ctx)
+        acts = d._code_plan(acc, posts, state) if moves is None else d._apply(moves, acc, posts, state)
+    return [(a.params["want"]["cards"][0], a.params["give"]["cash"]) for a in acts
+            if a.kind == "post_offer" and (a.expected or {}).get("kind") == "bid"]
+
+
+class GoalBidIsPosted(unittest.TestCase):
+    """code-73c02496: the plan's goals (CHA-11 at 110, LAT-11 at 60) were candidates but never posted: the
+    protocol's 40 P room for speculative bids dropped every goal above 40 P, and the model could skip them."""
+    NOTHING = {"accept": None, "accept_reason": "", "post": [], "bids": [], "swaps": [], "note": "",
+               "lesson_ids": []}
+
+    def test_the_code_plan_posts_a_goal_above_the_speculative_room(self):
+        self.assertEqual(posted({"LAV-11": 230}), [("LAV-11", 230)])
+
+    def test_the_model_cannot_skip_a_goal_bid(self):
+        self.assertEqual(posted({"LAV-11": 230}, moves=self.NOTHING), [("LAV-11", 230)])
+
+    def test_two_goals_share_the_free_cash_and_never_take_the_reserve(self):
+        self.assertEqual(posted({"LAV-11": 110, "LAV-12": 60}), [("LAV-11", 110), ("LAV-12", 60)])
+        # 150 P in hand: the reserve stays, the second goal has no cash left and is not posted cut-price
+        self.assertEqual(posted({"LAV-11": 110, "LAV-12": 60}, cash=150), [("LAV-11", 110)])
+        # 100 P: the first goal does not fit at its price and is skipped; the second one does
+        self.assertEqual(posted({"LAV-11": 110, "LAV-12": 60}, cash=100), [("LAV-12", 60)])
+
+    def test_a_goal_never_reaches_our_value(self):
+        self.assertEqual(posted({"LAV-11": 400}, per_deal=500), [("LAV-11", 287)])
+
+
 class PlanCheck(unittest.TestCase):
     PIC = {"held_refs": ["LAV-01", "MAL-11"],
            "sets": {"LAV": {"missing": [], "off_page": [{"ref": "LAV-11", "value_to_us": 288.0},
