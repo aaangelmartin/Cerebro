@@ -34,6 +34,10 @@ class SandboxTest(unittest.TestCase):
         st, out = E.http_json("GET", info["game"] + "/api/me")                 # the game wants a key
         self.assertEqual(st, 401)
         st, out = E.http_json("POST", info["game"] + "/api/threads", {"with": "t10", "venue": "v07"},
+                              {"X-Team-Key": guest["game_key"]})               # the host's own venue: refused,
+        self.assertEqual(st, 409)                                              # as the real game does (self_venue)
+        self.assertIn("self_venue", str(out))
+        st, out = E.http_json("POST", info["game"] + "/api/threads", {"with": "t10", "venue": "rastro"},
                               {"X-Team-Key": guest["game_key"]})               # the real game's two calls
         self.assertEqual(st, 200)
         self.assertIsInstance(out["id"], int)

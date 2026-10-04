@@ -62,6 +62,8 @@ class Game:
         other = body.get("with")
         if other not in g_teams(self.game):
             raise GameError(400, "`with` is a team id such as t10")
+        if other == HOST and body.get("venue") == VENUE:      # as the real game: nobody deals with a
+            raise GameError(409, "self_venue: t10 owns v07; open the thread on El Rastro (venue rastro)")  # venue's owner there
         g = self.game
         with g.lock:
             key = tuple(sorted((team, other)))
@@ -84,7 +86,7 @@ class Game:
         return {"id": tid, "status": "open", "sent": True}
 
     def guest(self) -> dict:
-        """What the agent under test is given: a fresh Connect prompt (the code works once, for 15 minutes), the
+        """What the agent under test is given: a fresh Connect prompt (the code works once, for 60 minutes), the
         game's address and its simulated key."""
         s, got, _ = self.rig.call("POST", "/plaza/api/connect/start", {"team": GUEST})
         key = next(k for k, t in self.teams.items() if t == GUEST)

@@ -1,7 +1,7 @@
 """Connecting a team to the plaza: a browser session, a one-use code, an agent token and a proof in the game.
 
     start(team)            -> a session for the browser and a short code, with the prompt the human hands its agent
-    agent(team, code)      -> the agent trades the code for its token (the code works once, for 15 minutes)
+    agent(team, code)      -> the agent trades the code for its token (the code works once, for 60 minutes)
     prove(team, text)      -> the same code, seen as text in a game thread the team sent us, verifies the session
     auth(token)            -> the team an agent token writes for; every call is its heartbeat
 
@@ -21,7 +21,7 @@ from pathlib import Path
 from .store import TEAM_RX, PlazaError, read_json, write_atomic
 
 HOST = "t10"
-CODE_TTL_S = 15 * 60.0
+CODE_TTL_S = 60 * 60.0             # teams take a while to hand the prompt to their agent
 SESSION_TTL_S = 12 * 3600.0
 ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
@@ -33,8 +33,8 @@ MAX_SESSIONS, SESSIONS_PER_TEAM = 8000, 400         # unanswered ones; more than
 MAX_HITS = 5000
 SAVE_SEEN_EVERY_S = 10.0
 ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"       # no 0/O, 1/I
-PROVE_FIRST = ("prove it is your team first: with your own game key, open a thread with t10 in the game and send "
-               "your connection code as the text; this token reads and writes once the market has seen it "
+PROVE_FIRST = ("prove it is your team first: with your own game key, open a thread with t10 on El Rastro (venue rastro; on v07 the "
+               "game answers self_venue) and send your connection code as the text; this token reads and writes once the market has seen it "
                "(a few seconds), so try again shortly")
 CODE_RX = re.compile(r"PLAZA-[2-9A-HJ-NP-Z]{6}")
 TOKEN_RX = re.compile(r"[A-Za-z0-9_-]{20,64}")
@@ -57,12 +57,12 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
         return (
             f"Eres el agente del Team {n} en The Bazaar. {name} es el mercado de Team 10 en el venue "
             f"{venue} (comisión 0; Team 10 nunca es parte). Base de todas las rutas: {base}\n"
-            f"Lee primero {base}/AGENTS.md. Después, con el código {code} (un uso, 15 min):\n"
+            f"Lee primero {base}/AGENTS.md. Después, con el código {code} (un uso, 60 min):\n"
             f"1. POST /api/connect/agent {body}; envía el agent_token como cabecera X-Plaza-Token "
             "siempre.\n"
-            f"2. En el juego, abre un hilo con t10 en el venue {venue} y envía {code} como texto, con TU PROPIA clave del juego. Nunca "
+            f"2. En el juego abre un hilo con t10 en El Rastro (venue rastro, no {venue}) y envía {code} como texto, con TU PROPIA clave del juego. Nunca "
             "envíes esa clave aquí ni a nadie.\n"
-            f"3. Repite GET /api/agent/next hasta verified: true (antes, 403 prove_first). Luego PUT "
+            f"3. Repite GET /api/agent/next hasta verified: true. Luego PUT "
             f"/api/team/{team} con wants, spares, for_sale.\n"
             "4. En cada tick: GET /api/agent/next, ejecuta cada petición en orden, POST /api/agent/ack. Cierra todo "
             f"en el venue {venue}. Hazlo todo tú."
@@ -70,11 +70,11 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
     return (
         f"You are Team {n}'s trading agent in The Bazaar. {name} is Team 10's market on venue {venue} (0 fee; Team "
         f"10 is never a party). Base URL of every path below: {base}\n"
-        f"Read {base}/AGENTS.md first. Then, with code {code} (one use, 15 min):\n"
+        f"Read {base}/AGENTS.md first. Then, with code {code} (one use, 60 min):\n"
         f"1. POST /api/connect/agent {body}; send the agent_token you get as header X-Plaza-Token on every request.\n"
-        f"2. In the game, open a thread with t10 on venue {venue} and send {code} as the text, using YOUR OWN game key. Never send "
+        f"2. In the game, open a thread with t10 on El Rastro (venue rastro, not {venue}) and send {code} as the text, with YOUR OWN game key. Never send "
         "that key here or to anyone.\n"
-        f"3. Poll GET /api/agent/next until verified: true (403 prove_first before). Then PUT "
+        f"3. Poll GET /api/agent/next until verified: true. Then PUT "
         f"/api/team/{team} with wants, spares, for_sale.\n"
         "4. Every tick: GET /api/agent/next, run each request in order, POST /api/agent/ack. Close every deal on "
         f"venue {venue}. Do it all yourself."

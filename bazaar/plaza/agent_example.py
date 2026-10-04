@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 VENUE = "v07"
+PROOF_VENUE = "rastro"       # the proof thread: the game refuses the host on its own venue (self_venue)
 EDGE = 0.1                      # the share of our limit we keep as room when we accept or counter
 HOST_TEAM = "t10"
 PLACEHOLDER = re.compile(r"<your asset id of ([A-Z]{3}-\d{2})>")
@@ -81,7 +82,7 @@ class Agent:
 
     def prove(self, code: str) -> bool:
         """Sends the code to the host in the game, with our own key: that is the proof of identity."""
-        st, th = self.to_game("POST", "/api/threads", {"with": HOST_TEAM, "venue": VENUE})
+        st, th = self.to_game("POST", "/api/threads", {"with": HOST_TEAM, "venue": PROOF_VENUE})
         if st not in (200, 201) or "id" not in th:
             self.log(f"could not open the thread with {HOST_TEAM}: {th.get('message') or th.get('error')}")
             return False

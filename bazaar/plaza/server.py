@@ -29,7 +29,7 @@ from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
-from . import lots as lots_mod, prices
+from . import lots as lots_mod, prices, signals as signals_mod
 from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store, read_json, write_atomic
 
@@ -57,7 +57,7 @@ STATIC_RX = re.compile(r"/plaza/static/((?:(?:screens|i18n|fixtures|fixtures/adm
 ADMIN_STATIC_RX = re.compile(r"/plaza/admin/static/screens/([a-z0-9_]{1,40}\.(js|css))")     # web/admin/<name>
 ADMIN_PAGE = re.compile(r"/plaza/admin/(?:overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs)")
 STANDING_PATHS = ("/plaza/api/me", "/plaza/api/status", "/plaza/api/agent/next")   # answers that carry `standing`
-EXTENSIONS = (team_api, deals_api, lots_mod)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
+EXTENSIONS = (team_api, deals_api, lots_mod, signals_mod)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
 ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
@@ -161,7 +161,7 @@ class Board:
         self.built_in = 0.0                                    # how long the last one took
         self.wait_until = 0.0                                  # a slow board is not rebuilt again before this
         self.stats_at: tuple = (None, 0, {"deals": 0, "volume": 0, "saved": 0, "last": None})
-        for ext in (team_api, deals_api, admin_api, lots_mod):          # a fork hangs its own stores on the board here:
+        for ext in (team_api, deals_api, admin_api, lots_mod, signals_mod):          # a fork hangs its own stores on the board here:
             if hasattr(ext, "attach"):                        # board.team_activity, board.suggest, board.perf
                 ext.attach(self)
 
@@ -712,6 +712,8 @@ class Board:
         try:
             wants = {e["ref"] for e in (snap["sheets"].get(team) or {}).get("wants") or []}
             out["actions"] += lots_mod._lots(self).actions(team, wants)   # an auction of a card it wants: its call
+            sig = signals_mod._signals(self)
+            out["actions"] += sig.actions(signals_mod.for_team(self, snap, team))   # demand only this market sees
         except Exception:  # noqa: BLE001
             pass
         return out
@@ -999,7 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
             rec = self.board.store.check(team, pin, self._client())
         if not rec.get("pin_proved"):                   # a PIN anybody could have set: nothing in the team's name
             raise PlazaError(403, "prove_first", "prove the claim first: send its code as text in a game thread "
-                                                 f"with {HOST}, with your own game key")
+                                                 f"with {HOST} on El Rastro (venue rastro), with your own game key")
         return self._gate(team), True, False
 
     def _session(self, q: dict) -> str | None:
@@ -1369,7 +1371,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
                 out = self.board.store.claim(body.get("team"), body.get("pin"), self._client())
-                out["prove"] = (f"open a thread with {HOST} in the game and send the code as the message text; "
+                out["prove"] = (f"open a thread with {HOST} on El Rastro (venue rastro) and send the code as the message text; "
                                 "the sheet turns verified within a minute")
                 return self._json(200, out)
             if self.command == "POST" and path in ("/plaza/api/connect/start", "/plaza/api/connect/agent"):
@@ -1397,7 +1399,7 @@ class Handler(BaseHTTPRequestHandler):
                 known = bool((self.board.store.declared().get(team) or {}).get("verified"))
                 out = self.board.connect.agent(team, body.get("code"), self._client(), known,
                                                current=self.headers.get(TOKEN_HEADER))
-                out["next"] = (f"prove it is you: open a thread with {HOST} in the game and send the code as the "
+                out["next"] = (f"prove it is you: in the game open a thread with {HOST} on El Rastro (venue rastro, not v07) and send the code as the "
                                f"message text; GET /plaza/api/agent/next says verified within seconds; only then "
                                f"PUT /plaza/api/team/{team} with header {TOKEN_HEADER} (403 prove_first before)")
                 self.board.hour("connect_agent")
@@ -1412,6 +1414,7 @@ class Handler(BaseHTTPRequestHandler):
                 out = self.board.queue.ack(team, body.get("id"), body.get("status"), body.get("note"))
                 self.board.strikes.ack(team, body.get("id"))       # a warning it has now read
                 lots_mod._lots(self.board).ack(team, body.get("id"))
+                signals_mod._signals(self.board).ack(team, body.get("id"))
                 return self._json(200, out)
             for ext in EXTENSIONS:
                 if ext.write(self, self.command, path, body):

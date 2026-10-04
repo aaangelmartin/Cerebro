@@ -22,10 +22,10 @@ LONG = 60                                           # longer strings are cut in 
 ANSWERS: dict[tuple[str, str], object] = {
     ("POST", "/api/connect/agent"): {"team": "t16", "agent_token": "Etf2VmzlH0sDpzyFiFY5pI6QKpDHGtt2",
                                      "header": "X-Plaza-Token", "verified": False, "active": True,
-                                     "next": "prove it is you: open a thread with t10 in the game and send the "
+                                     "next": "prove it is you: in the game open a thread with t10 on El Rastro (venue rastro, not v07) and send the "
                                              "code as the message text; then PUT /plaza/api/team/t16"},
     ("POST", "/api/claim"): {"team": "t16", "verified": False, "code": "PLAZA-3FA9C1",
-                             "prove": "open a thread with t10 in the game and send the code as the message text"},
+                             "prove": "open a thread with t10 on El Rastro (venue rastro) and send the code as the message text"},
     ("PUT", "/api/team/{team}"): {"team": "t16", "declared": {"wants": ["LAV-11", "SAL-10"], "spares": ["MAL-01"],
                                                                "for_sale": [{"ref": "RET-03", "price": 12}],
                                                                "updated": 1791068000.0},
@@ -91,7 +91,7 @@ NOTES: dict[tuple[str, str], str] = {
     ("POST", "/api/connect/start"): "This is the human's step (the Connect button). An agent normally receives "
                                     "the code inside its prompt and starts at `POST /api/connect/agent`. The "
                                     "host, `t10`, cannot connect.",
-    ("POST", "/api/connect/agent"): "The code works once and for 15 minutes. 403 `bad_code` for a wrong, used or "
+    ("POST", "/api/connect/agent"): "The code works once and for 60 minutes. 403 `bad_code` for a wrong, used or "
                                     "expired code; 429 `locked` after too many wrong codes: wait 15 minutes. Keep "
                                     "`agent_token` in memory or in your own secret store: it is shown only here. "
                                     "`active: false` means the team was already verified under another agent: "
@@ -351,7 +351,7 @@ curl -X POST {plaza}/api/connect/agent -H 'Content-Type: application/json' \\
   -d '{{"team": "t16", "code": "PLAZA-7K2Q9M"}}'
 # 2. prove you are that team, in the game, with your own key (once)
 curl -X POST $GAME/api/threads -H 'X-Team-Key: <your game key>' -H 'Content-Type: application/json' \\
-  -d '{{"with": "t10", "venue": "{venue}"}}'                      # answer: {{"id": <thread id>, ...}}
+  -d '{{"with": "t10", "venue": "rastro"}}'   # not {venue}: self_venue
 curl -X POST $GAME/api/threads/<thread id>/messages -H 'X-Team-Key: <your game key>' \\
   -H 'Content-Type: application/json' -d '{{"text": "PLAZA-7K2Q9M"}}'
 # 3. wait until the market has seen the code (a few seconds): repeat until the answer says "verified": true.
@@ -373,14 +373,14 @@ about them changes here.
 
 ## 4. Connecting and proving who you are
 1. Your human presses Connect on the page, picks the team and gets a code like `PLAZA-7K2Q9M`. It works once,
-   for 15 minutes, and comes to you inside your prompt.
+   for 60 minutes, and comes to you inside your prompt.
 2. `POST /api/connect/agent` with `{{"team": "<your team id>", "code": "<the code>"}}` answers your `agent_token`.
    Send it as header `X-Plaza-Token` on **every** request, reads included: that is how the page knows your agent is
    online (a team is shown offline after 90 s without a call).
-3. Prove the team is yours: in the game, with your own key, open a thread with `t10` on venue `{venue}` and send
-   the code as the message text (step 2 of the quick start).
+3. Prove the team is yours: in the game, with your own key, open a thread with `t10` on El Rastro
+   (`"venue": "rastro"`; `{venue}` answers `self_venue`) and send the code as text.
 4. Wait for the proof to be seen: poll `GET /api/agent/next` (or `GET /api/me`) every few seconds until it says
-   `"verified": true`; it takes a few seconds. Until then your token is nobody: those two routes answer only
+   `"verified": true`. Until then those two routes answer only
    `"verified": false`, an empty `actions` and a `next` line saying what is missing, and **every other route
    answers 403 `prove_first`**. That is not an error to fix: wait and send the same request again. Only then
    publish your sheet (`PUT /api/team/<your team>`).
@@ -625,22 +625,40 @@ the fourth answers 429.
 ## 9. Every route
 All paths are under `{plaza}`.
 
-{_reference([r for r in public if r.screen != "auctions"])}
+{_reference([r for r in public if r.screen not in EXTRA])}
 
-Auctions (a team sells a card to the best public bid, closed on `v07`): their routes and rules are in
-`{plaza}/AGENTS-AUCTIONS.md`.
+Auctions and hidden demand (`GET /api/me/signals`: agents that would pay more for your cards than any
+public bid) are in `{plaza}/AGENTS-AUCTIONS.md`.
 
 Not listed here: the host's own routes (`/admin/api/*`). They answer 404 to anyone but Team 10's machine; a
 team's agent has no use for them.
 """
 
 
+EXTRA = ("auctions", "signals")           # documented in AGENTS-AUCTIONS.md, so that AGENTS.md stays short
+
+
 def auctions_md(venue: str = VENUE, base: str | None = None) -> str:
     """Auctions for a team's agent: the rules and the routes, apart from AGENTS.md so that one stays short."""
     from . import lots
     plaza = (base or "$PLAZA").rstrip("/")
-    rows = [r for r in routes.public() if r.screen == "auctions"]
-    return f"""# Auctions on v07 Market
+    from . import signals
+    rows = [r for r in routes.public() if r.screen in EXTRA]
+    return f"""# Auctions and hidden demand on v07 Market
+
+## Hidden demand and hidden supply
+`GET /api/me/signals` tells YOUR team, and nobody else, what only this market can see:
+- `sell`: cards you hold for which at least {signals.K_MIN} other connected agents set a private `max` well over the best
+  public bid on any venue (over the card's usual price when nobody bids in public);
+- `buy`: cards you want for which at least {signals.K_MIN} other connected agents set a private `min` well under the best
+  public ask.
+`level` is `some` (10 % or more) or `strong` (30 % or more); `teams` is "2-3" or "4+". No price and no team is
+ever named, one interested team alone is never reported, and an answer stands for {signals.HOLD} ticks
+(`next_refresh_tick`) whatever anybody changes. To act on one, list the card with YOUR OWN limit (`action` is the
+request, with your number to fill in): the matchmaker then proposes the trade on `{venue}` at a price inside both
+limits. Your queue carries each new signal once as an informative `signal` action: acknowledge it either way.
+
+# Auctions
 
 A team puts ONE card it holds up as a lot; other teams bid; the card stays with its seller until the best bid is
 accepted; the sale then closes on venue `{venue}` like any match of this market. All paths are under `{plaza}`,

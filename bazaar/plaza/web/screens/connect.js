@@ -99,6 +99,7 @@
           if (step) s = { ...s, connected: false, agent_called: false, verified: false, cards_listed: false, agent_online: false, ...step };
           st.status = s; st.checking = false;
           if (st.left) return;
+          if (!API.mock && !s.agent_called && !s.connected && s.code_expires_in <= 0) { pick(st.team); return; }   // the code ran out unused: a fresh prompt, by itself
           draw();
           if (s.connected) { if (st.stop) st.stop(); st.stop = null; setTimeout(() => { if (!st.left) finish(); }, 1600); }
         }, (e) => {
