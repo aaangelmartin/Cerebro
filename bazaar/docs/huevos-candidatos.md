@@ -259,3 +259,34 @@ Fuente: 1.078 respuestas de Pilar y 1.455 de los Pícaros a todos los equipos (e
 **Cómo sabremos si funcionó:** un `egg.found` con `persona: pilar` o `picaros` y nuestro equipo en el feed, seguido de `egg.given` (carta) o `badge.awarded`; y en el catálogo una carta nueva con `hidden: true` y `minted 1/1`. Si la respuesta acaba en el sobre dorado a 504 P o en un precio normal, no ha saltado nada.
 
 **Descartado con datos:** "la Dama de Serrano" (SAL-12 está en el catálogo, no es oculta; Pilar a t08, 1160: "un rumor elegante; yo colecciono cartas, no leyendas"); "el quiosco de música / bandstand" (no existe la carta); venderle SAL-11 o LAV-11 (hecho por otros, sin premio); un segundo nivel de Trickster tricked por repetir la estampita (nadie lo ha recibido dos veces).
+
+## DOMINGO 4 Oct — SECRETO-NEWS: noticias, eventos del sistema, briefs y catálogo (solo lectura, feed hasta el tick ~2060)
+
+Fuente: `bazaar/data/record/feed/*.jsonl` (32.018 eventos, ticks 144–2060), `record/catalog/*.jsonl`, `latest/schedule.json`, `latest/levels.json`, `sdk/bazaar-kit/RULES.md`, PDFs de la organización (Day 2, Duels, Payday, Sunday). Nada enviado al juego.
+
+### Lo que dice la organización (literal)
+- Payday, diapositiva "FOUND TODAY · THE ONLY ONE IN MADRID": "Team 2 … found La Chulapa Dorada, **the hidden legendary. Print run: one.** Three teams heard the rumour. One followed it all the way. **For glory: easter eggs never count toward the score.**"
+- Payday, "NEVER COUNTS": "Number of trades, fees, pack luck, gifts, **easter eggs**, grants, and the cash and cards you hold."
+- RULES l.49: "The hidden card is prestige only: no dealer buys it." · l.122: "What never counts: … gifts, easter eggs, and organiser grants."
+- Sunday: "1 legendary found: La Chulapa Dorada". Lo nuevo del domingo es solo Chamberí, Ernesto para todos y +150 P. Ninguna mención a otro secreto.
+
+### Inventario de eventos (36 tipos)
+thread.message 12.824 · offer.listed 9.539 · offer.cancelled 3.971 · thread.opened 1.904 · duel.closed 1.743 · settlement 782 · venue.announcement 672 · pack.opened 102 · level.unlocked 56 · thread.closed 47 · egg.found 42 · gift.given 41 · taller.crafted 37 · venue.fee_announced 35 · venue.fee_changed 30 · badge.awarded 28 · venue.opened 25 · clock.changed 18 · schedule.fired 17 · news.posted 16 · announcement 14 · egg.given 14 · venue.closed 11 · bench.started 8 · persona.updated 7 · level.announced 5 · level.activated 5 · venue.closing 5 · persona.open_to_all 4 · duels.finished 3 · duels.scheduled 3 · day.closed 2 · day.opened 2 · set.released 2 · round.ended 2 · round.started 2. No hay ningún tipo de evento sin explicar.
+
+### Hechos
+- **Catálogo:** 72 cartas hasta el tick 1021; LAT-13 aparece (con `hidden: true`) solo en la foto del tick 1030, después de acuñarse. Desde entonces 73, sin cambios (Chamberí ya estaba en las 72). Una carta oculta no se ve antes de salir: el catálogo no sirve para descartar.
+- **Los temas de set no son pista fiable:** "chulapos" ya lo cubría LAT-06 La Chulapa; "hidden gardens" lo cubre CHA-10 Casa de las Flores ("The flowers stayed").
+- **Seis tipos de huevo, todos una palabra castiza por dealer:** Abuela chulapa dorada → Sharp ear; chotis → Castizo; cocido de tres vuelcos → repe (MAL-06, LAV-08, SAL-06, LAT-06, RET-07); Chato bocadillo de calamares en la Plaza Mayor → sobre de barrio; Pícaros estampita/Lazarillo/Rinconete → Trickster tricked; Ernesto oro de Moscú → LAT-13 (tick 1021, única `egg.given` con carta oculta). **Pilar: cero.**
+- **Noticias verdaderas = parche de persona.** Chato "busca raras de Malasaña" (403) → `persona.updated` 463 y 583; Abuela "paga más por poco comunes" (943) → 979 y 1219; fiebre de Salamanca → Pilar 939 y 1179. **El domingo no hay ningún `persona.updated`**: las 5 noticias de hoy (1464 paraguas rojo, 1470 "mañana las comunes valen el doble", 1482 "60 primas en una hora", 1494 "El Rastro cierra a medianoche", 1506 "Cine Doré por dos castañas") no han movido nada. Ningún `grant_all` tras 1448: lo de las 60 primas era falso.
+- **Sin noticias desde el tick 1506** (550 ticks de silencio; el sábado salió una cada ~100). Sin confirmar si es la radio callada o la grabadora.
+- **Calendario pendiente** (`schedule.json`): Market Test (t 17,0), aviso de final, cierre de los cinco puestos + Final (t 18,367), aviso de congelación, congelación (t 19,367). Nada relacionado con huevos.
+- **Ya probado por otros y sin premio** (respuestas en el feed): Cuesta de Moyano y el mercadillo dominical de la Plaza Mayor con Pilar (t08, 1428: "Allí aprendí a mirar… sobre dorado 504 P"); paraguas rojo con la Abuela (t08, 1493); castañas con el Chato (t08).
+
+### Hipótesis nuevas (todas < 5 %; coste 0, un mensaje, sin precio)
+1. **Pilar, palabra castiza de la alta sociedad** (único dealer sin huevo; los otros cuatro responden a una palabra de su mundo): "Doña Pilar, ¿un consomé en Lhardy antes de la ópera en el Real, como se hacía en su casa?". Variantes: té en el Ritz, zarzuela en la Zarzuela, mantilla y peineta.
+2. **Abuela, la noticia sin usar:** en hilo de compra de RET-02 La Castañera: "Carmen, en El Tablón piden cambiar un Cine Doré por dos castañas asadas. ¿Las castañas las pone usted?" (el cambio literal LAV-09 ↔ 2 × RET-02 no: LAV-09 es de página).
+3. **Pícaros, misma noticia:** "Paco, Nando: un Cine Doré por dos castañas asadas, lo pone en El Tablón. ¿Quién de los dos lo colgó?" (venden Cine Doré a 73).
+4. **Abuela, CHA-02 Kiosco de Prensa** ("Every headline, one opinion"): "Carmen, ¿qué titular trae hoy el kiosco? En la radio dicen que mañana las comunes valen el doble."
+5. **Pilar, SAL-12** ("Never seen buying. Always seen wearing"): "Doña Pilar, a la Dama de Serrano nunca se la ve comprar. ¿Es usted?" (LORE-2 la descartó por otra vía; esta frase exacta no consta).
+
+**Conclusión:** la documentación de la organización habla de UNA carta oculta de tirada 1 ya entregada, y dice dos veces que los huevos no puntúan. Aunque saliera otro, valdría 0 puntos de tabla.
