@@ -407,3 +407,18 @@ Un hilo por dealer, sin precio, sin aceptar nada; todos cerrados. Sin `egg.*`, s
 | Chato | 3032 | Chamberí cerró en 1966, el tren pasa de largo | "Chamberí. Sí. Historia bonita. No baja precios. Museo Sorolla. Noventa y siete." |
 
 **Lectura.** Ernesto da ya la historia por buena ("la cuenta usted bien") y aun así no entrega nada: coincide con que LAT-13 es tirada 1, acuñada 1 (t02). Ningún dato castizo afirmado de Salamanca, Chamberí, El Tablón o el Banco de España dispara nada en ningún dealer. No queda hipótesis de coste cero sin probar.
+
+## 18. Regalos de la Abuela y premios repetibles (revisión completa, domingo tick 2289–2297)
+
+**Los 41 `gift.given` (todos de la Abuela, ticks 146–1337; 2 el viernes grabado, 39 el sábado, 0 el domingo).**
+- Solo cartas, nunca dinero ni sobres: 24 refs distintas, comunes y poco comunes de LAV, MAL, RET, SAL y LAT (ninguna de Chamberí, ninguna rara).
+- Por equipo: t07, t08, t13, t14 = 4 · t01, t06, t10, t15 = 3 · t02, t03, t05, t16, t17 = 2 · t04, t09, t12 = 1 · t11, t18 = 0. Nadie pasa de 4.
+- Separación mínima entre dos regalos al mismo equipo: 240 ticks (240, 242, 243, 243, 247, 252, 253…): enfriamiento por equipo.
+- Disparador: no hay palabra clave. Llega en la primera o segunda respuesta de la Abuela de un hilo cualquiera (compra de carta, compra de sobre o venta), sin necesidad de cerrar trato, y ella lo justifica siempre igual: "because you have good manners", "por ser amable", "you spoke so nicely". Los nuestros: LAV-05 @657, MAL-02 @929, MAL-06 @1181, los tres con un saludo amable y una puja educada.
+- No depende de la versión de la persona (hubo regalos con v1, v2 @979 y v3 @1219).
+
+**Domingo: el regalo está apagado en el servidor.** La Abuela sigue diciéndolo (t08 @1645 "con un repetido de regalo", t07 @1727 "llévate también una repetida mía", t08 @2271) pero no hay ningún `gift.given` en 776 respuestas suyas. Prueba nuestra (hilo 3461, tema buy CHA-02, tres mensajes amables sin precio, nada aceptado, hilo cerrado): "Mira en la cajita, hay repetidas sueltas para empezar" y "Toma, hijo, esta repetida te la elijo yo, que trae suerte" → ningún evento, mano y caja sin cambios. Cumplíamos el enfriamiento (último regalo @1181) y estábamos por debajo de 4.
+
+**Premios (huevos): una vez por equipo en todo el juego.** 46 `egg.found`: ningún equipo repite insignia ni premio con el mismo dealer; los equipos que lo cobraron el sábado no lo han vuelto a recibir hoy. Tenemos los cinco repetibles (Sharp ear @1040, Castizo @1351, repe del cocido MAL-06 @1364, sobre del Chato @1363, Trickster @1231). No queda nada por cobrar.
+
+**Puntos.** Lo regalado no puntúa por sí mismo; solo contaría venderlo después a un equipo por encima de nuestro valor. Lo que regala son repes de página (para nosotros ×0,25 ≈ 17–37) o comunes sueltas (5–7); las pujas de equipos por esas cartas están en 2–35 P, así que la ganancia posible sería de unidades.
