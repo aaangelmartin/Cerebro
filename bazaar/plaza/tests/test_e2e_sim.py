@@ -296,6 +296,79 @@ class RoughAgents(E2E):
         self.close()
 
 
+class Standing(E2E):
+    """A matched trade that its maker closes on another venue: a warning, then the ban, and we can lift it."""
+
+    def elsewhere(self, buyer: str, seller: str, ref: str, price: int) -> None:
+        oid = self.rig.game.post_offer(buyer, {"venue": "rastro", "give": {"cash": price}, "want": {"cards": [ref]},
+                                               "to": seller})["id"]
+        self.rig.game.accept(seller, oid, {"assets": [self.rig.game.asset_of(seller, ref)]})
+        self.rig.game.advance()
+        self.rig.refresh()
+
+    def test_one_warning_then_the_ban_and_the_host_lifts_it(self):
+        s1 = self.rig.agent("t01", for_sale=[{"ref": "SAL-10", "price": 70, "min": 60}], have=["SAL-10", "SAL-01"])
+        s2 = self.rig.agent("t03", for_sale=[{"ref": "RET-09", "price": 60, "min": 50}], have=["RET-09"])
+        buyer = self.rig.agent("t02", wants=[{"ref": "SAL-10", "max": 90}, {"ref": "RET-09", "max": 75}])
+        self.rig.refresh()
+        self.assertEqual((self.state("t01", "t02"), self.state("t03", "t02")), ("proposed", "proposed"))
+        for a in (s1, s2, buyer):
+            a.queue()                                          # every agent has read its proposals
+        self.assertEqual(buyer.api("GET", "/plaza/api/me")[1]["standing"]["strikes"], 0)
+
+        self.elsewhere("t02", "t01", "SAL-10", 75)             # the buyer posts it on El Rastro and it closes there
+        self.assertEqual(self.state("t01", "t02"), "settled_elsewhere")
+        st = buyer.api("GET", "/plaza/api/me")[1]["standing"]
+        self.assertEqual((st["strikes"], st["limit"], st["banned"], st["last"]["card"], st["last"]["venue"]),
+                         (1, 2, False, "SAL-10", "rastro"))
+        self.assertEqual(s1.api("GET", "/plaza/api/me")[1]["standing"]["strikes"], 0)      # it only accepted
+        q = buyer.queue()
+        self.assertEqual(q["actions"][0]["type"], "warning")
+        done = buyer.step()                                    # an agent that runs its queue as it comes: no harm
+        self.assertIn(("warning", "done", None), done)
+        self.assertNotIn("warning", [x["type"] for x in buyer.queue()["actions"]])
+        self.assertEqual(buyer.api("GET", "/plaza/api/me/cards")[0], 200)                  # warned, still in
+
+        self.assertEqual(self.state("t03", "t02"), "offer_on_v07")                         # its agent posted it here...
+        self.elsewhere("t02", "t03", "RET-09", 60)             # ...and its team closes it on El Rastro all the same
+        st, out, _ = buyer.api("GET", "/plaza/api/me/cards")
+        self.assertEqual((st, out["error"]), (403, "banned"))
+        self.assertEqual(buyer.api("GET", "/plaza/api/agent/next")[0], 403)
+        self.assertEqual(buyer.api("PUT", "/plaza/api/team/t02", {"wants": ["LAV-09"]})[0], 403)
+        me = buyer.api("GET", "/plaza/api/me")[1]["standing"]
+        self.assertEqual((me["banned"], me["strikes"], len(me["evidence"])), (True, 2, 2))
+        self.rig.agent("t04", for_sale=[{"ref": "LAV-09", "price": 60, "min": 50}], have=["LAV-09"])
+        self.rig.refresh()
+        self.assertIsNone(self.rig.match_of("t04", "t02"))     # a banned team is in no new match
+        self.assertEqual(s2.api("GET", "/plaza/api/me/cards")[0], 200)                     # nobody else is touched
+
+        st, out, _ = self.rig.call("POST", "/plaza/admin/api/action", {"action": "unban", "team": "t02"}, admin=True)
+        self.assertEqual((st, out["standing"]), (200, {"strikes": 1, "limit": 2, "banned": False}))
+        self.assertEqual(buyer.api("GET", "/plaza/api/me/cards")[0], 200)
+        teams = self.rig.call("GET", "/plaza/admin/api/teams", admin=True)[1]
+        ev = next(t for t in teams["strikes"]["teams"] if t["team"] == "t02")["evidence"]
+        self.assertEqual([(e["card"], e["venue"], e["role"], e["forgiven"]) for e in ev],
+                         [("SAL-10", "rastro", "posted", False), ("RET-09", "rastro", "posted", True)])
+        self.healthy()
+        self.close()
+
+    def test_an_offer_moved_to_our_venue_before_it_closes_costs_nothing(self):
+        seller, buyer = self.pair()
+        self.rig.refresh()
+        for a in (seller, buyer):
+            a.queue()
+        oid = self.rig.game.post_offer("t02", {"venue": "rastro", "give": {"cash": 75}, "want": {"cards": ["SAL-10"]},
+                                               "to": "t01"})["id"]
+        self.rig.refresh()
+        self.assertIn("move_offer", [a["type"] for a in buyer.queue()["actions"]])
+        self.rig.game.cancel("t02", oid)
+        self.rig.run(8, until=lambda: self.state() == "settled")
+        self.assertEqual(self.state(), "settled")
+        self.assertEqual(buyer.api("GET", "/plaza/api/me")[1]["standing"]["strikes"], 0)
+        self.assertEqual(self.rig.board.strikes.view()["teams"], [])
+        self.close()
+
+
 class ClosedAndPaused(E2E):
     def test_our_switch_turns_the_api_off_and_on(self):
         seller, _ = self.pair()

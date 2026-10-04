@@ -180,7 +180,8 @@ class Strikes:
                     "reason": (t.get("banned") or {}).get("reason") if banned else None}
 
     def actions(self, team: str) -> list[dict]:
-        """Queue actions: one `warning` per strike the agent has not acknowledged. Nothing to send: read and ack."""
+        """Queue actions: one `warning` per strike the agent has not acknowledged. Its request only reads the
+        team's own standing, so an agent that runs every action as it comes does no harm: read, then ack."""
         with self.lock:
             if not self.on:
                 return []
@@ -194,8 +195,9 @@ class Strikes:
                             "why": f"warning {i} of {self.limit}: {s['card']} with {s['with']} was closed on "
                                    f"{s['venue']}, not on {self.venue}. Trades this market matches close on "
                                    f"{self.venue} (0 fee). At {self.limit} your team loses access for good. "
-                                   "Nothing to send: acknowledge it.",
-                            "request": None, "strikes": i, "limit": self.limit, "card": s["card"],
+                                   "Read your standing and acknowledge this.",
+                            "request": {"target": "plaza", "method": "GET", "auth": "X-Plaza-Token",
+                                        "path": "/plaza/api/me", "body": None}, "strikes": i, "limit": self.limit, "card": s["card"],
                             "venue": s["venue"], "tick": s["tick"]})
             return out
 

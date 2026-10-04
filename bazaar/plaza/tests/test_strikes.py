@@ -109,7 +109,8 @@ class RuleTest(unittest.TestCase):
     def test_the_agent_reads_its_warning_once(self):
         self.hit()
         (a,) = self.s.actions("t01")
-        self.assertEqual((a["type"], a["id"], a["request"], a["strikes"]), ("warning", action_id("m-1|9|t01"), None, 1))
+        self.assertEqual((a["type"], a["id"], a["request"]["path"], a["request"]["method"], a["strikes"]),
+                         ("warning", action_id("m-1|9|t01"), "/plaza/api/me", "GET", 1))
         self.assertEqual(len(a["id"]), 14)
         self.assertFalse(self.s.ack("t02", a["id"]))           # not its warning
         self.assertTrue(self.s.ack("t01", a["id"]))
