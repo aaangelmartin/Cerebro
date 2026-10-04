@@ -186,3 +186,51 @@ class Memory(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CashCappedThread(unittest.TestCase):
+    """A buy thread at a dealer without a step ladder (Abuela) whose next bid cash cannot cover waits a few ticks
+    for cash and is then closed: it used to wait for ever and block her only slot."""
+
+    def thread(self, dealer_tick):
+        off = {"id": 901, "maker": "abuela", "to": "t10", "give": {"types": ["card:LAV-07"]}, "want": {"cash": 27},
+               "final": False, "status": "expired", "created_tick": dealer_tick}
+        return {"id": 77, "kind": "persona", "with": "abuela", "topic": {"buy": {"card": "LAV-07"}},
+                "status": "open", "created_tick": dealer_tick - 9, "standing_offers": [],
+                "messages": [{"tick": dealer_tick - 9, "sender": "abuela", "text": "28", "price": 28},
+                             {"tick": dealer_tick - 1, "sender": "t10", "text": "17", "price": 17},
+                             {"tick": dealer_tick, "sender": "abuela", "text": "27", "price": 27, "offer": off}]}
+
+    def moves(self, now, dealer_tick=1500):
+        dom = domain(last_gift=1490)                                   # the gift window is closed
+        dom._spend_cap = lambda *a, **k: 13                            # the hour's spend leaves 13 P
+        sit = SIT(tick=now, cash=340, threads=[self.thread(dealer_tick)])
+        info = dom._prepare(sit, CTX(now)).infos[0]
+        return info.move.kind, [a.kind for a in dom.fallback(sit, CTX(now)) if a.params.get("thread") == 77]
+
+    def test_it_waits_a_few_ticks_for_cash(self):
+        from bazaar.dealers.domain import CASH_HOLD_TICKS
+        kind, acts = self.moves(1500 + CASH_HOLD_TICKS - 1)
+        self.assertEqual((kind, acts), ("wait", []))
+
+    def test_then_it_frees_the_dealers_slot(self):
+        from bazaar.dealers.domain import CASH_HOLD_TICKS
+        kind, acts = self.moves(1500 + CASH_HOLD_TICKS)
+        self.assertEqual((kind, acts), ("close", ["close_thread"]))
+
+
+class OneBuyThreadPerCard(unittest.TestCase):
+    def plan(self, threads=()):
+        import dataclasses
+        dom = domain(last_gift=1490)
+        p = dom._prepare(SIT(tick=1500, cash=300, assets=[], threads=list(threads)), CTX(1500))
+        first = next(c for c in p.candidates if c.kind.startswith("buy"))
+        p.candidates.append(dataclasses.replace(first, id="c99", dealer="chato"))
+        p.free = sorted(set(p.free) | {"abuela", "chato"})
+        return dom, p, first
+
+    def test_the_same_card_is_not_opened_at_two_dealers_in_one_tick(self):
+        dom, p, first = self.plan()
+        acts = dom._open_actions(p, [(first.id, ""), ("c99", "")], "fallback")
+        self.assertEqual([(a.params["with"], a.params["topic"]["buy"]["card"]) for a in acts],
+                         [(first.dealer, first.item)])

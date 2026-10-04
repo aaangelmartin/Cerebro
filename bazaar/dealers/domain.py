@@ -68,6 +68,7 @@ LOOP_MARGIN_P = 15                           # dealer -> dealer loop: the proven
 LOOP_RECENT_S = 3 * 3600                     # ...and "proven" means our own sales to that dealer this recent
 HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
 HOLD_GAP_SHARE = 0.05                        # "near our limit": within 1 P, or this share of it for larger prices
+CASH_HOLD_TICKS = 6                          # a bid capped by cash waits this long for cash, then frees the thread
 PACK_EDGE = 1.25                             # until packs can be opened, buy one only if value >= 1.25 x price
 PACK_EDGE_P = 5.0                            # ... and at least this many P above it
 
@@ -855,7 +856,13 @@ class DealersDomain:
             small = v.opening is not None and v.opening < steps.MIN_OPENING    # 5 P commons keep the quick rule
             prof = None if cautious or v.is_pack or small else steps.profile_for(v.dealer, v.side)
             if move.kind == "close" and budget_bound and not v.final and not cautious and prof is None:
-                move = Move("wait", None, "cash committed to our other buy bids: hold this one")
+                # The wait is short: a dealer's offer lives two ticks and it has one slot per team. A thread that
+                # sat on its cash cap for good (sim, Abuela, 40 ticks) blocked every other deal with her, the gift
+                # window included.
+                waited = tick - int(v.last_dealer_tick or v.created_tick or tick)
+                move = Move("wait", None, "cash committed to our other buy bids: hold this one") \
+                    if waited < CASH_HOLD_TICKS else \
+                    Move("close", None, f"cash caps our bid for {waited} ticks: close and free the dealer's slot")
             force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
             max_msgs = int((order or {}).get("max_messages") or (4 if order is not None else HOLD_MESSAGES))
             if prof is not None:
@@ -1263,10 +1270,17 @@ class DealersDomain:
     def _open_actions(self, plan: Plan, picks: list[tuple[str, str]], source: str) -> list[Action]:
         by_id = {c.id: c for c in plan.candidates}
         out, used, slots = [], set(), plan.slots
+        # One buy thread per card. A second one for the same card (sim: LAV-07 at Chato and at Abuela in one tick)
+        # is valued by the rails as a spare copy, so every bid in it is vetoed and it only burns the dealer's slot.
+        buying = {str(i.view.item) for i in plan.infos if i.view.buying and not i.view.is_pack}
         for cid, reason in picks:
             c = by_id.get(cid)
             if not c or c.dealer in used or c.dealer not in plan.free or slots <= 0:
                 continue
+            if c.kind.startswith("buy") and not c.kind.endswith("pack"):
+                if str(c.item) in buying:
+                    continue
+                buying.add(str(c.item))
             used.add(c.dealer)
             slots -= 1
             out.append(self._act_open(c, source, reason))
