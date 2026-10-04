@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
 import threading
@@ -52,11 +53,16 @@ def unseal(key: bytes, blob: bytes) -> bytes:
 
 
 def _limit(value, name: str):
+    """A limit is kept as a whole number of P. The game gives values such as 17.5 and 2.5, so decimals are taken
+    and rounded in the team's favour: a `min` up (never sold under what it said), a `max` down (never bought
+    above it), a `value` to the nearest whole, halves up."""
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= MAX:
-        raise PlazaError(400, "bad_request", f"{name} is a number between 1 and {MAX}, or null to forget it")
-    return int(round(value))
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or not 0 < value <= MAX:
+        raise PlazaError(400, "bad_request", f"{name} is a number from 1 to {MAX} (decimals are rounded: min up, "
+                         "max down, value to the nearest), or null to forget it")
+    whole = math.ceil(value) if name == "min" else math.floor(value) if name == "max" else math.floor(value + 0.5)
+    return min(MAX, max(1, int(whole)))
 
 
 def limits(entry: dict, allowed: tuple) -> dict:
@@ -65,7 +71,7 @@ def limits(entry: dict, allowed: tuple) -> dict:
     for k in FIELDS:
         if k in entry:
             if k not in allowed:
-                raise PlazaError(400, "bad_request", f"{k} does not apply here")
+                raise PlazaError(400, "bad_request", f"{k} does not apply here: this entry takes ref, {', '.join(allowed)}")
             out[k] = _limit(entry[k], k)
     return out
 
@@ -90,7 +96,8 @@ def split(body) -> tuple[dict, dict[str, dict]]:
                 e = {k: v for k, v in e.items() if k not in FIELDS}
                 if field != "for_sale":
                     if set(e) - {"ref"}:
-                        raise PlazaError(400, "bad_request", f"{field} entries are a ref, or a ref with private limits")
+                        raise PlazaError(400, "bad_request", f"{field}: unknown key {', '.join(sorted(set(e) - {'ref'}))[:60]}; "
+                                         f"an entry is a ref, or an object with ref, {', '.join(allowed)}")
                     e = e["ref"]
             clean.append(e)
         out[field] = clean

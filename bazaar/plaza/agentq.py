@@ -104,7 +104,8 @@ class AgentQ:
             self._save()
             return {"id": action_id, **a}
 
-    def build(self, team: str, matches: list[dict], within, declared_at: float | None, tick: int | None) -> dict:
+    def build(self, team: str, matches: list[dict], within, declared_at: float | None, tick: int | None,
+              tick_s: float | None = None) -> dict:
         """The ordered actions for `team`. `matches` are its live matches, unmasked, each with its recipe;
         `within(ref, role, price)` answers from the team's OWN limits."""
         now = self.clock()
@@ -222,5 +223,8 @@ class AgentQ:
                     else:
                         waiting.append({"match": mid, "why": "accepted; waiting for the game to settle it"})
             self._save()
-        return {"team": team, "tick": tick, "actions": actions, "waiting": waiting, "failed": failed,
-                "poll_after_s": POLL_S, "default_mode": t["default"]}
+        # ask again within a tick while something is moving; otherwise every couple of ticks is plenty
+        one = max(2, min(POLL_S, int(tick_s))) if tick_s else 5
+        busy = bool(actions or waiting or matches)
+        return {"team": team, "verified": True, "tick": tick, "actions": actions, "waiting": waiting, "failed": failed,
+                "poll_after_s": one if busy else min(60, max(POLL_S, 2 * one)), "default_mode": t["default"]}

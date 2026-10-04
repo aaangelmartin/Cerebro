@@ -206,7 +206,8 @@ class Store:
             raise PlazaError(400, "bad_request", "send a JSON object")
         unknown = set(body) - set(LISTS)
         if unknown:
-            raise PlazaError(400, "bad_request", f"unknown fields: {', '.join(sorted(unknown))[:80]}")
+            raise PlazaError(400, "bad_request", f"unknown key {', '.join(sorted(map(str, unknown)))[:60]}; "
+                             f"allowed: {', '.join(LISTS)}, have")
         new = {}
         if "wants" in body:
             new["wants"] = clean_refs(body["wants"], "wants")

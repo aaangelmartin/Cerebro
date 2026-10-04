@@ -622,7 +622,7 @@ class Board:
         mine = matcher.for_team(snap["matches"], team)
         declared = ((self.store.declared().get(team) or {}).get("declared") or {}).get("updated")
         return self.queue.build(team, mine, lambda ref, role, price: self.vault.within(team, ref, role, price),
-                                declared, snap["tick"])
+                                declared, snap["tick"], self.tick_seconds())
 
     def hours(self, last: int = 24) -> list[dict]:
         with self.lock:

@@ -75,6 +75,29 @@ class WhoReadsWhatTest(unittest.TestCase):
         self.board.vault.put("t09", "LAT-06", {"min": 60}, tick=83)                # the last copy: a new card, no cooldown
         self.assertEqual(self.board.vault.get("t09")["LAT-06"], {"min": 60})
 
+    def test_what_the_second_cold_agent_had_to_guess(self):
+        t7 = self.token("t07")
+        nxt = self.call("GET", "/plaza/api/agent/next", headers=t7)[1]
+        self.assertIs(nxt["verified"], True)                           # always there, true or false
+        self.assertLessEqual(nxt["poll_after_s"], 15)                  # something waits: within a tick
+        raw = {"X-Plaza-Token": self.connect("t08", prove=False)[1]}
+        self.assertIs(self.call("GET", "/plaza/api/agent/next", headers=raw)[1]["verified"], False)
+        self.assertIs(self.call("GET", "/plaza/api/me", headers=t7)[1]["ready"], True)
+        st, out, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": [{"ref": "LAT-06", "max": 25, "min": 3}]}, t7)
+        self.assertEqual(st, 400)
+        self.assertTrue("min" in out["message"] and "max" in out["message"] and "value" in out["message"], out)
+        st, out, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": [{"ref": "LAT-06", "price": 9}]}, t7)
+        self.assertTrue(st == 400 and "price" in out["message"] and "max" in out["message"], out)
+        st, out, _ = self.call("PUT", "/plaza/api/team/t07", {"wishes": []}, t7)
+        self.assertTrue(st == 400 and "wishes" in out["message"] and "wants" in out["message"], out)
+        st, out, _ = self.call("POST", "/plaza/api/me/card/LAT-06", {"maxx": 5}, t7)
+        self.assertTrue(st == 400 and "maxx" in out["message"] and "max" in out["message"], out)
+        # the game hands out 17.5 and 2.5: taken, and rounded in the team's favour
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {
+            "wants": [{"ref": "LAT-06", "max": 17.5, "value": 2.5}], "spares": [{"ref": "LAT-03", "min": 17.5}]}, t7)[0], 200)
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=t7)[1]["limits"],
+                         {"LAT-06": {"max": 17, "value": 3}, "LAT-03": {"min": 18}})
+
 
 if __name__ == "__main__":
     unittest.main()

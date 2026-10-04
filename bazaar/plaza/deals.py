@@ -67,7 +67,8 @@ def clean_message(body, kind: str, rarity: str | None) -> dict:
         raise PlazaError(400, "bad_request", "send a JSON object")
     unknown = set(body) - {"action", "price", "cards", "text"}
     if unknown:
-        raise PlazaError(400, "bad_request", f"unknown fields: {', '.join(sorted(unknown))[:80]}")
+        raise PlazaError(400, "bad_request", f"unknown key {', '.join(sorted(map(str, unknown)))[:60]}; "
+                         "allowed: action, price, cards, text")
     out: dict = {}
     action = body.get("action")
     if action is not None:

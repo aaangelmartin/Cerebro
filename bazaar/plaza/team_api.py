@@ -72,7 +72,10 @@ def _obj(body, keys: set, need_one: bool = True) -> dict:
     if not isinstance(body, dict):
         raise PlazaError(400, "bad_request", "send a JSON object")
     unknown = set(body) - keys
-    if unknown or (need_one and not body):
+    if unknown:
+        raise PlazaError(400, "bad_request", f"unknown key {', '.join(sorted(map(str, unknown)))[:60]}; "
+                         "allowed: " + ", ".join(sorted(keys)))
+    if need_one and not body:
         raise PlazaError(400, "bad_request", "send any of: " + ", ".join(sorted(keys)))
     return body
 
@@ -158,7 +161,10 @@ def me_view(h, team: str, q: dict, snap: dict) -> dict:
     out = {"team": team, "name": name, "tick": snap.get("tick"), "venue": matcher.VENUE, "status": st,
            "settings": settings_view(board, team), "agent": board.queue.settings(team),
            "limits": board.vault.get(team), "owned": [c["ref"] for c in cards["have"]], "counts": cards["counts"],
-           "trades": trades, "activity_seq": activity_mod.of(board).seq_of(team), "read_only": False}
+           "trades": trades, "activity_seq": activity_mod.of(board).seq_of(team), "read_only": False,
+           # `ready`: this credential works and the team is proved, so it can trade. `status.connected` is the
+           # stricter "every step done" (cards listed, agent seen lately) the Connect page draws.
+           "ready": bool(st.get("verified"))}
     if team in snap.get("sheets", {}):                         # the public sheet, as the first page drew it
         out["home"] = {**board.team_view(team, snap, team),
                        "matches": board.matches_view(snap, team, viewer=team)["matches"]}
