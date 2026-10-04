@@ -136,6 +136,15 @@ and never leaves `/api/me/*`. Without it, owned = `spares` + `for_sale`.
   `conflict` and the message says the right body). A match keeps `offer`, `settlement` (the game's id) and
   `settled_venue`. An offer that expires or is cancelled sends the match back to `proposed`. `settled_elsewhere`
   is a final state: the same two teams closed that card on another venue.
+- **What is matched** (`matcher.py`; no text may promise more). A sale is proposed only when (a) both sides gave a
+  limit and they overlap (private `min` and `max`, asked blindly, or a public ask and bid that cross), or (b) the
+  card is a `spares` entry the seller's agent declared and a want the buyer's agent declared; and, when both gave a
+  private `value`, only when the buyer's is higher. Swaps and three-way swaps: same rarity, declared by the agents.
+  Dear cards first (last of a page, then legendary, epic, rare...). So a team that has not connected an agent is
+  matched only where its public offers already cross: say "connect your agent to be matched".
+- **The price** is the card's reference (median of its last sales between teams, else the declared price, else the
+  book), pulled inside the overlap with a secret margin (`quotes.py`). It is never the midpoint of two private
+  limits. Say "a price inside both limits"; never "the middle", never "the best price".
 - Hooks on the board: a fork hangs its own stores in `attach(board)` of its module, called when the board is made:
   `board.team_activity.add(team, kind, text, **extra)` and `board.suggest` (`all()`, `set(id, status, reply)`) are
   B1's; a team's settings are `board.store.settings(team)` (`paused`, `lang`). `deals_api.candidates(board, sheets,

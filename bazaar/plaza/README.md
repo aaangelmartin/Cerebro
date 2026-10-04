@@ -60,27 +60,44 @@ no" per card and "overlap: yes or no" per match.
   and the venue's matchmaker never receive these numbers. `declared_pairs` (what the broker reads) runs without the
   vault. `test_private_queue.py` checks all of it: no limit in any public answer, in another team's queue, in an
   error, in `/plaza/admin/*`, or in any file under `data/live`.
-- Known property of the rule: a price at the middle of the overlap lets a team that knows its own limit work out
-  the other side's. The answer never says whether a price came from limits, which blurs it but does not remove it.
+- The price is not the middle of the overlap (a team that knew its own limit could work out the other's): it is
+  the card's public reference price, pulled inside the overlap with a margin drawn from the vault's key
+  (`quotes.py`, `matcher.rule_price`). What a team can still learn from a price pulled in: the other limit lies
+  beyond it, within a third of the distance to its own limit. A refusal is held 20 ticks and a limit changes once
+  every 20 ticks, so a limit cannot be found by walking one's own.
 
 ## The matchmaker
 
 - **Sources.** What an agent declares replaces what is deduced from the public game data, field by field.
 - **Kinds.** Direct sale, card-for-card swap (same rarity), three-way swap (same rarity).
-- **Priority.** 1 the last card of a page, 2 a swap, 3 an epic, rare or legendary card, 4 the rest. Inside a tier,
-  declared before deduced, then by score.
-- **Suggested price.** The midpoint when there is an ask and a bid; else the price one side declared; else the
-  book of the rarity; never under the floor of the rarity (common 4, uncommon 12, rare 40, epic 110, legendary 300).
-  With private limits on both sides, the middle of their overlap.
+- **The gate: only trades that create value.** The game scores the venue by the value its trades create (the
+  buyer's private value minus the seller's), and a bad trade lowers the score (SCORING.md). A sale is proposed only
+  when both sides gave a limit and they overlap (private limits, or a public ask and bid that cross), or when the
+  card is a duplicate the seller's agent declared and a want the buyer's agent declared; with two private values,
+  only when the buyer's is higher. Swaps only between cards the agents declared. A paused team gets no new match.
+- **Priority.** 1 the last card of a page, 2 a legendary or an epic, 3 a rare, 4 the rest; then a swap before a
+  sale, a pair that has not traded on `v07` yet, declared before deduced, then by score.
+- **Suggested price.** The reference price of the card (the median of its last five sales between teams; else the
+  price one side declared; else the book of the rarity), pulled inside the overlap of the two limits; on a grid of
+  1 P under 20 and 5 P above; never under the floor of the rarity (common 4, uncommon 12, rare 40, epic 110,
+  legendary 300).
+- **Two engines, two jobs.** This matcher pairs two named teams and gives each agent the addressed offer to post on
+  `v07`; an addressed offer settles on its own when it is accepted. The broker (`bazaar/broker`) pairs PUBLIC
+  offers that cross on `v07` (a board venue does nothing with them by itself) and announces pairs; it reads
+  `declared_pairs` from here and never a limit. The broker must be up all day; the panel's status shows it.
 - **One active match per card and team.** A card is not proposed to three teams at once: the other candidates wait
   as `alternatives` of the active match and take its place when it ends.
-- **Expiry.** A proposal nobody follows expires after 120 ticks; an offer seen on the venue and never settled,
-  after 90.
+- **Expiry.** A proposal nobody follows expires after 120 ticks. An offer that is cancelled, or that the game
+  drops after 60 ticks, sends the match back to `proposed` with a fresh recipe.
+- **Lost trades.** When the two teams of a match close that card on another venue the match ends as
+  `settled_elsewhere`: it did not count for us, and Performance lists it. An agent that posts the offer on another
+  venue is told so in its queue (`move_offer`) and on its activity record.
 - **Learning.** A match a team passed on is not proposed again for 240 ticks (expired: 120, settled: 600).
 - **Never us.** `t10` is never a party. No team is excluded; we can pause the matchmaker, leave one match out,
   force a sale between two other teams or expire a match.
 
-States: `proposed` -> `offer_on_v07` -> `accepted` -> `settled` (or `passed`, `expired`). `offer_on_v07` and
+States: `proposed` -> `offer_on_v07` -> `accepted` -> `settled` (or `passed`, `expired`, `settled_elsewhere`;
+`deals.MOVES` is the whole table). `offer_on_v07` and
 `settled` are read from the recorded game feed (an addressed offer on `v07` between the two teams for that card;
 the settlement between them). The game publishes no event when an offer is accepted, so `accepted` is the word of
 the team that receives the offer, on the thread.
