@@ -154,6 +154,11 @@ Ours, only through the dashboard login (the gateway adds a token the plaza wrote
   (its own lock, `data/live/supervise-plaza.pid`). When the main supervisor is restarted it starts the plaza too;
   a second copy stands by while the port is taken.
 - **By hand.** `.venv/bin/python -m bazaar.plaza.server` (port from `PLAZA_PORT`, default 8793).
+- **Practice market.** `.venv/bin/python -m bazaar.plaza.sandbox` starts the real server on a temporary folder
+  (:8893), a simulated game over HTTP with the real game's routes (:8894) and two counterparties running
+  `agent_example.py`. `POST :8894/sandbox/guest` answers the Connect prompt, the game address and a made-up key
+  for the third team; `GET :8894/sandbox/status` says how far that team's agent got. It is how AGENTS.md is
+  tested on an agent that knows nothing else. Nothing real is touched.
 - **Gateway.** `legacy/dashboard/server.py` (:8787) forwards the whitelisted `/plaza` routes without the dashboard
   login and the `/plaza/admin` routes with it. Start it from the repository root with
   `DASHBOARD_ENV_FILE=.env nohup .venv/bin/python -u legacy/dashboard/server.py > bazaar/data/gateway.out 2>&1 &`.
