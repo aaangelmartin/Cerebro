@@ -259,6 +259,9 @@ def main():
     connect()
     wait_verified()
     publish()
+    st, link = market("POST", "/api/me/viewer-link", {})   # a one-use link for your human to watch (10 minutes)
+    if st == 200 and link.get("url"):
+        log(f"Watch your agent here: {link['url']}")
     log("running: this process is your agent; leave it running (Ctrl+C stops it, the same command starts it again)")
     while True:
         try:
