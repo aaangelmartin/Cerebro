@@ -113,14 +113,17 @@ class ServerTest(unittest.TestCase):
         st, out, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-03"], "spares": ["LAT-06"]}, {"X-Plaza-Pin": "4242"})
         self.assertEqual((st, out["declared"]["wants"]), (200, ["LAT-03"]))
         t7 = self.call("GET", "/plaza/api/team/t07")[1]
-        self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-03", "agent")])
-        self.assertTrue(t7["claimed"])
-        self.assertFalse(t7["verified"])
+        self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-06", "public")])   # not proved yet:
+        self.assertTrue(t7["claimed"])                                      # anyone could have claimed it, so the
+        self.assertFalse(t7["verified"])                                    # sheet is kept and shown to nobody
         # the team proves the claim with a thread message to us in the game
         (self.record / "threads" / "9.json").write_text(json.dumps(
             {"id": 9, "kind": "team", "team": "t07", "with": "t10", "messages": [{"sender": "t07", "text": f"hi {c['code']}"}]}))
         self.board.rebuild()
-        self.assertTrue(self.call("GET", "/plaza/api/team/t07")[1]["verified"])
+        self.board.rebuild()
+        t7 = self.call("GET", "/plaza/api/team/t07")[1]
+        self.assertTrue(t7["verified"])
+        self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-03", "agent")])
 
     def test_a_message_from_another_team_does_not_verify(self):
         c = self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})[1]
@@ -318,6 +321,9 @@ class ServerTest(unittest.TestCase):
         for team, body in (("t07", {"wants": ["LAT-06"]}), ("t09", {"spares": ["LAT-06"]})):       # a declared spare meets a declared want
             self.call("POST", "/plaza/api/claim", {"team": team, "pin": "4242"})
             self.call("PUT", f"/plaza/api/team/{team}", body, {"X-Plaza-Pin": "4242"})
+        self.assertEqual(S.declared_pairs(self.live, self.record), [])       # claimed, not proved in the game: nothing
+        for team in ("t07", "t09"):
+            self.board.store.mark_verified(team)
         pairs = S.declared_pairs(self.live, self.record)
         self.assertEqual([(p["seller"], p["buyer"], p["ref"]) for p in pairs], [("t09", "t07", "LAT-06")])
 
