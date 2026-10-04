@@ -82,6 +82,10 @@ class StatusTest(Base):
         self.call("POST", "/plaza/admin/api/action", {"action": "pause"}, ADMIN)
         clock(self.record)
         self.assertEqual(self.call("GET", "/plaza/api/status")[1]["matchmaker"], "paused")
+        self.call("POST", "/plaza/admin/api/action", {"action": "off"}, ADMIN)        # switched off: still answers
+        st, out, _ = self.call("GET", "/plaza/api/status")
+        self.assertEqual((st, out["market"]), (200, "off"))
+        self.assertEqual(self.call("GET", "/plaza/api/teams")[0], 503)
 
     def test_agent_of_the_caller(self):
         clock(self.record)
