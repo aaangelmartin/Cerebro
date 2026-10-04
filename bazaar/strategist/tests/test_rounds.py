@@ -49,7 +49,8 @@ class RoundTest(unittest.TestCase):
         info = W.round_info(self.CLOCK, self.SCHED, self.LB, {"tick": 2010, "ts": 100.0}, now=700.0)
         self.assertEqual((info["round"], info["weight"]), (3, 1.0))
         self.assertEqual(info["hours_left_in_round"], 5.85)              # to "Scores freeze", past the day's close
-        self.assertEqual(info["game_hour_real_minutes"], 30.0)
+        self.assertEqual(info["game_hour_real_minutes"], 60.0)              # t_hours follows the wall clock
+        self.assertEqual(info["ticks_per_game_hour"], 240)
         self.assertEqual(info["started_minutes_ago"], 10.0)
         self.assertEqual([r["round"] for r in info["closed_rounds"]], [1, 2])
 
@@ -83,16 +84,16 @@ class RoundTest(unittest.TestCase):
         self.assertEqual(n["required_per_hour"], round(1.0 / 5.85, 2))
         text = B.win_text(win)
         self.assertIn("round 3", text)
-        self.assertIn("30.0 real minutes", text)
+        self.assertIn("60 real minutes (240 ticks of 15 s)", text)
         self.assertIn("this round only", text)
 
 
 class ReviewTest(unittest.TestCase):
     def test_review_follows_the_game_hour(self):
         self.assertEqual(srun.review_every_s({"tick_seconds": 30.0}), 3600.0)
-        self.assertEqual(srun.review_every_s({"tick_seconds": 15.0}), 1800.0)
-        self.assertEqual(srun.review_every_s({"tick_seconds": 60.0}), 3600.0)     # capped at an hour
-        self.assertEqual(srun.review_every_s({"tick_seconds": 5.0}), srun.REVIEW_MIN_S)
+        self.assertEqual(srun.review_every_s({"tick_seconds": 15.0}), 3600.0)     # 240 ticks of 15 s
+        self.assertEqual(srun.review_every_s({"tick_seconds": 60.0}), 3600.0)
+        self.assertEqual(srun.review_every_s({"tick_seconds": 5.0}), 3600.0)
         self.assertEqual(srun.review_every_s({}), 3600.0)
         self.assertEqual(srun.review_every_s(None), 3600.0)
 

@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-MAX_POLICIES = 30
+MAX_POLICIES = 40
 
 
 def _append(path: Path, row: dict) -> None:
@@ -121,15 +121,22 @@ def apply_policies(live: Path, updates: list[dict], by: str = "brain", now: floa
             p.update(status=status, reason=str(u.get("reason") or p.get("reason") or "")[:300], updated=now)
             changed.append(p)
         elif text:
-            nid = f"P{1 + max([int(str(x)[1:]) for x in by_id if str(x)[1:].isdigit()] or [0])}"
+            # a number the brain gave that memory does not hold is kept, so its own references stay true
+            nid = pid if re.fullmatch(r"P\d+", pid) else \
+                f"P{1 + max([int(str(x)[1:]) for x in by_id if str(x)[1:].isdigit()] or [0])}"
             p = {"id": nid, "text": text, "from": u.get("from") or by, "by": u.get("by") or by, "since": now,
                  "status": status, "reason": str(u.get("reason") or "")[:300], "updated": now}
             pols.append(p)
             by_id[nid] = p
             changed.append(p)
-    active = [p for p in pols if p.get("status") == "active"]
-    retired = [p for p in pols if p.get("status") != "active"]
-    mem["policies"] = (active + retired)[:MAX_POLICIES]
+    # Over the cap the OLDEST go, retired ones first: on Saturday night 30 old active rules filled the list and
+    # every new one (Sunday's plan among them) was cut off at once while the brain believed it in force.
+    age = lambda p: float(p.get("updated") or p.get("since") or 0.0)   # noqa: E731
+    active = sorted((p for p in pols if p.get("status") == "active"), key=age)
+    retired = sorted((p for p in pols if p.get("status") != "active"), key=age)
+    kept = active[-MAX_POLICIES:]
+    kept += retired[len(retired) - (MAX_POLICIES - len(kept)):] if len(kept) < MAX_POLICIES and retired else []
+    mem["policies"] = kept
     mem["updated"] = now
     path = Path(live) / "brain_memory.json"
     tmp = path.with_suffix(".tmp")
@@ -334,7 +341,8 @@ def win_text(win: dict | None) -> str:
         if nxt:
             line += f"; round '{nxt.get('name')}' starts at h{nxt.get('at_hours')} FROM ZERO (weight {nxt.get('weight')})"
         if rnd.get("game_hour_real_minutes"):
-            line += f"; one game hour is {rnd.get('game_hour_real_minutes')} real minutes at {rnd.get('tick_seconds'):g} s ticks"
+            line += (f"; one game hour is {rnd.get('game_hour_real_minutes'):g} real minutes "
+                     f"({rnd.get('ticks_per_game_hour')} ticks of {rnd.get('tick_seconds'):g} s)")
         if rnd.get("started"):
             line += (f"; this round started at tick {rnd['started'].get('tick')} (raw components fell from "
                      f"{rnd['started'].get('raw_before')} to {rnd['started'].get('raw_after')}): everything below "

@@ -70,7 +70,10 @@ def score_points(record: Path, now: float | None = None) -> list[dict]:
 
 RESET_MIN_RAW = 3.0             # a round restart: the raw components had at least this much...
 RESET_SHARE = 0.25              # ...and fell to this share of it or less between two snapshots
-GAME_HOUR_TICKS = 120           # one game hour, at any tick length
+# t_hours runs on the wall clock while the game runs: a 60 s tick moved it 1/60 h on Friday (tick 158 -> 2.6333,
+# 159 -> 2.65) and a 30 s tick 1/120 h on Saturday, so a game hour is 60 real minutes at any tick length and
+# Sunday's 15 s ticks are 240 to the hour (h16.65 -> h22.65 is 09:00 -> 15:00).
+GAME_HOUR_S = 3600.0
 
 
 def _raw_total(p: dict) -> float:
@@ -125,7 +128,8 @@ def round_info(clock: dict, schedule: dict, leaderboard: dict, reset: dict | Non
     ts = _f((clock or {}).get("tick_seconds"))
     if ts:
         out["tick_seconds"] = ts
-        out["game_hour_real_minutes"] = round(GAME_HOUR_TICKS * ts / 60.0, 1)
+        out["game_hour_real_minutes"] = round(GAME_HOUR_S / 60.0, 1)
+        out["ticks_per_game_hour"] = round(GAME_HOUR_S / ts)
     if reset:
         out["started"] = reset
         if now is not None and reset.get("ts"):
