@@ -222,6 +222,32 @@ One named tunnel, `bazaar-t10`, carries two hostnames of Ángel's zone; its conf
   `cloudflared tunnel --no-autoupdate --url http://localhost:8787 > bazaar/data/cloudflared.out 2>&1 &`, then set
   `control.plaza_url` to `null` so the plaza announces the quick tunnel's address again.
 
+## Risks we know and accept
+
+A fourth independent review left nothing critical or high. What follows stays, on purpose or because the game
+gives us no way round it.
+
+- **Limits can be narrowed slowly.** A price proposed between two private limits says roughly where they are. A
+  patient team gets one new answer per pair and card every 60 ticks: about 4 answers, 180 ticks, to place
+  another team's limit within 10 %. AGENTS.md and the page tell teams to set limits with the margin they want
+  to keep.
+- **A Connect code can be phished.** A team's agent that sends, in the game, a code somebody else handed it gives
+  that somebody the team here (never in the game). What it gets is empty: limits, hand, sheet, overrides and PIN
+  are wiped before the new token works. The rightful team takes itself back by proving a fresh code, and we have
+  `reset_team`.
+- **`accepter` stays off.** With it on, the team that only accepted an offer posted elsewhere is struck too, so a
+  team could post an addressed offer that another accepts by habit and get it warned.
+- **The strike rule is easy to dodge** (a public listing, two offers, another price, a `pass` first). That is the
+  choice: we would rather miss a strike than strike a team that did nothing. Only one addressed offer to the
+  other team of the match, posted on another venue after the proposal, never cancelled, alive and at the price
+  the deal closed at, names its maker.
+- **A deal closed inside a game thread** is not among the feed's offers. If the same team also had exactly one
+  live addressed offer to the other at that price on that venue, it is named.
+- **8000 sessions at most.** Three addresses starting connections flat out can fill the store and push out other
+  teams' codes that were not redeemed yet; those teams press Connect again.
+- **The dashboard sits behind one password**, with 20 tries per 5 minutes per address. The market's panel never
+  answers through a public hostname.
+
 ## Tests
 
 `.venv/bin/python -m unittest bazaar.plaza.tests.test_store bazaar.plaza.tests.test_matcher bazaar.plaza.tests.test_server bazaar.plaza.tests.test_gateway bazaar.plaza.tests.test_feed_floor bazaar.plaza.tests.test_connect_deals bazaar.plaza.tests.test_private_queue`

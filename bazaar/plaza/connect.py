@@ -86,7 +86,6 @@ class Connect:
         self.path, self.host, self.clock = Path(path), host, clock
         self.lock = threading.RLock()
         self.hits: dict[tuple, list[float]] = {}
-        self.changed: set[str] = set()      # teams whose agent was just replaced by another: the board wipes them
         self.data = self._load()
         self.saved_seen = 0.0
         self.on_event = None                # (team, kind, text): set by the team API to feed the activity log
@@ -235,7 +234,7 @@ class Connect:
             return min([v.get("created", now) for v in self.data["sessions"].values()
                         if not v.get("verified") and v.get("expires", 0) >= now] or [now])
 
-    def prove(self, team: str, text: str, tick: int | None = None) -> bool:
+    def prove(self, team: str, text: str, tick: int | None = None, wipe=None) -> bool:
         """A message this team sent us in the game carries one of its codes: that session is verified, its agent
         becomes the team's agent and everything else of the team is dropped. `tick` is the message's game tick: a
         message older than the session proves nothing.
@@ -257,7 +256,11 @@ class Connect:
             before = self.data["agents"].get(team) or {}
             replaced = bool(before.get("verified"))
             if before and before.get("token") != s[hit].get("token"):
-                self.changed.add(team)                         # another agent comes in: nothing of the last one stays
+                # Another agent comes in: nothing of the last one stays. Wiped BEFORE the new token works, under
+                # this lock, so no request of the newcomer can read what was there; if we die in between, the old
+                # agent is still the team's and the proof, seen again, wipes again.
+                if wipe is not None:
+                    wipe(team)
             s[hit]["verified"], s[hit]["verified_at"] = True, now
             if s[hit].get("token"):
                 self._activate(team, s[hit])

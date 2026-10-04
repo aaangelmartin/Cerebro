@@ -86,9 +86,17 @@ class IdentityTest(Base):
         self.assertEqual(self.call("GET", "/plaza/api/me", headers=real)[0], 401)
         sheet = self.call("GET", "/plaza/api/team/t03")[1]
         self.assertFalse([c for c in sheet.get("wanted", []) if c.get("source") == "declared"])
+        # the wipe comes before the new token works: at the moment it is activated there is nothing left to read
+        seen = []
+        activate = self.board.connect._activate
+        self.board.connect._activate = lambda team, rec: (seen.append((self.board.vault.get(team), self.board.vault.have(team),
+                                                                         self.board.store.sheet(team)["declared"])), activate(team, rec))[1]
+        self.call("PUT", "/plaza/api/team/t03", {"wants": [{"ref": "LAT-06", "max": 44}], "have": ["LAT-03"]}, taker)
         _, back = self.agent("t03")                            # the rightful team proves a fresh code: it is back,
         self.assertEqual(self.call("GET", "/plaza/api/me", headers=back)[0], 200)   # and publishes again
         self.assertEqual(self.call("GET", "/plaza/api/me", headers=taker)[0], 401)
+        self.assertEqual(seen, [({}, None, {})])
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=back)[1]["limits"], {})
 
     def test_a_proof_seen_before_the_agent_calls_puts_the_earlier_agent_out(self):
         _, planted = self.agent("t08", prove=False)                          # somebody redeemed a code for t08 first

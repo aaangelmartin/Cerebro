@@ -290,18 +290,19 @@ class Board:
                     if sender in codes:
                         self.store.verify(sender, m["text"])
                     at = m.get("tick") if isinstance(m.get("tick"), int) else None
-                    if sender in sessions and self.connect.prove(sender, m["text"], at):
-                        first = not (self.store.declared().get(sender) or {}).get("verified")
-                        if first or sender in self.connect.changed:
-                            # Limits, hand and sheet go whenever the team changes hands, not only at its first
-                            # proof: whoever comes in with a new token reads nothing the last agent left. The
-                            # rightful agent publishes again in one call.
-                            self.connect.changed.discard(sender)
-                            self._forget_private(sender)
-                            self.store.wipe(sender)
+                    first = not (self.store.declared().get(sender) or {}).get("verified")
+                    if sender in sessions and self.connect.prove(sender, m["text"], at, wipe=self._handover):
+                        if first:
+                            self._forget_private(sender)        # limits left in its name before the proof
                         self.store.mark_verified(sender)
                         self.hour("verified")
                         self.stale()
+
+    def _handover(self, team: str) -> None:
+        """The team changes hands (connect.prove calls this before the new token works): limits, hand, sheet,
+        overrides and PIN go, every time. The rightful agent publishes again in one call."""
+        self._forget_private(team)
+        self.store.wipe(team)
 
     def _forget_private(self, team: str) -> None:
         try:
