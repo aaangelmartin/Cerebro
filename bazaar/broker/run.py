@@ -563,9 +563,10 @@ def last_announce_tick(venue_id: str, live: Path | None = None, tail_bytes: int 
 
 
 def team_message(gw: Gateway, venue_id: str) -> Callable[[str, str], Any]:
-    """Open a thread with a team on our venue, leave one message and close it (frees the thread slot)."""
+    """Open a thread with a team on El Rastro, leave one message and close it (frees the thread slot)."""
     def send(team: str, text: str) -> Any:
-        t = gw.post("/api/threads", {"with": team, "venue": venue_id})
+        # the game refuses a thread on our own venue (self_venue): the note travels on the house market
+        t = gw.post("/api/threads", {"with": team, "venue": "rastro"})
         tid = t.get("id") or (t.get("thread") or {}).get("id")
         try:
             return gw.post(f"/api/threads/{int(tid)}/messages", {"text": text[:600]})

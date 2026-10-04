@@ -204,7 +204,8 @@ class BigTicketsAndWording(unittest.TestCase):
                              announce=said.append, rarity_fn=lambda: self.RAR)
             done = m.step(100)
         self.assertTrue(done["announced"])
-        self.assertLess(said[0].index("MAL-11"), said[0].index("LAT-03"))
+        self.assertIn("MAL-11", said[0])                 # the game keeps 240 characters: the big ticket takes them
+        self.assertNotIn("LAT-03", said[0])
 
     def test_a_named_pair_always_makes_the_announcement_next_to_the_big_tickets(self):
         tickets = [{"kind": "relist", "ref": f"X{i}", "score": 5.0 - i} for i in range(4)]
@@ -220,13 +221,18 @@ class PlazaLinkTest(unittest.TestCase):
     def test_announcement_carries_the_page_and_fits(self):
         pair = {"kind": "wanted", "seller": "t09", "buyer": "t07", "ref": "LAT-06", "rarity": "uncommon",
                 "price": 20, "ask": 20.0, "bid": 0, "saves": 2}
-        text = M.announcement([pair], page="https://example.org/plaza")
+        swap = {"kind": "swap", "seller": "t06", "buyer": "t16", "ref": "LAT-01", "ref_back": "RET-05"}
+        text = M.announcement([swap], page="https://example.org/plaza")
         self.assertTrue(text.endswith("https://example.org/plaza/board"))
         self.assertLessEqual(len(text), M.MAX_TEXT)
         self.assertNotIn("example.org", M.announcement([pair]))
+        # the game keeps 240 characters: the call of the first line is never cut, the link gives way to it
+        one = M.announcement([pair], page="https://example.org/plaza")
+        self.assertLessEqual(len(one), 240)
+        self.assertIn('"to":"t07"} ; t07: POST /api/offers/<id>/accept', one)
         long = M.announcement([dict(pair, ref=f"LAT-{i:02d}") for i in range(1, 9)], limit=8, page="https://example.org/plaza")
         self.assertLessEqual(len(long), M.MAX_TEXT)
-        self.assertTrue(long.endswith("https://example.org/plaza/board"))
+        self.assertIn("POST /api/offers/<id>/accept", long)
 
     def test_declared_pairs_lead_and_respect_the_exclusions(self):
         with tempfile.TemporaryDirectory() as d:
@@ -243,7 +249,7 @@ class PlazaLinkTest(unittest.TestCase):
             self.assertTrue(done["announced"])
             self.assertIn("LAT-03", said[0])
             self.assertNotIn("RET-03", said[0])
-            self.assertIn("https://example.org/plaza/", said[0])
+            self.assertLessEqual(len(said[0]), 240)          # the link gives way to the complete call
 
 
 if __name__ == "__main__":
@@ -353,7 +359,7 @@ class ThePlazaCannotHurtTheBroker(unittest.TestCase):
             mm = self.maker(d, said, declared_fn=lambda: [self.PAIR], page_fn=lambda: "https://example.org/plaza")
             self.assertTrue(mm.step(100)["announced"])
             self.assertIn("LAT-03", said[0])
-            self.assertTrue(said[0].endswith("https://example.org/plaza/board"))
+            self.assertLessEqual(len(said[0]), 240)          # the link gives way to the complete call
 
 
 class TheBrokerReportsBeforeTheSlowWork(unittest.TestCase):

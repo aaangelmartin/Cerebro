@@ -30,7 +30,7 @@ EVERY_TICKS = 5
 ANNOUNCE_EVERY = 20                               # game limit: one announcement per venue per 20 ticks
 REPEAT_AFTER = 60                                 # the same pair is not messaged again before this many ticks
 THREADS_PER_WINDOW, WINDOW = 4, 10
-MAX_TEXT = 900
+MAX_TEXT = 240                                    # the game cuts a venue announcement at 240 characters
 HELPER_TIMEOUT_S = 2.0                            # the plaza's helpers get this long, then the pass goes on without them
 HELPER_PAUSE_S = 120.0                            # and are left alone this long after a miss
 
@@ -236,7 +236,7 @@ def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len:
                          f"{p['saves']:.0f} P fee). {p['buyer']}: {_bid_call(p['ref'], p['price'], venue)} ; "
                          f"holders: {ACCEPT}, keep the full {p['price']}.")
         elif p["kind"] == "wanted":
-            lines.append(f"{p['ref']}: {p['buyer']} is hunting it at the dealers, {p['seller']} sells it at "
+            lines.append(f"{p['ref']}: {p['buyer']} wants it, {p['seller']} sells it at "
                          f"{p['ask']:.0f}. {p['seller']}: {_ask_call(p['ref'], p['price'], venue, p['buyer'])} ; "
                          f"{p['buyer']}: {ACCEPT}. 0 fee.")
         else:
@@ -245,14 +245,17 @@ def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len:
                          f"{ACCEPT}. Saves {p['saves']:.0f} P of Rastro fee.")
     if not lines:
         return None
-    head = (f"{venue} (Team 10): 0 % fee, 0 P a card, nothing to connect. Post your offer on {venue} with your "
-            f"own key and the other team accepts it. Open now: ")
-    text = head + " | ".join(lines)
-    tail = f" Every card's best price and the call for it: {page}/board" if page else ""   # the plaza (bazaar.plaza)
-    while len(text) + len(tail) > max_len and len(lines) > 1:
-        lines.pop()
-        text = head + " | ".join(lines)
-    return text[:max_len - len(tail)] + tail
+    # The game keeps 240 characters: a short head, then whole lines while they fit (the first one always goes,
+    # with its call complete), then the plaza link only when there is room left for it.
+    head = f"{venue} 0% fee, no setup. "
+    tail = f" More: {page}/board" if page else ""   # the plaza (bazaar.plaza)
+    text = head + lines[0]
+    for line in lines[1:]:
+        if len(text) + 3 + len(line) > max_len:
+            break
+        text += " | " + line
+    text = text[:max_len]
+    return text + tail if len(text) + len(tail) <= max_len else text
 
 
 def thread_texts(p: dict, venue: str = VENUE) -> dict[str, str]:
