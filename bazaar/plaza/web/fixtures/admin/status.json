@@ -35,5 +35,7 @@
  "game": "open",
  "market": "open",
  "enabled": true,
- "paused": false
+ "paused": false,
+ "feed": "ok",
+ "public_url": "https://market.example.org/plaza"
 }

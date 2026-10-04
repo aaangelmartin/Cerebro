@@ -119,8 +119,6 @@ class Agent:
             self.log(f"dry run: would publish {json.dumps(sheet)[:300]}")
             return 200, {}
         st, out = self.market("PUT", f"/api/team/{self.team}", sheet)
-        if st == 400 and "have" in sheet and "have" in str(out.get("message")):
-            st, out = self.market("PUT", f"/api/team/{self.team}", {k: v for k, v in sheet.items() if k != "have"})
         self.log(f"published {len(sheet.get('wants') or [])} wants, {len(sheet.get('spares') or [])} spares"
                  if st == 200 else f"publish refused: {out.get('message')}")
         return st, out

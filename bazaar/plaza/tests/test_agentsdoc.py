@@ -112,6 +112,18 @@ class DocumentTest(unittest.TestCase):
         self.assertIn("Mercado X", A.agents_md(name="Mercado X").splitlines()[0])
         self.assertLess(len(self.md), 60_000)
 
+    def test_the_numbers_and_rules_are_the_ones_the_code_enforces(self):
+        from bazaar.plaza import deals, private, server, suggest, team_api
+        for needle in (f"once every {private.COOL_TICKS} ticks", f"{team_api.READS_PER_MIN} reads and "
+                       f"{team_api.WRITES_PER_MIN} writes per team", f"{server.READS_PER_MIN} reads and "
+                       f"{server.WRITES_PER_MIN} writes per agent token", f"{suggest.PER_MINUTE} suggestions per team",
+                       f"({deals.OFFER_LIFE} ticks)", '"repeated": true', "`move_offer`", "`settled_elsewhere`",
+                       '{"offer_id": N}', "`bad_token`", "`conflict`", "not shown and not matched",
+                       "never the middle of the two limits", "the last card of a page first",
+                       "Only when both declared sides gain"):
+            self.assertIn(needle, self.md)
+        self.assertNotIn("listed as unverified", self.md)       # an unproved sheet is not listed at all
+
     def test_the_loop_in_the_document_is_real_python(self):
         compile(A.LOOP, "AGENTS.md loop", "exec")
         self.assertIn(A.LOOP, self.md)

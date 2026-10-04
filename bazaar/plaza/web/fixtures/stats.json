@@ -16,5 +16,6 @@
  "agents_online": 5,
  "matches_live": 12,
  "matches_settled": 23,
- "tick": 1446
+ "tick": 1446,
+ "traders": 8
 }

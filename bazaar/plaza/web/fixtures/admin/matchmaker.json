@@ -193,7 +193,8 @@
   "accepted": 0,
   "settled": 0,
   "passed": 0,
-  "expired": 0
+  "expired": 0,
+  "settled_elsewhere": 0
  },
  "cooling": 0,
  "paused": false,

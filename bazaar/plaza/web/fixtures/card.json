@@ -18,27 +18,32 @@
   {
    "team": "t04",
    "source": "public",
-   "finishes_page": false
+   "finishes_page": false,
+   "bid": 68
   },
   {
    "team": "t05",
    "source": "public",
-   "finishes_page": true
+   "finishes_page": true,
+   "bid": 68
   },
   {
    "team": "t06",
    "source": "public",
-   "finishes_page": true
+   "finishes_page": true,
+   "bid": 68
   },
   {
    "team": "t09",
    "source": "public",
-   "finishes_page": false
+   "finishes_page": false,
+   "bid": 68
   },
   {
    "team": "t12",
    "source": "public",
-   "finishes_page": false
+   "finishes_page": false,
+   "bid": 68
   }
  ],
  "offers": [
@@ -258,5 +263,6 @@
   "owned": false,
   "want": true,
   "as": null
- }
+ },
+ "reference_price": 76
 }

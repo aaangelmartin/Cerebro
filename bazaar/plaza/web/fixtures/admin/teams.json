@@ -18,7 +18,8 @@
    "blocked": false,
    "wants": 5,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t02",
@@ -37,7 +38,8 @@
    "blocked": false,
    "wants": 2,
    "available": 1,
-   "matches": 1
+   "matches": 1,
+   "paused": false
   },
   {
    "team": "t03",
@@ -56,7 +58,8 @@
    "blocked": false,
    "wants": 0,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t04",
@@ -75,7 +78,8 @@
    "blocked": false,
    "wants": 10,
    "available": 2,
-   "matches": 2
+   "matches": 2,
+   "paused": false
   },
   {
    "team": "t05",
@@ -94,7 +98,8 @@
    "blocked": false,
    "wants": 11,
    "available": 0,
-   "matches": 3
+   "matches": 3,
+   "paused": false
   },
   {
    "team": "t06",
@@ -113,7 +118,8 @@
    "blocked": false,
    "wants": 12,
    "available": 9,
-   "matches": 5
+   "matches": 5,
+   "paused": false
   },
   {
    "team": "t07",
@@ -132,7 +138,8 @@
    "blocked": false,
    "wants": 3,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t08",
@@ -151,7 +158,8 @@
    "blocked": false,
    "wants": 9,
    "available": 1,
-   "matches": 4
+   "matches": 4,
+   "paused": false
   },
   {
    "team": "t09",
@@ -170,7 +178,8 @@
    "blocked": false,
    "wants": 6,
    "available": 7,
-   "matches": 4
+   "matches": 4,
+   "paused": false
   },
   {
    "team": "t11",
@@ -189,7 +198,8 @@
    "blocked": false,
    "wants": 0,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t12",
@@ -208,7 +218,8 @@
    "blocked": false,
    "wants": 12,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t13",
@@ -227,7 +238,8 @@
    "blocked": false,
    "wants": 5,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t14",
@@ -246,7 +258,8 @@
    "blocked": false,
    "wants": 12,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t15",
@@ -265,7 +278,8 @@
    "blocked": false,
    "wants": 4,
    "available": 0,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   },
   {
    "team": "t16",
@@ -284,7 +298,8 @@
    "blocked": false,
    "wants": 11,
    "available": 4,
-   "matches": 8
+   "matches": 8,
+   "paused": false
   },
   {
    "team": "t17",
@@ -303,7 +318,8 @@
    "blocked": false,
    "wants": 4,
    "available": 0,
-   "matches": 1
+   "matches": 1,
+   "paused": false
   },
   {
    "team": "t18",
@@ -322,10 +338,12 @@
    "blocked": false,
    "wants": 1,
    "available": 1,
-   "matches": 0
+   "matches": 0,
+   "paused": false
   }
  ],
  "connected": 9,
  "verified": 6,
- "online": 5
+ "online": 5,
+ "agents": 0
 }

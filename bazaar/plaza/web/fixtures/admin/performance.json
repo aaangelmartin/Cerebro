@@ -328,7 +328,23 @@
     "pairs": 19
    }
   ],
-  "market": []
+  "market": [
+   {
+    "tick": 1386,
+    "ours": 12.5,
+    "best_other": 10.9
+   },
+   {
+    "tick": 1416,
+    "ours": 12.5,
+    "best_other": 11.2
+   },
+   {
+    "tick": 1445,
+    "ours": 12.5,
+    "best_other": 11.4
+   }
+  ]
  },
  "broker": {
   "state": "on",

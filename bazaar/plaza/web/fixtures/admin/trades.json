@@ -252,7 +252,9 @@
   "accepted": 0,
   "settled": 1,
   "passed": 0,
-  "expired": 0
+  "expired": 0,
+  "settled_elsewhere": 0
  },
- "total": 3
+ "total": 3,
+ "closed": []
 }
