@@ -11,7 +11,7 @@ Plaza.screen("docs", {
     const screenName = (s) => (s === "-" || !s ? t("docs.agentsOnly") : s === "every screen" ? t("docs.everyScreen") : I18N.t("nav." + s));
 
     root.appendChild(K.pageHead(t("nav.docs"), t("docs.sub"),
-      K.btn("AGENTS.md", { small: true, icon: "doc", href: "/plaza/AGENTS.md" }), K.btn(t("docs.copyBase"), { small: true, icon: "copy", onclick: () => K.copy(base + "/api") })));
+      K.link("/plaza/agents", { class: "btn sm" }, K.icon("doc", 14), "AGENTS.md"), K.btn(t("docs.copyBase"), { small: true, icon: "copy", onclick: () => K.copy(base + "/api") })));
     root.appendChild(el("div", { class: "docs-facts" },
       el("span", null, el("span", { class: "label" }, t("docs.base")), el("code", null, base + "/api")),
       el("span", null, el("span", { class: "label" }, t("docs.header")), el("code", null, "X-Plaza-Token: <" + t("docs.token") + ">")),

@@ -4,7 +4,7 @@
 //   const stop = API.poll("/api/me/trades", 3000, draw, onError)
 //   const stop = API.stream((item) => …)            the floor, live
 // Mock mode: ?mock=1 answers from /plaza/static/fixtures (kept for the browser session; ?mock=0 leaves it).
-// ?mock=closed, paused, offline, empty and error switch the matching state.
+// ?mock=closed, paused, offline, empty and error switch the matching state; ?mock=anon is a visitor with no session.
 (function () {
   "use strict";
   const BASE = "/plaza";
@@ -42,6 +42,7 @@
   }
   function mocked(method, path, body) {
     if (mock === "error" && path !== "/api/status") return Promise.reject({ status: 500, error: "mock", message: "mock error" });
+    if (mock === "anon" && /^\/api\/(me|agent)(\/|$)/.test(path)) return Promise.reject({ status: 401, error: "no_session", message: "no session" });
     const name = fixture(path);
     if (!name) return method === "GET" ? Promise.reject({ status: 404, error: "not_found", message: "no fixture for " + path }) : Promise.resolve({ ok: true, mock: true, sent: body });
     return fetch(BASE + "/static/fixtures/" + name + ".json").then((r) => {

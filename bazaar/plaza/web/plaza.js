@@ -1,7 +1,11 @@
 // Plaza: the shell of v07 Market. Top bar with the clock, side nav with the status box, router, the closed and
 // paused overlay. One screen per file registers itself:
 //   Plaza.screen("home", { title: "home.title", needsTeam: true, render(root, ctx) { …; return stop; } });
-// ctx: { params, query, me, status, go(path), t }. `render` may return a function, called when the screen is left.
+// ctx: { params, query, me, status, frame, go(path), t }. `render` may return a function, called when the screen is left.
+// Frames: the same screen is drawn in one of four. "app" (top bar and side nav) for a team with a session; "public"
+// (a small head: back, brand, language, Connect) for a visitor; "nonav" (top bar only) and "bare" (nothing, the
+// screen draws its own head). A screen may set `frame` to one of them or to a function; by default a screen that
+// needs a team is "app" and any other follows the session: hasTeam() ? "app" : "public".
 (function () {
   "use strict";
   const K = window.K, API = window.API, I18N = window.I18N;
@@ -27,7 +31,7 @@
     : [{ name: "home", path: "/plaza/home", icon: "home" }, { name: "cards", path: "/plaza/cards", icon: "cards" },
        { name: "offers", path: "/plaza/offers", icon: "offers", badge: "trades" }, { name: "activity", path: "/plaza/activity", icon: "activity" },
        { name: "market", path: "/plaza/market", icon: "market" }, { name: "docs", path: "/plaza/docs", icon: "api" },
-       { name: "how", path: "/plaza/how", icon: "how" }];
+       { name: "agents", path: "/plaza/agents", icon: "doc" }, { name: "how", path: "/plaza/how", icon: "how" }];
 
   const screens = {};
   const state = { me: null, status: null, admin: null, current: null, leave: null, dismissed: null, tickAt: 0 };
@@ -47,6 +51,27 @@
     if (path !== location.pathname + location.search) history[replace ? "replaceState" : "pushState"]({}, "", path);
     document.body.classList.remove("nav-open");
     render();
+  }
+
+  // ---- who is looking, and the frame their screen gets. The one place that answers "is there a team session?".
+  function hasTeam() { return !ADMIN && Boolean(state.me); }
+  function frameOf(def, query) {
+    if (ADMIN || !def) return ADMIN ? "app" : hasTeam() ? "app" : "public";
+    let f = typeof def.frame === "function" ? def.frame({ team: hasTeam(), query }) : def.frame;
+    if (!f) f = def.bare ? "bare" : def.noNav ? "nonav" : "auto";
+    if (f === "auto" || f === "app") return hasTeam() ? "app" : "public";       // no side nav for a visitor, ever
+    return f;
+  }
+  /** The head of a public page: back to the landing, the brand, the language and Connect. */
+  function publicHead(def) {
+    const lang = K.el("div", { class: "lang-switch", role: "group", "aria-label": t("shell.language") }, I18N.LANGS.map((l) =>
+      K.el("button", { type: "button", class: l === I18N.lang ? "active" : null, "aria-pressed": String(l === I18N.lang), onclick: () => I18N.setLang(l) }, l.toUpperCase())));
+    return K.el("header", { class: "pubbar" },
+      K.link("/plaza/", { class: "btn sm pubbar-back", "aria-label": t("shell.back"), title: t("shell.back") }, K.icon("back", 13), K.el("span", null, t("shell.back"))),
+      K.link("/plaza/", { class: "brand" }, K.el("span", { class: "brand-mark" }, "M"), K.el("span", { class: "brand-name" }, "v07 Market"),
+        def && def.title ? K.el("span", { class: "label pubbar-what" }, t(def.title)) : null),
+      K.el("div", { class: "pubbar-right" }, lang,
+        K.link("/plaza/connect", { class: "btn sm primary pubbar-connect" }, K.icon("agent", 13), K.el("span", null, t("shell.connectTeam")))));
   }
 
   // ---- the shell
@@ -133,7 +158,7 @@
     if (!API.mock && anon()) { state.me = null; state.meError = false; return Promise.resolve(); }
     return API.get("/api/me").then((me) => { state.me = me; state.meError = false; }, (e) => {
       const none = e && [401, 403, 404].includes(e.status);
-      if (none) { state.me = null; anon(true); }
+      if (none) { state.me = null; if (!API.mock) anon(true); }
       state.meError = !none;                        // the market did not answer: keep what we knew, say so
     });
   }
@@ -145,7 +170,7 @@
     if (old) old.remove();
     const def = screens[state.current] || {};
     const kind = s.market === "closed" || s.market === "off" ? "closed" : s.market === "paused" ? "paused" : null;
-    if (!kind || def.bare || def.noOverlay || state.dismissed === kind + ":" + s.tick) return;
+    if (!kind || state.frame === "bare" || def.noOverlay || state.dismissed === kind + ":" + s.tick) return;
     const opens = typeof s.opens_in_s === "number" ? Math.max(0, s.opens_in_s) : null;
     const hms = opens === null ? null : [Math.floor(opens / 3600), Math.floor((opens % 3600) / 60), opens % 60].map((x, i) => (i ? String(x).padStart(2, "0") : String(x))).join(":");
     dom.main.appendChild(K.el("div", { class: "closed-overlay" }, K.el("div", { class: "closed-card" + (kind === "paused" ? " is-paused" : ""), role: "dialog", "aria-label": t("closed." + kind + ".title") },
@@ -159,14 +184,25 @@
   // ---- drawing a screen
   function render() {
     if (state.leave) { try { state.leave(); } catch (e) { console.error(e); } state.leave = null; }
-    const found = match(location.pathname);
+    let found = match(location.pathname);
+    let def = found ? screens[found.name] : null;
+    // A screen of a team, opened with no session: the visitor goes to the landing, never to an empty app.
+    if (!ADMIN && def && def.needsTeam && !hasTeam() && !state.meError) {
+      history.replaceState({}, "", "/plaza/");
+      found = match("/plaza/");
+      def = screens[found.name];
+    }
     const name = found ? found.name : null;
-    const def = name ? screens[name] : null;
+    const query = Object.fromEntries(new URLSearchParams(location.search));
+    const frame = frameOf(def, query);
     state.current = name;
-    document.body.classList.toggle("bare", Boolean(def && def.bare));
-    document.body.classList.toggle("no-nav", Boolean(def && def.noNav));
+    state.frame = frame;
+    document.body.classList.toggle("bare", frame === "bare");
+    document.body.classList.toggle("no-nav", frame === "nonav");
+    document.body.classList.toggle("public", frame === "public");
     drawNav();
     K.clear(dom.main);
+    if (frame === "public") dom.main.appendChild(publicHead(def));
     const root = dom.main.appendChild(K.el("div", { class: "page scr-" + (name || "none") }));
     dom.main.scrollTop = 0;
     document.title = (def && def.title ? t(def.title) + " · " : "") + "v07 Market";
@@ -174,16 +210,11 @@
       root.appendChild(K.state("empty", t("shell.notFound"), location.pathname, K.btn(t("shell.goHome"), { onclick: () => go(ROOT + "/") })));
       return;
     }
-    if (def.needsTeam && !state.me && state.meError) {
+    if (def.needsTeam && !hasTeam()) {                // only when the market did not answer: keep the address, say so
       root.appendChild(K.state("error", t("common.error"), t("shell.noAnswer"), K.btn(t("common.retry"), { onclick: () => loadMe().then(render) })));
       return;
     }
-    if (def.needsTeam && !state.me) {
-      root.appendChild(K.state("offline", t("shell.connectFirst"), t("shell.connectFirstText"),
-        K.btn(t("shell.connect"), { kind: "primary", iconAfter: "arrow", onclick: () => go("/plaza/connect") })));
-      return;
-    }
-    const ctx = { params: found.params, query: Object.fromEntries(new URLSearchParams(location.search)), me: state.me, status: state.status, go, t };
+    const ctx = { params: found.params, query, me: state.me, status: state.status, frame, go, t };
     try {
       const leave = def.render(root, ctx);
       state.leave = typeof leave === "function" ? leave : null;
@@ -204,6 +235,6 @@
     setInterval(() => loadMe().then(drawNav), 15000);
   }
 
-  window.Plaza = { screen, adminScreen: screen, go, state, admin: ADMIN, refresh: () => { anon(false); return Promise.all([loadStatus(), loadMe()]).then(render); } };
+  window.Plaza = { screen, adminScreen: screen, go, state, hasTeam, admin: ADMIN, refresh: () => { anon(false); return Promise.all([loadStatus(), loadMe()]).then(render); } };
   document.addEventListener("DOMContentLoaded", boot);
 })();

@@ -67,6 +67,16 @@ h1, h2, h3, p { margin: 0; }
 .no-nav .closed-overlay { left: 0; }
 .no-nav .page { max-width: 1180px; margin: 0 auto; }
 .bare .page { max-width: none; padding: 0; }
+/* a visitor's frame: no top bar, no side nav, a small head of its own */
+.public .topbar, .public .sidenav { display: none; }
+.public .layout { inset: 0; }
+.public .page { max-width: 1240px; width: 100%; margin: 0 auto; }
+.public .closed-overlay { inset: var(--topbar-h) 0 0 0; }
+.pubbar { display: flex; align-items: center; gap: 14px; height: var(--topbar-h); padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--s1);
+  position: sticky; top: 0; z-index: 22; }
+.pubbar .brand { min-width: 0; }
+.pubbar-what { margin-left: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pubbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
 
 /* status box: name on the left, a bordered label on the right, nothing else (v11) */
 .status-box { border: 1px solid var(--line-2); background: var(--s1); margin-top: auto; font-size: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
@@ -218,6 +228,10 @@ a.card:hover, button.card:hover { border-color: var(--ink-3); }
   .main { overflow: visible; }
   .page { padding: 16px 12px 32px; }
   .closed-overlay { position: fixed; inset: var(--topbar-h) 0 0 0; }
+  .bare .layout, .public .layout { padding-top: 0; }
+  .pubbar { padding: 0 10px; gap: 10px; }
+  .pubbar-back > span:not(.ic-wrap), .pubbar-what, .pubbar .brand-name { display: none; }
+  .pubbar-right { gap: 8px; }
   .thread { height: 260px; }
   .swap { gap: 10px; }
 }

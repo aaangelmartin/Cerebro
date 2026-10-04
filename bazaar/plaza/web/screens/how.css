@@ -1,5 +1,6 @@
 /* how: styles of this screen only, classes start with .how- */
-.page.scr-how { gap: 0; min-height: 100%; }
+.page.scr-how { gap: 0; min-height: 100%; padding: 0; max-width: none; }
+body:not(.bare) .how-body { padding-top: 40px; }
 .how-who { display: flex; align-items: center; gap: 8px; font-family: var(--font-num); font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .how-dot { width: 6px; height: 6px; background: var(--ok); flex: none; }
 .how-body { max-width: 1120px; width: 100%; margin: 0 auto; padding: 64px 24px 56px; display: flex; flex-direction: column; }

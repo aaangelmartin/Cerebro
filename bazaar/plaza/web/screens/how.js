@@ -1,5 +1,5 @@
-// how: how everything works, on one page with nothing behind it. Shown once right after Connect and again from
-// the side nav. It ends in "Enter the market".
+// how: how everything works, on one page. Right after Connect (?first=1) it is shown once with nothing behind it and
+// ends in "Enter the market"; from the side nav it opens inside the app; a visitor reads it in the public frame.
 (function () {
   "use strict";
   const { el } = K;
@@ -19,19 +19,21 @@
 
   Plaza.screen("how", {
     title: "nav.how",
-    bare: true,
+    frame: ({ team, query }) => (team && query.first ? "bare" : "auto"),
     render(root, ctx) {
-      const me = ctx.me;
+      const me = ctx.me, first = ctx.frame === "bare", inApp = ctx.frame === "app";
       try { localStorage.setItem(SEEN_KEY, "1"); } catch (e) { /* private window */ }
       const enter = (big) => {
-        const b = me ? K.btn(t("how.enter"), { kind: "primary", iconAfter: big ? "arrow" : null, onclick: () => ctx.go("/plaza/home") })
+        const b = inApp ? K.btn(t("nav.home"), { iconAfter: big ? "arrow" : null, onclick: () => ctx.go("/plaza/home") })     // already inside: no way out, just Home
+                : me ? K.btn(t("how.enter"), { kind: "primary", iconAfter: big ? "arrow" : null, onclick: () => ctx.go("/plaza/home") })
                      : K.btn(t("landing.connect"), { kind: "primary", icon: "agent", onclick: () => ctx.go("/plaza/connect") });
         if (big) b.classList.add("how-enter");
         return b;
       };
 
-      root.appendChild(F1.head(t("nav.how"),
-        me ? el("span", { class: "how-who" }, el("span", { class: "how-dot" }), t("how.who", { name: me.name || K.teamName(me.team), team: me.team })) : null,
+      // Only the first time, with nothing behind, the page draws its own head; otherwise the frame has one.
+      if (first) root.appendChild(F1.head(t("nav.how"),
+        el("span", { class: "how-who" }, el("span", { class: "how-dot" }), t("how.who", { name: me.name || K.teamName(me.team), team: me.team })),
         enter(false)));
 
       const body = root.appendChild(el("div", { class: "how-body" }));
@@ -84,7 +86,7 @@
       const counts = el("p", { class: "how-end-sub" }, t("how.end.again"));
       body.appendChild(el("div", { class: "how-end" },
         el("div", null, el("div", { class: "how-end-title" }, me ? t("how.end.title") : t("how.end.titleOut")), counts), enter(true)));
-      body.appendChild(el("div", { class: "how-foot" }, K.endpoint("GET /plaza/api/me", "GET /plaza/AGENTS.md"), F1.langSwitch()));
+      body.appendChild(el("div", { class: "how-foot" }, K.endpoint("GET /plaza/api/me", "GET /plaza/AGENTS.md"), first ? F1.langSwitch() : null));
 
       if (me && me.counts) {
         const c = me.counts, live = me.trades ? (me.trades.proposed || 0) + (me.trades.offer_on_v07 || 0) + (me.trades.accepted || 0) : 0;

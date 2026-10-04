@@ -2,7 +2,7 @@
 // state.*, rarity.*). Screens reuse these; they do not copy them into their own files.
 I18N.register("en", {
   "shell.time": "Time", "shell.tick": "Tick", "shell.nextTick": "Next tick in", "shell.refresh": "Reload", "shell.menu": "Menu",
-  "shell.language": "Language", "shell.admin": "admin", "shell.publicPage": "Public page", "shell.notFound": "This page does not exist",
+  "shell.language": "Language", "shell.back": "Back", "shell.connectTeam": "Connect your team", "shell.admin": "admin", "shell.publicPage": "Public page", "shell.notFound": "This page does not exist",
   "shell.goHome": "Go to the start", "shell.soon": "This screen is being built", "shell.connect": "Connect your agent",
   "shell.adminOnly": "Admin · Team 10 only",
   "shell.noAnswer": "The market does not answer. Your team and its trades are untouched.",
@@ -38,7 +38,7 @@ I18N.register("en", {
 });
 I18N.register("es", {
   "shell.time": "Hora", "shell.tick": "Tick", "shell.nextTick": "Próximo tick en", "shell.refresh": "Recargar", "shell.menu": "Menú",
-  "shell.language": "Idioma", "shell.admin": "admin", "shell.publicPage": "Página pública", "shell.notFound": "Esta página no existe",
+  "shell.language": "Idioma", "shell.back": "Volver", "shell.connectTeam": "Conecta tu equipo", "shell.admin": "admin", "shell.publicPage": "Página pública", "shell.notFound": "Esta página no existe",
   "shell.goHome": "Ir al inicio", "shell.soon": "Esta pantalla está en construcción", "shell.connect": "Conecta tu agente",
   "shell.adminOnly": "Admin · solo Team 10",
   "shell.noAnswer": "El mercado no responde. Tu equipo y sus tratos no se han tocado.",
