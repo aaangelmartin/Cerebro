@@ -83,12 +83,27 @@ Plaza.screen("board", {
         el("p", { class: "muted board-help" }, t(list === "wants" ? "board.wantHelp" : "board.sellHelp")));
     }
 
+    // The game's own call for this card on v07, for a team's agent: nothing to connect, its own key, 0 % fee.
+    function quickText(c) {
+      const buy = (c.ask && c.ask.price) || c.median || c.last || c.book, sell = (c.bid && c.bid.price) || c.median || c.last || c.book;
+      const lines = ["v07 (Team 10's market, 0% fee) · " + c.ref + " " + (c.name || ""),
+        "Buy it: POST $GAME/api/offers " + JSON.stringify({ venue: "v07", give: { cash: buy }, want: { cards: [c.ref] } }),
+        "Sell it: POST $GAME/api/offers " + JSON.stringify({ venue: "v07", give: { assets: ["<your asset id of " + c.ref + " from GET /api/me>"] }, want: { cash: sell } })];
+      if (c.bid && c.bid.on_v07 && c.bid.offer) lines.push("A bid of " + c.bid.price + " is on v07 now: sell into it with POST $GAME/api/offers/" + c.bid.offer + "/accept");
+      if (c.ask && c.ask.on_v07 && c.ask.offer) lines.push("An ask of " + c.ask.price + " is on v07 now: take it with POST $GAME/api/offers/" + c.ask.offer + "/accept");
+      lines.push("Use your own team key, change the price if you want. The other team accepts it on v07; nobody pays a fee. More: " + location.origin + "/plaza/api/quick");
+      return lines.join("\n");
+    }
+    function quickBtn(c) {
+      return el("button", { type: "button", class: "btn sm board-quick", title: t("board.quickHelp"), onclick: () => K.copy(quickText(c)) }, K.icon("copy", 13), t("board.quick"));
+    }
+
     function act(c) {
-      if (!ctx.me) return el("div", { class: "board-act" }, K.link("/plaza/connect", { class: "btn sm", title: t("board.connectFirst") }, K.icon("agent", 13), t(c.ask ? "board.want" : "board.request")));
+      if (!ctx.me) return el("div", { class: "board-act" }, quickBtn(c), K.link("/plaza/connect", { class: "btn sm", title: t("board.connectFirst") }, K.icon("agent", 13), t(c.ask ? "board.want" : "board.request")));
       const open = (list) => () => { st.open = st.open && st.open.ref === c.ref && st.open.list === list ? null : { ref: c.ref, list }; drawBody(); };
       return el("div", { class: "board-act" },
         K.btn(t(c.ask ? "board.want" : "board.request"), { small: true, onclick: open("wants") }),
-        K.btn(t("board.sell"), { small: true, onclick: open("spares") }));
+        K.btn(t("board.sell"), { small: true, onclick: open("spares") }), quickBtn(c));
     }
 
     function row(c) {
@@ -129,7 +144,7 @@ Plaza.screen("board", {
       K.clear(feeds);
       K.add(feeds, [el("span", { class: "label" }, t("board.json")), feed("/plaza/board.json"), feed("/plaza/board/live.json", "board.jsonLive"),
         feed("/plaza/board/history.json", "board.jsonHistory"), feed("/plaza/collections.json"), feed("/plaza/AGENTS.md"),
-        feed("/plaza/lots.json"),
+        feed("/plaza/lots.json"), feed("/plaza/api/opportunities"), feed("/plaza/api/quick", "board.noConnect"),
         K.link("/plaza/collections", { class: "btn sm board-json" }, K.icon("cards", 13), t("board.collections")),
         K.link("/plaza/auctions", { class: "btn sm" }, K.icon("offers", 13), t("board.auctions"))]);
     }
