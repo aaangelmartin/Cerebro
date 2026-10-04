@@ -55,28 +55,33 @@ def new_code() -> str:
 def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Plaza", lang: str = "en") -> str:
     """What the human pastes to its agent, in English or Spanish. `base` is the public address ending in /plaza."""
     n = int(team[1:])
-    run = (f"export PLAZA={base} PLAZA_CODE={code} TEAM={team} GAME=<game base URL> GAME_KEY=<your game key>; "
-           "curl -s $PLAZA/agent.py -o v07.py && nohup python3 v07.py > v07.log 2>&1 &")
+    body = f'{{"team": "{team}", "code": "{code}"}}'
     if lang == "es":
         return (
-            f"Eres el agente del Team {n} en The Bazaar. {name} es el mercado de Team 10 en el venue {venue} (comisión "
-            "0). Ejecuta esto y DÉJALO CORRIENDO en segundo plano: conecta, prueba tu equipo en el juego, publica tu "
-            "mano real y negocia por ti, para siempre. TU PROPIA clave del juego solo va al juego.\n"
-            f"{run}\n"
-            "Comprueba que v07.log dice \"running\" y que sigue vivo: esta tarea NO termina.\n"
-            f"¿Prefieres hacerlo tú? Lee {base}/AGENTS.md: POST /api/connect/agent; envía "
-            f"{code} a t10 en un hilo del juego en El Rastro (venue rastro); luego NO PARES: PUT "
-            f"/api/team/{team} con tu hoja y sondea GET /api/agent/next para siempre."
+            f"Eres el agente del Team {n} en The Bazaar. {name} es el mercado de Team 10 en el venue {venue} "
+            f"(comisión 0). Base de las rutas: {base}\n"
+            f"1. POST /api/connect/agent {body}; usa el agent_token como cabecera X-Plaza-Token.\n"
+            f"2. En el juego, con TU PROPIA clave del juego (nunca la envíes aquí), abre un hilo con t10 en El "
+            f"Rastro (venue rastro) y envía {code} como texto.\n"
+            "3. Sondea GET /api/agent/next hasta verified: true.\n"
+            f"4. PUT /api/team/{team} con wants, spares, for_sale de tu mano real.\n"
+            "5. BUCLE SIN FIN: cada tick GET /api/agent/next, ejecuta cada acción con tu clave, POST /api/agent/ack.\n"
+            "Es una tarea de larga duración: no pares tras el paso 3; un agente que deja de sondear no recibe "
+            "tratos. Detalles: /AGENTS.md\n"
+            "Ayuda opcional, léela antes: /agent.py.txt (texto plano; tu clave solo va al juego)."
         )
     return (
-        f"You are Team {n}'s trading agent in The Bazaar. {name} is Team 10's market on venue {venue} (0 fee). Run "
-        "this and LEAVE IT RUNNING in the background: it connects, proves your team in the game, lists your real "
-        "hand and trades for you, for ever. YOUR OWN game key goes only to the game.\n"
-        f"{run}\n"
-        "Check that v07.log says \"running\" and that the process stays alive: this task does NOT end.\n"
-        f"Prefer to drive it yourself? Read {base}/AGENTS.md: POST /api/connect/agent; send "
-        f"{code} to t10 in a game thread on El Rastro (venue rastro); then DO NOT STOP: PUT "
-        f"/api/team/{team} with your sheet and poll GET /api/agent/next for ever."
+        f"You are Team {n}'s trading agent in The Bazaar. {name} is Team 10's market on venue {venue} (0 fee). "
+        f"Base of every path: {base}\n"
+        f"1. POST /api/connect/agent {body}; use the agent_token as header X-Plaza-Token.\n"
+        f"2. In the game, with YOUR OWN game key (never send it here), open a thread with t10 on El Rastro (venue "
+        f"rastro) and send {code} as the text.\n"
+        "3. Poll GET /api/agent/next until verified: true.\n"
+        f"4. PUT /api/team/{team} with wants, spares, for_sale from your real hand.\n"
+        "5. LOOP FOR EVER: every tick GET /api/agent/next, run each action with your key, POST /api/agent/ack.\n"
+        "This is a long-running task: do not stop after step 3; an agent that stops polling gets no trades. "
+        "Details: /AGENTS.md\n"
+        "Optional helper, read it first: /agent.py.txt (plain text; your key only goes to the game)."
     )
 
 

@@ -147,8 +147,10 @@ class DocumentTest(unittest.TestCase):
         self.assertEqual(src.count('os.environ["GAME_KEY"]'), 1)           # read in one place: the call to the game
         self.assertRegex(src, r'call\(method, GAME \+ path, body, \{"X-Team-Key": os\.environ\["GAME_KEY"\]\}\)')
         self.assertNotIn("import subprocess", src)
-        for needle in ("/agent.py", "nohup python3 v07.py", "never ends", "shown OFFLINE"):
-            self.assertIn(needle, self.md)
+        import hashlib
+        self.assertIn(hashlib.sha256(src.encode()).hexdigest(), self.md)     # the script the page names is this one
+        for needle in ("/agent.py.txt", "Drive it yourself", "never ends", "shown OFFLINE", "WHAT IT NEVER DOES"):
+            self.assertIn(needle, self.md + src)
 
 
 class PromptTest(unittest.TestCase):
@@ -158,8 +160,8 @@ class PromptTest(unittest.TestCase):
             p = C.prompt("t16", "PLAZA-7K2Q9M", base, "v07", "v07 Market", lang=lang)
             self.assertLessEqual(len(p), 900, lang)
             for piece in ("Team 16", "PLAZA-7K2Q9M", "/AGENTS.md", "/api/connect/agent", own, "t10", "v07",
-                          "/api/team/t16", "/api/agent/next", "/agent.py", "nohup",
-                          f"PLAZA={base} PLAZA_CODE=PLAZA-7K2Q9M TEAM=t16", "rastro"):
+                          "/api/team/t16", "/api/agent/next", "/api/agent/ack", "X-Plaza-Token", "/agent.py.txt",
+                          "rastro", "verified: true"):
                 self.assertIn(piece, p, lang)
         self.assertEqual(C.prompt("t16", "PLAZA-7K2Q9M", base), C.prompt("t16", "PLAZA-7K2Q9M", base, lang="xx"))
 

@@ -1131,8 +1131,9 @@ class Handler(BaseHTTPRequestHandler):
             except TypeError:
                 md = agents_md()
             return self._send(200, md.encode(), "text/markdown; charset=utf-8", cors=True)
-        if path in ("/plaza/agent.py", "/agent.py"):        # the one-file agent a team runs with its own game key
-            return self._send(200, (Path(__file__).parent / "runner.py").read_bytes(), "text/x-python; charset=utf-8",
+        if path in ("/plaza/agent.py", "/agent.py", "/plaza/agent.py.txt", "/agent.py.txt"):
+            # the optional one-file helper, as plain text so that any reader can open it before anyone runs it
+            return self._send(200, (Path(__file__).parent / "runner.py").read_bytes(), "text/plain; charset=utf-8",
                               cors=True)
         if path in ("/plaza/AGENTS-AUCTIONS.md", "/AGENTS-AUCTIONS.md"):
             from .agentsdoc import auctions_md

@@ -9,8 +9,12 @@ It connects, proves your team in the game, reads your REAL hand, publishes your 
 cards you miss, prudent private limits from the values the game gives YOUR team) and then trades for you for ever:
 it only closes on venue v07, only at a price inside your own limits, and only when your team gains.
 
-YOUR GAME KEY: read from GAME_KEY, sent ONLY to GAME (function `game` below, header X-Team-Key). It is never sent
-to the market and never printed: `market` sends only the market's own token. Read the 250 lines; nothing is hidden.
+WHAT THIS DOES: talks to two hosts only, GAME (with your key) and PLAZA (with the market's token).
+WHAT IT NEVER DOES: it never sends your game key anywhere but GAME (one function, `game`, header X-Team-Key);
+  it never prints the key; it runs no other program and imports nothing outside the standard library;
+  it writes one file, ./.v07_token_<team> (the market's token, mode 600), and nothing outside its folder;
+  it never closes a deal outside venue v07 or outside your own limits. Ctrl+C (or kill) stops it at once.
+Optional: everything it does you can do yourself with AGENTS.md. Read the file first; nothing is hidden.
 Standard library only. Options: --dry-run (send nothing), --once (one turn). MARGIN=0.10 is the room kept under
 your value when buying and over it when selling. The token is kept in ./.v07_token_<team> (mode 600)."""
 import json
