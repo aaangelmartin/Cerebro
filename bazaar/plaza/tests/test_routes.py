@@ -40,8 +40,12 @@ class RouteListTest(unittest.TestCase):
 
     def test_openapi_lists_the_live_routes_only(self):
         doc = routes.openapi("X")
-        live = {("/plaza" + r.path, r.method.lower()) for r in routes.ROUTES if r.live}
+        live = {("/plaza" + r.path, r.method.lower()) for r in routes.ROUTES if r.live and r.who != "admin"}
         self.assertEqual({(p, m) for p, ops in doc["paths"].items() for m in ops}, live)
+        self.assertFalse(any("/admin/" in p for p in doc["paths"]))                  # the public list never names the panel
+        everything = routes.openapi("X", admin=True)
+        self.assertEqual(len([m for ops in everything["paths"].values() for m in ops]), len([r for r in routes.ROUTES if r.live]))
+        self.assertTrue(all("x-screen" in op for ops in everything["paths"].values() for op in ops.values()))
 
     @unittest.skipUnless(test_gateway.GATEWAY.exists(), "no gateway in this checkout")
     def test_the_gateway_forwards_every_route(self):

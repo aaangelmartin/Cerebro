@@ -150,6 +150,7 @@
     const def = name ? screens[name] : null;
     state.current = name;
     document.body.classList.toggle("bare", Boolean(def && def.bare));
+    document.body.classList.toggle("no-nav", Boolean(def && def.noNav));
     drawNav();
     K.clear(dom.main);
     const root = dom.main.appendChild(K.el("div", { class: "page scr-" + (name || "none") }));

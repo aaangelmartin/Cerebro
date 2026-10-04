@@ -10,6 +10,7 @@ Every team's sheet arrives filled with what the game shows everyone (bazaar.plaz
 replaces it through the API behind a team PIN (bazaar.plaza.store). The game key of a team is never asked for."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -37,7 +38,7 @@ HOST = public.HOST
 VENUE = matcher.VENUE
 REFRESH_S = 15.0
 MAX_BODY = 16 * 1024
-READS_PER_MIN, WRITES_PER_MIN = 240, 30
+READS_PER_MIN, WRITES_PER_MIN = 300, 40
 STATIC = {"/plaza/static/plaza.css": ("plaza.css", "text/css; charset=utf-8"),
           "/plaza/static/plaza.js": ("plaza.js", "text/javascript; charset=utf-8"),
           "/plaza/static/components.js": ("components.js", "text/javascript; charset=utf-8")}
@@ -609,6 +610,17 @@ class Handler(BaseHTTPRequestHandler):
             return fwd
         return self.client_address[0]
 
+    def _budget_key(self) -> str:
+        """Who a request counts against: the agent's token or the browser's session when there is one (teams at the
+        venue share an address), else the address."""
+        token = self.headers.get(TOKEN_HEADER) or ""
+        if 20 <= len(token) <= 80:
+            return "k:" + hashlib.sha256(token.encode()).hexdigest()[:24] + ":" + self._client()
+        m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
+        if m:
+            return "s:" + hashlib.sha256(m.group(1).encode()).hexdigest()[:24] + ":" + self._client()
+        return self._client()
+
     def _send(self, status: int, body: bytes, ctype: str, cache: str = "no-store", cors: bool = False) -> None:
         self.board.count(self.route, status)
         self.send_response(status)
@@ -730,7 +742,9 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path
         self.route = "page"
-        if not self.budget.take(self._client(), "read"):
+        # The page's own files are cheap and every team at the venue may share one address: only the API is budgeted.
+        if (path.startswith("/plaza/api/") or path.startswith("/plaza/admin/api/")) \
+                and not self.budget.take(self._budget_key(), "read"):
             return self._error(429, "slow_down", "too many requests; try again in a minute")
         if path.startswith("/plaza/admin"):
             return self._admin_get(path, {k: v[-1] for k, v in parse_qs(u.query).items()})
@@ -921,6 +935,8 @@ class Handler(BaseHTTPRequestHandler):
             f = self._filters(q)
         except PlazaError as e:
             return self._error(e.status, e.code, e.message)
+        if path == "/plaza/admin/api/openapi":
+            return self._json(200, routes.openapi(NAME, admin=True))
         if path == "/plaza/admin/api/overview":
             return self._json(200, self.board.overview(snap))
         if path == "/plaza/admin/api/activity":
@@ -937,7 +953,7 @@ class Handler(BaseHTTPRequestHandler):
     def _write(self):
         path = urlparse(self.path).path
         self.route = "write"
-        if not self.budget.take(self._client(), "write"):
+        if not self.budget.take(self._budget_key(), "write"):
             return self._error(429, "slow_down", "too many requests; try again in a minute")
         if "json" not in (self.headers.get("Content-Type") or "").lower():
             return self._error(415, "bad_request", "send Content-Type: application/json")

@@ -15,7 +15,7 @@ CATALOG = {"sets": [{"id": "LAT", "name": "La Latina", "color": "#F2A541", "rele
     "rarities": {"common": {"book": 10}, "uncommon": {"book": 25}}}
 REPORT = {"tick": 77, "rivals": {
     "t09": {"name": "Team 9", "pages": 2, "album": "30/50", "selling": {"LAT-06": {"ask": 20, "venue": "rastro", "offer": 5}}},
-    "t07": {"name": "Team 7", "hunting": {"LAT-06": {"dealer_threads": 2}}}}}
+    "t07": {"name": "Team 7", "hunting": {"LAT-06": {"dealer_threads": 2, "bid": 20, "venue": "rastro"}}}}}
 
 
 class ServerTest(unittest.TestCase):
@@ -315,11 +315,11 @@ class ServerTest(unittest.TestCase):
 
     def test_declared_pairs_for_the_matchmaker(self):
         self.assertEqual(S.declared_pairs(self.live, self.record), [])
-        for team, body in (("t07", {"wants": ["LAT-06"]}), ("t09", {"for_sale": [{"ref": "LAT-06", "price": 18}]})):
+        for team, body in (("t07", {"wants": ["LAT-06"]}), ("t09", {"spares": ["LAT-06"]})):       # a declared spare meets a declared want
             self.call("POST", "/plaza/api/claim", {"team": team, "pin": "4242"})
             self.call("PUT", f"/plaza/api/team/{team}", body, {"X-Plaza-Pin": "4242"})
         pairs = S.declared_pairs(self.live, self.record)
-        self.assertEqual([(p["seller"], p["buyer"], p["ref"], p["price"]) for p in pairs], [("t09", "t07", "LAT-06", 18)])
+        self.assertEqual([(p["seller"], p["buyer"], p["ref"]) for p in pairs], [("t09", "t07", "LAT-06")])
 
 
 if __name__ == "__main__":

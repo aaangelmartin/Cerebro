@@ -63,6 +63,8 @@ h1, h2, h3, p { margin: 0; }
 .page { padding: 24px 20px 40px; max-width: 1240px; display: flex; flex-direction: column; gap: 16px; }
 .bare .topbar, .bare .sidenav { display: none; }
 .bare .layout { inset: 0; }
+.no-nav .sidenav, .no-nav .tb-menu { display: none; }
+.no-nav .page { max-width: 1180px; margin: 0 auto; }
 .bare .page { max-width: none; padding: 0; }
 
 /* status box: name on the left, a bordered label on the right, nothing else (v11) */

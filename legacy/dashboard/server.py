@@ -254,7 +254,7 @@ PLAZA_STREAM = "/plaza/api/floor/stream"
 PLAZA_ADMIN_RX = re.compile(
     r"/plaza/admin(?:/(?:static/admin\.js|static/screens/[a-z0-9_]{1,40}\.(?:js|css)"
     r"|overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs"
-    r"|api/(?:overview|activity|matchmaker|status|performance|trades|teams|suggestions|venue))?)?")
+    r"|api/(?:overview|activity|matchmaker|status|performance|trades|teams|suggestions|venue|openapi))?)?")
 PLAZA_ADMIN_WRITE = "/plaza/admin/api/action"
 PLAZA_TOKEN_FILE = Path(ENV.get("PLAZA_TOKEN_FILE") or ROOT.parent.parent / "bazaar" / "data" / "live" / "plaza_admin.token")
 PLAZA_MAX_BODY = 16 * 1024

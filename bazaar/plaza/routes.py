@@ -109,6 +109,8 @@ ROUTES: list[Route] = [
       "admin suggestions", "B2", False),
     R("GET", "/admin/api/venue", "admin", "The venue as the game shows it.", None, "admin/venue.json",
       "admin venue", "B2", False),
+    R("GET", "/admin/api/openapi", "admin", "This list with the panel's routes, for machines.", None, None,
+      "admin docs", "shell", True),
     R("POST", "/admin/api/action", "admin", "One of our switches: on, off, refresh, pause, resume, hide, unhide, block, unblock, "
       "exclude, include, force, expire, suggestion.", {"action": "pause"}, None, "admin", "B2", True),
 ]
@@ -119,13 +121,13 @@ def public() -> list[Route]:
     return [r for r in ROUTES if r.who != "admin"]
 
 
-def openapi(name: str = "v07 Market") -> dict:
-    """A small OpenAPI document of the live routes."""
+def openapi(name: str = "v07 Market", admin: bool = False) -> dict:
+    """A small OpenAPI document of the live routes: the public ones, or with `admin` our panel's too."""
     paths: dict[str, dict] = {}
     for r in ROUTES:
-        if not r.live:
+        if not r.live or (r.who == "admin" and not admin):
             continue
-        op = {"summary": r.what, "x-who": r.who, "responses": {"200": {"description": "ok"}}}
+        op = {"summary": r.what, "x-who": r.who, "x-screen": r.screen, "responses": {"200": {"description": "ok"}}}
         if r.body is not None:
             op["requestBody"] = {"content": {"application/json": {"example": r.body}}}
         if r.fixture:

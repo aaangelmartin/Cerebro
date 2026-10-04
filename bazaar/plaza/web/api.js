@@ -54,7 +54,7 @@
   function call(method, path, body, query) {
     const clean = Object.fromEntries(Object.entries(query || {}).filter(([, v]) => v !== null && v !== undefined && v !== ""));
     const qs = new URLSearchParams(clean).toString();
-    if (mock) return mocked(method, path, body);
+    if (mock && !/\/api\/openapi(\.json)?$/.test(path)) return mocked(method, path, body);   // the route list is always the real one
     const init = { method, credentials: "same-origin", headers: {} };
     if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
     return fetch(BASE + path + (qs ? "?" + qs : ""), init).then((r) => r.json().catch(() => ({})).then((data) => {
@@ -99,5 +99,13 @@
     return () => { if (es) es.close(); if (stopPoll) stopPoll(); };
   }
 
-  window.API = { get, post, put, poll, stream, get mock() { return mock; }, BASE };
+  /** A raw document under /plaza as text (AGENTS.md). Always the real one, mock or not. */
+  function text(path) {
+    return fetch(BASE + path, { credentials: "same-origin" }).then((r) => {
+      if (!r.ok) throw { status: r.status, error: "error", message: r.statusText };
+      return r.text();
+    }, () => { throw { status: 0, error: "offline", message: "the market does not answer" }; });
+  }
+
+  window.API = { get, post, put, text, poll, stream, get mock() { return mock; }, BASE };
 })();

@@ -34,7 +34,8 @@ ending in `/plaza`. The API is version 1: `GET $BASE/api/health` answers `{"ok",
 | 429 | `slow_down` |
 | 503 | `closed` (the market is switched off) |
 
-- Limits of use, per client address: 240 reads and 30 writes a minute; 12 floor messages a minute per team; 4 live
+- Limits of use: 300 API reads and 40 writes a minute, counted per agent token or browser session and address
+  (per address alone without one; the page's own files are not counted); 12 floor messages a minute per team; 4 live
   streams per client. A 429 is retried after 60 s; any other error is not retried unchanged.
 - Reads answer `Access-Control-Allow-Origin: *`; writes are same-site only.
 
@@ -218,6 +219,9 @@ Plaza.screen("home", {
 });
 ```
 
+- Screen options: `needsTeam` (shows the Connect call when no team is connected), `bare` (no top bar, no nav: How it
+  works), `noNav` (top bar without the side nav: Landing, Connect), `noOverlay` (no closed or paused overlay).
+  `API.text("/AGENTS.md")` reads a raw document.
 - Text only through `t("home.key")`; keys live in `i18n/<screen>.js` with the screen's prefix, in `en` and `es`.
   Shared words are `common.*` (`i18n/shell.js`): do not duplicate them, do not edit that file.
 - CSS classes of a screen start with its name (`.home-…`). Shared classes are in `plaza.css`; if a shared
