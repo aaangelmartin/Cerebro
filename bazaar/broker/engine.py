@@ -738,7 +738,8 @@ def public_plan(book: dict, limit: int = 10, tick: int | None = None) -> list[Ma
     """Card by card: each single-card ask against the highest bid that wants that card (any copy via want.types, or
     that exact asset via want.assets), from another maker, covering ask + fee. Price at the midpoint, lowered until the
     buyer can also pay our fee. Asks are taken cheapest first; a bid is used once. Offers that expire at or before
-    `tick` (default book["tick"]) are skipped: the server would refuse them."""
+    `tick` (default book["tick"]) are skipped: the server would refuse them. An offer addressed to one team (`to`)
+    only meets that team's offer."""
     fee_bps, fee_card = int(book.get("fee_bps") or 0), int(book.get("fee_per_card") or 0)
     if tick is None and isinstance(book.get("tick"), int):
         tick = book["tick"]
@@ -770,6 +771,8 @@ def public_plan(book: dict, limit: int = 10, tick: int | None = None) -> list[Ma
         for b, types, assets in bids:
             if b["id"] in used or b.get("maker") == s.get("maker"):
                 continue
+            if (s.get("to") and s["to"] != b.get("maker")) or (b.get("to") and b["to"] != s.get("maker")):
+                continue                # an addressed offer is for that team alone: never cross it with a third one
             if not ((ref and types == [ref]) or (aid is not None and assets == [aid])):
                 continue
             bid = int(b["give"]["cash"])

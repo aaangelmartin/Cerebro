@@ -276,6 +276,7 @@ class BrokerLoop:
 
     def on_tick(self, tick: int, clock: dict) -> None:
         ctl = self.control()
+        self.heartbeat(tick)                           # alive before the slow reads: a late game is not a hung broker
         try:
             book = self.client.book()
         except Exception as e:  # noqa: BLE001
@@ -366,6 +367,7 @@ class BrokerLoop:
                                                     "plan": [m.to_dict() for m in pplan], "results": presults})
         self._read_results(tick)
         self.engine.forget_before(tick - 40)
+        self.heartbeat(tick)                           # the Market Test work is done: the side job cannot age it
         self._matchmake(tick, clock, send, bool(bench))
         self.heartbeat(tick)
 

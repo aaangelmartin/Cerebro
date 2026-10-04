@@ -15,6 +15,7 @@ State and proposals live in data/live/matchmaker.json (the brain reads it in its
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -30,6 +31,8 @@ ANNOUNCE_EVERY = 20                               # game limit: one announcement
 REPEAT_AFTER = 60                                 # the same pair is not messaged again before this many ticks
 THREADS_PER_WINDOW, WINDOW = 4, 10
 MAX_TEXT = 900
+HELPER_TIMEOUT_S = 2.0                            # the plaza's helpers get this long, then the pass goes on without them
+HELPER_PAUSE_S = 120.0                            # and are left alone this long after a miss
 
 
 def rastro_fee(price: float) -> float:
@@ -271,6 +274,8 @@ class MatchMaker:
         self._announce, self._message, self.rarity_fn = announce, message, rarity_fn
         self.venue, self.us = venue, us
         self.state: dict = {"announced_tick": None, "sent": {}, "threads": [], "pairs": [], "log": []}
+        self._busy: dict[str, threading.Thread] = {}     # helper name -> a call that never came back
+        self._pause: dict[str, float] = {}               # helper name -> not before this time
         try:
             d = json.loads(self.state_file.read_text())
             if isinstance(d, dict):
@@ -293,6 +298,38 @@ class MatchMaker:
 
     def _log(self, tick: int, what: str, **kw) -> None:
         self.state.setdefault("log", []).append({"tick": tick, "t": round(time.time(), 1), "what": what, **kw})
+
+    def _helper(self, tick: int, name: str, fn: Callable[[], Any] | None, default: Any) -> Any:
+        """Call a helper that lives in another package (the plaza) without trusting it: in its own thread,
+        with a deadline, and left alone for a while after it fails or is late. The broker's tick loop also
+        plays the Market Test and the supervisor restarts a broker that stops writing its heartbeat, so a
+        slow or broken plaza must cost this pass its extras and nothing more."""
+        if fn is None:
+            return default
+        timeout = HELPER_TIMEOUT_S
+        old = self._busy.get(name)
+        if (old is not None and old.is_alive()) or time.time() < self._pause.get(name, 0.0):
+            return default
+        box: dict = {}
+
+        def run() -> None:
+            try:
+                box["value"] = fn()
+            except Exception as e:  # noqa: BLE001
+                box["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=run, daemon=True, name=f"matchmaker-{name}")
+        t.start()
+        t.join(timeout)
+        if t.is_alive() or "error" in box:
+            if t.is_alive():
+                self._busy[name] = t
+            self._pause[name] = time.time() + HELPER_PAUSE_S
+            self._log(tick, "helper_failed", helper=name,
+                      error=box.get("error") or f"no answer in {timeout:.1f} s")
+            return default
+        self._busy.pop(name, None)
+        return box.get("value", default)
 
     def _fresh(self, tick: int, key: str) -> bool:
         last = (self.state.get("sent") or {}).get(key)
@@ -327,7 +364,7 @@ class MatchMaker:
         pairs = find_pairs(report, rar, us=self.us, venue=self.venue, exclude=exclude)
         pairs = mix(pairs, big_tickets(report, rar, us=self.us, venue=self.venue, exclude=exclude))
         try:                                                   # pairs both agents declared on the plaza go first
-            declared = [p for p in (self.declared_fn() if self.declared_fn else [])
+            declared = [p for p in (self._helper(tick, "declared", self.declared_fn, []) or [])
                         if p.get("seller") not in exclude and p.get("buyer") not in exclude]
         except Exception:  # noqa: BLE001 - the plaza is optional
             declared = []
@@ -348,10 +385,8 @@ class MatchMaker:
 
         ann_at = max([x for x in (self.state.get("announced_tick"), last_venue_announce) if x is not None], default=None)
         new = [p for p in pairs if self._fresh(tick, "ann:" + pair_key(p))] or pairs
-        try:
-            page = self.page_fn() if self.page_fn else None
-        except Exception:  # noqa: BLE001
-            page = None
+        page = self._helper(tick, "page", self.page_fn, None)
+        page = page if isinstance(page, str) and page.startswith("http") else None
         text = announcement(new, self.venue, page=page)
         if text and self._announce and (ann_at is None or tick - ann_at >= ANNOUNCE_EVERY):
             try:

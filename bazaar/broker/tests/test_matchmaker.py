@@ -294,3 +294,128 @@ class LoopHook(unittest.TestCase):
         lp.matchmaker = Bad()
         lp._matchmake(100, {"tick_seconds": 30.0}, True, False)
         self.assertEqual(lp.errors[-1]["where"], "matchmaker")
+
+
+class ThePlazaCannotHurtTheBroker(unittest.TestCase):
+    """The plaza's helpers run with a deadline and are left alone after a miss: a slow or broken plaza costs
+    the pass its extras, never the broker's tick (the supervisor restarts a broker that stops reporting)."""
+
+    PAIR = {"kind": "wanted", "seller": "t03", "buyer": "t04", "ref": "LAT-03", "rarity": "common", "price": 8,
+            "ask": 8.0, "bid": 0.0, "saves": 1, "maybe_last": False, "score": 9.0, "why": "x"}
+
+    def maker(self, d, said, **kw):
+        team = {"t03": rival(selling={"LAT-06": {"price": 20, "venue": "rastro"}}),
+                "t04": rival(hunting={"LAT-06": {"bid": 22, "venue": "rastro"}})}
+        return M.MatchMaker(Path(d) / "mm.json", lambda: report(**team), lambda: {"matchmaker_exclude": []},
+                            announce=said.append, rarity_fn=lambda: RARITY, **kw)
+
+    def test_a_hung_helper_is_dropped_after_its_deadline_and_not_called_again(self):
+        import threading
+        import time
+        release, calls = threading.Event(), []
+
+        def hung():
+            calls.append(1)
+            release.wait(5)
+            return [self.PAIR]
+        with tempfile.TemporaryDirectory() as d:
+            said = []
+            mm = self.maker(d, said, declared_fn=hung, page_fn=lambda: "https://example.org/plaza")
+            old, M.HELPER_TIMEOUT_S = M.HELPER_TIMEOUT_S, 0.2
+            try:
+                t0 = time.time()
+                mm.step(100)
+                self.assertLess(time.time() - t0, 1.0)                # the pass did not wait for it
+                mm.step(120)                                          # and does not stack a second call
+                self.assertEqual(len(calls), 1)
+                self.assertIn("helper_failed", [e["what"] for e in mm.state["log"]])
+            finally:
+                M.HELPER_TIMEOUT_S = old
+                release.set()
+
+    def test_a_helper_that_raises_or_returns_rubbish_leaves_the_pass_whole(self):
+        def boom():
+            raise RuntimeError("plaza down")
+        with tempfile.TemporaryDirectory() as d:
+            said = []
+            mm = self.maker(d, said, declared_fn=boom, page_fn=lambda: {"not": "a url"})
+            done = mm.step(100)
+            self.assertNotIn("skipped", done)
+            if said:
+                self.assertNotIn("{'not'", said[0])
+
+    def test_the_helpers_answer_is_used_when_it_comes_in_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            said = []
+            mm = self.maker(d, said, declared_fn=lambda: [self.PAIR], page_fn=lambda: "https://example.org/plaza")
+            self.assertTrue(mm.step(100)["announced"])
+            self.assertIn("LAT-03", said[0])
+            self.assertTrue(said[0].endswith("https://example.org/plaza/"))
+
+
+class TheBrokerReportsBeforeTheSlowWork(unittest.TestCase):
+    def test_heartbeat_is_written_before_the_book_is_read_and_before_the_side_job(self):
+        from bazaar.broker.run import BrokerLoop
+        d = Path(tempfile.mkdtemp())
+        seen = []
+
+        class Client:
+            has_key = True
+
+            def book(self_inner):
+                seen.append(("book", json.loads((d / "status.json").read_text())["tick"]))
+                return {"offers": [], "bench_offers": []}
+
+        lp = BrokerLoop(Client(), d / "bench", {"session_ticks": 16}, status_file=d / "status.json",
+                        state_file=d / "state.json", notices_file=d / "notices.jsonl")
+
+        class Slow:
+            venue = "v07"
+
+            def step(self_inner, tick, last_venue_announce=None):
+                seen.append(("matchmaker", json.loads((d / "status.json").read_text())["tick"]))
+                return {}
+        lp.matchmaker = Slow()
+        lp.on_tick(300, {"tick_seconds": 15.0})
+        self.assertEqual(seen, [("book", 300), ("matchmaker", 300)])
+
+
+class TheBrokerSurvivesTheGame(unittest.TestCase):
+    def test_a_failed_book_read_is_logged_and_the_next_tick_plays(self):
+        from bazaar.broker.run import BrokerLoop
+        from bazaar.gateway import GameError
+        d = Path(tempfile.mkdtemp())
+
+        class Client:
+            has_key = True
+            fail = True
+
+            def clock(self):
+                return {"tick": self.tick, "t_hours": 17.0, "tick_seconds": 15.0, "doors": "open"}
+
+            def schedule(self):
+                return {"upcoming": []}
+
+            def book(self):
+                if self.fail:
+                    raise GameError("upstream", "game is slow")
+                return {"offers": [], "bench_offers": []}
+
+            def me(self):
+                return {}
+
+            def feed(self):
+                return {"events": []}
+
+        c = Client()
+        lp = BrokerLoop(c, d / "bench", {"session_ticks": 16}, status_file=d / "status.json",
+                        state_file=d / "state.json", notices_file=d / "notices.jsonl")
+        c.tick = 400
+        lp.poll()
+        self.assertEqual(lp.errors[-1]["where"], "book")
+        self.assertEqual(json.loads((d / "status.json").read_text())["tick"], 400)      # still reporting
+        c.fail, c.tick = False, 401
+        n = len(lp.errors)
+        lp.poll()
+        self.assertEqual(len(lp.errors), n)
+        self.assertEqual(json.loads((d / "status.json").read_text())["tick"], 401)
