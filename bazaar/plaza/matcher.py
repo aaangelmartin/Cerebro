@@ -14,6 +14,7 @@ it is the public reference price of the card, pulled inside the overlap with a m
 from __future__ import annotations
 
 import hashlib
+import time
 
 VENUE = "v07"
 HOST = "t10"
@@ -22,12 +23,42 @@ BOOK = {"common": 10, "uncommon": 25, "rare": 70, "epic": 180, "legendary": 450}
 RARITY_SCORE = {"common": 0.0, "uncommon": 0.5, "rare": 1.5, "epic": 2.5, "legendary": 3.0}
 RARITY_RANK = {"legendary": 0, "epic": 1, "rare": 2, "uncommon": 3, "common": 4}   # dear cards first: they move the score
 MAX_CANDIDATES = 1500
+MAX_SWAPS = 600                 # card-for-card candidates kept; the search stops there
+MAX_TRIANGLES = 200
+MAX_STEPS = 150000              # inner steps the swap and three-way searches may take, together
+BUDGET_S = 0.4                  # and the time they may take: the board is never held up by one big sheet
 MAX_MARGIN = 0.25               # the secret margin is at most this share of the overlap, on each side
 
 
 def grid(price: float) -> int:
     """Prices are whole P under 20 and multiples of 5 above."""
     return int(round(price)) if price < 20 else int(round(price / 5.0)) * 5
+
+
+def step(price: float) -> int:
+    """The size of one grid step at this price."""
+    return 1 if price < 20 else 5
+
+
+def inside(lo: int, hi: int, ref_price: float, margin: int = 1) -> int | None:
+    """A grid price strictly inside [lo, hi]: at least `margin` and one grid step away from each end, as near the
+    reference as that allows, rounded towards the inside and never onto an end. When the overlap is too narrow for
+    the 5 P grid the price is a whole P; when it has no inside at all (narrower than 2 P): None."""
+    lo, hi = int(lo), int(hi)
+    for unit in (5, 1):
+        low, high = lo + max(margin, unit), hi - max(margin, unit)
+        if unit == 5:
+            if hi < 20 + unit:                                 # the 5 P grid starts at 20
+                continue
+            low, high = -(-low // 5) * 5, (high // 5) * 5      # up to the grid from below, down to it from above
+        else:
+            low, high = lo + max(1, min(margin, (hi - lo) // 2)), hi - max(1, min(margin, (hi - lo) // 2))
+        if low > high:
+            continue
+        price = min(max(float(ref_price or 0), low), high)
+        out = int(round(price / unit)) * unit
+        return min(max(out, low), high)
+    return None
 
 
 def rule_price(lo: int, hi: int, ref_price: float, floor: int = 1, share: float = 0.0) -> int | None:
@@ -193,7 +224,12 @@ def _quoter(gate, quote):
         return quote
     owner = getattr(gate, "__self__", None)
     if owner is not None and callable(getattr(owner, "quote", None)):
-        return owner.quote                                     # a vault: its own price rule, not the old midpoint
+        return owner.quote
+    if owner is not None and hasattr(owner, "key") and hasattr(owner, "data"):
+        from .quotes import Quoter                             # a vault's gate: the same rules as everywhere else
+        if getattr(owner, "_quoter", None) is None:
+            owner._quoter = Quoter(owner)
+        return owner._quoter.quote
     if gate is None:
         return public_quote
 
@@ -204,20 +240,22 @@ def _quoter(gate, quote):
         gated, overlap = gate(seller, buyer, ref, base["price"], floor)
         if gated is None:
             return {"price": None, "overlap": False, "value": None, "basis": None}
-        return {"price": gated, "overlap": base["overlap"] or overlap, "value": None,
-                "basis": "limits" if overlap and gated != base["price"] else base["basis"]}
+        return {"price": gated, "overlap": base["overlap"] or overlap, "value": None, "basis": base["basis"]}
     return old
 
 
 def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue: str = VENUE, gate=None, *,
          quote=None, refprice: dict[str, int] | None = None, traded=frozenset(), paused=frozenset(),
-         strict: bool = True) -> list[dict]:
+         strict: bool = True, prefers=None, budget_s: float = BUDGET_S, clock=time.monotonic) -> list[dict]:
     """Every candidate among the teams' sheets, dear cards first. `assign` then keeps one per card and team.
 
     `quote(seller, buyer, ref, ref_price, floor, salt, ask, bid)` answers blindly about the two teams' limits;
     `refprice` is the public reference price per card (median of its sales between teams); `traded` the pairs that
     already closed on our venue; `paused` the teams that asked for no new matches. `strict=False` also proposes
-    what is only deduced from the public feed (never used by the server: such a trade may cost the venue points)."""
+    what is only deduced from the public feed (never used by the server: such a trade may cost the venue points).
+    `prefers(team, get, give)` says whether a team values the card it gets above the one it gives (None: it did not
+    say); a swap in which a team said it loses is not proposed. The swap and three-way searches stop at a count, a
+    number of steps and `budget_s`: they return what they found, dear cards first, never everything at any cost."""
     teams = {t: s for t, s in sheets.items() if t != host and not s.get("host") and t not in paused}
     have = {t: _have(s) for t, s in teams.items()}
     want = {t: _want(s) for t, s in teams.items()}
@@ -262,73 +300,125 @@ def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue:
                             "last_of_page": last, "priority": priority("sale", rarity, last),
                             "confidence": "declared" if declared else "probable", "score": round(score, 2),
                             "pair_traded": pair, "why": why, "recipe": recipe(a, b, ref, price, venue)})
-    seen = set()
-    for a in teams:                                            # mutual swap: same rarity, both gain, no cash
-        for b in teams:
-            if a >= b:
-                continue
-            for x in have[a]:
-                if x not in want[b]:
-                    continue
-                for y in have[b]:
-                    if y == x or y not in want[a]:
-                        continue
-                    rx, ry = (cat.get(x) or {}).get("rarity"), (cat.get(y) or {}).get("rarity")
-                    if rx != ry or (a, b, x, y) in seen:
-                        continue
-                    seen.add((a, b, x, y))
-                    both = agent(have[a][x], have[b][y], want[a][y], want[b][x])
-                    if strict and not both:
-                        continue
-                    last = last_of_page(teams[b], x) or last_of_page(teams[a], y)
-                    pair = frozenset((a, b)) in traded
-                    out.append({"kind": "swap", "teams": [a, b], "seller": a, "buyer": b, "ref": x, "ref_back": y,
-                                "name": (cat.get(x) or {}).get("name"),
-                                "rarity": rx, "price": 0, "basis": "swap", "saves": 2 * rastro_fee(BOOK.get(rx or "", 0)),
-                                "last_of_page": last, "priority": priority("swap", rx, last),
-                                "confidence": "declared" if both else "probable",
-                                "score": round(5.0 + RARITY_SCORE.get(rx or "", 0.0) + (2.0 if both else 0.0), 2),
-                                "pair_traded": pair,
-                                "why": f"{a} has {x} and wants {y}; {b} has {y} and wants {x}",
-                                "recipe": swap_recipe(a, b, x, y, venue)})
-    tri = set()
+    if prefers is None:
+        prefers = getattr(getattr(ask_quote, "__self__", None), "prefers", None) or (lambda team, get, give: None)
+    rar = lambda r: (cat.get(r) or {}).get("rarity")           # noqa: E731
+    declared = lambda e: e.get("source") == "agent"            # noqa: E731
+    # what each team can give and wants, by rarity; in strict mode only what its agent declared takes part
+    give: dict[str, dict] = {t: {} for t in teams}
+    for t in teams:
+        for r, e in have[t].items():
+            if not strict or declared(e):
+                give[t].setdefault(rar(r), []).append(r)
+    wanters: dict[str, list[str]] = {}
+    for t in sorted(teams):
+        for r, e in want[t].items():
+            if not strict or declared(e):
+                wanters.setdefault(r, []).append(t)
+    seeks = {t: {r for r, e in want[t].items() if not strict or declared(e)} for t in teams}
+    rank = lambda r: RARITY_RANK.get(r or "", 5)               # noqa: E731
+    deadline, steps = clock() + max(0.0, budget_s), [0]
+
+    def spent() -> bool:
+        steps[0] += 1
+        return steps[0] > MAX_STEPS or (steps[0] % 512 == 0 and clock() > deadline)
+
+    def gains(*moves) -> bool:
+        """No team of the swap said it values what it gets below what it gives."""
+        return all(prefers(t, get, giv) is not False for t, get, giv in moves)
+
     order = sorted(teams)
-    for a in order:                                            # three-way: a gives x to b, b gives y to c, c gives z to a
-        for x in have[a]:
-            for b in order:
-                if b == a or x not in want[b]:
-                    continue
-                for y in have[b]:
-                    if y == x:
+    swaps, stop = 0, False
+    for rarity in sorted({r for t in teams for r in give[t]}, key=rank):   # dear cards first
+        if stop:
+            break
+        for a in order:                                        # mutual swap: same rarity, both gain, no cash
+            if stop:
+                break
+            for x in give[a].get(rarity, ()):
+                if stop:
+                    break
+                for b in wanters.get(x, ()):
+                    if b <= a:
                         continue
-                    for c in order:
-                        if c in (a, b) or y not in want[c]:
+                    for y in give[b].get(rarity, ()):
+                        if spent() or swaps >= MAX_SWAPS:
+                            stop = True
+                            break
+                        if y == x or y not in seeks[a]:
                             continue
-                        for z in have[c]:
-                            if z in (x, y) or z not in want[a]:
+                        if not gains((a, y, x), (b, x, y)):
+                            continue
+                        both = agent(have[a][x], have[b][y], want[a][y], want[b][x])
+                        last = last_of_page(teams[b], x) or last_of_page(teams[a], y)
+                        pair = frozenset((a, b)) in traded
+                        swaps += 1
+                        out.append({"kind": "swap", "teams": [a, b], "seller": a, "buyer": b, "ref": x, "ref_back": y,
+                                    "name": (cat.get(x) or {}).get("name"),
+                                    "rarity": rarity, "price": 0, "basis": "swap",
+                                    "saves": 2 * rastro_fee(BOOK.get(rarity or "", 0)),
+                                    "last_of_page": last, "priority": priority("swap", rarity, last),
+                                    "confidence": "declared" if both else "probable",
+                                    "score": round(5.0 + RARITY_SCORE.get(rarity or "", 0.0) + (2.0 if both else 0.0), 2),
+                                    "pair_traded": pair,
+                                    "why": f"{a} has {x} and wants {y}; {b} has {y} and wants {x}",
+                                    "recipe": swap_recipe(a, b, x, y, venue)})
+                    if stop:
+                        break
+    tri: set = set()
+    stop = False
+    for rarity in sorted({r for t in teams for r in give[t]}, key=rank):
+        if stop:
+            break
+        for a in order:                                        # three-way: a gives x to b, b gives y to c, c gives z to a
+            if stop:
+                break
+            mine = [z for z in seeks[a] if rar(z) == rarity]   # what a could get back, of this rarity
+            if not mine:
+                continue
+            for x in give[a].get(rarity, ()):
+                if stop:
+                    break
+                for b in wanters.get(x, ()):
+                    if b == a or stop:
+                        continue
+                    for y in give[b].get(rarity, ()):
+                        if stop:
+                            break
+                        if y == x:
+                            continue
+                        for c in wanters.get(y, ()):
+                            if spent() or len(tri) >= MAX_TRIANGLES:
+                                stop = True
+                                break
+                            if c in (a, b):
                                 continue
-                            rar = {(cat.get(r) or {}).get("rarity") for r in (x, y, z)}
-                            key = tuple(sorted([(a, x), (b, y), (c, z)]))
-                            if len(rar) != 1 or key in tri:
-                                continue
-                            all_declared = agent(have[a][x], have[b][y], have[c][z], want[b][x], want[c][y], want[a][z])
-                            if strict and not all_declared:
-                                continue
-                            tri.add(key)
-                            r = next(iter(rar))
-                            out.append({"kind": "triangle", "teams": [a, b, c], "seller": a, "buyer": b, "ref": x,
-                                        "legs": [{"from": a, "to": b, "ref": x}, {"from": b, "to": c, "ref": y},
-                                                 {"from": c, "to": a, "ref": z}],
-                                        "name": (cat.get(x) or {}).get("name"),
-                                        "rarity": r, "price": 0, "basis": "swap",
-                                        "saves": 3 * rastro_fee(BOOK.get(r or "", 0)),
-                                        "last_of_page": False, "priority": priority("triangle", r, False),
-                                        "confidence": "declared" if all_declared else "probable",
-                                        "score": round(4.0 + RARITY_SCORE.get(r or "", 0.0), 2),
-                                        "pair_traded": False,
-                                        "why": f"{a} gives {x} to {b}, {b} gives {y} to {c}, {c} gives {z} to {a}",
-                                        "recipe": {"note": f"three card-for-card offers on {venue}, each addressed to "
-                                                           "the next team; no cash, no fee"}})
+                            for z in mine:
+                                if spent() or len(tri) >= MAX_TRIANGLES:
+                                    stop = True
+                                    break
+                                if z in (x, y) or z not in have[c] or (strict and not declared(have[c][z])):
+                                    continue
+                                key = tuple(sorted([(a, x), (b, y), (c, z)]))
+                                if key in tri or not gains((a, z, x), (b, x, y), (c, y, z)):
+                                    continue
+                                all_declared = agent(have[a][x], have[b][y], have[c][z], want[b][x], want[c][y], want[a][z])
+                                tri.add(key)
+                                out.append({"kind": "triangle", "teams": [a, b, c], "seller": a, "buyer": b, "ref": x,
+                                            "legs": [{"from": a, "to": b, "ref": x}, {"from": b, "to": c, "ref": y},
+                                                     {"from": c, "to": a, "ref": z}],
+                                            "name": (cat.get(x) or {}).get("name"),
+                                            "rarity": rarity, "price": 0, "basis": "swap",
+                                            "saves": 3 * rastro_fee(BOOK.get(rarity or "", 0)),
+                                            "last_of_page": False, "priority": priority("triangle", rarity, False),
+                                            "confidence": "declared" if all_declared else "probable",
+                                            "score": round(4.0 + RARITY_SCORE.get(rarity or "", 0.0), 2),
+                                            "pair_traded": False,
+                                            "why": f"{a} gives {x} to {b}, {b} gives {y} to {c}, {c} gives {z} to {a}",
+                                            "recipe": {"note": f"three card-for-card offers on {venue}, each addressed to "
+                                                               "the next team; no cash, no fee"}})
+                            if stop:
+                                break
     for m in out:
         m["id"] = match_id(m)
     out.sort(key=order_key)

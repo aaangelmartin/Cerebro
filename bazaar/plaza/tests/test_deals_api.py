@@ -89,17 +89,16 @@ class QuoterTest(unittest.TestCase):
         self.assertIs(self.ask(70)["value"], True)
         with self.v.lock:
             self.v.data["t02"] = {}
-        self.assertEqual(self.ask(70)["overlap"], None)                            # one limit: the public price passes
-        self.assertEqual(self.ask(45)["overlap"], False)                           # or it does not; no number
-        out = self.ask(45, bid=85)                                                 # a public bid stands in
-        self.assertEqual((out["overlap"], out["basis"]), (True, "limits"))
-        self.assertTrue(60 <= out["price"] <= 67, out)                             # the low end, plus the margin
+        self.assertEqual(self.ask(70)["overlap"], None)                            # one limit: it is not looked at
+        self.assertEqual(self.ask(45), {"price": 45, "overlap": None, "value": None, "basis": None})   # whatever the price
+        out = self.ask(45, bid=85)                                                 # a public bid never stands in for it
+        self.assertEqual((out["price"], out["overlap"], out["basis"]), (45, None, None))
 
     def test_a_refusal_is_held_so_limits_cannot_be_walked(self):
         self.limits(95, 90)
         no = self.q.at(100).quote("t01", "t02", "SAL-09", 200, 40)
         self.assertEqual((no["price"], no["overlap"]), (None, False))
-        self.limits(89, 90)                                                        # the seller steps down to find 90
+        self.limits(80, 90)                                                        # the seller steps down to find 90
         self.assertEqual(self.q.at(105).quote("t01", "t02", "SAL-09", 200, 40), no)
         self.assertEqual(self.q.at(100 + quotes.HOLD_TICKS).quote("t01", "t02", "SAL-09", 200, 40)["overlap"], True)
         again = [self.q.quote("t01", "t02", "SAL-09", 200, 40)["price"] for _ in range(5)]
@@ -305,6 +304,9 @@ class RoutesTest(unittest.TestCase):
         self.assertEqual(st, 200, s)
         st, a, _ = self.call("POST", "/plaza/api/connect/agent", {"team": team, "code": s["connect_code"]})
         self.assertEqual(st, 200, a)
+        (self.record / "threads" / f"th-{team}.json").write_text(json.dumps(      # the proof in the game
+            {"id": team, "kind": "team", "messages": [{"sender": team, "text": s["connect_code"]}]}) + "\n")
+        self.board.verified_at = 0.0
         return {"X-Plaza-Token": a["agent_token"]}
 
     def event(self, **e):
@@ -320,6 +322,9 @@ class RoutesTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/plaza/api/me/trades")[0], 401)
         st, out, _ = self.call("GET", "/plaza/api/me/trades", headers=t7)
         self.assertEqual((st, out["team"], len(out["trades"]), out["counts"]["proposed"]), (200, "t07", 1, 1))
+        self.assertEqual(out["trades"][0]["next"]["type"], "decide")       # no limit of its own: nothing goes ahead
+        self.board.vault.put("t07", "LAT-06", {"max": 25})
+        out = self.call("GET", "/plaza/api/me/trades", headers=t7)[1]
         t = out["trades"][0]
         self.assertEqual((t["your_role"], t["gives"], [c["ref"] for c in t["receives"]], t["cash"], t["mode"], t["order"],
                           t["venue"], t["state"]), ("buyer", [], ["LAT-06"], -20, "auto", None, "v07", "proposed"))
@@ -332,6 +337,7 @@ class RoutesTest(unittest.TestCase):
 
     def test_the_queue_names_our_venue_and_asks_for_the_offer_id(self):
         t7 = self.connect("t07")
+        self.board.vault.put("t07", "LAT-06", {"max": 25})
         nxt = self.call("GET", "/plaza/api/agent/next", headers=t7)[1]
         post = next(a for a in nxt["actions"] if a["type"] == "post_offer")
         self.assertEqual(post["request"]["body"]["venue"], "v07")
@@ -368,6 +374,7 @@ class RoutesTest(unittest.TestCase):
         st, out, _ = self.call("POST", url, {"offer_id": 503}, t7)
         self.assertEqual((st, out["offer"]["confirmed"], out["state"]), (200, True, "offer_on_v07"))
         self.assertEqual(self.call("POST", url, {"offer_id": 503}, t7)[1]["state"], "offer_on_v07")    # twice
+        self.board.vault.put("t09", "LAT-06", {"min": 15})
         nxt = self.call("GET", "/plaza/api/agent/next", headers=t9)[1]
         self.assertIn(("accept_offer", 503), [(a["type"], a.get("offer")) for a in nxt["actions"]])
 

@@ -199,7 +199,7 @@ class RealAnswersTest(unittest.TestCase):
         self.assertTrue(nxt["actions"], nxt)
         st, real, _ = self.call("POST", "/plaza/api/agent/ack", {"id": nxt["actions"][0]["id"], "status": "done"}, h7)
         self.assertEqual(same_shape(A.ANSWERS[("POST", "/api/agent/ack")], real, "ack"), [])
-        st, real, _ = self.call("POST", "/plaza/api/claim", {"team": "t05", "pin": "4821"})
+        st, real, _ = self.call("POST", "/plaza/api/claim", {"team": "t05", "pin": "48215673"})
         self.assertEqual(same_shape(A.ANSWERS[("POST", "/api/claim")], real, "claim"), [])
 
     def test_the_queue_names_only_documented_action_types_and_targets(self):
@@ -270,7 +270,10 @@ class ExampleAgentTest(unittest.TestCase):
         self.assets = [{"id": 11, "team": "t09", "ref": "LAT-06"}, {"id": 12, "team": "t09", "ref": "LAT-06"},
                        {"id": 21, "team": "t07", "ref": "LAT-03"}]
         seller, buyer = self.agent("t09"), self.agent("t07")
-        self.assertEqual(seller.limits, {"LAT-06": {"min": 11}})          # a second copy: a quarter of 40, plus one
+        self.assertEqual(seller.limits["LAT-06"], {"min": 11})            # a second copy: a quarter of 40, plus one
+        self.assertTrue(all("max" in v for k, v in seller.limits.items() if k != "LAT-06"), seller.limits)   # wants: a max each
+        # the buyer says what it pays at most: without a limit of its own nothing is bought blind
+        self.assertEqual(buyer.publish({"wants": [{"ref": "LAT-06", "max": 60}], "have": ["LAT-03"]})[0], 200)
         self.assertEqual(self.call("GET", "/plaza/api/me", headers={"X-Plaza-Token": buyer.token})[1]["status"]["verified"], True)
         self.board.rebuild()
         trades = self.call("GET", "/plaza/api/team/t07")[1]["trades"]
@@ -302,9 +305,9 @@ class ExampleAgentTest(unittest.TestCase):
         a = self.agent("t07")
         self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07", "ref": "LAT-06"},
                   {"X-Plaza-Admin": "test-admin-token"})
+        self.assertEqual(a.publish({"wants": [{"ref": "LAT-06", "max": 2000}]})[0], 200)   # its own limit: it may go ahead
         before = len(self.seen)
         a.dry_run = True
-        a.publish({"wants": ["LAT-06"]})
         q = a.step()
         self.assertTrue(q["actions"])
         self.assertEqual([u for u, _ in self.seen[before:]], [self.base + "/plaza/api/agent/next"])

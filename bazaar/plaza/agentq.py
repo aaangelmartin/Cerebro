@@ -4,7 +4,8 @@
     ack(id)     -> done or failed
 
 The plaza never acts in the game: it tells the agent what to send. Each trade runs in mode `auto` (the agent goes
-ahead while the price is inside the team's own limits) or `ask_me` (it waits for the human, who orders Accept,
+ahead only at a price the market suggested or the team itself named, and only when the team set a limit that the
+price respects; a price the other side chose, or a card with no limit, is handed to the agent as `decide`) or `ask_me` (it waits for the human, who orders Accept,
 Counter at a price or Pass from the page; the order becomes an action here). An action carries only its own team's
 data: the other side's limits are never in it."""
 from __future__ import annotations
@@ -154,12 +155,21 @@ class AgentQ:
                     add("counter", m, f"your human counters at {order['price']} P",
                         msg({"action": "counter", "price": order["price"]}), order["ts"])
                     continue
-                ok = kind == "swap" or within(m["ref"], role, price)
-                go = bool(order and order["action"] == "accept") or (mode == "auto" and ok)
+                agreed = team in (m.get("agreed") or [])       # its own word, at the price now on the table
+                inside = True if kind == "swap" else within(m["ref"], role, price)
+                # auto goes ahead only at a price nobody else chose: the market's own suggestion or the team's own
+                # counter, and only when the team set a limit that says it takes it. Anything else is the agent's call.
+                ours = kind == "swap" or m.get("price_by") in (None, team)
+                go = bool(order and order["action"] == "accept") or (mode == "auto" and (agreed or (inside is True and ours)))
                 if not go:
                     if mode == "auto":
-                        add("decide", m, "the price on the table is outside your own limits: counter or pass",
-                            msg({"action": "counter", "price": "<your price>"}), m["state"], price)
+                        why = ("you set no limit for this card, so nothing says you take this price: accept, counter or pass"
+                               if inside is None else
+                               "the price on the table is outside your own limits: counter or pass" if inside is False else
+                               "the other team set this price: accept, counter or pass")
+                        add("decide", m, why, msg({"action": "counter", "price": "<your price>"}), m["state"], price,
+                            price=price, options=[{"action": "accept"}, {"action": "counter", "price": "<your price>"},
+                                                  {"action": "pass"}])
                     else:
                         waiting.append({"match": mid, "why": "ask_me: waiting for your human"})
                     continue
@@ -186,7 +196,7 @@ class AgentQ:
                                 f"cancel it and post it on {venue}",
                                 {"target": "game", "auth": "your own game key", "method": "DELETE",
                                  "path": f"/api/offers/{wrong['id']}", "body": {}}, wrong["id"])
-                    elif team not in (m.get("agreed") or []):
+                    elif not agreed:
                         aid = _id(team, "agree", mid, price, stamp)
                         if order:
                             order["id"] = aid
@@ -194,22 +204,21 @@ class AgentQ:
                             msg({"action": "accept"}), price, stamp)
                     else:
                         waiting.append({"match": mid, "why": "waiting for the other side to post the offer"})
-                elif m["state"] == "offer_on_v07":
-                    if m.get("offer_maker") == team:
-                        waiting.append({"match": mid, "why": "your offer is on the venue; waiting for the accept"})
-                        continue
+                elif m.get("offer_maker") == team:
+                    waiting.append({"match": mid, "why": "your offer is on the venue; waiting for the accept"})
+                else:                                          # offer_on_v07 or accepted, and the offer is the other's
                     give = m["ref"] if team == m["seller"] else m.get("ref_back")
                     body = {"assets": [f"<your asset id of {give}>"]} if give and (kind == "swap" or role == "seller") else {}
                     aid = _id(team, "confirm", mid, m["offer"], stamp)
                     if order:
                         order["id"] = aid
-                    add("accept_offer", m, f"accept offer {m['offer']} in the game (it is on venue {m.get('venue') or 'v07'}; "
-                        "it settles on the next tick)",
+                    add("accept_offer", m, f"accept offer {m['offer']} in the game (it is on venue {m.get('venue') or 'v07'})",
                         {"target": "game", "auth": "your own game key", "method": "POST",
                          "path": f"/api/offers/{m['offer']}/accept", "body": body}, m["offer"], stamp, offer=m["offer"])
-                    add("confirm", m, "say on the thread that you accepted", msg({"action": "accept"}), m["offer"], stamp)
-                else:
-                    waiting.append({"match": mid, "why": "accepted; it settles on the next tick"})
+                    if m["state"] == "offer_on_v07":
+                        add("confirm", m, "say on the thread that you accepted", msg({"action": "accept"}), m["offer"], stamp)
+                    else:
+                        waiting.append({"match": mid, "why": "accepted; waiting for the game to settle it"})
             self._save()
         return {"team": team, "tick": tick, "actions": actions, "waiting": waiting, "failed": failed,
                 "poll_after_s": POLL_S, "default_mode": t["default"]}

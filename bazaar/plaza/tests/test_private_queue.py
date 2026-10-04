@@ -50,24 +50,27 @@ class VaultTest(unittest.TestCase):
         g = self.v.gate
         self.assertEqual(g("t01", "t02", "SAL-09", 60), (60, None))                 # no limits: untouched
         self.v.put("t01", "SAL-09", {"min": 50})
-        self.assertEqual(g("t01", "t02", "SAL-09", 60), (60, True))                 # one side: pass, unchanged
-        self.assertEqual(g("t01", "t02", "SAL-09", 45), (None, False))              # or drop: the limit never shows
+        self.assertEqual(g("t01", "t02", "SAL-09", 60), (60, None))                 # one side: it is not looked at,
+        self.assertEqual(g("t01", "t02", "SAL-09", 45), (45, None))                 # whatever the price: nothing to search
         self.v.put("t02", "SAL-09", {"max": 70})
-        self.assertEqual(g("t01", "t02", "SAL-09", 45), (60, True))                 # both: the middle of the overlap
+        self.assertEqual(g("t01", "t02", "SAL-09", 45), (45, True))                 # both: they meet; the price is not moved
+        self.assertEqual(g("t01", "t02", "SAL-09", 1999), (1999, True))             # and never decides the answer
         self.v.put("t02", "SAL-09", {"max": 49})
         self.assertEqual(g("t01", "t02", "SAL-09", 60), (None, False))              # no overlap: no proposal
         self.assertEqual(self.v.flags("t01"), {"SAL-09": True})
         self.v.put("t01", "SAL-09", {"min": None})
         self.assertEqual((self.v.get("t01"), self.v.flags("t01")), ({}, {}))
-        self.assertTrue(self.v.within("t02", "SAL-09", "buyer", 49))
-        self.assertFalse(self.v.within("t02", "SAL-09", "buyer", 50))
+        self.assertIs(self.v.within("t02", "SAL-09", "buyer", 49), True)
+        self.assertIs(self.v.within("t02", "SAL-09", "buyer", 50), False)
+        self.assertIsNone(self.v.within("t01", "SAL-09", "seller", 50))             # no limit of its own: not a yes
 
     def test_matcher_only_proposes_inside_the_overlap(self):
         sh = sheets(sheet("t01", sale=[{"ref": "SAL-09", "price": 90}]), sheet("t02", wants=["SAL-09"]))
         self.v.put("t01", "SAL-09", {"min": 60})
         self.v.put("t02", "SAL-09", {"max": 80})
         m = M.find(sh, CAT, gate=self.v.gate)[0]
-        self.assertEqual((m["price"], m["basis"]), (70, "limits"))
+        self.assertEqual(m["basis"], "limits")
+        self.assertTrue(60 < m["price"] < 80, m["price"])                           # inside, never on a limit
         self.v.put("t02", "SAL-09", {"max": 55})
         self.assertEqual(M.find(sh, CAT, gate=self.v.gate), [])
         self.assertEqual(M.find(sh, CAT, strict=False)[0]["price"], 90)             # without the vault: public data only
@@ -255,6 +258,7 @@ class PrivateFlowTest(FlowTest):
     def test_queue_and_human_orders_through_http(self):
         s7, tok7 = self.verified("t07")
         s9, tok9 = self.verified("t09")
+        self.board.vault.put("t07", "LAT-06", {"max": 25})                          # its own limit: auto may go ahead
         st, nxt, _ = self.call("GET", "/plaza/api/agent/next", headers=tok7)
         self.assertEqual([a["type"] for a in nxt["actions"]], ["sync_cards", "post_offer"])
         mid = nxt["actions"][1]["match"]
@@ -326,8 +330,8 @@ class HostingTest(unittest.TestCase):
     def test_per_client_budget_uses_the_address_cloudflare_reports(self):
         codes = [self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "x"}, {"CF-Connecting-IP": "203.0.113.9",
                                                                                   "X-Plaza-Client": f"198.51.100.{i}"})[0]
-                 for i in range(S.WRITES_PER_MIN + 2)]
-        self.assertEqual(codes[-1], 429)                       # a made-up X-Plaza-Client does not dodge the budget
+                 for i in range(S.WRITES_PER_MIN * S.SHARED_READS + 2)]     # one address is a whole room
+        self.assertEqual((codes[0], codes[-1]), (400, 429))    # a made-up X-Plaza-Client does not dodge the budget
 
 
 class FirewallTest(unittest.TestCase):

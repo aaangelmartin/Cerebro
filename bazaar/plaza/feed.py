@@ -166,7 +166,9 @@ class Feed:
             if venue == self.venue or (len(teams) == 2 and not p.get("persona")):
                 # every sale between two teams, wherever it closed: a match that settles off our venue is lost
                 self._log({"t": "settled", "tick": tick, "venue": venue, "id": p.get("settlement"),
-                           "parties": parties, "refs": refs, "price": price})
+                           "parties": parties, "refs": refs, "price": price,
+                           "moves": [{"ref": i["ref"], "from": i.get("frm"), "to": i.get("to")}
+                                     for i in p.get("items") or [] if isinstance(i, dict) and i.get("ref")]})
             if venue == self.venue:
                 self.counts["venue_deals"] += 1
                 self.counts["venue_volume"] += price

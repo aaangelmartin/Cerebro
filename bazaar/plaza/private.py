@@ -1,8 +1,8 @@
 """A team's private limits: the least it sells a card for, the most it pays, what the card is worth to it.
 
 Private means private: only the team itself reads them (its browser session or its agent token). The matcher asks
-this module one blind question (do the two limits overlap, and where is the middle?) and never sees a number of
-either side on its own. Nobody else does: not another team, not our own panel (it only learns "limits set: yes or
+this module one blind question (do the two limits overlap?) and never sees a number of either side on its own;
+the price comes from `quotes.Quoter`, never from the middle of the two. Nobody else does: not another team, not our own panel (it only learns "limits set: yes or
 no"), not our bot, brain or broker.
 
 They live in their own folder (0700), outside data/live, in one file encrypted with a key that sits next to it
@@ -171,20 +171,36 @@ class Vault:
         with self.lock:
             return {ref: dict(v) for ref, v in (self.data.get(team) or {}).items()}
 
-    def cooling(self, team: str, ref: str, fields: dict, tick: int | None) -> bool:
-        """Would this change a `min` or a `max` that was already changed less than COOL_TICKS ago?
+    @staticmethod
+    def _stamps(last) -> dict:
+        """field -> when it last changed. A record written before the fields were told apart covers min and max."""
+        if not isinstance(last, dict):
+            return {}
+        if isinstance(last.get("fields"), dict):
+            return last["fields"]
+        return {k: last for k in ("min", "max")} if "ts" in last else {}
 
-        Setting a limit for the first time is free and so is sending the same number again. Moving it is not:
+    def cooling(self, team: str, ref: str, fields: dict, tick: int | None) -> bool:
+        """Would this give a `min`, a `max` or a `value` a new number less than COOL_TICKS after its last change?
+
+        Setting one for the first time is free, so is sending the same number again and so is forgetting it. A new
+        number is not, and forgetting counts as a change (clearing a limit and setting it again is no way around):
         a team that moves its limit every tick and watches which matches appear reads the other side's."""
         with self.lock:
             cur = (self.data.get(team) or {}).get(ref) or {}
-            moved = any(k in fields and k in cur and fields[k] != cur[k] for k in ("min", "max"))
-            last = ((self.data.get(CHANGED) or {}).get(team) or {}).get(ref)
-        if not moved or not last:
-            return False
-        if isinstance(tick, int) and isinstance(last.get("tick"), int):
-            return 0 <= tick - last["tick"] < COOL_TICKS
-        return 0 <= self.clock() - last.get("ts", 0) < COOL_S
+            stamps = self._stamps(((self.data.get(CHANGED) or {}).get(team) or {}).get(ref))
+        for k in FIELDS:
+            if k not in fields or fields[k] is None or fields[k] == cur.get(k):
+                continue
+            last = stamps.get(k)
+            if not last:
+                continue
+            if isinstance(tick, int) and not isinstance(tick, bool) and isinstance(last.get("tick"), int):
+                if 0 <= tick - last["tick"] < COOL_TICKS:
+                    return True
+            elif 0 <= self.clock() - last.get("ts", 0) < COOL_S:
+                return True
+        return False
 
     def put(self, team: str, ref: str, fields: dict, tick: int | None = None) -> None:
         """Sets the fields given; a field sent as None is forgotten. A limit moved again too soon is a 429."""
@@ -192,9 +208,14 @@ class Vault:
             raise PlazaError(429, "slow_down", f"a card's limit changes once every {COOL_TICKS} ticks")
         with self.lock:
             cur = dict((self.data.get(team) or {}).get(ref) or {})
-            if any(k in fields and k in cur and fields[k] != cur[k] for k in ("min", "max")):
-                self.data.setdefault(CHANGED, {}).setdefault(team, {})[ref] = {
-                    "ts": self.clock(), **({"tick": tick} if isinstance(tick, int) and not isinstance(tick, bool) else {})}
+            moved = [k for k in FIELDS if k in fields and k in cur and fields[k] != cur[k]]   # not the first time
+            if moved:
+                book = self.data.setdefault(CHANGED, {}).setdefault(team, {})
+                stamps = dict(self._stamps(book.get(ref)))
+                when = {"ts": self.clock(), **({"tick": tick} if isinstance(tick, int) and not isinstance(tick, bool) else {})}
+                for k in moved:
+                    stamps[k] = when
+                book[ref] = {"fields": stamps}
             for k in FIELDS:
                 if k in fields:
                     if fields[k] is None:
@@ -217,27 +238,26 @@ class Vault:
             return {ref: True for ref, v in (self.data.get(team) or {}).items() if v}
 
     def gate(self, seller: str, buyer: str, ref: str, price: int, floor: int = 1) -> tuple[int | None, bool | None]:
-        """The blind question. (price to propose or None, overlap yes / no / no limits set).
+        """The old blind question, kept for callers that have no Quoter: (the price given or None, overlap).
 
-        Both limits set: propose only when they overlap, at the middle of the overlap. One limit set: the public
-        suggestion passes or does not, unchanged, so the limit itself never shows."""
+        It answers only when BOTH teams set a limit, and then only whether the two meet: the price it is given never
+        decides the answer and is never changed, so no price (ours, a team's, the host's) can be used to search for
+        a limit. One limit alone is never compared with anything: the answer is "not both set"."""
         with self.lock:
             lo = ((self.data.get(seller) or {}).get(ref) or {}).get("min")
             hi = ((self.data.get(buyer) or {}).get(ref) or {}).get("max")
-        if lo is None and hi is None:
+        if lo is None or hi is None:
             return price, None
-        if lo is not None and hi is not None:
-            if hi < lo or hi < floor:
-                return None, False
-            return max(floor, int(round((lo + hi) / 2))), True
-        if lo is not None:
-            return (price, True) if price >= lo else (None, False)
-        return (price, True) if price <= hi else (None, False)
+        if hi < lo or hi < floor:
+            return None, False
+        return price, True
 
-    def within(self, team: str, ref: str, role: str, price: int) -> bool:
-        """For the team's own agent queue: is this price inside its own limit?"""
+    def within(self, team: str, ref: str, role: str, price: int) -> bool | None:
+        """For the team's own agent queue: is this price inside its own limit? None: it set no limit for the card,
+        so nothing says the price is one it would take (the queue then asks the agent, it does not go ahead)."""
         with self.lock:
             v = (self.data.get(team) or {}).get(ref) or {}
-        if role == "seller":
-            return v.get("min") is None or price >= v["min"]
-        return v.get("max") is None or price <= v["max"]
+        limit = v.get("min") if role == "seller" else v.get("max")
+        if limit is None:
+            return None
+        return price >= limit if role == "seller" else price <= limit

@@ -41,6 +41,8 @@ def can_move(frm: str, to: str) -> bool:
     return to in MOVES.get(frm, ())
 ACTIONS = ("counter", "accept", "pass")
 PROPOSAL_TICKS = 120            # a proposal with no message and no offer expires after this
+PROPOSAL_HARD = 360             # and one that is only talk, however lively, after this
+MAX_REPORTS = 3                 # offer ids a team may report for one match before the feed confirms one
 OFFER_TICKS = 90                # an offer seen on the venue and never settled
 PASS_TICKS = 240                # a passed match is not proposed again for this long
 EXPIRED_TICKS = 120
@@ -145,6 +147,27 @@ class Deals:
                        "highlight": state in ("settled", "accepted")})
         return True
 
+    @staticmethod
+    def _giveaway(rec: dict, price) -> bool:
+        """A sale priced under the floor of its rarity: never taken as the offer of a match."""
+        return rec["kind"] == "sale" and bool(price) and price < matcher.FLOOR.get(rec.get("rarity") or "", 1)
+
+    @staticmethod
+    def _offer_price(rec: dict, price, maker: str) -> dict:
+        """The fields a sale takes from the offer the game shows. A price that is not the one on the table was
+        chosen by the offer's maker: the other team's earlier word does not cover it."""
+        if not price or rec["kind"] != "sale" or price == rec.get("price"):
+            return {}
+        return {"price": price, "price_by": maker, "saves": matcher.rastro_fee(price),
+                "agreed": [t for t in rec.get("agreed") or [] if t == maker]}
+
+    @staticmethod
+    def _same_way(rec: dict, e: dict) -> bool:
+        """Is this settlement the match, and not the same card going the other way? Checked against whatever the
+        feed says about who gave the card."""
+        gave = [m.get("from") for m in e.get("moves") or [] if m.get("ref") == rec["ref"] and m.get("from")]
+        return not gave or rec["seller"] in gave
+
     def _game(self, log: list[dict], events: list) -> None:
         """Applies what the game said since the last call: offers and sales between teams, on any venue."""
         if len(log) < self.log_pos:
@@ -167,9 +190,13 @@ class Deals:
                         self.notes.append({"kind": "wrong_venue", "tick": tick, "match": r["id"], "team": e["maker"],
                                            "to": e["to"], "ref": r["ref"], "venue": venue, "offer": e["id"]})
                         break
+                    if self._giveaway(r, e.get("price")):      # under the floor of its rarity: not this match
+                        self.notes.append({"kind": "below_floor", "tick": tick, "match": r["id"], "team": e["maker"],
+                                           "to": e["to"], "ref": r["ref"], "venue": venue, "offer": e["id"]})
+                        break
                     self._move(r, "offer_on_v07", tick, events, offer=e["id"], offer_maker=e["maker"],
                                offer_tick=tick, elsewhere_offer=None, reported_offer=None,
-                               **({"price": e["price"]} if e.get("price") and r["kind"] == "sale" else {}))
+                               **self._offer_price(r, e.get("price"), e["maker"]))
                     break
             elif e["t"] == "cancelled":
                 for r in live:
@@ -181,7 +208,8 @@ class Deals:
             elif e["t"] == "settled":
                 for r in live:
                     if r["state"] in LIVE_STATES and set(e["parties"]) == {r["seller"], r["buyer"]} \
-                            and (r["ref"] in e["refs"] or r.get("ref_back") in e["refs"]) and tick >= r["proposed_tick"]:
+                            and (r["ref"] in e["refs"] or r.get("ref_back") in e["refs"]) and tick >= r["proposed_tick"] \
+                            and self._same_way(r, e):
                         self._move(r, "settled" if venue == self.venue else "settled_elsewhere", tick, events,
                                    settlement=e.get("id"), settled_venue=venue,
                                    **({"price": e["price"]} if e.get("price") and r["kind"] == "sale" else {}))
@@ -197,9 +225,11 @@ class Deals:
             before = json.dumps([(r["id"], r["state"], r.get("price"), r.get("alternatives")) for r in self.matches.values()])
             self._game(log, events)
             for r in self.matches.values():                                    # nobody followed it
-                if r["state"] == "proposed" and tick - r["state_tick"] > PROPOSAL_TICKS and not r.get("forced") \
-                        and tick - (r.get("last_tick") or r["state_tick"]) > PROPOSAL_TICKS:
-                    self._move(r, "expired", tick, events)
+                if r["state"] == "proposed" and not r.get("forced") and (
+                        tick - r["state_tick"] > PROPOSAL_HARD
+                        or (tick - r["state_tick"] > PROPOSAL_TICKS
+                            and tick - (r.get("last_tick") or r["state_tick"]) > PROPOSAL_TICKS)):
+                    self._move(r, "expired", tick, events)     # nobody followed it, or talk that never became an offer
                 elif r["state"] in ("offer_on_v07", "accepted") \
                         and tick - (r.get("offer_tick") or r["state_tick"]) > OFFER_LIFE:
                     self._move(r, "proposed", tick, events, offer=None, offer_maker=None, offer_tick=None,
@@ -212,8 +242,8 @@ class Deals:
             fresh = {c["id"]: c for c in cands}
             blocked = lambda m: m["id"] in excluded_matches       # noqa: E731 - a match, never a team
             held = lambda r: bool(set(parties(r)) & set(paused_teams))   # noqa: E731 - a paused team keeps its matches
-            for mid in [k for k, r in self.matches.items() if r["state"] == "proposed" and not r.get("messages")
-                        and not r.get("forced") and not r.get("reported_offer")
+            for mid in [k for k, r in self.matches.items() if r["state"] == "proposed" and not self._engaged(r)
+                        and not r.get("forced")
                         and ((k not in fresh and not held(r)) or blocked(r))]:
                 self.matches.pop(mid)                                          # the sheets changed: withdrawn
             for mid in [k for k, r in self.matches.items() if r["state"] in DONE_STATES and k not in self.cool]:
@@ -244,6 +274,8 @@ class Deals:
                         r.update({k: c[k] for k in ("why", "last_of_page", "priority", "confidence", "score",
                                                     "pair_traded") if k in c})
                         if r["state"] == "proposed" and not r.get("price_by") and not r.get("forced"):
+                            if c["price"] != r.get("price"):
+                                r["agreed"] = []               # a word given at another price is not a word at this one
                             r.update({k: c[k] for k in ("price", "saves", "basis") if k in c}, suggested=c["price"])
                 r["alternatives"] = m["alternatives"]
             keep = {m["id"] for m in active}
@@ -256,6 +288,13 @@ class Deals:
                                                for r in self.matches.values()]):
                 self._save()
         return events
+
+    @staticmethod
+    def _engaged(rec: dict) -> bool:
+        """Did BOTH teams act on this proposal? A note, a counter or an offer id from one side alone does not keep
+        a match (and the other team's card) once the sheets no longer support it."""
+        acted = {m["team"] for m in rec.get("messages") or [] if m.get("action") in ("accept", "counter")}
+        return len(acted) >= 2
 
     # ---- reads
     def live(self) -> list[dict]:
@@ -338,7 +377,9 @@ class Deals:
             item = {"n": self.next_msg, "team": team, "verified": bool(verified), "ts": now, "tick": self.tick, **msg}
             self.next_msg += 1
             rec["messages"] = (rec.get("messages") or [])[-(MAX_MESSAGES - 1):] + [item]
-            rec["updated"], rec["last_tick"] = now, self.tick
+            rec["updated"] = now
+            if action:                                         # a note alone does not keep a proposal alive
+                rec["last_tick"] = self.tick
             self._save()
             other = next((t for t in parties(rec) if t != team), None)
             floor = {"src": "plaza", "kind": action or "note", "ts": now, "tick": self.tick, "match": rec["id"],
@@ -365,6 +406,13 @@ class Deals:
             if rec.get("offer") == offer_id:                   # said twice: the same answer
                 return rec, [], True
             if offer is None:
+                if (rec.get("reported_offer") or {}).get("id") == offer_id:
+                    return rec, [], False                      # said twice: still waiting for the feed
+                told = rec.setdefault("reports", {})
+                if told.get(team, 0) >= MAX_REPORTS:
+                    raise PlazaError(429, "slow_down", "you reported several offers for this match and the game "
+                                     "showed none of them: post the offer first, then report its id once")
+                told[team] = told.get(team, 0) + 1
                 rec["reported_offer"] = {"id": offer_id, "team": team, "tick": self.tick}
                 rec["updated"] = self.clock()
                 self._save()
@@ -378,12 +426,14 @@ class Deals:
                     or offer.get("ref") not in (rec["ref"], rec.get("ref_back")):
                 raise PlazaError(409, "conflict", f"offer {offer_id} is not this match: it must be yours, addressed "
                                  f"to {other}, for {rec['ref']}, on {self.venue}")
+            if self._giveaway(rec, offer.get("price")):
+                raise PlazaError(409, "below_floor", f"offer {offer_id} sells a {rec.get('rarity')} card under "
+                                 f"{matcher.FLOOR.get(rec.get('rarity') or '', 1)} P: not taken on this venue")
             events: list[dict] = []
             if rec["state"] == "proposed":
                 self._move(rec, "offer_on_v07", self.tick, events, offer=offer_id, offer_maker=team,
                            offer_tick=offer.get("created_tick") or self.tick, reported_offer=None,
-                           elsewhere_offer=None,
-                           **({"price": offer["price"]} if offer.get("price") and rec["kind"] == "sale" else {}))
+                           elsewhere_offer=None, **self._offer_price(rec, offer.get("price"), team))
             self._save()
             return rec, events, True
 

@@ -97,7 +97,8 @@ class Agent:
         """Your sheet from your real hand. Replace this with your own judgement.
 
         have: every card. spares: second copies, never sold under a quarter of what the card is worth to you
-        (that is what a second copy is worth). wants: every released card you do not hold."""
+        (that is what a second copy is worth). wants: every released card you do not hold, each with a `max` (the
+        game's list price of its rarity): without a limit of your own the market never trades for you blind."""
         held: dict[str, list[dict]] = {}
         for a in self.assets():
             held.setdefault(a["ref"], []).append(a)
@@ -107,8 +108,12 @@ class Agent:
                 worth = copies[0].get("your_value")
                 spares.append({"ref": ref, "min": max(1, int(worth / 4) + 1)} if worth else ref)
         st, cat = self.to_game("GET", "/api/catalog")
-        wants = sorted(c["id"] for s in (cat.get("sets") or []) if s.get("released", True)
-                       for c in s.get("cards") or [] if not c.get("hidden") and c["id"] not in held) if st == 200 else []
+        book = {k: v.get("book") for k, v in (cat.get("rarities") or {}).items() if isinstance(v, dict)} if st == 200 else {}
+        wants = []
+        for c in sorted((c for s in (cat.get("sets") or []) if s.get("released", True) for c in s.get("cards") or []
+                         if not c.get("hidden") and c["id"] not in held), key=lambda c: c["id"]) if st == 200 else []:
+            most = book.get(c.get("rarity"))                # never above the game's list price; put your own value here
+            wants.append({"ref": c["id"], "max": int(most)} if most else c["id"])
         return {"wants": wants, "spares": spares, "for_sale": [], "have": sorted(held)}
 
     def publish(self, sheet: dict | None = None):
@@ -137,12 +142,40 @@ class Agent:
             return mine[m.group(1)]
         return body
 
+    def stand(self, match_id: str) -> tuple[dict, str, int | None, int]:
+        """(the match, our role, our own limit for its card or None, the price on the table)."""
+        st, m = self.market("GET", f"/api/match/{match_id}")
+        if st != 200:
+            return {}, "", None, 0
+        role = "seller" if m.get("seller") == self.team else "buyer"
+        ours = self.limits.get(m.get("ref") or "", {})
+        return m, role, ours.get("min") if role == "seller" else ours.get("max"), int(m.get("price") or 0)
+
+    def takes(self, match_id: str) -> tuple[bool, str]:
+        """Would WE trade at the price now on the table? Checked against our own limits before anything is sent
+        to the game: the queue is advice, the limit is ours. A sale of a card we set no limit for is never done
+        blind, whoever suggests the price."""
+        m, role, limit, price = self.stand(match_id)
+        if not m:
+            return False, "could not read the match"
+        if m.get("kind") != "sale":
+            return True, ""
+        if limit is None:
+            return False, f"no limit of ours for {m.get('ref')}: not traded blind"
+        if (role == "seller" and price < limit) or (role == "buyer" and price > limit):
+            return False, f"{price} P is outside our limit for {m.get('ref')}"
+        return True, ""
+
     def decide(self, action: dict):
-        """The price on the table is outside our limits: counter at our own limit, or pass. Yours to improve."""
-        st, m = self.market("GET", f"/api/match/{action['match']}")
-        ours = self.limits.get(m.get("ref") or "", {}) if st == 200 else {}
-        price = ours.get("min") if m.get("seller") == self.team else ours.get("max")
-        return {"action": "counter", "price": price} if price else {"action": "pass"}
+        """The queue hands us the decision: the other team set the price, it is outside our limit, or we set no
+        limit. Inside our limit: accept. Outside: counter at our limit. No limit of ours: nothing (None); set a
+        `min` or a `max` for the card and the queue goes on. Yours to improve."""
+        m, role, limit, price = self.stand(action["match"])
+        if not m or limit is None:
+            return None
+        if (role == "seller" and price >= limit) or (role == "buyer" and price <= limit):
+            return {"action": "accept"}
+        return {"action": "counter", "price": limit}
 
     def run_action(self, a: dict) -> tuple[bool, str]:
         """Runs one action of the queue. Returns (done, note)."""
@@ -150,8 +183,15 @@ class Agent:
         if a["type"] == "sync_cards":
             st, out = self.publish()
         elif a["type"] == "decide":
-            st, out = self.market(r["method"], r["path"], self.decide(a))
+            word = self.decide(a)
+            if word is None:
+                return False, "no limit of ours for this card: set one, or decide by hand"
+            st, out = self.market(r["method"], r["path"], word)
         elif r["target"] == "game":
+            if a["type"] in ("post_offer", "accept_offer") and a.get("match"):
+                ok, why = self.takes(a["match"])               # the price is checked against OUR limits first
+                if not ok:
+                    return False, "refused: " + why
             try:
                 body = r.get("body") or {}
                 if PLACEHOLDER.search(json.dumps(body)):
