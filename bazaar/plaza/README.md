@@ -194,6 +194,34 @@ The public hostname points straight at the plaza process (:8793), not at the das
 6. Check: `curl https://plaza.<domain>/plaza/api/health` answers, `curl -i https://plaza.<domain>/plaza/admin/`
    is a 404, and a new connection prompt names `https://plaza.<domain>/plaza`.
 
+### What is running (set up on Sunday 4 Oct)
+
+One named tunnel, `bazaar-t10`, carries two hostnames of Ángel's zone; its config is `~/.cloudflared/config.yml`
+(credentials next to it; neither is in the repository):
+
+| Hostname | Goes to | Who uses it |
+|---|---|---|
+| `market.<domain>` | `http://127.0.0.1:8793` (the plaza, directly) | the teams and their agents |
+| `dashboard.<domain>` | `http://localhost:8787` (the gateway, Basic auth) | Team 10 |
+
+- **Public address.** Set in `control.plaza_url` (`POST :8791/control {"plaza_url": "https://market.<domain>/plaza"}`
+  with the header `X-Dashboard: 1`); the prompt and AGENTS.md pick it up without a restart. `PLAZA_PUBLIC_URL`
+  is not set, so the control value wins over the quick tunnel's address.
+- **Start again.** From the repository root:
+  `nohup cloudflared tunnel --no-autoupdate run bazaar-t10 > bazaar/data/cloudflared-named.out 2>&1 &`.
+  It is not under the supervisor: after a reboot or a crash, run that line. `cloudflared tunnel info bazaar-t10`
+  shows whether a connector is up.
+- **Checks from outside.** `market.<domain>/` redirects to `/plaza/`; `/plaza/api/status`, `/plaza/AGENTS.md`
+  and `/AGENTS.md` answer 200; `/plaza/admin/` and `/plaza/admin/api/...` answer 404; `dashboard.<domain>/`
+  answers 401 without credentials.
+- **A hostname that does not resolve on this machine.** A lookup made before the record existed is remembered as
+  "no such name" by the local network's resolver for up to half an hour. Check with
+  `curl -s -H 'accept: application/dns-json' 'https://cloudflare-dns.com/dns-query?name=market.<domain>&type=A'`
+  and test with `curl --resolve market.<domain>:443:<one of those addresses> ...` meanwhile.
+- **Rescue.** If the named tunnel is down and cannot be brought back, the quick tunnel still works:
+  `cloudflared tunnel --no-autoupdate --url http://localhost:8787 > bazaar/data/cloudflared.out 2>&1 &`, then set
+  `control.plaza_url` to `null` so the plaza announces the quick tunnel's address again.
+
 ## Tests
 
 `.venv/bin/python -m unittest bazaar.plaza.tests.test_store bazaar.plaza.tests.test_matcher bazaar.plaza.tests.test_server bazaar.plaza.tests.test_gateway bazaar.plaza.tests.test_feed_floor bazaar.plaza.tests.test_connect_deals bazaar.plaza.tests.test_private_queue`
