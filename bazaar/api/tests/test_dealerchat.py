@@ -139,6 +139,27 @@ class DealerChatTest(unittest.TestCase):
         self.assertIn("perdemos valor", out["check"]["blocked"])
         self.assertEqual([c[0] for c in self.game.calls].count("/api/offers/900/accept"), 1)
 
+    def test_a_page_card_may_cost_up_to_the_price_the_team_set(self):
+        self.req("/dealer-chat/send", {"dealer": "banco", "text": "x", "side": "buy", "item": "LAV-11"}, HDR)
+        self.game.values["LAV-11"] = 80.0
+        self.game.me["cash"] = 400
+        self.req("/control", {"page_buys": {"LAV-11": 90}}, HDR)
+        self.game.threads[0]["messages"] = []
+        self.game.offer(100)                                                # above the price we set: still a loss
+        out = self.req("/dealer-chat/accept", {"dealer": "banco", "offer": 900, "confirm": True}, HDR)[1]
+        self.assertIn("perdemos valor", out["check"]["blocked"])
+        self.game.threads[0]["messages"] = []
+        self.game.offer(90)
+        out = self.req("/dealer-chat/accept", {"dealer": "banco", "offer": 900, "confirm": True}, HDR)[1]
+        self.assertTrue(out["accepted"])
+        self.game.threads[0]["messages"] = []
+        self.game.values["MAL-09"] = 80.0
+        self.game.offer(90, "MAL-09")                                       # the dealer switched the card: not the one we set
+        out = self.req("/dealer-chat/accept", {"dealer": "banco", "offer": 900, "confirm": True}, HDR)[1]
+        self.assertFalse(out["accepted"])
+        self.assertIn("perdemos valor", out["check"]["blocked"])
+        self.assertEqual(self.req("/control", {"page_buys": {"LAV-11": 500}}, HDR)[0], 400)
+
     def test_a_stale_offer_id_is_refused(self):
         self.req("/dealer-chat/send", {"dealer": "banco", "text": "x", "side": "buy", "item": "LAV-11"}, HDR)
         self.game.offer(100)

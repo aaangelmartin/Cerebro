@@ -135,12 +135,24 @@ def check(offer: dict, gw, me: dict, control: dict) -> dict:
         blocked = f"pagar {pay} P supera el tope por trato de {per_deal} P"
     elif not known:
         blocked = "no conocemos nuestro valor de alguna carta de la oferta"
-    elif gain < 0:
+    elif gain < 0 and not _page_buy(offer, pay, control):
         blocked = f"perdemos valor: recibimos {get} y damos {give}"
     return {"offer": offer.get("id"), "we_get": get_names, "we_give": give_names, "pay": pay,
             "receive_cash": int((offer.get("give") or {}).get("cash") or 0), "value_get": get, "value_give": give,
             "gain": gain, "known": known, "cash": cash, "reserve": reserve, "per_deal": per_deal,
             "final": bool(offer.get("final")), "blocked": blocked}
+
+
+def _page_buy(offer: dict, pay: int, control: dict) -> bool:
+    """A card that finishes a page (control.page_buys: ref -> max price, set by the team) may cost more than
+    its value alone: the offer must give exactly that one card for cash, at or under the agreed price."""
+    give, want = offer.get("give") or {}, offer.get("want") or {}
+    types = [str(t) for t in give.get("types") or []]
+    if len(types) != 1 or give.get("assets") or give.get("cash") or want.get("assets") or want.get("types"):
+        return False
+    kind, _, ref = types[0].partition(":")
+    cap = (control.get("page_buys") or {}).get(ref)
+    return kind == "card" and isinstance(cap, (int, float)) and 0 < pay <= cap
 
 
 def _standing(thread: dict, dealer: str) -> dict | None:
