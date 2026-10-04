@@ -316,6 +316,10 @@ class DealersDomain:
             if p is None:
                 self._note_order(o, "skipped", f"dealer {d} is not available to us", plan.tick)
                 continue
+            if not selling and self._no_stock(d, ref, values):
+                # t1722-1750: seven threads with Pícaros for SAL-11 (9 of 9 out), each answered "sold out"
+                self._note_order(o, "skipped", f"{ref} is sold out: no dealer has a copy left", plan.tick)
+                continue
             if d not in plan.free:
                 self._note_order(o, "skipped", f"{d} is busy, cooling off or at its hourly quota", plan.tick)
                 continue
@@ -634,7 +638,7 @@ class DealersDomain:
             self.store.set_quota_hit(dealer)
         if "budget" in reason:                              # it has no cash left to buy from us this hour
             self.store.set_budget_hit(dealer, tick + getattr(self, "_block_ticks", BUDGET_BLOCK_TICKS))
-        if "sold_out" in reason:
+        if "sold_out" in reason or "sold out" in reason.replace("_", " "):
             self._sold_out[(dealer, t.get("item", ""))] = time.time()
         price = settlements.get(dealer)
         if price is None and t.get("accepted") is not None and status in (None, "deal"):
@@ -1105,6 +1109,18 @@ class DealersDomain:
             plan.candidates.append(c)
             plan.forced.append(c.id)
 
+    def _no_stock(self, dealer: str, ref: str, values: Values) -> bool:
+        """No dealer can sell this card now: the catalog says every printed copy is out, or this dealer told us
+        "sold out" in the last half hour. Fresh stock in the catalog (minted < print_run) lifts the first."""
+        c = (getattr(values, "cards", None) or {}).get(ref) or {}
+        try:
+            run, out = int(c.get("print_run") or 0), int(c.get("minted") or 0)
+        except (TypeError, ValueError):
+            run, out = 0, 0
+        if run > 0 and out >= run:
+            return True
+        return time.time() - self._sold_out.get((dealer, ref), 0) < 1800
+
     @staticmethod
     def _not_held_first(probes: list[Candidate], values: Values) -> list[Candidate]:
         """The gift probe never asks for a card we already hold while anything else will do: a second copy is
@@ -1137,6 +1153,8 @@ class DealersDomain:
                 if time.time() - self._sold_out.get((d, item), 0) < 1800:
                     return
                 buying = kind.startswith("buy")
+                if buying and not kind.endswith("pack") and self._no_stock(d, item, values):
+                    return                                   # every printed copy is out: nothing to buy
                 o = float(opening_hint or self.store.expect_opening(d, kind, list_price) or 0)
                 if o <= 1:
                     return
