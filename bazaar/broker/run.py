@@ -577,6 +577,19 @@ def team_message(gw: Gateway, venue_id: str) -> Callable[[str, str], Any]:
     return send
 
 
+def plaza_helpers() -> tuple[Callable[[], Any] | None, Callable[[], Any] | None]:
+    """The plaza's two helpers for the matchmaker (its public address, the pairs agents declared), or
+    (None, None) when the plaza package does not even import. The broker plays the Market Test: it must
+    start and run whatever state the market board's code is in."""
+    try:
+        from ..plaza import server as plaza
+    except Exception as e:  # noqa: BLE001 - any failure of that package, a syntax error included
+        print(f"broker: plaza not available ({type(e).__name__}: {e}); announcements go without its page", flush=True)
+        return None, None
+    return (lambda: plaza.public_url(config.LIVE, config.DATA),
+            lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record"))
+
+
 def _num(x: Any) -> float | None:
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         return None
@@ -677,12 +690,11 @@ def main(argv: list[str] | None = None) -> None:
     if not against_sim:
         from ..intel.needs import needs_report
         from .matchmaker import VENUE, MatchMaker
-        from ..plaza import server as plaza
+        page_fn, declared_fn = plaza_helpers()
         loop.matchmaker = MatchMaker(config.LIVE / "matchmaker.json", needs_report,
                                      lambda: _read_json(config.LIVE / "control.json"),
                                      announce=client.announce, message=team_message(gw, VENUE),
-                                     page_fn=lambda: plaza.public_url(config.LIVE, config.DATA),
-                                     declared_fn=lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record"))
+                                     page_fn=page_fn, declared_fn=declared_fn)
     print(f"broker: {'fake bazaar' if against_sim else 'live'} | key {'present' if key else 'MISSING'} | "
           f"writes {'on' if writes()[0] else 'off (' + writes()[1] + ')'} | out {out}", flush=True)
     while True:

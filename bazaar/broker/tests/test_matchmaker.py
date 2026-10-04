@@ -419,3 +419,24 @@ class TheBrokerSurvivesTheGame(unittest.TestCase):
         lp.poll()
         self.assertEqual(len(lp.errors), n)
         self.assertEqual(json.loads((d / "status.json").read_text())["tick"], 401)
+
+
+class TheBrokerStartsWithoutThePlaza(unittest.TestCase):
+    def test_a_plaza_that_does_not_import_leaves_the_broker_with_no_helpers(self):
+        import sys
+        from unittest import mock
+        import bazaar.plaza as pkg
+        from bazaar.broker import run
+        had = pkg.__dict__.pop("server", None)              # `from pkg import server` would find it there first
+        try:
+            with mock.patch.dict(sys.modules, {"bazaar.plaza.server": None}), mock.patch("builtins.print"):
+                self.assertEqual(run.plaza_helpers(), (None, None))
+        finally:
+            if had is not None:
+                pkg.server = had
+
+    def test_with_the_plaza_in_place_the_helpers_answer(self):
+        from bazaar.broker import run
+        page, declared = run.plaza_helpers()
+        self.assertTrue(callable(page) and callable(declared))
+        self.assertIsInstance(declared(), list)
