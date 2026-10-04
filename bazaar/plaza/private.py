@@ -17,12 +17,15 @@ import json
 import os
 import secrets
 import threading
+import time
 from pathlib import Path
 
-from .store import PlazaError
+from .store import PlazaError, write_atomic
 
 FIELDS = ("min", "max", "value")
 MAX = 2000
+HAVE, HAVE_BY_HAND, CHANGED = "#have", "#have_by_hand", "#changed"   # not team ids: a team's limits sit under its id
+COOL_TICKS, COOL_S = 20, 300.0                     # a card's min or max moves once in this long
 
 
 def _stream(key: bytes, nonce: bytes, n: int) -> bytes:
@@ -95,8 +98,8 @@ def split(body) -> tuple[dict, dict[str, dict]]:
 
 
 class Vault:
-    def __init__(self, folder: Path | str):
-        self.folder = Path(folder)
+    def __init__(self, folder: Path | str, clock=time.time):
+        self.folder, self.clock = Path(folder), clock
         self.lock = threading.Lock()
         self.folder.mkdir(parents=True, exist_ok=True)
         os.chmod(self.folder, 0o700)
@@ -119,18 +122,48 @@ class Vault:
         return key
 
     def _load(self) -> dict:
-        try:
-            data = json.loads(unseal(self.key, self.file.read_bytes()).decode("utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, ValueError):
-            return {}
+        for path in (self.file, self.file.with_name(self.file.name + ".bak")):     # the copy, when the file is broken
+            try:
+                data = json.loads(unseal(self.key, path.read_bytes()).decode("utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                return data
+        return {}
 
     def _save(self) -> None:
-        tmp = self.folder / "limits.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(seal(self.key, json.dumps(self.data).encode("utf-8")))
-        os.replace(tmp, self.file)
+        write_atomic(self.file, seal(self.key, json.dumps(self.data).encode("utf-8")), 0o600)
+
+    # ---- the cards a team holds: as private as its limits, so they live here and not under data/live
+    def have(self, team: str) -> list[str] | None:
+        """Only ever returned to that team. None: the team never said what it holds."""
+        with self.lock:
+            rows = (self.data.get(HAVE) or {}).get(team)
+            return list(rows) if isinstance(rows, list) else None
+
+    def set_have(self, team: str, refs: list[str] | None) -> None:
+        with self.lock:
+            book = self.data.setdefault(HAVE, {})
+            if refs is None:
+                book.pop(team, None)
+            else:
+                book[team] = list(refs)
+            self._save()
+
+    def have_overrides(self, team: str) -> dict[str, str]:
+        """ref -> "add" or "remove": what the human corrected by hand."""
+        with self.lock:
+            return dict((self.data.get(HAVE_BY_HAND) or {}).get(team) or {})
+
+    def override_have(self, team: str, ref: str, op: str | None) -> None:
+        """`op` None releases the card back to the agent."""
+        with self.lock:
+            mine = self.data.setdefault(HAVE_BY_HAND, {}).setdefault(team, {})
+            if op is None:
+                mine.pop(ref, None)
+            else:
+                mine[ref] = op
+            self._save()
 
     # ---- the team itself
     def get(self, team: str) -> dict[str, dict]:
@@ -138,10 +171,30 @@ class Vault:
         with self.lock:
             return {ref: dict(v) for ref, v in (self.data.get(team) or {}).items()}
 
-    def put(self, team: str, ref: str, fields: dict) -> None:
-        """Sets the fields given; a field sent as None is forgotten."""
+    def cooling(self, team: str, ref: str, fields: dict, tick: int | None) -> bool:
+        """Would this change a `min` or a `max` that was already changed less than COOL_TICKS ago?
+
+        Setting a limit for the first time is free and so is sending the same number again. Moving it is not:
+        a team that moves its limit every tick and watches which matches appear reads the other side's."""
+        with self.lock:
+            cur = (self.data.get(team) or {}).get(ref) or {}
+            moved = any(k in fields and k in cur and fields[k] != cur[k] for k in ("min", "max"))
+            last = ((self.data.get(CHANGED) or {}).get(team) or {}).get(ref)
+        if not moved or not last:
+            return False
+        if isinstance(tick, int) and isinstance(last.get("tick"), int):
+            return 0 <= tick - last["tick"] < COOL_TICKS
+        return 0 <= self.clock() - last.get("ts", 0) < COOL_S
+
+    def put(self, team: str, ref: str, fields: dict, tick: int | None = None) -> None:
+        """Sets the fields given; a field sent as None is forgotten. A limit moved again too soon is a 429."""
+        if self.cooling(team, ref, fields, tick):
+            raise PlazaError(429, "slow_down", f"a card's limit changes once every {COOL_TICKS} ticks")
         with self.lock:
             cur = dict((self.data.get(team) or {}).get(ref) or {})
+            if any(k in fields and k in cur and fields[k] != cur[k] for k in ("min", "max")):
+                self.data.setdefault(CHANGED, {}).setdefault(team, {})[ref] = {
+                    "ts": self.clock(), **({"tick": tick} if isinstance(tick, int) and not isinstance(tick, bool) else {})}
             for k in FIELDS:
                 if k in fields:
                     if fields[k] is None:

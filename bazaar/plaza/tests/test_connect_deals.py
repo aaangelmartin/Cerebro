@@ -309,16 +309,16 @@ class FlowTest(unittest.TestCase):
         st, d, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-06"], "spares": ["LAT-03"]}, token)
         self.assertEqual((st, d["declared"]["wants"]), (200, ["LAT-06"]))
         self.assertEqual(self.call("PUT", "/plaza/api/team/t08", {"wants": []}, token)[0], 403)   # another team
-        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": []}, {"X-Plaza-Token": "x" * 32})[0], 403)
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": []}, {"X-Plaza-Token": "x" * 32})[0], 401)
         st, status, _ = self.call("GET", q)
-        self.assertEqual(status["missing"], ["verified"])
+        self.assertEqual(status["missing"], ["verified", "cards_listed"])    # a sheet counts once the team is proved
         self.game_says("t08", s["connect_code"], "other")                                      # somebody else: no
         self.assertEqual(self.call("GET", q)[1]["verified"], False)
         self.game_says("t07", f"hi, {s['connect_code']}")
         st, status, _ = self.call("GET", "/plaza/api/connect/status", headers={"Cookie": cookie.split(";")[0]})
         self.assertEqual((status["missing"], status["connected"], status["team"]), ([], True, "t07"))
         st, me, _ = self.call("GET", "/plaza/api/me", headers={"Cookie": "a=b; " + cookie.split(";")[0]})
-        self.assertEqual((st, me["team"], me["read_only"]), (200, "t07", True))
+        self.assertEqual((st, me["team"], me["read_only"]), (200, "t07", False))  # the human may override by hand
         self.assertEqual([c["ref"] for c in me["home"]["wanted"]], ["LAT-06"])
         self.assertEqual([c["ref"] for c in me["home"]["available"]], ["LAT-03"])
         self.assertTrue(me["home"]["agent_online"])

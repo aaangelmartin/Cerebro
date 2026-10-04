@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import secrets
 import threading
 import time
 from pathlib import Path
 
-from .store import TEAM_RX, PlazaError
+from .store import TEAM_RX, PlazaError, read_json, write_atomic
 
 HOST = "t10"
 CODE_TTL_S = 15 * 60.0
@@ -81,25 +80,36 @@ class Connect:
         self.hits: dict[tuple, list[float]] = {}
         self.data = self._load()
         self.saved_seen = 0.0
+        self.on_event = None                # (team, kind, text): set by the team API to feed the activity log
+        self.unsaid: list[tuple] = []
 
     # ---- file
     def _load(self) -> dict:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
-        data = data if isinstance(data, dict) else {}
-        data.setdefault("sessions", {})
-        data.setdefault("agents", {})
+        data = read_json(self.path)
+        for key in ("sessions", "agents"):
+            if not isinstance(data.get(key), dict):
+                data[key] = {}
         return data
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(self.data, f)
-        os.replace(tmp, self.path)
+        write_atomic(self.path, json.dumps(self.data).encode("utf-8"), 0o600)
+
+    def _say(self, team: str, kind: str, text: str) -> None:
+        """Tells whoever listens (the team's activity log) what happened; never lets it break a connection."""
+        if self.on_event is None:
+            self.unsaid = (self.unsaid + [(team, kind, text)])[-200:]      # kept until somebody listens
+            return
+        try:
+            self.on_event(team, kind, text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def listen(self, fn) -> None:
+        """Sets the listener and tells it what happened before it came."""
+        with self.lock:
+            self.on_event, late, self.unsaid = fn, self.unsaid, []
+        for team, kind, text in late:
+            self._say(team, kind, text)
 
     # ---- limits
     def _take(self, key: tuple, limit: int) -> bool:
@@ -182,6 +192,8 @@ class Connect:
             if active:                                         # an unverified team: the newest agent is the agent
                 self._activate(team, rec)
             self._save()
+            self._say(team, "connect", "connected with its code" if active else
+                      "connected; it writes once the new code is proved in the game")
             return {"team": team, "agent_token": token, "header": "X-Plaza-Token", "verified": bool(rec.get("verified")),
                     "active": bool(active)}
 
@@ -220,12 +232,13 @@ class Connect:
             for k in [k for k, v in s.items() if v["team"] == team and k != hit and not v.get("verified")]:
                 s.pop(k, None)
             self._save()
+            self._say(team, "connect", "proved its code in the game")
             return True
 
     def auth(self, token) -> tuple[str, bool]:
-        """(team, verified) for an agent token; raises 403 otherwise. Counts as the agent's heartbeat."""
+        """(team, verified) for an agent token; raises 401 otherwise. Counts as the agent's heartbeat."""
         if not isinstance(token, str) or not TOKEN_RX.fullmatch(token):
-            raise PlazaError(403, "bad_token", "send your agent token in X-Plaza-Token")
+            raise PlazaError(401, "bad_token", "send your agent token in X-Plaza-Token")
         h = _h(token)
         with self.lock:
             now = self.clock()
@@ -242,7 +255,7 @@ class Connect:
                         break                                  # replaced by a newer agent of the same team
                     raise PlazaError(403, "prove_first", "this team is verified: send the new code as text in a "
                                                          "game thread with t10 before this token can write")
-        raise PlazaError(403, "bad_token", "unknown agent token; connect again")
+        raise PlazaError(401, "bad_token", "unknown agent token; connect again")
 
     def session(self, token) -> dict | None:
         if not isinstance(token, str) or not TOKEN_RX.fullmatch(token):
@@ -275,6 +288,28 @@ class Connect:
                     "agent_last_seen": a.get("last_seen") if mine else None,
                     "code_expires_in": max(0, int(rec["code_expires"] - now)) if not rec.get("agent_called") else 0,
                     "session_expires_in": max(0, int(rec["expires"] - now))}
+
+    def agent_status(self, team: str, listed: bool) -> dict:
+        """The same steps, asked by the team's agent with its token (it has no browser session)."""
+        with self.lock:
+            now = self.clock()
+            a = self.data["agents"].get(team) or {}
+            online = bool(a.get("last_seen") and now - a["last_seen"] < ONLINE_S)
+            steps = {"agent_called": bool(a), "verified": bool(a.get("verified")), "cards_listed": bool(listed),
+                     "agent_online": online}
+            return {"team": team, **steps, "missing": [k for k, ok in steps.items() if not ok],
+                    "connected": all(steps.values()), "agent_last_seen": a.get("last_seen"), "code_expires_in": 0,
+                    "session_expires_in": 0}
+
+    def team_of(self, session=None, token=None) -> str | None:
+        """Who is asking, without demanding anything: the team of a token or of a browser session, or None."""
+        if token:
+            try:
+                return self.auth(token)[0]
+            except PlazaError:
+                return None
+        rec = self.session(session)
+        return rec["team"] if rec else None
 
     # ---- ours
     def overview(self) -> dict[str, dict]:

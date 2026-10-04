@@ -174,7 +174,7 @@ class PrivateFlowTest(FlowTest):
         blob = ""
         for path in ("/plaza/api/teams", "/plaza/api/team/t07", "/plaza/api/team/t09", "/plaza/api/matches",
                      "/plaza/api/matches?team=t09", "/plaza/api/wall", "/plaza/api/offers?team=t09", "/plaza/api/floor",
-                     "/plaza/api/card/LAT-06", "/plaza/api/health", "/plaza/agents.md", *extra):
+                     "/plaza/api/card/LAT-06", "/plaza/api/health", "/plaza/agents.md", "/plaza/api/status", *extra):
             blob += json.dumps(self.call("GET", path)[1])
         for path in ("/plaza/admin/api/overview", "/plaza/admin/api/activity", "/plaza/admin/api/activity?team=t09",
                      "/plaza/admin/api/activity?team=t07", "/plaza/admin/api/matchmaker"):
@@ -227,7 +227,8 @@ class PrivateFlowTest(FlowTest):
                 raw = path.read_bytes()
                 for secret in ("1333", "1991", "1771", "1001"):
                     self.assertFalse(leaks(raw, secret), (path.name, secret))
-        self.assertEqual(sorted(p.name for p in (self.live.parent / "plaza_private").iterdir()), ["key", "limits.bin"])
+        self.assertEqual(sorted(p.name for p in (self.live.parent / "plaza_private").iterdir()),
+                         ["key", "limits.bin", "limits.bin.bak"])           # the copy is sealed with the same key
         pairs = json.dumps(S.declared_pairs(self.live, self.record))
         for secret in ("1333", "1991", "1001", "1552"):
             self.assertFalse(leaks(pairs, secret), secret)
@@ -237,9 +238,9 @@ class PrivateFlowTest(FlowTest):
         _, tok8 = self.verified("t08")
         self.call("POST", "/plaza/api/me/card/LAT-06?session=" + s7, {"max": 1771, "value": 1991})
         self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers=tok8)[1]["limits"], {})
-        self.assertEqual(self.call("GET", "/plaza/api/agent/cards")[0], 403)
-        self.assertEqual(self.call("GET", "/plaza/api/agent/next")[0], 403)
-        self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers={"X-Plaza-Admin": "test-admin-token"})[0], 403)
+        self.assertEqual(self.call("GET", "/plaza/api/agent/cards")[0], 401)
+        self.assertEqual(self.call("GET", "/plaza/api/agent/next")[0], 401)
+        self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers={"X-Plaza-Admin": "test-admin-token"})[0], 401)
         self.assertEqual(self.call("POST", "/plaza/api/me/card/LAT-06", {"max": 5})[0], 401)                # no session
         self.assertEqual(self.call("POST", "/plaza/api/me/card/LAT-06?session=" + "x" * 32, {"max": 5})[0], 401)
         self.assertEqual(self.call("POST", "/plaza/api/me/card/ZZZ-99?session=" + s7, {"max": 5})[0], 404)
@@ -258,7 +259,7 @@ class PrivateFlowTest(FlowTest):
         self.assertEqual(nxt["actions"][1]["request"]["body"]["to"], "t09")
         st, ack, _ = self.call("POST", "/plaza/api/agent/ack", {"id": nxt["actions"][0]["id"], "status": "done"}, tok7)
         self.assertEqual((st, ack["status"]), (200, "done"))
-        self.assertEqual(self.call("POST", "/plaza/api/agent/ack", {"id": "a-000000000000", "status": "done"})[0], 403)
+        self.assertEqual(self.call("POST", "/plaza/api/agent/ack", {"id": "a-000000000000", "status": "done"})[0], 401)
         self.assertEqual(self.call("POST", "/plaza/api/agent/ack", {"id": 5, "status": "done"}, tok7)[0], 400)
         url = f"/plaza/api/me/trade/{mid}?session=" + s7
         self.assertEqual(self.call("POST", url, {"mode": "ask_me"})[1]["agent"]["modes"], {mid: "ask_me"})

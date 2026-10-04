@@ -20,7 +20,10 @@ REF_RX = re.compile(r"^[A-Z]{3}-\d{2}$")
 TEAM_RX = re.compile(r"^t\d{2}$")
 PIN_RX = re.compile(r"^[A-Za-z0-9]{4,16}$")
 MAX_REFS = 60                      # per list: an album has 60-odd cards
+MAX_HAVE = 200                     # every card a team holds
 MAX_PRICE = 2000
+LISTS = ("wants", "spares", "for_sale")
+LANGS = ("en", "es")
 PIN_TRIES = 5                      # wrong PINs before a team's sheet locks for LOCK_S
 LOCK_S = 60.0
 HOST = "t10"
@@ -32,15 +35,66 @@ class PlazaError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+def write_atomic(path: Path, data: bytes, mode: int | None = None) -> None:
+    """Writes a temporary file and renames it over `path`; the copy it replaces stays as `<name>.bak`.
+
+    A process that dies half way leaves the old file whole, and a file that no longer parses is read from the
+    copy (`read_json`)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode if mode is not None else 0o644)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass
+    try:
+        old = path.read_bytes()
+    except OSError:
+        old = None
+    if old:
+        bak = path.with_name(path.name + ".bak")
+        tmp2 = path.with_name(path.name + ".bak.tmp")
+        fd = os.open(tmp2, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode if mode is not None else 0o644)
+        with os.fdopen(fd, "wb") as f:
+            f.write(old)
+        os.replace(tmp2, bak)
+    os.replace(tmp, path)
+
+
+def read_json(path: Path, kind: type = dict):
+    """The file, else its `.bak` when the file is missing or does not parse, else an empty `kind`."""
+    path = Path(path)
+    for p in (path, path.with_name(path.name + ".bak")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, kind):
+            return data
+    return kind()
+
+
+def whole(value, name: str, top: int = MAX_PRICE) -> int:
+    """A whole number from 1 to `top`."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (
+            float("inf"), float("-inf")) or int(value) != value or not 1 <= value <= top:
+        raise PlazaError(400, "bad_request", f"{name} is a whole number from 1 to {top}")
+    return int(value)
+
+
 def _hash(pin: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 50_000).hex()
 
 
-def clean_refs(value, field: str) -> list[str]:
+def clean_refs(value, field: str, top: int = MAX_REFS) -> list[str]:
     if value is None:
         return []
-    if not isinstance(value, list) or len(value) > MAX_REFS:
-        raise PlazaError(400, "bad_request", f"{field} must be a list of at most {MAX_REFS} card refs")
+    if not isinstance(value, list) or len(value) > top:
+        raise PlazaError(400, "bad_request", f"{field} must be a list of at most {top} card refs")
     out: list[str] = []
     for r in value:
         if not isinstance(r, str) or not REF_RX.fullmatch(r):
@@ -80,17 +134,10 @@ class Store:
 
     # ---- file
     def _load(self) -> dict:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, ValueError):
-            return {}
+        return read_json(self.path)
 
     def _save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.path)
+        write_atomic(self.path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
     # ---- identity
     def _team(self, team: str) -> str:
@@ -148,7 +195,7 @@ class Store:
         """Replaces the fields the agent sends (wants, spares, for_sale); fields left out stay as they were."""
         if not isinstance(body, dict):
             raise PlazaError(400, "bad_request", "send a JSON object")
-        unknown = set(body) - {"wants", "spares", "for_sale"}
+        unknown = set(body) - set(LISTS)
         if unknown:
             raise PlazaError(400, "bad_request", f"unknown fields: {', '.join(sorted(unknown))[:80]}")
         new = {}
@@ -165,10 +212,13 @@ class Store:
         with self.lock:
             data = self._load()
             rec = data.setdefault("teams", {}).setdefault(team, {})
-            rec["declared"] = {**(rec.get("declared") or {}), **new, "updated": self.clock()}
+            dec = {**(rec.get("declared") or {}), **new, "updated": self.clock()}
+            if dec.get("bids"):                                # a bid goes with its want
+                dec["bids"] = {r: b for r, b in dec["bids"].items() if r in (dec.get("wants") or [])}
+            rec["declared"] = dec
             rec["seen"] = self.clock()
             self._save(data)
-            return dict(rec["declared"])
+            return {k: v for k, v in dec.items() if k != "bids"}
 
     def verify(self, team: str, text: str) -> bool:
         """Marks the team verified when `text` (a message the team sent us in the game) carries its code."""
@@ -279,12 +329,131 @@ class Store:
 
     # ---- reads (never the PIN, the salt or the code)
     def declared(self) -> dict[str, dict]:
+        """What every team shows: its agent's lists with its human's overrides on top.
+
+        Only for a team that proved itself in the game. Anyone can start a connection in another team's name, so
+        a sheet published before the proof is kept (`unproved`) and shown to nobody until the code is seen."""
         out = {}
         for team, rec in (self._load().get("teams") or {}).items():
-            out[team] = {"declared": rec.get("declared"), "claimed": bool(rec.get("pin")),
-                         "verified": bool(rec.get("verified")), "seen": rec.get("seen")}
+            eff, ok = effective(rec), bool(rec.get("verified"))
+            out[team] = {"declared": eff if ok else None, "unproved": bool(eff) and not ok,
+                         "claimed": bool(rec.get("pin")), "verified": ok, "seen": rec.get("seen")}
         return out
+
+    def sheet(self, team: str) -> dict:
+        """One team's lists for its own page: the agent's, the overrides and the result."""
+        rec = (self._load().get("teams") or {}).get(team) or {}
+        return {"declared": dict(rec.get("declared") or {}), "overrides": _overrides(rec),
+                "effective": effective(rec) or {}, "bids": dict((rec.get("declared") or {}).get("bids") or {})}
+
+    # ---- one card at a time (POST /api/me/cards)
+    def edit(self, team: str, op: str, lst: str, ref: str, human: bool, price: int | None = None,
+             bid: int | None = None) -> None:
+        """Adds or removes one card of a list, or releases a human override.
+
+        A human's change is an override: it is kept apart, wins over the agent's list and survives the agent's
+        next full sheet until it is released. An agent's change edits its own list."""
+        team = self._team(team)
+        if lst not in LISTS or op not in ("add", "remove", "release") or not REF_RX.fullmatch(ref or ""):
+            raise PlazaError(400, "bad_request", "op is add, remove or release; list is wants, spares or for_sale")
+        with self.lock:
+            data = self._load()
+            rec = data.setdefault("teams", {}).setdefault(team, {})
+            over = rec.setdefault("overrides", {}).setdefault(lst, {})
+            if op == "release":
+                over.pop(ref, None)
+            elif human:
+                if op == "add" and ref not in over and len([1 for o in over.values() if o.get("op") == "add"]) >= MAX_REFS:
+                    raise PlazaError(400, "bad_request", f"{lst} holds at most {MAX_REFS} cards")
+                over[ref] = {"op": op, "ts": self.clock(), **({"price": price} if price is not None else {}),
+                             **({"bid": bid} if bid is not None else {})}
+            else:
+                dec = rec.setdefault("declared", {})
+                rows = list(dec.get(lst) or [])
+                key = (lambda e: e["ref"]) if lst == "for_sale" else (lambda e: e)
+                rows = [e for e in rows if key(e) != ref]
+                if op == "add":
+                    if len(rows) >= MAX_REFS:
+                        raise PlazaError(400, "bad_request", f"{lst} holds at most {MAX_REFS} cards")
+                    rows.append({"ref": ref, **({"price": price} if price is not None else {})}
+                                if lst == "for_sale" else ref)
+                dec[lst] = rows
+                if lst == "wants":
+                    bids = dict(dec.get("bids") or {})
+                    bids.pop(ref, None)
+                    if op == "add" and bid is not None:
+                        bids[ref] = bid
+                    dec["bids"] = bids
+                dec["updated"] = self.clock()
+            rec["seen"] = self.clock()
+            self._save(data)
+
+    def lock_limits(self, team: str, ref: str, fields) -> None:
+        """Remembers which private fields of a card the human set (their names, never their numbers), so the
+        agent's next sheet does not write over them. `fields` None releases the card."""
+        with self.lock:
+            data = self._load()
+            rec = data.setdefault("teams", {}).setdefault(self._team(team), {})
+            locks = rec.setdefault("overrides", {}).setdefault("limits", {})
+            if fields is None:
+                locks.pop(ref, None)
+            else:
+                locks[ref] = sorted(set(locks.get(ref) or []) | {f for f in fields if f in ("min", "max", "value")})
+            self._save(data)
+
+    # ---- settings of the team (the language of its page, its pause)
+    def settings(self, team: str) -> dict:
+        s = ((self._load().get("teams") or {}).get(team) or {}).get("settings") or {}
+        return {"lang": s.get("lang") if s.get("lang") in LANGS else "en", "paused": bool(s.get("paused"))}
+
+    def set_settings(self, team: str, lang=None, paused=None) -> dict:
+        if lang is not None and lang not in LANGS:
+            raise PlazaError(400, "bad_request", "lang is en or es")
+        if paused is not None and not isinstance(paused, bool):
+            raise PlazaError(400, "bad_request", "paused is true or false")
+        with self.lock:
+            data = self._load()
+            rec = data.setdefault("teams", {}).setdefault(self._team(team), {})
+            s = rec.setdefault("settings", {})
+            if lang is not None:
+                s["lang"] = lang
+            if paused is not None:
+                s["paused"] = paused
+            self._save(data)
+        return self.settings(team)
+
+    def paused_teams(self) -> set[str]:
+        """Teams that asked for no new matches (their live ones go on). The matcher reads this."""
+        return {t for t, r in (self._load().get("teams") or {}).items() if (r.get("settings") or {}).get("paused")}
 
     def pending_codes(self) -> dict[str, str]:
         return {t: r["code"] for t, r in (self._load().get("teams") or {}).items()
                 if r.get("code") and not r.get("verified")}
+
+
+def _overrides(rec: dict) -> dict:
+    o = rec.get("overrides") or {}
+    return {**{lst: {r: dict(v) for r, v in (o.get(lst) or {}).items() if isinstance(v, dict)} for lst in LISTS},
+            "limits": {r: list(v) for r, v in (o.get("limits") or {}).items() if isinstance(v, list)}}
+
+
+def effective(rec: dict) -> dict | None:
+    """The lists a team shows: its agent's, then every human override (add puts the card in, remove takes it out).
+    None when neither the agent nor the human declared anything."""
+    dec, over = rec.get("declared"), _overrides(rec)
+    if not dec and not any(over[lst] for lst in LISTS):
+        return dec
+    out = dict(dec or {})
+    for lst in LISTS:
+        if lst not in out and not over[lst]:
+            continue
+        rows = list(out.get(lst) or [])
+        key = (lambda e: e["ref"]) if lst == "for_sale" else (lambda e: e)
+        for ref, o in over[lst].items():
+            rows = [e for e in rows if key(e) != ref]
+            if o.get("op") == "add":
+                rows.append({"ref": ref, **({"price": o["price"]} if o.get("price") else {})}
+                            if lst == "for_sale" else ref)
+        out[lst] = rows
+    out.setdefault("updated", max([o.get("ts") or 0 for lst in LISTS for o in over[lst].values()] or [0]) or None)
+    return out
