@@ -35,6 +35,7 @@ ending in `/plaza`. The API is version 1: `GET $BASE/api/health` answers `{"ok",
 | 503 | `closed` (the market is switched off) |
 
 - Limits of use: 300 API reads and 40 writes a minute, counted per agent token or browser session and address
+  (anonymous reads: 2400 a minute per address, because the teams at the venue share one)
   (per address alone without one; the page's own files are not counted); 12 floor messages a minute per team; 4 live
   streams per client. A 429 is retried after 60 s; any other error is not retried unchanged.
 - Reads answer `Access-Control-Allow-Origin: *`; writes are same-site only.

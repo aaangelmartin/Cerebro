@@ -34,7 +34,7 @@ Plaza.screen("kit", {
       K.feed([{ tick: 1446, text: "Accepting offer #20311 from t05: LAV-09 for 80 P", now: true }, { tick: 1445, text: "Read 3 new proposals from the matchmaker" },
               { tick: 1444, text: "Countered at 80 P for LAV-09", extra: K.id("m-ba346d6c75") }])));
     const thread = grid.appendChild(box("K.thread", "fixed height, its own scroll"));
-    API.get("/api/match/m-ba346d6c75").then((m) => {
+    API.text("/static/fixtures/match.json").then(JSON.parse).then((m) => {       // always the sample thread
       const many = [].concat(m.thread || [], m.thread || [], m.thread || [], m.thread || []);
       thread.querySelector(".panel-body").appendChild(K.thread(many, (m.thread && m.thread[0] || {}).team, { earlier: 9 }));
     }, () => thread.querySelector(".panel-body").appendChild(K.state("error")));

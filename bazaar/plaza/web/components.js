@@ -100,6 +100,45 @@
     return m ? { set: m[1], no: m[2] } : { set: String(ref || "").slice(0, 3), no: "" };
   }
 
+
+  // ---- sentences the server writes in English (the agent's log, the "why" of a trade, the next step of the queue):
+  // the known ones are said in the page's language, anything else stays as it came.
+  const SAY_ES = [
+    [/^(t\d\d) can part with ([A-Z]{3}-\d\d); (t\d\d) looks for it( \(probably the last card of its page\))?$/, (m) => `${m[1]} puede soltar ${m[2]}; ${m[3]} la busca` + (m[4] ? " (probablemente la última carta de su página)" : "")],
+    [/^(t\d\d) has (\S+) and wants (\S+); (t\d\d) has \S+ and wants \S+$/, (m) => `${m[1]} tiene ${m[2]} y busca ${m[3]}; ${m[4]} tiene ${m[3]} y busca ${m[2]}`],
+    [/^(t\d\d) gives (\S+) to (t\d\d), (t\d\d) gives (\S+) to (t\d\d), (t\d\d) gives (\S+) to (t\d\d)$/, (m) => `${m[1]} da ${m[2]} a ${m[3]}, ${m[4]} da ${m[5]} a ${m[6]}, ${m[7]} da ${m[8]} a ${m[9]}`],
+    [/^three-way swap: agree on the thread first$/, () => "cambio a tres: primero hay que acordarlo en el hilo"],
+    [/^ask_me: waiting for your human$/, () => "pregúntame antes: esperando a tu humano"],
+    [/^waiting for the other side to post the offer$/, () => "esperando a que la otra parte publique la oferta"],
+    [/^your offer is on the venue; waiting for the accept$/, () => "tu oferta está en el venue; esperando a que la acepten"],
+    [/^accepted; it settles on the next tick$/, () => "aceptado; se cierra en el próximo tick"],
+    [/^nothing to do now$/, () => "nada que hacer ahora"],
+    [/^publish your current duplicates, cards for sale and wants/, () => "publicar tus repetidas, cartas en venta y buscadas"],
+    [/^your human passed on this trade$/, () => "tu humano ha pasado de este trato"],
+    [/^your human counters at (\d+) P/, (m) => `tu humano contraoferta a ${m[1]} P`],
+    [/^the price on the table is outside your own limits: counter or pass/, () => "el precio sobre la mesa está fuera de tus límites: contraoferta o pasa"],
+    [/^post this addressed offer in the game, on venue (\S+) and nowhere/, (m) => `publicar esta oferta dirigida en el juego, en el venue ${m[1]} y en ningún otro`],
+    [/^your offer (\d+) for this match is on ([^:\s]+):/, (m) => `tu oferta ${m[1]} de este trato está en ${m[2]}: cancélala y publícala en v07`],
+    [/^your offer (\d+) for (\S+) is on ([^:\s]+):/, (m) => `tu oferta ${m[1]} por ${m[2]} está en ${m[3]}: este trato solo se cierra en v07 (sin comisión). Cancélala y publícala en v07.`],
+    [/^tell the other side you take these terms; it then posts the offer/, () => "decir a la otra parte que aceptas estas condiciones; después publica la oferta"],
+    [/^accept offer (\d+) in the game/, (m) => `aceptar la oferta ${m[1]} en el juego`],
+    [/^say on the thread that you accepted$/, () => "decir en el hilo que has aceptado"],
+    [/^connected and proved its code in the game$/, () => "conectado; ha probado su código en el juego"],
+    [/^published (\d+) cards? it has and (\d+) it wants$/, (m) => `ha publicado ${m[1]} cartas que tiene y ${m[2]} que busca`],
+    [/^set private limits on (\d+) cards?$/, (m) => `ha puesto límites privados en ${m[1]} cartas`],
+    [/^matched with (t\d\d): (\S+) at (\d+) P$/, (m) => `emparejado con ${m[1]}: ${m[2]} a ${m[3]} P`],
+    [/^countered at (\d+) P$/, (m) => `ha contraofertado a ${m[1]} P`],
+    [/^posted the addressed offer on v07$/, () => "ha publicado la oferta dirigida en v07"],
+    [/^read its queue: (\d+) actions?$/, (m) => `ha leído su cola: ${m[1]} ${m[1] === "1" ? "acción" : "acciones"}`],
+    [/^(\S+) settled on v07 at (\d+) P with (t\d\d)$/, (m) => `${m[1]} cerrada en v07 a ${m[2]} P con ${m[3]}`],
+    [/^the host answered your suggestion: (\S+)$/, (m) => `el anfitrión ha respondido a tu sugerencia: ${m[1]}`],
+  ];
+  function say(text) {
+    if (typeof text !== "string" || I18N.lang !== "es") return text;
+    for (const [rx, fn] of SAY_ES) { const m = rx.exec(text); if (m) return fn(m); }
+    return text;
+  }
+
   // ---- small pieces
   function pill(text, tone) { return el("span", { class: "pill tone-" + (tone || "mute") }, el("span", { class: "dot" }), text); }
   function chip(text, tone, ic) { return el("span", { class: "chip" + (tone ? " tone-" + tone : "") }, ic ? icon(ic, 11) : null, text); }
@@ -168,7 +207,7 @@
 
   // ---- the status box of the side nav: a name and a bordered label per row (v11)
   const TONES = { connected: "ok", open: "ok", on: "ok", ok: "ok", closed: "bad", offline: "bad", off: "bad", down: "bad",
-                  paused: "pause", waiting: "pause", stale: "warn" };
+                  paused: "pause", waiting: "pause", stale: "warn", unknown: "warn", suspended: "bad" };
   function statusBox(rows) {
     return el("div", { class: "status-box" }, rows.map((r) => el("div", { class: "sb-line" }, el("span", { class: "sb-name" }, r.name),
       pill(t("status." + r.state), TONES[r.state] || "mute"))));
@@ -248,5 +287,5 @@
   }
 
   window.K = { el, add, clear, icon, ICONS, pill, chip, id, label, btn, link, panel, pageHead, kpis, table, endpoint, state, toast, copy, statusBox,
-               card, cash, cardLine, swap, feed, thread, num, price, tick, ago, teamNo, teamName, refParts, RARITY, TONES };
+               card, cash, cardLine, swap, feed, thread, num, price, tick, ago, teamNo, teamName, refParts, say, RARITY, TONES };
 })();

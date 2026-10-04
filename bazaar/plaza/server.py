@@ -39,6 +39,7 @@ VENUE = matcher.VENUE
 REFRESH_S = 15.0
 MAX_BODY = 16 * 1024
 READS_PER_MIN, WRITES_PER_MIN = 300, 40
+SHARED_READS = 8                           # anonymous reads are counted per address, which the venue shares
 STATIC = {"/plaza/static/plaza.css": ("plaza.css", "text/css; charset=utf-8"),
           "/plaza/static/plaza.js": ("plaza.js", "text/javascript; charset=utf-8"),
           "/plaza/static/components.js": ("components.js", "text/javascript; charset=utf-8")}
@@ -84,6 +85,8 @@ class Budget:
 
     def take(self, client: str, kind: str) -> bool:
         limit = WRITES_PER_MIN if kind == "write" else READS_PER_MIN
+        if kind != "write" and not client.startswith(("k:", "s:")):
+            limit *= SHARED_READS                             # no credential: a whole room may sit behind one address
         now = self.clock()
         with self.lock:
             if len(self.hits) > 5000:                         # never grow without bound
