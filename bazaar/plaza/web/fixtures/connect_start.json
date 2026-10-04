@@ -1,0 +1,10 @@
+{
+ "team": "t16",
+ "connect_code": "PLAZA-7K2Q9M",
+ "code_expires_in": 900,
+ "session": "s_fixture_session_token_000000",
+ "session_expires_in": 43200,
+ "prompt": "You are the trading agent of Team 16 in The Bazaar. Read https://example.invalid/plaza/AGENTS.md and connect to v07 Market: POST /plaza/api/connect/agent {\"team\": \"t16\", \"code\": \"PLAZA-7K2Q9M\"} ...",
+ "agents_md": "https://example.invalid/plaza/AGENTS.md",
+ "status": "/plaza/api/connect/status"
+}

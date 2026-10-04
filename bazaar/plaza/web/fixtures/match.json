@@ -1,0 +1,164 @@
+{
+ "kind": "sale",
+ "seller": "t16",
+ "buyer": "t05",
+ "ref": "LAV-09",
+ "name": "Cine Doré",
+ "rarity": "rare",
+ "price": 80,
+ "saves": 5,
+ "last_of_page": true,
+ "priority": 1,
+ "confidence": "probable",
+ "score": 6.5,
+ "why": "t16 can part with LAV-09; t05 looks for it (probably the last card of its page)",
+ "id": "m-ba346d6c75",
+ "alternatives": [
+  {
+   "id": "m-c7b5408144",
+   "kind": "sale",
+   "seller": "t16",
+   "buyer": "t06",
+   "ref": "LAV-09",
+   "price": 80
+  },
+  {
+   "id": "m-4ca425b46a",
+   "kind": "sale",
+   "seller": "t16",
+   "buyer": "t04",
+   "ref": "LAV-09",
+   "price": 80
+  },
+  {
+   "id": "m-df941b0f14",
+   "kind": "sale",
+   "seller": "t16",
+   "buyer": "t09",
+   "ref": "LAV-09",
+   "price": 80
+  },
+  {
+   "id": "m-68fbfa4bde",
+   "kind": "sale",
+   "seller": "t16",
+   "buyer": "t12",
+   "ref": "LAV-09",
+   "price": 80
+  }
+ ],
+ "state": "proposed",
+ "proposed_tick": 1445,
+ "state_tick": 1445,
+ "proposed": 1791067756.5323808,
+ "updated": 1791067756.5323808,
+ "suggested": 80,
+ "agreed": [],
+ "offer": null,
+ "venue": "v07",
+ "recipe": {
+  "buyer": {
+   "method": "POST",
+   "path": "/api/offers",
+   "body": {
+    "venue": "v07",
+    "give": {
+     "cash": 80
+    },
+    "want": {
+     "cards": [
+      "LAV-09"
+     ]
+    },
+    "to": "t16"
+   }
+  },
+  "seller": {
+   "method": "POST",
+   "path": "/api/offers/<id of that offer>/accept",
+   "body": {
+    "assets": [
+     "<your asset id of LAV-09>"
+    ]
+   }
+  },
+  "note": "0 fee on v07; on El Rastro the taker pays 5 P"
+ },
+ "rastro_fee": 5,
+ "messages": 3,
+ "last_message": {
+  "n": 3,
+  "team": "t16",
+  "action": "accept",
+  "price": 80,
+  "text": "deal at 80",
+  "tick": 1445,
+  "ts": 1791068030.0,
+  "verified": true
+ },
+ "teams": [
+  "t16",
+  "t05"
+ ],
+ "thread": [
+  {
+   "n": 1,
+   "team": "t16",
+   "action": "counter",
+   "price": 84,
+   "text": "84 and it is yours this tick",
+   "tick": 1443,
+   "ts": 1791068000.0,
+   "verified": true
+  },
+  {
+   "n": 2,
+   "team": "t05",
+   "action": "counter",
+   "price": 80,
+   "text": "80, it finishes my page and I post the offer now",
+   "tick": 1444,
+   "ts": 1791068015.0,
+   "verified": true
+  },
+  {
+   "n": 3,
+   "team": "t16",
+   "action": "accept",
+   "price": 80,
+   "text": "deal at 80",
+   "tick": 1445,
+   "ts": 1791068030.0,
+   "verified": true
+  }
+ ],
+ "history": [
+  {
+   "state": "proposed",
+   "tick": 1445,
+   "ts": 1791067756.5323808
+  }
+ ],
+ "sides": [
+  {
+   "team": "t16",
+   "gives": [
+    {
+     "ref": "LAV-09",
+     "name": "Cine Doré",
+     "rarity": "rare",
+     "set": "LAV",
+     "color": "#E4572E",
+     "art": "/plaza/art/LAV-09.svg"
+    }
+   ],
+   "receives_cash": 80
+  },
+  {
+   "team": "t05",
+   "gives": [],
+   "pays": 80
+  }
+ ],
+ "tick": 1445
+}

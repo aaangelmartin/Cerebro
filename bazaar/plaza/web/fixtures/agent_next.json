@@ -1,0 +1,44 @@
+{
+ "team": "t16",
+ "tick": 1446,
+ "poll_after_s": 5,
+ "default_mode": "auto",
+ "actions": [
+  {
+   "id": "a-3f2a9c1d77e0",
+   "type": "accept_offer",
+   "match": "m-ba346d6c75",
+   "why": "accept offer 20311 in the game",
+   "offer": 20311,
+   "request": {
+    "target": "game",
+    "auth": "your own game key",
+    "method": "POST",
+    "path": "/api/offers/20311/accept",
+    "body": {}
+   }
+  },
+  {
+   "id": "a-77b1e09a2c41",
+   "type": "confirm",
+   "match": "m-ba346d6c75",
+   "why": "say on the thread that you accepted",
+   "request": {
+    "target": "plaza",
+    "method": "POST",
+    "auth": "X-Plaza-Token",
+    "path": "/plaza/api/match/m-ba346d6c75/message",
+    "body": {
+     "action": "accept"
+    }
+   }
+  }
+ ],
+ "waiting": [
+  {
+   "match": "m-11aa22bb33",
+   "why": "waiting for the other side to post the offer"
+  }
+ ],
+ "failed": []
+}

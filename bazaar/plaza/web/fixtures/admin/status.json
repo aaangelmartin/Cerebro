@@ -1,0 +1,39 @@
+{
+ "tick": 1446,
+ "processes": [
+  {
+   "id": "server",
+   "name": "Server",
+   "state": "on",
+   "detail": "up 3 h 12 min"
+  },
+  {
+   "id": "tunnel",
+   "name": "Tunnel",
+   "state": "on",
+   "detail": "public address answers"
+  },
+  {
+   "id": "matchmaker",
+   "name": "Matchmaker",
+   "state": "on",
+   "detail": "12 live matches"
+  },
+  {
+   "id": "recorder",
+   "name": "Recorder",
+   "state": "on",
+   "detail": "feed at tick 1446"
+  },
+  {
+   "id": "venue",
+   "name": "Venue v07",
+   "state": "open",
+   "detail": "0 % fee"
+  }
+ ],
+ "game": "open",
+ "market": "open",
+ "enabled": true,
+ "paused": false
+}

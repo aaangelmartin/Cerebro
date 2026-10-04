@@ -1,0 +1,40 @@
+{
+ "suggestions": [
+  {
+   "id": "s-0001",
+   "team": "t16",
+   "topic": "feature",
+   "text": "Show the last three deals of each card on the market grid.",
+   "status": "planned",
+   "reply": "On the card page today; the grid next.",
+   "tick": 1406,
+   "ts": 1791067000.0
+  },
+  {
+   "id": "s-0002",
+   "team": "t16",
+   "topic": "price",
+   "text": "Rare cards of Salamanca are suggested too low.",
+   "status": "open",
+   "reply": null,
+   "tick": 1441,
+   "ts": 1791068020.0
+  },
+  {
+   "id": "s-0003",
+   "team": "t04",
+   "topic": "bug",
+   "text": "The queue repeated an action after a 429.",
+   "status": "open",
+   "reply": null,
+   "tick": 1444,
+   "ts": 1791068060.0
+  }
+ ],
+ "counts": {
+  "open": 2,
+  "planned": 1,
+  "done": 0,
+  "dismissed": 0
+ }
+}

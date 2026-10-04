@@ -1,0 +1,258 @@
+{
+ "tick": 1446,
+ "trades": [
+  {
+   "id": "m-ba346d6c75",
+   "kind": "sale",
+   "state": "offer_on_v07",
+   "seller": "t05",
+   "buyer": "t16",
+   "ref": "LAV-09",
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "price": 80,
+   "suggested": 80,
+   "saves": 5,
+   "last_of_page": true,
+   "priority": 1,
+   "why": "t05 can part with LAV-09; t16 looks for it",
+   "proposed_tick": 1440,
+   "state_tick": 1445,
+   "venue": "v07",
+   "offer": 20311,
+   "agreed": [],
+   "teams": [
+    "t05",
+    "t16"
+   ],
+   "messages": 3,
+   "sides": [
+    {
+     "team": "t05",
+     "gives": [
+      {
+       "ref": "LAV-09",
+       "name": "Cine Doré",
+       "rarity": "rare",
+       "set": "LAV",
+       "color": "#E4572E",
+       "art": "/plaza/art/LAV-09.svg"
+      }
+     ],
+     "receives_cash": 80
+    },
+    {
+     "team": "t16",
+     "gives": [],
+     "pays": 80
+    }
+   ],
+   "thread": [
+    {
+     "n": 1,
+     "team": "t16",
+     "action": "counter",
+     "price": 84,
+     "text": "84 and it is yours this tick",
+     "tick": 1443,
+     "ts": 1791068000.0,
+     "verified": true
+    },
+    {
+     "n": 2,
+     "team": "t05",
+     "action": "counter",
+     "price": 80,
+     "text": "80, it finishes my page and I post the offer now",
+     "tick": 1444,
+     "ts": 1791068015.0,
+     "verified": true
+    },
+    {
+     "n": 3,
+     "team": "t16",
+     "action": "accept",
+     "price": 80,
+     "text": "deal at 80",
+     "tick": 1445,
+     "ts": 1791068030.0,
+     "verified": true
+    }
+   ],
+   "overlap": true,
+   "stalled": false
+  },
+  {
+   "id": "m-11aa22bb33",
+   "kind": "sale",
+   "state": "proposed",
+   "seller": "t16",
+   "buyer": "t04",
+   "ref": "RET-03",
+   "name": "El Titiritero",
+   "rarity": "common",
+   "price": 12,
+   "suggested": 12,
+   "saves": 2,
+   "last_of_page": false,
+   "priority": 4,
+   "why": "t16 can part with RET-03; t04 looks for it",
+   "proposed_tick": 1440,
+   "state_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "agreed": [],
+   "teams": [
+    "t16",
+    "t04"
+   ],
+   "messages": 3,
+   "sides": [
+    {
+     "team": "t16",
+     "gives": [
+      {
+       "ref": "RET-03",
+       "name": "El Titiritero",
+       "rarity": "common",
+       "set": "RET",
+       "color": "#3BB273",
+       "art": "/plaza/art/RET-03.svg"
+      }
+     ],
+     "receives_cash": 12
+    },
+    {
+     "team": "t04",
+     "gives": [],
+     "pays": 12
+    }
+   ],
+   "thread": [
+    {
+     "n": 1,
+     "team": "t16",
+     "action": "counter",
+     "price": 84,
+     "text": "84 and it is yours this tick",
+     "tick": 1443,
+     "ts": 1791068000.0,
+     "verified": true
+    },
+    {
+     "n": 2,
+     "team": "t05",
+     "action": "counter",
+     "price": 80,
+     "text": "80, it finishes my page and I post the offer now",
+     "tick": 1444,
+     "ts": 1791068015.0,
+     "verified": true
+    },
+    {
+     "n": 3,
+     "team": "t16",
+     "action": "accept",
+     "price": 80,
+     "text": "deal at 80",
+     "tick": 1445,
+     "ts": 1791068030.0,
+     "verified": true
+    }
+   ],
+   "overlap": null,
+   "stalled": true
+  },
+  {
+   "id": "m-44cc55dd66",
+   "kind": "sale",
+   "state": "settled",
+   "seller": "t16",
+   "buyer": "t09",
+   "ref": "MAL-01",
+   "name": "Vinilo de la Movida",
+   "rarity": "common",
+   "price": 9,
+   "suggested": 9,
+   "saves": 1,
+   "last_of_page": false,
+   "priority": 4,
+   "why": "t16 can part with MAL-01; t09 looks for it",
+   "proposed_tick": 1440,
+   "state_tick": 1445,
+   "venue": "v07",
+   "offer": 20311,
+   "agreed": [],
+   "teams": [
+    "t16",
+    "t09"
+   ],
+   "messages": 3,
+   "sides": [
+    {
+     "team": "t16",
+     "gives": [
+      {
+       "ref": "MAL-01",
+       "name": "Vinilo de la Movida",
+       "rarity": "common",
+       "set": "MAL",
+       "color": "#7B2CBF",
+       "art": "/plaza/art/MAL-01.svg"
+      }
+     ],
+     "receives_cash": 9
+    },
+    {
+     "team": "t09",
+     "gives": [],
+     "pays": 9
+    }
+   ],
+   "thread": [
+    {
+     "n": 1,
+     "team": "t16",
+     "action": "counter",
+     "price": 84,
+     "text": "84 and it is yours this tick",
+     "tick": 1443,
+     "ts": 1791068000.0,
+     "verified": true
+    },
+    {
+     "n": 2,
+     "team": "t05",
+     "action": "counter",
+     "price": 80,
+     "text": "80, it finishes my page and I post the offer now",
+     "tick": 1444,
+     "ts": 1791068015.0,
+     "verified": true
+    },
+    {
+     "n": 3,
+     "team": "t16",
+     "action": "accept",
+     "price": 80,
+     "text": "deal at 80",
+     "tick": 1445,
+     "ts": 1791068030.0,
+     "verified": true
+    }
+   ],
+   "settled_tick": 1442,
+   "overlap": null,
+   "stalled": false
+  }
+ ],
+ "counts": {
+  "proposed": 1,
+  "offer_on_v07": 1,
+  "accepted": 0,
+  "settled": 1,
+  "passed": 0,
+  "expired": 0
+ },
+ "total": 3
+}
