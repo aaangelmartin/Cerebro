@@ -165,5 +165,35 @@ class TheEvaluationTool(unittest.TestCase):
         self.assertEqual(res["mirror"]["illegal"], 0)
 
 
+class ReplayOfRecordedRivals(unittest.TestCase):
+    def record(self) -> tuple[Path, Path]:
+        import json
+        d = Path(tempfile.mkdtemp())
+        head = {"duel": 9, "session": 3, "status": "deal", "role": "seller", "your_limit": 80, "your_days_weight": 2.0,
+                "deadline_tick": 1016, "price": 100, "days": 0, "result": 20.0, "rounds": 1}
+        (d / "9.json").write_text(json.dumps(head))
+        (d / "2026-10-03.jsonl").write_text(json.dumps({"duel": 9, "messages_new": [
+            {"tick": 1000, "from": "you", "price": 120, "days": 10}, {"tick": 1002, "from": "Rival Sol", "price": 90, "days": 0},
+            {"tick": 1005, "from": "Rival Sol", "price": 100, "days": 0}]}) + "\n")
+        mem_file = d / "mem.json"
+        mem_file.write_text(json.dumps({"duels": {"9": {"first_seen": 1000, "deadline": 1016, "accepted_by": "us"}}}))
+        return d, mem_file
+
+    def test_the_trace_is_read_with_tick_offsets(self):
+        d, m = self.record()
+        row = se.load_traces(d, 3, m)[0]
+        self.assertEqual((row["role"], row["limit"], row["length"]), ("seller", 80, 16))
+        self.assertEqual(row["rival"], [(2, 90, 0), (5, 100, 0)])
+        self.assertEqual(row["ours"], [(0, 120, 10)])
+
+    def test_the_rival_plays_back_on_a_shorter_clock_and_we_never_cross_the_limit(self):
+        d, m = self.record()
+        rows = se.load_traces(d, 3, m)
+        for ticks, decay in ((16, 0.08), (12, 0.10)):
+            r = se.replay(rows, ticks, decay)
+            self.assertEqual((r["n"], r["illegal"]), (1, 0))
+            self.assertGreater(r["points"], 0)                 # the rival's 90 and 100 are above our cost of 80
+
+
 if __name__ == "__main__":
     unittest.main()

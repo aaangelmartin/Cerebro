@@ -301,7 +301,10 @@ def main(argv=None):
     ap.add_argument("--decay", type=float, default=0.10)
     ap.add_argument("--kinds", default=",".join(RIVALS))
     ap.add_argument("--variants", action="store_true", help="one line per parameter variant (mixed rivals)")
+    ap.add_argument("--replay", action="store_true", help="play back the recorded rivals of Duels II instead")
     a = ap.parse_args(argv)
+    if a.replay:
+        return replay_main(a.ticks, a.decay)
     kinds = a.kinds.split(",")
     base = play(a.n, a.seed, a.ticks, a.decay, kinds)
     table(f"CODE POLICY, {a.ticks} ticks, decay {a.decay}, price + days, {a.n} duels per rival", base)
@@ -313,6 +316,129 @@ def main(argv=None):
             worst = min(((res[k]["points"] - base[k]["points"], k) for k in MIX if k in res), default=(0, ""))
             print(f"  {name:18} {mixed(res):8.2f} {100 * mixed(res, 'deal_rate'):6.0f} {mixed(res, 'rounds'):6.1f} "
                   f"{mixed(res) - b:+7.2f}   {worst[1]} {worst[0]:+.2f}")
+
+
+
+# --- replay of the real rivals of Duels II ------------------------------------------------------------------
+def load_traces(record_dir: Path | str | None = None, session: int = 3, memory: Path | str | None = None) -> list[dict]:
+    """One row per recorded duel of a session: our role, limit and day weight, the rival's priced offers by
+    tick offset, and how it ended. Read from the recorder's files (data/record/duels) and our duel memory."""
+    import json
+    from .. import config
+    d = Path(record_dir or config.DATA / "record" / "duels")
+    try:
+        mem = json.loads(Path(memory or config.LIVE / "duel_memory.json").read_text()).get("duels", {})
+    except (OSError, ValueError):
+        mem = {}
+    final, msgs = {}, defaultdict(list)
+    for f in d.glob("*.json"):
+        try:
+            x = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(x, dict) and x.get("session") == session:
+            final[x["duel"]] = x
+    for f in sorted(d.glob("*.jsonl")):
+        for line in f.read_text().splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("duel") in final:
+                msgs[e["duel"]] += e.get("messages_new") or []
+    rows = []
+    for i, x in sorted(final.items()):
+        length = int((mem.get(str(i)) or {}).get("deadline", x["deadline_tick"]) - (mem.get(str(i)) or {}).get(
+            "first_seen", x["deadline_tick"] - 16)) or 16
+        start = x["deadline_tick"] - length
+        seen = sorted({(m["tick"], m["from"], m.get("price"), m.get("days")) for m in msgs[i] if m.get("price") is not None})
+        rows.append({
+            "duel": i, "role": x["role"], "limit": x["your_limit"], "w": float(x.get("your_days_weight") or 0.0),
+            "length": length, "status": x["status"], "price": x.get("price"), "days": x.get("days"),
+            "accepted_by": (mem.get(str(i)) or {}).get("accepted_by"), "result": float(x.get("result") or 0.0),
+            "rounds": x.get("rounds"),
+            "rival": [(t - start, p, dd or 0) for t, who, p, dd in seen if str(who).lower() not in ("you", "us", "me")],
+            "ours": [(t - start, p, dd or 0) for t, who, p, dd in seen if str(who).lower() in ("you", "us", "me")],
+        })
+    return rows
+
+
+class Replay(Rival):
+    """A rival that plays back what a real team did in Duels II, on the new clock: its own offers at the same
+    point of the duel, and it accepts terms at least as good for it, on price and on days, as terms it is
+    known to take (its own offers so far, and our offer if it accepted one). Not reactive: a lower bound."""
+    kind = "replay"
+
+    def __init__(self, sc, rng, row: dict, ticks: int):
+        super().__init__(sc, rng)
+        scale = (ticks - 1) / max(1, row["length"] - 1)
+        self.plan = sorted({(int(round(t * scale)), p, d) for t, p, d in row["rival"]})
+        self.takes: list[tuple] = []                       # (from tick, price, days) it accepts
+        if row["status"] == "deal" and row["accepted_by"] == "rival" and row["ours"]:
+            t = max(0, int(round(row["ours"][-1][0] * scale)))
+            self.takes.append((t, row["price"], row["days"] or 0))
+        self.sent = 0
+
+    def better(self, price, days, ref_price, ref_days) -> bool:
+        if self.role == "seller":
+            return price >= ref_price and (days or 0) >= ref_days
+        return price <= ref_price and (days or 0) <= ref_days
+
+    def act(self, k, ours, theirs):
+        if ours:
+            p, d = ours[-1][0], ours[-1][1]
+            refs = [(rp, rd) for t, rp, rd in self.takes if t <= k] + [(rp, rd) for rp, rd, _ in theirs]
+            if any(self.better(p, d, rp, rd) for rp, rd in refs):
+                return ("accept",)
+        due = [x for x in self.plan if x[0] <= k]
+        if len(due) > self.sent:
+            t, p, d = due[self.sent]
+            self.sent += 1
+            if not theirs or (p, d) != (theirs[-1][0], theirs[-1][1]):
+                return ("offer", p, d, self.text(p))
+        return None
+
+
+def replay(rows: list[dict], ticks: int, decay: float) -> dict:
+    """Our code policy against every recorded rival, on the given clock. Points as the server scores them."""
+    tmp = Path(tempfile.mkdtemp(prefix="replay")) / "duel_memory.json"
+    dom = DuelsDomain(memory=OpponentMemory(tmp, autosave=False), use_llm=False)
+    pts, deals, rounds, illegal, by_role = 0.0, 0, 0, 0, defaultdict(float)
+    for n, row in enumerate(rows):
+        role, w = row["role"], abs(row["w"])
+        # only our side is known: the rival's limit and weight are never read by Replay
+        sc = Scenario(value=row["limit"], cost=row["limit"], our_role=role, w_us=w if role == "seller" else -w,
+                      w_rival=0.0, uses_days=True, decay=decay, item=f"Replay {row['duel']}")
+        r = run_duel(dom, sc, Replay(sc, random.Random(n), row, ticks), n + 1, f"Rival {row['duel']}", ticks,
+                     5000 + 20 * n)
+        dom.memory.record_result(n + 1, "deal" if r.deal else "no_deal", price=r.price, rounds=r.rounds, days=r.days,
+                                 accepted_by=r.accepted_by or None)
+        pts += r.points
+        deals += r.deal
+        rounds += r.rounds if r.deal else 0
+        illegal += r.illegal
+        by_role[role] += r.points
+    n = max(1, len(rows))
+    return {"n": len(rows), "points": pts, "avg": pts / n, "deal_rate": deals / n, "rounds": rounds / max(1, deals),
+            "illegal": illegal, "seller": by_role["seller"], "buyer": by_role["buyer"]}
+
+
+def replay_main(ticks: int, decay: float) -> None:
+    rows = load_traces()
+    if not rows:
+        print("no recorded duels found")
+        return
+    real = sum(r["result"] for r in rows)
+    print(f"\nREPLAY of {len(rows)} recorded Duels II rivals (real result that day: {real:.0f} points, "
+          f"{sum(1 for r in rows if r['status'] == 'deal')} deals, with Claude deciding)")
+    print(f"  {'clock':22} {'variant':18} {'points':>7} {'deal%':>6} {'rounds':>6} {'seller':>7} {'buyer':>6} {'illegal':>7}")
+    for label, t, dec in (("16 ticks, decay 0.08", 16, 0.08), (f"{ticks} ticks, decay {decay}", ticks, decay)):
+        base = None
+        for name, over in VARIANTS.items():
+            r = with_params(over, lambda: replay(rows, t, dec))
+            base = base if base is not None else r["points"]
+            print(f"  {label:22} {name:18} {r['points']:7.0f} {100 * r['deal_rate']:6.0f} {r['rounds']:6.1f} "
+                  f"{r['seller']:7.0f} {r['buyer']:6.0f} {r['illegal']:7d}   {r['points'] - base:+.0f}")
 
 
 if __name__ == "__main__":
