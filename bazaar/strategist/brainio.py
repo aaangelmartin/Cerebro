@@ -135,7 +135,8 @@ def apply_policies(live: Path, updates: list[dict], by: str = "brain", now: floa
     active = sorted((p for p in pols if p.get("status") == "active"), key=age)
     retired = sorted((p for p in pols if p.get("status") != "active"), key=age)
     kept = active[-MAX_POLICIES:]
-    kept += retired[len(retired) - (MAX_POLICIES - len(kept)):] if len(kept) < MAX_POLICIES and retired else []
+    room = MAX_POLICIES - len(kept)                 # the newest retired ones fill what is left (never a negative index:
+    kept += retired[-room:] if room > 0 else []     # that dropped the oldest retired rules while there was room)
     mem["policies"] = kept
     mem["updated"] = now
     path = Path(live) / "brain_memory.json"

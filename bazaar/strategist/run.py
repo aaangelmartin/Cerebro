@@ -45,7 +45,9 @@ REVIEW_EVERY_S = 3600.0         # predicted vs realised score, once a game hour:
 MAX_TOKENS = 24000              # medium effort thinks before the tool call: 3000, then 12000, cut the plan
 COMPACT_RULE = ("\n\nKEEP THE PLAN COMPACT so it is never cut: urgent actions first (accept_offers, cancel_offers, "
                 "post_offers, dealer_orders, goal_buys, cash_policy, chat_reply), at most 6 priorities, 4 findings, 1 promo_draft, "
-                "2 code_requests and 2 human_tasks, each string under 300 characters.")
+                "2 code_requests and 2 human_tasks, each string under 300 characters. `policies` is never cut: every rule "
+                "you say you retire or rewrite in chat_reply must be an entry there (id, status, reason; text only "
+                "when it changes), or it stays in force as it was.")
 CUT_RETRY = ("\n\nYOUR PREVIOUS ANSWER WAS CUT at the token limit and nothing was published. Answer again with the "
              "COMPACT plan only: priorities (at most 4, short), accept_offers, cancel_offers, post_offers, dealer_orders, goal_buys, "
              "cash_policy, points_plan (one action per component) and chat_reply. Leave every other field out.")
