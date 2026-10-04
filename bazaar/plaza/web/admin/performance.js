@@ -13,10 +13,23 @@
                no_agents: ["/plaza/admin/teams", "teams"], flat: ["/plaza/admin/venue", "venue"] };
   const BAD = { count: 1, value_drop: 1, lost: 1, broker: 1, no_agents: 1 };
 
+  // The server writes its alerts in English; the known ones are said in Spanish when the page is.
+  const ALERT_ES = {
+    count: [/^the game counts (\S+) trades on (\S+); our feed saw (\S+)\./, (m) => `el juego cuenta ${m[1]} tratos en ${m[2]}; nuestro feed ha visto ${m[3]}. Revisa huecos en el grabador antes de fiarte de las cifras de abajo.`],
+    value_drop: [/^a trade at tick (\S+) lowered the value created from (\S+) to (\S+):/, (m) => `un trato en el tick ${m[1]} bajó el valor creado de ${m[2]} a ${m[3]}: búscalo y aprieta el filtro.`],
+    lost: [/^(\d+) matched trade\(s\) closed off (\S+) \(last: (.+)\):/, (m) => `${m[1]} trato(s) emparejado(s) se cerraron fuera de ${m[2]} (último: ${m[3]}): di a esos agentes que cierren en ${m[2]}.`],
+    broker: [/^the broker is (\S+):/, (m) => `el broker está ${m[1]}: las ofertas públicas que se cruzan en v07 no se están emparejando. Reinícialo con el supervisor.`],
+    no_agents: [/^no team has connected an agent/, () => "ningún equipo ha conectado un agente: no se puede emparejar nada. Pídeselo a los equipos en persona."],
+    flat: [/^no value created for (\d+) ticks while teams closed (\d+) trade\(s\) on other venues/, (m) => `sin valor creado en ${m[1]} ticks mientras los equipos cerraban ${m[2]} trato(s) en otros venues: anuncia y habla con los equipos.`],
+  };
+  function alertText(a) {
+    const rule = I18N.lang === "es" ? ALERT_ES[a.kind] : null, m = rule ? rule[0].exec(a.text || "") : null;
+    return m ? rule[1](m) : a.text || "";
+  }
   /** The server's alerts as they come; without them, the signals of SCORING.md read from the numbers here. */
   function signals(d, ov) {
     if (Array.isArray(d.alerts)) return d.alerts.map((a) => { const [to, scr] = GO[a.kind] || GO.count;
-      return { tone: BAD[a.kind] ? "bad" : "warn", title: t("admin.sig.kind." + (GO[a.kind] ? a.kind : "other")), text: a.text || "", to, cta: t("nav.admin." + scr) }; });
+      return { tone: BAD[a.kind] ? "bad" : "warn", title: t("admin.sig.kind." + (GO[a.kind] ? a.kind : "other")), text: alertText(a), to, cta: t("nav.admin." + scr) }; });
     const out = [], f = d.funnel || {}, venues = d.venues || [];
     if (d.alert) out.push({ tone: "bad", title: t("admin.sig.kind.other"), text: String(d.alert), to: "/plaza/admin/trades?state=settled", cta: t("nav.admin.trades") });
     if (f.settled_elsewhere) out.push({ tone: "bad", title: t("admin.sig.elsewhere", { n: K.num(f.settled_elsewhere) }), text: t("admin.sig.elsewhereText"), to: "/plaza/admin/trades?state=settled_elsewhere", cta: t("nav.admin.trades") });

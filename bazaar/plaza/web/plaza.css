@@ -221,3 +221,9 @@ a.card:hover, button.card:hover { border-color: var(--ink-3); }
   .thread { height: 260px; }
   .swap { gap: 10px; }
 }
+.nav-note { margin: auto 0 8px; padding: 0 2px; font-family: var(--font-num); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.nav-note + .status-box { margin-top: 0; }
+@media (max-width: 760px) {
+  body[data-app="admin"] .panel { overflow-x: auto; }
+  body[data-app="admin"] .page > * { min-width: 0; max-width: 100%; }
+}

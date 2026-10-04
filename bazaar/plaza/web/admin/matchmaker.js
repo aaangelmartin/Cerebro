@@ -31,7 +31,7 @@
             { label: t("admin.col.match"), render: (m) => K.id(m.id) },
             { label: t("admin.col.pair"), render: (m) => A.pair(m.seller, m.buyer, m.kind !== "sale") },
             { label: t("admin.col.suggested"), num: true, render: (m) => (m.kind === "sale" ? K.price(m.price) : t("admin.kind." + m.kind)) },
-            { label: t("admin.col.state"), render: (m) => [A.stateChip(m.state), m.forced ? K.chip(t("admin.mm.forced"), "warn") : null] },
+            { label: t("admin.col.state"), render: (m) => [A.stateChip(m.state), m.forced ? K.chip(t("admin.mm.forced"), "signal") : null] },
             { label: t("admin.col.limits"), render: (m) => A.limits(m.overlap) },
             { label: t("admin.col.why"), render: (m) => el("span", { class: "adm-why" }, m.why || "") },
             { label: t("admin.col.age"), num: true, render: (m) => el("span", { class: m.stalled ? "tone-warn" : null }, t(m.age_ticks === 1 ? "common.tick1" : "common.ticks", { n: K.num(m.age_ticks || 0) })) },

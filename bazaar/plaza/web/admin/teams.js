@@ -67,7 +67,7 @@
         if (!sorted.find((x) => x.team === picked)) picked = sorted[0].team;
         const table = K.table([
           { label: t("admin.col.team"), render: (x) => A.team(x.team) },
-          { label: t("admin.col.state"), render: (x) => [K.chip(t("admin.team." + stateOf(x)), { verified: "ok", blocked: "bad", pending: "warn" }[stateOf(x)] || ""), x.paused ? K.chip(t("status.paused"), "pause") : null] },
+          { label: t("admin.col.state"), render: (x) => [K.chip(t("admin.team." + stateOf(x)), { verified: "ok", blocked: "bad", pending: "signal" }[stateOf(x)] || ""), x.paused ? K.chip(t("status.paused"), "pause") : null] },
           { label: t("admin.col.agent"), render: (x) => (x.agent ? K.pill(t("status." + (x.online ? "connected" : "offline")), x.online ? "ok" : "bad") : "–") },
           { label: t("admin.col.lastSync"), render: (x) => A.ticksAgo(x.last_sync) },
           { label: t("admin.teams.available"), num: true, render: (x) => K.num(x.available || 0) },

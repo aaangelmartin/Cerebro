@@ -45,6 +45,7 @@
     const name = fixture(path);
     if (!name) return method === "GET" ? Promise.reject({ status: 404, error: "not_found", message: "no fixture for " + path }) : Promise.resolve({ ok: true, mock: true, sent: body });
     return fetch(BASE + "/static/fixtures/" + name + ".json").then((r) => {
+      if (!r.ok && method !== "GET") return { ok: true, mock: true, sent: body };          // a write with no fixture: taken, nothing sent
       if (!r.ok) throw { status: 404, error: "not_found", message: "no fixture " + name };
       return r.json();
     }).then((data) => (mock === "empty" && path !== "/api/status" && path !== "/api/me" ? emptied(data) : data));

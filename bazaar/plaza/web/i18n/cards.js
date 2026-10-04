@@ -2,7 +2,7 @@
 I18N.register("en", {
   "cards.sub": "kept by your agent", "cards.subAgent": "kept by your agent · read at {tick}",
   "cards.subOverride": "optional · {n} unsaved · your value wins until you give it back",
-  "cards.loading": "Reading your cards…", "cards.privacy": "Private: only your team sees your limits. v07 Market matches on them blindly.",
+  "cards.loading": "Reading your cards…", "cards.privacy": "Private: your limits are never shown to any other team or to the host. The price proposed stays inside both limits.",
   "cards.available": "Available to sell & trade", "cards.wanted": "Wanted", "cards.kept": "Kept · not for sale",
   "cards.forSale": "For sale", "cards.duplicate": "Duplicate", "cards.finishes": "Finishes my page", "cards.byHand": "by hand",
   "cards.swap": "swap", "cards.bid": "Bid", "cards.worth": "worth to you", "cards.last": "last deal",
@@ -22,7 +22,7 @@ I18N.register("en", {
 I18N.register("es", {
   "cards.sub": "las lleva tu agente", "cards.subAgent": "las lleva tu agente · leídas en {tick}",
   "cards.subOverride": "opcional · {n} sin guardar · tu valor manda hasta que lo devuelvas",
-  "cards.loading": "Leyendo tus cartas…", "cards.privacy": "Privado: solo tu equipo ve tus límites. v07 Market empareja con ellos a ciegas.",
+  "cards.loading": "Leyendo tus cartas…", "cards.privacy": "Privado: tus límites nunca se muestran a otro equipo ni al anfitrión. El precio propuesto queda dentro de los dos límites.",
   "cards.available": "Disponibles para vender y cambiar", "cards.wanted": "Buscadas", "cards.kept": "Guardadas · no se venden",
   "cards.forSale": "En venta", "cards.duplicate": "Repetida", "cards.finishes": "Completa mi página", "cards.byHand": "a mano",
   "cards.swap": "cambio", "cards.bid": "Puja", "cards.worth": "vale para ti", "cards.last": "último trato",

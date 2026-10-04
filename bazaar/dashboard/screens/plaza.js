@@ -22,6 +22,24 @@
   const GO = { count: "trades", value_drop: "trades", lost: "trades", broker: "venue", no_agents: "teams", flat: "venue" };
   const BAD = { count: 1, value_drop: 1, lost: 1, broker: 1, no_agents: 1 };
 
+  // The market writes its alerts in English; the known ones are said in Spanish when the dashboard is.
+  const ALERT_ES = {
+    count: [/^the game counts (\S+) trades on (\S+); our feed saw (\S+)\./, (m) => `el juego cuenta ${m[1]} tratos en ${m[2]}; nuestro feed ha visto ${m[3]}. Revisa huecos en el grabador antes de fiarte de estas cifras.`],
+    value_drop: [/^a trade at tick (\S+) lowered the value created from (\S+) to (\S+):/, (m) => `un trato en el tick ${m[1]} bajó el valor creado de ${m[2]} a ${m[3]}: búscalo y aprieta el filtro.`],
+    lost: [/^(\d+) matched trade\(s\) closed off (\S+) \(last: (.+)\):/, (m) => `${m[1]} trato(s) emparejado(s) se cerraron fuera de ${m[2]} (último: ${m[3]}): di a esos agentes que cierren en ${m[2]}.`],
+    broker: [/^the broker is (\S+):/, (m) => `el broker está ${m[1]}: las ofertas públicas que se cruzan en v07 no se están emparejando. Reinícialo con el supervisor.`],
+    no_agents: [/^no team has connected an agent/, () => "ningún equipo ha conectado un agente: no se puede emparejar nada. Pídeselo a los equipos en persona."],
+    flat: [/^no value created for (\d+) ticks while teams closed (\d+) trade\(s\) on other venues/, (m) => `sin valor creado en ${m[1]} ticks mientras los equipos cerraban ${m[2]} trato(s) en otros venues: anuncia y habla con los equipos.`],
+  };
+  function say(a) {
+    const rule = window.I18N.lang === "es" ? ALERT_ES[a.kind] : null, m = rule ? rule[0].exec(a.text || "") : null;
+    return m ? rule[1](m) : a.text || "";
+  }
+  function beat(text) {
+    const m = window.I18N.lang === "es" ? /^last beat (\d+) s ago$/.exec(String(text)) : null;
+    return m ? `último latido hace ${m[1]} s` : text;
+  }
+
   async function pull(force) {
     if (S.busy || (!force && Date.now() - S.at < 4000)) return;
     S.busy = true;
@@ -71,7 +89,7 @@
     const alerts = Array.isArray(d.alerts) ? d.alerts : d.alert ? [{ kind: "other", text: String(d.alert) }] : [];
     const al = U().panel(tr("plaza.alerts.title"), { sub: tr("plaza.alerts.sub") });
     al.body.appendChild(alerts.length ? el("div", { class: "pz-alerts" }, alerts.map((a) => el("div", { class: ["pz-alert", BAD[a.kind] ? "tone-bad" : "tone-warn"] },
-      el("span", { class: "pz-dot" }), el("span", { class: "pz-alert-text" }, a.text || ""),
+      el("span", { class: "pz-dot" }), el("span", { class: "pz-alert-text" }, say(a)),
       el("a", { class: "btn", href: ADMIN + (GO[a.kind] || "performance") }, tr("plaza.go." + (GO[a.kind] || "performance"))))))
       : U().empty(tr("plaza.alerts.none")));
 
@@ -83,7 +101,7 @@
       [tr("plaza.funnel.proposed"), num(f.proposed)], [tr("plaza.funnel.offer"), num(f.offer_on_v07)], [tr("plaza.funnel.accepted"), num(f.accepted)],
       [tr("plaza.funnel.settled"), num(f.settled), f.settled ? "ok" : ""], [tr("plaza.funnel.elsewhere"), num(f.settled_elsewhere), f.settled_elsewhere ? "bad" : ""],
       [tr("plaza.funnel.expired"), num(f.expired)],
-      d.broker ? [tr("plaza.broker"), (d.broker.state === "on" ? tr("plaza.up") : tr("plaza.down")) + (d.broker.detail ? " · " + d.broker.detail : ""), d.broker.state === "on" ? "ok" : "bad"] : null,
+      d.broker ? [tr("plaza.broker"), (d.broker.state === "on" ? tr("plaza.up") : tr("plaza.down")) + (d.broker.detail ? " · " + beat(d.broker.detail) : ""), d.broker.state === "on" ? "ok" : "bad"] : null,
       [tr("plaza.test"), typeof s.bench_efficiency === "number" ? s.bench_efficiency.toFixed(3) : "—"]]));
     const venues = (d.venues || []).slice(0, 8);
     const vn = U().panel(tr("plaza.venues.title"), { sub: tr("plaza.venues.sub") });

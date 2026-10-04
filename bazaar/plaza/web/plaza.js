@@ -91,7 +91,7 @@
     const lang = K.el("div", { class: "lang-switch", role: "group", "aria-label": t("shell.language") }, I18N.LANGS.map((l) =>
       K.el("button", { type: "button", class: l === I18N.lang ? "active" : null, "aria-pressed": String(l === I18N.lang), onclick: () => I18N.setLang(l) }, l.toUpperCase())));
     K.clear(dom.nav);
-    K.add(dom.nav, [K.el("div", { class: "nav-list" }, items), K.statusBox(rows),
+    K.add(dom.nav, [K.el("div", { class: "nav-list" }, items), ADMIN ? K.el("div", { class: "nav-note" }, t("shell.adminOnly")) : null, K.statusBox(rows),
       K.el("div", { class: "nav-foot" }, lang,
         ADMIN ? K.btn(t("shell.publicPage"), { href: "/plaza/", small: true }) : [
           K.link("/plaza/suggest", { class: "btn sm" }, K.icon("suggest", 13), t("nav.suggest")),

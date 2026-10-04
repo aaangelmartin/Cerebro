@@ -61,7 +61,7 @@
             { label: t("admin.docs.screen"), render: (r) => t("nav.admin." + r.screen) },
             { label: t("admin.docs.action"), render: (r) => t("admin.docs.do." + r.what) },
             { label: t("admin.docs.call"), render: (r) => el("span", { class: "adm-call" }, r.isPost ? [el("b", null, "POST"), " /plaza/admin/api/action ", JSON.stringify(r.call)] : [el("b", null, r.call.split(" ")[0]), " ", r.call.split(" ").slice(1).join(" ")]) },
-            { label: t("admin.docs.who"), render: (r) => (r.there ? K.chip(t("admin.docs.hostAgent"), "ok") : K.chip(t("admin.docs.notYet"), "warn")) },
+            { label: t("admin.docs.who"), render: (r) => (r.there ? K.chip(t("admin.docs.hostAgent"), "ok") : K.chip(t("admin.docs.notYet"))) },
           ], rows),
           missing ? null : el("div", { class: "adm-quiet" }, K.icon("hand", 14), t("admin.docs.byHand"))));
         body.appendChild(K.panel({ title: t("admin.docs.public"), note: t("admin.docs.publicNote", { n: pub.length }), icon: "doc", flush: true },

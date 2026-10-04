@@ -4,7 +4,7 @@
   const { el } = K;
   const A = window.ADM;
   const KINDS = ["", "agent", "offer", "deal", "announce", "connect", "match"];
-  const TONE = { deal: "ok", settle: "ok", announce: "signal", accept: "ok", connect: "warn", note: "", want: "", offer: "" };
+  const TONE = { deal: "ok", settle: "ok", announce: "signal", accept: "ok", connect: "", note: "", want: "", offer: "" };
 
   /** One floor item as a sentence. Everything in it is already public on the floor or on the game's feed. */
   A.item = function (i) {

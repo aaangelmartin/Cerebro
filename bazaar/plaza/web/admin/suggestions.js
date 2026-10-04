@@ -4,8 +4,8 @@
   const { el } = K;
   const A = window.ADM;
   const STATUS = ["open", "planned", "done", "dismissed"];
-  const TONE = { open: "signal", planned: "warn", done: "ok", dismissed: "" };
-  const TOPIC_TONE = { bug: "bad", price: "warn", feature: "", other: "" };
+  const TONE = { open: "signal", planned: "", done: "ok", dismissed: "" };
+  const TOPIC_TONE = { bug: "bad", price: "", feature: "", other: "" };
 
   Plaza.adminScreen("suggestions", {
     title: "nav.admin.suggestions",
