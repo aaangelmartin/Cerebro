@@ -244,6 +244,13 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/plaza/api/card/LAT-13")[0], 404)                         # hidden cards stay hidden
         self.assertEqual(self.call("GET", "/plaza/api/card/XXX-01")[0], 404)
 
+    def test_an_addressed_offer_is_not_on_the_public_board_or_card(self):
+        self.offer(101, "t03", {"cash": 0, "assets": [{"ref": "LAT-06"}]}, {"cash": 20})
+        self.offer(102, "t05", {"cash": 0, "assets": [{"ref": "LAT-06"}]}, {"cash": 25}, to="t09")
+        self.board.tick_feed()
+        self.assertEqual([o["id"] for o in self.call("GET", "/plaza/api/offers")[1]["offers"]], [101])
+        self.assertEqual([o["id"] for o in self.call("GET", "/plaza/api/card/LAT-06")[1]["offers"]], [101])
+
     def test_floor_post_poll_filters_and_moderation(self):
         pin = self.pin("t07")
         self.assertEqual(self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "want", "ref": "LAT-06"})[0], 403)

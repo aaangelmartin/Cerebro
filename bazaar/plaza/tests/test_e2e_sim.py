@@ -956,6 +956,8 @@ class Rubbish(E2E):
                 text = json.dumps(out) if not isinstance(out, str) else out
                 if s >= 500 and s != 503 or SECRET_RX.search(text):
                     bad.append((r.method, r.path, body[:40], s, text[:120]))
+                elif s < 400 and body == b"" and r.body == {}:
+                    pass                                      # a route that takes no field may come without a body
                 elif s < 400 and body in (b"", b"{", b"[]", b"null", b'"text"', b"12", b"\xff\xfe\x00bad utf8"):
                     self.finding(False, r.owner, f"{r.method} {r.path} answers {s} to the body {body[:20]!r}, "
                                                  f"which is not a JSON object (6.2 Input)")

@@ -607,6 +607,8 @@ class Board:
         """The market board: every open offer on every venue, filtered."""
         rows = []
         for o in snap["offers"]:
+            if o.get("to") and viewer not in (o["maker"], o["to"]):     # an addressed offer is its two parties' business
+                continue
             v = self.offer_view(o, snap)
             if q.get("set") and v["ref"][:3] != q["set"]:
                 continue
@@ -639,7 +641,8 @@ class Board:
                     seekers.append({"team": team, "source": e.get("source"),
                                     **({"bid": e["bid"]} if e.get("bid") else {}),
                                     **({"finishes_page": matcher.last_of_page(s, ref)} if team == viewer else {})})
-        offers = [self.offer_view(o, snap) for o in snap["offers"] if ref in (o["ref"], o.get("ref_back"))]
+        offers = [self.offer_view(o, snap) for o in snap["offers"] if ref in (o["ref"], o.get("ref_back"))
+                  and (not o.get("to") or viewer in (o["maker"], o["to"]))]
         sales = self.feed.sales_of(ref)
         prices = [x["price"] for x in sales if x.get("price")]
         return {**self.card(ref, snap), "book": (snap["cat"].get(ref) or {}).get("book"), "tick": snap["tick"],
