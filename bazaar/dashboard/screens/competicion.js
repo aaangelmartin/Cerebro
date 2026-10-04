@@ -311,6 +311,9 @@
       el("div", { class: "c-tabs" },
         el("button", { class: "t10-seg" + (tab === "precios" ? " on" : ""), "data-tab": "precios" }, tr("competicion.tab.prices")),
         el("button", { class: "t10-seg" + (tab === "mercados" ? " on" : ""), "data-tab": "mercados" }, tr("competicion.allMarkets"))),
+      el("section", { class: "t10-panel c-global" },
+        el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.global.title")), el("span", { class: "t10-sub t10-right c-global-sub" }, "")),
+        el("div", { class: "c-global-body" }, D.state("loading"))),
       el("div", { class: "c-top" },
         el("section", { class: "t10-panel c-chart" },
           el("div", { class: "t10-head" }, el("h2", {}, tr("competicion.chart.title")),
@@ -342,6 +345,96 @@
     root.querySelectorAll(".c-toggle button").forEach((b) => b.addEventListener("click", () => {
       S.mode = b.dataset.m; root.querySelectorAll(".c-toggle button").forEach((x) => x.classList.toggle("on", x === b)); S.lastSeq = null; refresh(root, S.data, S.params);
     }));
+  }
+
+  // ---------------------------------------------------------------- the three days
+  // The server publishes one table mark per team: the mean of the rounds, each by its weight and phase.
+  // Three cuts give every round back: the first one of Saturday (Friday alone), the first one of Sunday
+  // (through Saturday, as the organisers left it) and the latest one. Same sums as tools/global_leaderboard.py.
+  const PARTS = ["negotiating", "market"];
+  function globalBoard(rows) {
+    const cuts = [];
+    for (const row of rows || []) {
+      const d = row.data || row; let teams = d.teams || []; const rounds = d.rounds || [];
+      if (!Array.isArray(teams)) teams = Object.values(teams);
+      if (!teams.length || !rounds.length) continue;
+      const phase = {}, weight = {}, byTeam = {};
+      for (const r of rounds) { phase[r.round] = num(r.phase) || 0; weight[r.round] = num(r.weight) || 0; }
+      for (const t of teams) if (t && t.team) byTeam[t.team] = t;
+      cuts.push({ ts: num(row.ts), tick: d.tick, phase, weight, teams: byTeam });
+    }
+    if (!cuts.length) return null;
+    const now = cuts[cuts.length - 1];
+    const first2 = cuts.find((c) => c.phase[2] != null && c.phase[3] == null) || null;
+    const sunday = cuts.filter((c) => c.phase[3] != null);
+    const first3 = sunday[0] || null;
+    const ph = now.phase[3] || 0, w12 = (now.weight[1] || 0.5) + (now.weight[2] || 1), w3 = now.weight[3] || 1;
+    const m = (t, part) => num(t && t[part]) || 0;
+    const teams = Object.values(now.teams).map((t) => {
+      const row = { team: t.team, name: t.name || t.team, table: num(t.score) || 0, parts: {} };
+      for (const part of PARTS) {
+        let r1 = null;
+        if (first2 && first2.teams[t.team]) { const w1 = first2.weight[1] || 0.5, p2 = first2.phase[2] || 0; r1 = m(first2.teams[t.team], part) * (w1 + p2) / w1; }
+        const through2 = first3 && first3.teams[t.team] ? m(first3.teams[t.team], part) * (w12 + (first3.phase[3] || 0)) / w12 : m(t, part);
+        const r2 = r1 == null ? null : w12 * through2 - 0.5 * r1;
+        const r3 = ph > 0 ? (m(t, part) * (w12 + ph) - w12 * through2) / ph : 0;
+        row.parts[part] = { r1, r2, r3, final: (w12 * through2 + w3 * r3) / (w12 + w3) };
+      }
+      const sum = (k) => PARTS.every((p) => row.parts[p][k] != null) ? PARTS.reduce((a, p) => a + row.parts[p][k], 0) : null;
+      row.r1 = sum("r1"); row.r2 = sum("r2"); row.r3 = sum("r3"); row.final = sum("final");
+      return row;
+    });
+    for (const key of ["r1", "r2", "r3", "table", "final"]) {
+      teams.filter((t) => t[key] != null).sort((a, b) => b[key] - a[key]).forEach((t, i) => { t["rank_" + key] = i + 1; });
+    }
+    teams.sort((a, b) => b.table - a.table);
+    const top = teams.slice(0, 5).map((t) => t.team); if (!top.includes(US)) top.push(US);
+    const seen = new Map();
+    for (const c of sunday) seen.set(c.tick, { ts: c.ts, tick: c.tick, scores: Object.fromEntries(top.map((id) => [id, c.teams[id] ? num(c.teams[id].score) : null])) });
+    return { tick: now.tick, ts: now.ts, phase: ph, teams, top, timeline: [...seen.values()] };
+  }
+
+  async function renderGlobal(root) {
+    const box = root.querySelector(".c-global-body"); if (!box) return;
+    let doc = null;
+    try { doc = globalBoard(((await D.cached("global:lb", 30000, () => api.recStream("leaderboard", { tail: 400 }))) || {}).rows); }
+    catch (e) { return D.replace(box, D.state("error", D.errText(e))); }
+    if (!doc) return D.replace(box, D.state("empty", tr("competicion.global.none")));
+    const f = (x, nd = 1) => (x == null ? "—" : fmt(Math.abs(x) < 0.05 ? 0 : x, nd));
+    const cell = (v, rank, extra) => el("span", { class: "num c-g-cell" }, f(v), rank ? el("i", { class: "c-g-rank" }, "#" + rank) : null, extra || null);
+    const head = el("div", { class: "c-g-row c-g-head t10-cap" },
+      el("span", {}, "#"), el("span", {}, tr("common.team")), el("span", {}, tr("competicion.global.fri")), el("span", {}, tr("competicion.global.sat")),
+      el("span", {}, tr("competicion.global.sun")), el("span", {}, tr("competicion.global.now")), el("span", {}, tr("competicion.global.final")));
+    const lines = doc.teams.map((t) => el("div", { class: "c-g-row" + (t.team === US ? " c-g-us" : "") },
+      el("span", { class: "num" }, String(t.rank_table)),
+      el("span", { class: "c-g-name" }, t.team === US ? tr("common.team10us") : t.name),
+      cell(t.r1, t.rank_r1), cell(t.r2, t.rank_r2),
+      cell(t.r3, t.rank_r3, el("i", { class: "c-g-split" }, f(t.parts.negotiating.r3) + " · " + f(t.parts.market.r3))),
+      el("span", { class: "num c-g-cell c-g-strong" }, f(t.table, 2)),
+      cell(t.final, t.rank_final)));
+    // today, cut by cut: one line per team of the top five (and us)
+    const tl = doc.timeline; let chart = null;
+    if (tl.length > 1) {
+      const W = 640, H = 120, all = tl.flatMap((r) => Object.values(r.scores).filter((x) => x != null));
+      const lo = Math.min(...all) - 0.3, hi = Math.max(...all) + 0.3;
+      const x = (i) => (i / (tl.length - 1)) * (W - 70) + 4, y = (v) => H - 14 - ((v - lo) / (hi - lo || 1)) * (H - 24);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "c-g-chart"); svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", tr("competicion.global.today"));
+      doc.top.forEach((id) => {
+        const pts = tl.map((r, i) => (r.scores[id] == null ? null : x(i).toFixed(1) + "," + y(r.scores[id]).toFixed(1))).filter(Boolean);
+        const pl = document.createElementNS(svg.namespaceURI, "polyline");
+        pl.setAttribute("points", pts.join(" ")); pl.setAttribute("fill", "none");
+        pl.setAttribute("class", "c-g-line" + (id === US ? " c-g-line-us" : ""));
+        svg.append(pl);
+        const last = tl[tl.length - 1].scores[id];
+        if (last != null) { const tx = document.createElementNS(svg.namespaceURI, "text"); tx.setAttribute("x", W - 62); tx.setAttribute("y", y(last) + 3); tx.setAttribute("class", "c-g-lbl" + (id === US ? " c-g-lbl-us" : "")); tx.textContent = id + " " + f(last, 2); svg.append(tx); }
+      });
+      chart = el("div", { class: "c-g-today" }, el("div", { class: "t10-cap" }, tr("competicion.global.today")), svg);
+    }
+    const sub = root.querySelector(".c-global-sub");
+    if (sub) sub.textContent = tr("competicion.global.sub", { tick: doc.tick, pct: fmt(doc.phase * 100, 0) });
+    D.replace(box, [el("div", { class: "c-g-table" }, head, lines), chart, el("div", { class: "t10-small t10-muted c-g-note" }, tr("competicion.global.note"))]);
   }
 
   const settles = (rows) => rows.filter((r) => r.kind === "settle");
@@ -523,6 +616,7 @@
     safe(() => D.replace(root.querySelector(".c-book-a"), bookPanel(pA, pA && books[pA.venue], ourVenue)));
     safe(() => D.replace(root.querySelector(".c-book-b"), bookPanel(pB, pB && books[pB.venue], ourVenue)));
     safe(() => renderMT(root, broker, ourRow));
+    renderGlobal(root).catch((e) => console.error("competicion", e));
     const want = params ? String(params).split("/")[0] : null;
     if (want && S.drawerFor !== want) { S.drawerFor = want; safe(() => openVenue(rows.find((v) => v.venue === want), books[want], day)); }
     if (!want) S.drawerFor = null;

@@ -1,5 +1,15 @@
 /* competicion.* — dictionary for the competicion screen (prices and venues + all markets). */
 I18N.register("es", {
+  "competicion.global.title": "Clasificación de los tres días",
+  "competicion.global.sub": "tick {tick} · el domingo cuenta al {pct} %",
+  "competicion.global.fri": "Viernes",
+  "competicion.global.sat": "Sábado",
+  "competicion.global.sun": "Domingo (neg · mer)",
+  "competicion.global.now": "Tabla ahora",
+  "competicion.global.final": "Final si acabara así",
+  "competicion.global.today": "Hoy, corte a corte",
+  "competicion.global.none": "Todavía no hay cortes de la clasificación.",
+  "competicion.global.note": "Cada ronda vale 60: 30 de negociación y 30 de mercado. Las notas por ronda se reconstruyen de la tabla publicada; los 40 puntos de los jueces van aparte.",
   "competicion.title": "Competición",
   "competicion.tab.prices": "Precios y sedes",
   "competicion.allMarkets": "Todos los mercados",
@@ -113,6 +123,16 @@ I18N.register("es", {
   "competicion.conv.noMatch": "Ninguna conversación coincide.",
 });
 I18N.register("en", {
+  "competicion.global.title": "Standings over the three days",
+  "competicion.global.sub": "tick {tick} · Sunday counts {pct} %",
+  "competicion.global.fri": "Friday",
+  "competicion.global.sat": "Saturday",
+  "competicion.global.sun": "Sunday (neg · mkt)",
+  "competicion.global.now": "Table now",
+  "competicion.global.final": "Final if it ended like this",
+  "competicion.global.today": "Today, cut by cut",
+  "competicion.global.none": "No standings cuts yet.",
+  "competicion.global.note": "Each round is worth 60: 30 negotiating and 30 market. Round marks are rebuilt from the published table; the judges' 40 points are separate.",
   "competicion.title": "Standings",
   "competicion.tab.prices": "Prices and venues",
   "competicion.allMarkets": "All markets",
