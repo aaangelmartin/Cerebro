@@ -163,6 +163,9 @@ class Agent:
             if body.get("venue", VENUE) != VENUE:
                 return False, f"refused: this deal closes on {VENUE}"
             st, out = self.to_game(r["method"], r["path"], body)
+            then = a.get("then")
+            if 200 <= st < 300 and then and out.get("id") is not None:     # tell the market which offer it is
+                self.market(then["method"], then["path"], {"offer_id": out["id"]})
         else:
             st, out = self.market(r["method"], r["path"], r.get("body"))
         ok = 200 <= st < 300
