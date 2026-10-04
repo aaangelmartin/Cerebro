@@ -1,3 +1,39 @@
 // Texts of the home screen: keys start with "home."
-I18N.register("en", {});
-I18N.register("es", {});
+I18N.register("en", {
+  "home.sub.have": "{n} cards listed", "home.sub.want": "{n} wanted", "home.sub.limits": "{n} private limits",
+  "home.sub.updated": "updated {ago}", "home.sub.lastUpdate": "last update {ago}",
+  "home.running": "{n} trades running", "home.running1": "1 trade running", "home.onHold": "{n} trades on hold", "home.onHold1": "1 trade on hold",
+  "home.agent.title": "Your agent is working", "home.agent.note": "you only watch · nothing to do here",
+  "home.agent.stopped": "Your agent stopped here", "home.agent.last": "last activity · {tick}",
+  "home.agent.empty": "Your agent has not done anything yet", "home.agent.emptyText": "Its first call shows up here by itself, tick by tick.",
+  "home.by.market": "market", "home.by.human": "by hand",
+  "home.offline.title": "Your agent is offline", "home.offline.last": "Last call at {tick}, {ago}.",
+  "home.offline.text": "Nothing is accepted for you until it calls again. Open trades wait and expire on their own; nothing is lost.",
+  "home.offline.prompt": "Show the connect prompt",
+  "home.sell.title": "Available to sell & trade", "home.sell.none": "Your agent has not listed any card to sell or trade.",
+  "home.want.title": "Wanted", "home.want.none": "Your agent has not listed any card it wants.",
+  "home.trades.title": "Your trades", "home.trades.note": "your agent does them · all settle on v07", "home.trades.hold": "on hold until your agent is back",
+  "home.trades.empty": "No trades yet", "home.trades.emptyText": "Your agent keeps looking. A match shows up here by itself.",
+  "home.trade.waitingAgent": "Waiting for your agent", "home.trade.settled": "Settled on v07 at {tick}", "home.trade.saves": "saves {p} against El Rastro",
+  "home.trade.ticks": "matched {from} · last move {now}",
+  "home.error": "The market does not answer. This page tries again by itself.",
+});
+I18N.register("es", {
+  "home.sub.have": "{n} cartas publicadas", "home.sub.want": "{n} buscadas", "home.sub.limits": "{n} límites privados",
+  "home.sub.updated": "actualizado {ago}", "home.sub.lastUpdate": "última actualización {ago}",
+  "home.running": "{n} tratos en marcha", "home.running1": "1 trato en marcha", "home.onHold": "{n} tratos en espera", "home.onHold1": "1 trato en espera",
+  "home.agent.title": "Tu agente está trabajando", "home.agent.note": "tú solo miras · no hay nada que hacer aquí",
+  "home.agent.stopped": "Tu agente se paró aquí", "home.agent.last": "última actividad · {tick}",
+  "home.agent.empty": "Tu agente aún no ha hecho nada", "home.agent.emptyText": "Su primera llamada aparece aquí sola, tick a tick.",
+  "home.by.market": "mercado", "home.by.human": "a mano",
+  "home.offline.title": "Tu agente está sin conexión", "home.offline.last": "Última llamada en {tick}, {ago}.",
+  "home.offline.text": "No se acepta nada en tu nombre hasta que vuelva a llamar. Los tratos abiertos esperan y caducan solos; no se pierde nada.",
+  "home.offline.prompt": "Ver el prompt de conexión",
+  "home.sell.title": "Disponibles para vender y cambiar", "home.sell.none": "Tu agente no ha publicado ninguna carta para vender o cambiar.",
+  "home.want.title": "Buscadas", "home.want.none": "Tu agente no ha publicado ninguna carta que busque.",
+  "home.trades.title": "Tus tratos", "home.trades.note": "los hace tu agente · todos se cierran en v07", "home.trades.hold": "en espera hasta que vuelva tu agente",
+  "home.trades.empty": "Aún no hay tratos", "home.trades.emptyText": "Tu agente sigue buscando. Un emparejamiento aparece aquí solo.",
+  "home.trade.waitingAgent": "Esperando a tu agente", "home.trade.settled": "Cerrado en v07 en {tick}", "home.trade.saves": "ahorra {p} frente a El Rastro",
+  "home.trade.ticks": "emparejado {from} · último paso {now}",
+  "home.error": "El mercado no responde. Esta página lo reintenta sola.",
+});
