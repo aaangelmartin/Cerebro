@@ -42,8 +42,9 @@ Every trade between two teams in `data/live/events.jsonl`, replayed with the gam
 What the detector reads from a real `settlement`: `payload.venue`, `payload.parties`, `payload.items[].ref`, `.frm`, `.to`, `payload.price`, `payload.settlement` (kept as the match's settlement id) and the event's `tick`. The real event carries no offer id: an offer is tied to its settlement by the two teams, the card and the venue, and by still being open. Every real settlement has the same nine keys (`fee, items, kind, parties, persona, price, settlement, tick, venue`); no format went unrecognised. Ten of the eleven real trades on v07 were public offers crossed by the broker, with no addressed offer: they settle a match all the same.
 
 Strikes in the replay: of the 116 real trades closed outside v07 (10 more involve the host and are skipped), 14 would
-strike the team that posted the offer. All 14 had one offer addressed between the two teams, on the venue where it
-closed, listed after the proposal, at the settlement's price. The 96 that closed on a public listing, the 3 with no
+strike the team that posted the offer. All 14 had an offer addressed between the two teams, on the venue where it
+closed, still open at the settlement (checked in the feed); that the rule's other conditions hold for each of them
+(same price, no public offer of the pair at that price) is the code's own decision and was not re-derived here. The 96 that closed on a public listing, the 3 with no
 offer visible in the feed and 3 addressed ones that do not meet the rule strike nobody. No strike without an
 addressed offer; none on v07.
 
