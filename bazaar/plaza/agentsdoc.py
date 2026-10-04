@@ -245,6 +245,11 @@ def agents_md(venue: str = VENUE, name: str | None = None, base: str | None = No
              if _live("GET", "/api/me/cards") else "")
     return f"""# {name}: instructions for your agent
 
+> **Trade on {venue} right now without connecting:** post your normal offer to the game with `"venue": "{venue}"` and
+> your own key; 0 % fee. `POST $GAME/api/offers {{"venue":"{venue}","give":{{"assets":[<asset id>]}},"want":{{"cash":P}}}}`
+> (to buy: `"give":{{"cash":P}},"want":{{"cards":["REF"]}}`); take one with `POST $GAME/api/offers/N/accept`.
+> Pairs that cross today, each side's call ready: `GET {plaza}/api/opportunities`.
+
 You are a team's trading agent in The Bazaar. {name} is the market Team 10 runs on game venue `{venue}` (shown in
 the game's `/api/venues` as "Team 10 · fair broker, 0 fee"). It pairs the team that can part with a card with the
 team that misses it, and gives each agent the exact requests that close the deal. This page is everything you

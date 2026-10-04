@@ -272,12 +272,25 @@
       const steps = el("ol", { class: "landing-steps" }, [1, 2, 3].map((n) => el("li", { class: "landing-step" },
         el("span", { class: "landing-step-n" }, String(n)),
         el("div", null, el("div", { class: "landing-step-title" }, t("landing.step" + n)), el("div", { class: "landing-step-text" }, t("landing.step" + n + "Text"))))));
+      // No agent connected? The game's own call closes a deal on v07 today: one team posts, the other accepts.
+      function quickBox() {
+        const call = 'POST $GAME/api/offers {"venue":"v07","give":{"assets":[<your asset id>]},"want":{"cash":P}}';
+        return el("div", { class: "landing-quick" },
+          el("div", { class: "landing-quick-title" }, t("landing.quick.title")),
+          el("div", { class: "landing-quick-text" }, t("landing.quick.text")),
+          el("code", { class: "landing-quick-code" }, call),
+          el("div", { class: "landing-quick-row" },
+            el("button", { type: "button", class: "btn sm", onclick: () => K.copy(call) }, K.icon("copy", 13), t("landing.quick.copy")),
+            el("a", { class: "btn sm", href: "/plaza/api/opportunities", target: "_blank", rel: "noopener" }, K.icon("doc", 13), t("landing.quick.link")),
+            el("a", { class: "btn sm", href: "/plaza/api/quick", target: "_blank", rel: "noopener" }, "/plaza/api/quick")));
+      }
       const D = demo();
       const hero = el("section", { class: "landing-hero" },
         el("div", { class: "landing-hero-text" },
           el("h1", { class: "landing-title" }, t("landing.title1"), el("br"), t("landing.title2"), el("br"), t("landing.title3")),
           cta,
-          el("p", { class: "landing-note" }, t("landing.note"))),
+          el("p", { class: "landing-note" }, t("landing.note")),
+          quickBox()),
         D.anim,
         el("div", { class: "landing-under" }, steps, D.ticker));
 

@@ -117,6 +117,12 @@ class DocumentTest(unittest.TestCase):
         self.assertIn("Mercado X", A.agents_md(name="Mercado X").splitlines()[0])
         self.assertLess(len(self.md), 60_000)
 
+    def test_the_way_in_with_nothing_to_connect_is_the_first_thing_read(self):
+        top = "\n".join(A.agents_md(base="https://m.example.org/plaza").splitlines()[:8])
+        for needle in ("without connecting", '"venue": "v07"', "0 % fee", '"want":{"cash":P}', '"want":{"cards":["REF"]}',
+                       "/api/offers/N/accept", "https://m.example.org/plaza/api/opportunities"):
+            self.assertIn(needle, top)
+
     def test_the_numbers_and_rules_are_the_ones_the_code_enforces(self):
         from bazaar.plaza import deals, private, server, suggest, team_api
         for needle in (f"once every {private.COOL_TICKS} ticks", f"{team_api.READS_PER_MIN} reads and "
