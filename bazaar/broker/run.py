@@ -577,17 +577,28 @@ def team_message(gw: Gateway, venue_id: str) -> Callable[[str, str], Any]:
     return send
 
 
-def plaza_helpers() -> tuple[Callable[[], Any] | None, Callable[[], Any] | None]:
+def plaza_helpers(control_fn: Callable[[], dict] | None = None) -> tuple[Callable[[], Any] | None,
+                                                                         Callable[[], Any] | None]:
     """The plaza's two helpers for the matchmaker (its public address, the pairs agents declared), or
     (None, None) when the plaza package does not even import. The broker plays the Market Test: it must
-    start and run whatever state the market board's code is in."""
+    start and run whatever state the market board's code is in.
+
+    The address goes into the venue's announcements, which every team reads, only once a human has switched
+    the market on by hand: control.json `plaza: "on"` (POST /control {"plaza": "on"}). With the key absent
+    the market still runs, but its address is not announced."""
     try:
         from ..plaza import server as plaza
     except Exception as e:  # noqa: BLE001 - any failure of that package, a syntax error included
         print(f"broker: plaza not available ({type(e).__name__}: {e}); announcements go without its page", flush=True)
         return None, None
-    return (lambda: plaza.public_url(config.LIVE, config.DATA),
-            lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record"))
+    control = control_fn or (lambda: _read_json(config.LIVE / "control.json"))
+
+    def page() -> str | None:
+        if str((control() or {}).get("plaza") or "").lower() != "on":
+            return None
+        return plaza.public_url(config.LIVE, config.DATA)
+
+    return page, lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record")
 
 
 def _num(x: Any) -> float | None:

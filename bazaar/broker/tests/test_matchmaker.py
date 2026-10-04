@@ -440,3 +440,15 @@ class TheBrokerStartsWithoutThePlaza(unittest.TestCase):
         page, declared = run.plaza_helpers()
         self.assertTrue(callable(page) and callable(declared))
         self.assertIsInstance(declared(), list)
+
+    def test_the_markets_address_is_announced_only_once_it_is_switched_on_by_hand(self):
+        from unittest import mock
+        from bazaar.broker import run
+        ctl = {"plaza_url": "https://market.example.org/plaza"}
+        page, _ = run.plaza_helpers(lambda: ctl)
+        with mock.patch("bazaar.plaza.server.public_url", return_value="https://market.example.org/plaza"):
+            self.assertIsNone(page())                       # no key: the market runs, the address stays in
+            ctl["plaza"] = "off"
+            self.assertIsNone(page())
+            ctl["plaza"] = "on"
+            self.assertEqual(page(), "https://market.example.org/plaza")
