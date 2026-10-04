@@ -66,6 +66,10 @@ def budget_block_ticks(tick_seconds) -> int:
     return int(round(3600.0 / ts)) if 5.0 <= ts <= 60.0 else BUDGET_BLOCK_TICKS
 LOOP_MARGIN_P = 15                           # dealer -> dealer loop: the proven resale must beat the buy by this
 LOOP_RECENT_S = 3 * 3600                     # ...and "proven" means our own sales to that dealer this recent
+GIFT_RESERVE = 2                             # threads of the hour kept for a dealer's gift window (a try and a retry)
+GIFT_RESERVE_TICKS = 240                     # ...when that window opens within this many ticks
+STUCK_AFTER = 2                              # buy threads in a row a dealer ended above our max before we stop asking
+STUCK_TICKS = 120                            # ...for this long, unless our max now reaches the price it stopped at
 HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
 HOLD_GAP_SHARE = 0.05                        # "near our limit": within 1 P, or this share of it for larger prices
 CASH_HOLD_TICKS = 6                          # a bid capped by cash waits this long for cash, then frees the thread
@@ -228,6 +232,37 @@ class DealersDomain:
                                     "why": f"loop: bought at {j.get('paid')} P from {j.get('from')}, resell"}]
         return orders
 
+    def _note_stuck(self, dealer: str, kind: str, deal: bool, theirs: list, limit_est, tick: int) -> None:
+        """A buy thread ended: count the ones a dealer closed above our max, in a row, per kind of card."""
+        if not kind.startswith("buy:") or kind.endswith("pack"):
+            return
+        stuck = self.store.data.setdefault("stuck", {})
+        key = f"{dealer}|{kind}"
+        if deal:
+            stuck.pop(key, None)
+            return
+        prices = [float(p) for p in theirs or [] if isinstance(p, (int, float))]
+        floor = min(prices) if prices else (float(limit_est) if isinstance(limit_est, (int, float)) else None)
+        s = stuck.get(key) or {}
+        n = int(s.get("n") or 0) if 0 <= tick - int(s.get("tick") or 0) < STUCK_TICKS else 0
+        old = s.get("floor") if n else None
+        if floor is not None and old is not None:
+            floor = min(floor, float(old))
+        stuck[key] = {"n": n + 1, "tick": int(tick), "floor": floor if floor is not None else old}
+
+    def _stuck(self, dealer: str, kind: str, limit: float, tick: int) -> float | None:
+        """The price this dealer would not go below today, when asking again cannot close: STUCK_AFTER buy
+        threads in a row ended without a deal and our max is still under it. None: go ahead."""
+        s = (self.store.data.get("stuck") or {}).get(f"{dealer}|{kind}")
+        if not s or int(s.get("n") or 0) < STUCK_AFTER:
+            return None
+        if not 0 <= tick - int(s.get("tick") or 0) < STUCK_TICKS:
+            return None
+        floor = s.get("floor")
+        if floor is not None and limit >= float(floor):
+            return None
+        return float(floor) if floor is not None else float(limit) + 1.0
+
     def _note_order(self, o: dict, status: str, detail: str = "", tick: int | None = None, **extra) -> None:
         """Tell the brain what happened to one of its dealer orders (brain_posts.jsonl), once per change."""
         key = (o.get("dealer"), o.get("action"), o.get("ref"))
@@ -379,6 +414,13 @@ class DealersDomain:
                                                    f"{budget}: {self._spend_formula(sit, ctx)})", plan.tick)
                     continue
                 kind = f"buy:{rarity}"
+                floor = self._stuck(d, kind, limit, plan.tick)
+                if floor is not None:
+                    self._note_order(o, "skipped", f"{d} did not go below {round(floor)} P for a {rarity} in its "
+                                                   f"last threads today and our max is {limit} P: not asking again "
+                                                   f"for {STUCK_TICKS} ticks unless the cap reaches that price "
+                                                   "(it must stay under our value)", plan.tick)
+                    continue
                 topic = {"buy": {"card": ref}}
             est_open = float(o.get("open") or self.store.expect_opening(d, kind, entry.get("list_price")) or 0)
             out.append(Candidate(id=f"o{len(out) + 1}", dealer=d, topic=topic, kind=kind, item=ref,
@@ -603,6 +645,8 @@ class DealersDomain:
             self.store.record_deal(dealer, level, kind, t.get("item", "?"), t.get("opening"), int(price),
                                    t.get("limit_est"), buying, t.get("value"), thread=tid, tick=tick)
         okey = (dealer, t.get("side"), str(t.get("item") or "").upper())
+        if buying:
+            self._note_stuck(dealer, str(kind), deal, t.get("theirs") or [], t.get("limit_est"), tick)
         jobs = self.store.data.setdefault("loop", [])
         if buying and deal:                                 # bought under a loop order: resell it at once
             src = next((o for o in self._orders_last if o.get("resell_to") and o["dealer"] == dealer
@@ -970,6 +1014,11 @@ class DealersDomain:
             plan.free.append(d)
         budget = self._spend_cap(sit, ctx, committed=max(committed, sum(bids.values())))
         ordered = self._order_candidates(plan, sit, ctx, budget if not cautious else 0)
+        # the last threads of the hour with a gift-giving dealer wait for its gift window (one try and a retry)
+        kept = {d for d in gifts.DEALERS
+                if plan.quota_left.get(d, GIFT_RESERVE + 1) <= GIFT_RESERVE and not gifts.due(self.store.data, d, tick)
+                and gifts.next_tick(self.store.data, d) - tick <= GIFT_RESERVE_TICKS}
+        ordered = [c for c in ordered if c.dealer not in kept]
         if plan.free and plan.slots > 0:
             taken = {c.dealer for c in ordered}
             waiting: dict[str, int] = {}                # the brain's orders not finished yet keep their share of the quota
@@ -977,7 +1026,7 @@ class DealersDomain:
                 if self._order_done.get((o["dealer"], o["action"], o["ref"])) != int(o["bound"]):
                     waiting[o["dealer"]] = waiting.get(o["dealer"], 0) + 1
             plan.candidates = ordered + [c for c in self._candidates(plan, sit, ctx, budget if not cautious else 0)
-                                         if c.dealer not in taken
+                                         if c.dealer not in taken and c.dealer not in kept
                                          and plan.quota_left.get(c.dealer, 1) > waiting.get(c.dealer, 0)]
             if not cautious:
                 self._gift_candidates(plan, sit, ctx, budget, waiting)
@@ -1023,8 +1072,8 @@ class DealersDomain:
             if own is not None:
                 plan.forced.append(own.id)
                 continue
-            if plan.quota_left.get(d, 1) <= waiting.get(d, 0):
-                continue                                     # the brain's pending orders keep the quota
+            if plan.quota_left.get(d, 1) <= 0:
+                continue                                     # nothing left this hour (the gift outranks pending orders)
             tried = {t.get("item") for t in gifts.tries(self.store.data, d)}
             free, plan.free = plan.free, [d]
             try:
@@ -1075,6 +1124,8 @@ class DealersDomain:
                         return
                     if not relaxed and (f > lim or o - f < 1):
                         return
+                    if not relaxed and self._stuck(d, kind, lim, plan.tick) is not None:
+                        return                               # it closed above our max twice in a row: not again yet
                     exp = min(exp, lim)
                     gain = value - exp
                 else:
