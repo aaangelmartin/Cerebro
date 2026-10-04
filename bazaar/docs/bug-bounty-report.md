@@ -288,3 +288,55 @@ components and with the team-to-team settlements in the public feed. Nothing was
 - **Observed:** `neg_points` rose 9.5 → 29.5 at tick 1930 and `duel_points` grew from tick 1865, but
   `negotiating` stayed 21.65 until the cut of tick 1942 (22.22). Flags also land in `neg_points` (+10 each at
   ticks 1078, 1088, 1090 on Saturday), which l.118 does not list under Negotiating.
+
+## Duels, market test and trading (Sunday 11:40–12:00, read-only)
+
+Source: the recorded public feed (30 783 events, ticks 145–1962), our 179 duel records, our Market Test
+logs and `sdk/bazaar-kit/RULES.md`. Nothing was written to the game.
+
+### D1. El Rastro rounds its fee up to a whole coin (trading, small)
+
+- **Rule:** l.61 "The house venue, El Rastro, charges 5 % plus 1 P per card".
+- **Observed:** all 109 El Rastro settlements in the feed fit `fee = ceil(0.05 × price + cards)` exactly; none
+  fits plain rounding. 91 of the 109 were charged more than the stated formula: 377 P taken against 326.95 P.
+  Settlement 275 (tick 160): price 3, fee 2 (formula 1.15, so 67 % of the price). Settlement 249 (tick 146):
+  price 23, fee 3 (formula 2.15).
+- **Expected:** the stated amount, or a line in the rules saying the fee is rounded up.
+- **Impact:** about 0.5 P per trade, 50 P over all teams; it weighs most on cheap common cards.
+- **Check:** feed `settlement` events with `venue: "rastro"`: `fee`, `price`, `len(items)`.
+
+### D2. `bench_points` reads 0.5 at every efficiency we have had (market test: please confirm)
+
+- **Rule:** l.82 "Matching as well as the free auto stall earns half the bench points; the full points go to
+  the mean of the top three".
+- **Observed:** in all 16 readings of `me.score` after the eight sessions, `bench_points` is exactly 0.5 while
+  `bench_efficiency` ranged 0.854–0.967. In the hard test (session 7, tick 1690, venue v07) the server gave us
+  0.967; our replay of the same book through the auto rule gives the stall 0.872. In session 8 (tick 1774) the
+  round figure fell to 0.895 = (0.967 + 0.823) / 2, so 0.967 was the session's own value.
+- **Expected:** more than 0.5 for a session above the stall, unless the stall also made 0.967.
+- **Not confirmed:** the stall's 0.872 is our replay, not a server number; per-team bench figures are not public.
+- **Check:** `GET /api/me` → `score.bench_efficiency`, `score.bench_points` after a session; the organisers can
+  compare with the stall's efficiency in session 7.
+
+### D3. A fee notice is published for a fee that does not change (feed noise, small)
+
+- **Rule:** l.71 "fee changes take effect after a public notice".
+- **Observed:** `venue.fee_announced` and `venue.fee_changed` are emitted when the new fee equals the old one:
+  v03 seven more times at 0 bps after its real change at tick 233 (ticks 237–700), v05 and v07 five notices in tick 1445 for the same effective tick.
+- **Impact:** an agent that reacts to fee notices sees changes that are not changes.
+
+### Checked and found consistent
+
+- Duel points: all 147 deals we closed match `(limit − price − day weight × days) × (1 − decay)^rounds` (buyer;
+  mirrored for the seller), with rounds = the lower message count of the two sides. No mismatch.
+- Duel counts: 306 per round robin for 18 teams (sessions 2, 3, 4: 306, 612, 612); no duel closed twice in
+  1 497 `duel.closed` events; none of ours closed before its deadline without a deal.
+- Mute rivals cost us 23 duels with no deal (sessions 1–4: 10, 5, 4, 4); those are other teams' bots.
+- Limits of `/api/clock`: no team listed more than 12 offers in a tick or sent two messages in one thread in
+  a tick. No trade settled on a venue owned by one of its parties.
+- Cards: no serial above `print_run`, no card with more serials than its print run, and the chain of owners
+  of every card id is unbroken across 771 settlements.
+- Dealers: deals per team per game hour never exceed 7 (Abuela), 4 (Pícaros), 3 (Chato); no legendary sold.
+  Abuela gave 41 gifts on Saturday (last at tick 1337) and none on Sunday; no rule promises them.
+- Team venues: all 45 settlements on team venues fell while the venue's fee was 0, so a charged team fee
+  could not be checked from the feed.

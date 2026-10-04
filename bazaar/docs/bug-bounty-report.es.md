@@ -321,3 +321,59 @@ nuestro `me.score` y con los settlements entre equipos del feed público. No se 
 - **Observado:** `neg_points` subió de 9,5 a 29,5 en el tick 1930 y `duel_points` creció desde el tick 1865,
   pero `negotiating` siguió en 21,65 hasta el corte del tick 1942 (22,22). Además las banderas entran en
   `neg_points` (+10 cada una en los ticks 1078, 1088 y 1090 del sábado), que la l.118 no lista en Negociación.
+
+## Duelos, prueba de mercado y tratos (domingo 11:40–12:00, solo lectura)
+
+Fuente: el feed público grabado (30 783 eventos, ticks 145–1962), nuestros 179 registros de duelos, los
+registros de la prueba de mercado y `sdk/bazaar-kit/RULES.md`. No se escribió nada en el juego.
+
+### D1. El Rastro redondea su comisión hacia arriba a una moneda entera (tratos, menor)
+
+- **Regla:** l.61 "The house venue, El Rastro, charges 5 % plus 1 P per card".
+- **Observado:** las 109 liquidaciones de El Rastro del feed cumplen `fee = ceil(0,05 × precio + cartas)`;
+  ninguna cumple el redondeo normal. En 91 de las 109 se cobró más que la fórmula escrita: 377 P frente a
+  326,95 P. Liquidación 275 (tick 160): precio 3, comisión 2 (fórmula 1,15: el 67 % del precio). Liquidación
+  249 (tick 146): precio 23, comisión 3 (fórmula 2,15).
+- **Esperado:** el importe escrito, o una línea en las reglas que diga que se redondea hacia arriba.
+- **Impacto:** unos 0,5 P por trato, 50 P entre todos los equipos; pesa más en las comunes baratas.
+- **Comprobación:** eventos `settlement` del feed con `venue: "rastro"`: `fee`, `price`, `len(items)`.
+
+### D2. `bench_points` marca 0,5 con cualquier eficiencia que hemos tenido (prueba de mercado: a confirmar)
+
+- **Regla:** l.82 "Matching as well as the free auto stall earns half the bench points; the full points go to
+  the mean of the top three".
+- **Observado:** en las 16 lecturas de `me.score` tras las ocho sesiones, `bench_points` es exactamente 0,5
+  mientras `bench_efficiency` fue de 0,854 a 0,967. En la prueba difícil (sesión 7, tick 1690, venue v07) el
+  servidor nos dio 0,967; nuestra réplica del mismo libro con la regla automática da 0,872 al puesto. En la
+  sesión 8 (tick 1774) la cifra de la ronda bajó a 0,895 = (0,967 + 0,823) / 2, así que 0,967 era de la sesión.
+- **Esperado:** más de 0,5 en una sesión por encima del puesto, salvo que el puesto también hiciera 0,967.
+- **Sin confirmar:** el 0,872 del puesto es nuestra réplica, no un dato del servidor; las cifras de la prueba
+  de cada equipo no son públicas.
+- **Comprobación:** `GET /api/me` → `score.bench_efficiency`, `score.bench_points` tras una sesión; la
+  organización puede compararlo con la eficiencia del puesto en la sesión 7.
+
+### D3. Se publica aviso de comisión cuando la comisión no cambia (ruido en el feed, menor)
+
+- **Regla:** l.71 "fee changes take effect after a public notice".
+- **Observado:** se emiten `venue.fee_announced` y `venue.fee_changed` cuando la comisión nueva es igual a la
+  anterior: v03 siete veces más a 0 bps tras su cambio real del tick 233 (ticks 237–700), v05 y v07 cinco avisos en el tick 1445 con el mismo tick
+  de entrada en vigor.
+- **Impacto:** un agente que reacciona a los avisos ve cambios que no lo son.
+
+### Comprobado y coherente
+
+- Puntos de duelo: los 147 acuerdos que cerramos cumplen `(límite − precio − peso del día × días) ×
+  (1 − decay)^rondas` (comprador; al revés para el vendedor), con rondas = el menor número de mensajes de los
+  dos lados. Ningún descuadre.
+- Número de duelos: 306 por vuelta con 18 equipos (sesiones 2, 3, 4: 306, 612, 612); ningún duelo cerrado dos
+  veces en 1 497 eventos `duel.closed`; ninguno nuestro cerró sin acuerdo antes de su plazo.
+- Los rivales mudos nos costaron 23 duelos sin acuerdo (sesiones 1–4: 10, 5, 4, 4); son bots de otros equipos.
+- Límites de `/api/clock`: ningún equipo publicó más de 12 ofertas en un tick ni mandó dos mensajes en un
+  hilo en el mismo tick. Ningún trato se liquidó en un venue de una de sus partes.
+- Cartas: ningún número de serie por encima de `print_run`, ninguna carta con más series que su tirada, y la
+  cadena de dueños de cada carta no se rompe en 771 liquidaciones.
+- Dealers: los tratos por equipo y hora de juego no pasan de 7 (Abuela), 4 (Pícaros), 3 (Chato); no se vendió
+  ninguna legendaria. La Abuela dio 41 regalos el sábado (el último en el tick 1337) y ninguno el domingo;
+  ninguna regla los promete.
+- Venues de equipos: las 45 liquidaciones en venues de equipos cayeron con la comisión del venue a 0, así que
+  una comisión de equipo cobrada no se pudo comprobar con el feed.
