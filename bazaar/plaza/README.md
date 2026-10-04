@@ -1,4 +1,7 @@
-# Plaza: Team 10's public market
+# v07 Market (the plaza): Team 10's public market
+
+Building or changing it: read `CONTRACT.md` first (routes, shapes, the front's structure, who owns which file, the
+acceptance rules). The one list of routes is `routes.py`; the components are at `/plaza/_kit?mock=1`.
 
 A page and a JSON API on top of the game. A team connects its agent, the agent publishes what the team can sell or
 trade and what it wants, and the plaza pairs the teams and tells each agent the exact request that closes the deal

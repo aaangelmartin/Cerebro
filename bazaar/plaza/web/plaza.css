@@ -206,7 +206,10 @@ a.card:hover, button.card:hover { border-color: var(--ink-3); }
 @media (max-width: 760px) {
   body { overflow: auto; }
   .topbar { padding: 0 10px; }
-  .tb-clock .tb-cell.tb-time, .tb-bar { display: none; }
+  .tb-clock .tb-cell.tb-time, .tb-bar, .tb-clock .label { display: none; }
+  .tb-clock .tb-cell { padding: 0 8px; font-size: 12px; }
+  .tb-clock .tb-cell:nth-child(2)::before { content: "t"; color: var(--ink-3); font-family: var(--font-num); margin-right: -6px; }
+  .brand-name { font-size: 14px; }
   .tb-menu { display: grid; }
   .layout { position: static; padding-top: var(--topbar-h); display: block; }
   .sidenav { position: fixed; inset: var(--topbar-h) 0 0 0; width: auto; z-index: 25; display: none; border-right: 0; }
