@@ -27,6 +27,8 @@ SILENCE_TICKS = 6           # close a thread nobody wrote in for this long
 MAX_OUR_MSGS = 4            # then we stop talking and close
 OPEN_EVERY = 10             # ticks between threads we open ourselves
 OFFER_EXPIRES = 60
+PLAZA_CODE = re.compile(r"PLAZA-[2-9A-HJ-NP-Z]{6}")   # a team proving itself to our v07 Market
+CODE_HOLD_TICKS = 3         # the market reads the code from the recorded thread; then we free the slot
 MIN_LLM_S = 4.0
 LOG_NAME = "team_threads.jsonl"
 SENT_NAME = "team_messages_sent.json"
@@ -355,6 +357,12 @@ class TeamTalk:
             theirs = [m for m in msgs if m.get("sender") == other]
             last = theirs[-1] if theirs else None
             last_tick = max([m.get("tick") or 0 for m in msgs] + [t.get("created_tick") or st["first"], st["first"]])
+            if any(PLAZA_CODE.search(str(m.get("text") or "").upper()) for m in theirs):
+                # Not a trade: the team's agent is proving its identity to the market, which reads the code from
+                # the recorded thread and answers through its own API. No model call, no message, no offer.
+                if tick - last_tick >= CODE_HOLD_TICKS:
+                    out.append(self._close(t, me, "it carried a v07 Market proof code; nothing to answer"))
+                continue
             if st["close_at"] is not None and tick >= st["close_at"]:
                 out.append(self._close(t, me, "we answered and declined: free the thread slot"))
                 continue

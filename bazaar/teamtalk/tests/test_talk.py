@@ -57,6 +57,25 @@ class TeamTalkTest(unittest.TestCase):
         self.assertEqual(self.tt.actions(sit(101, [thread(msgs=[ASK])], [SAL10]), None,
                                          values=FakeValues({797: 63.0}), check=lambda a: OK), [])
 
+    def test_a_market_proof_code_is_never_answered(self):
+        """A team's agent proves itself to v07 Market by sending its code here: no reply, no offer, no model."""
+        code = {"id": 5, "tick": 100, "sender": "t15", "text": "PLAZA-QUHEBK"}
+        calls = []
+        self.tt._decide = lambda *a, **k: calls.append(1) or ({"action": "decline", "text": "x"}, "opus")
+        th = thread(tid=9, team="t15", msgs=[code], created=100)
+        th["venue"] = "v07"
+        for tick in (100, 101, 102):
+            self.assertEqual(self.tt.actions(sit(tick, [th], [SAL10]), None, values=FakeValues({797: 63.0}),
+                                             check=lambda a: OK), [])
+        acts = self.tt.actions(sit(103, [th], [SAL10]), None, values=FakeValues({797: 63.0}), check=lambda a: OK)
+        self.assertEqual(self.kinds(acts), ["close_thread"])
+        self.assertEqual(calls, [])
+        self.assertEqual(T.recent(self.live), [])                    # nothing for the brain to read as an offer
+        lower = dict(code, text="our code is plaza-quhebk, thanks")  # the market upper-cases it too
+        th2 = thread(tid=10, team="t15", msgs=[lower], created=100)
+        self.assertEqual(self.tt.actions(sit(100, [th2], [SAL10]), None, values=FakeValues({797: 63.0}),
+                                         check=lambda a: OK), [])
+
     def test_offers_the_copy_control_does_not_protect(self):
         two = [{"id": 627, "kind": "card", "ref": "RET-03"}, {"id": 1062, "kind": "card", "ref": "RET-03"}]
         vals = FakeValues({627: 2.8, 1062: 2.8})
