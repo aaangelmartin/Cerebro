@@ -159,13 +159,15 @@ class AgentQ:
                 inside = True if kind == "swap" else within(m["ref"], role, price)
                 # auto goes ahead only at a price nobody else chose: the market's own suggestion or the team's own
                 # counter, and only when the team set a limit that says it takes it. Anything else is the agent's call.
-                ours = kind == "swap" or m.get("price_by") in (None, team)
+                # A match the host forced was priced by hand, not by the rule: always the agent's call.
+                ours = (kind == "swap" or m.get("price_by") in (None, team)) and not m.get("forced")
                 go = bool(order and order["action"] == "accept") or (mode == "auto" and (agreed or (inside is True and ours)))
                 if not go:
                     if mode == "auto":
                         why = ("you set no limit for this card, so nothing says you take this price: accept, counter or pass"
                                if inside is None else
                                "the price on the table is outside your own limits: counter or pass" if inside is False else
+                               "the host proposed this trade by hand: accept, counter or pass" if m.get("forced") else
                                "the other team set this price: accept, counter or pass")
                         add("decide", m, why, msg({"action": "counter", "price": "<your price>"}), m["state"], price,
                             price=price, options=[{"action": "accept"}, {"action": "counter", "price": "<your price>"},

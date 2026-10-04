@@ -119,6 +119,14 @@ class QueueTest(unittest.TestCase):
         t, out = self.types("t07", on)
         self.assertEqual((t, out["waiting"][0]["match"]), ([], self.m["id"]))
 
+    def test_a_match_the_host_forced_is_always_the_agents_call(self):
+        forced = {**self.m, "forced": True, "basis": "forced"}
+        for team in ("t07", "t09"):                             # inside its limits, price nobody else chose: still decide
+            t, out = self.types(team, forced)
+            self.assertEqual(t, ["decide"], team)
+            self.assertIn("by hand", out["actions"][0]["why"])
+        self.assertEqual(self.types("t07", {**forced, "agreed": ["t07"]})[0], ["post_offer"])   # once it said yes
+
     def test_ack_done_failed_and_retry(self):
         _, out = self.types("t07")
         aid = out["actions"][0]["id"]

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -140,6 +141,10 @@ class Floor:
         rows = self.path.read_text(encoding="utf-8").splitlines()[-KEEP_FILE // 2:]
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        try:
+            shutil.copyfile(self.path, self.path.with_suffix(".bak"))  # the copy before the cut stays on disk
+        except OSError:
+            pass
         os.replace(tmp, self.path)
         self.lines = len(rows)
 
