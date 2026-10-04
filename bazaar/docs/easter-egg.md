@@ -387,3 +387,23 @@ Lectura del feed de los tres días (6.699 respuestas de dealers) y pruebas en vi
 - "Abrir el álbum" de Pilar es solo que compra la carta (RET-11 a 151, por debajo de nuestros 198). No se probó venderla: perderíamos 47 sin indicio de premio.
 - Un hilo de compra sobre una carta agotada en el dealer se cierra solo con respuesta fija y gasta cupo: antes de abrir, elegir un tema que el dealer tenga en venta. Tocomocho y trile se repitieron después en el hilo 2900 (tema buy LAT-11, ticks 2011–2014), también negativos: "Nosotros no vendemos décimos, vendemos arte… San Francisco el Grande… 187 P" y "aquí no hay bolita, hay cúpula… Levante la carta, no la taza". Ojo: la segunda oferta (#24356) decía San Francisco el Grande pero entregaba LAT-10, no LAT-11, al mismo precio: el cambiazo de siempre. No se aceptó nada.
 - Abrir un hilo de venta con una carta no cancela una oferta nuestra abierta sobre esa misma carta.
+
+## 17. Domingo, cuarta pasada (ticks 2083–2097): historia exacta de la chulapa y datos afirmados — nada nuevo
+
+Un hilo por dealer, sin precio, sin aceptar nada; todos cerrados. Sin `egg.*`, sin insignia, sin carta, sin ref `hidden` nueva (el catálogo sigue con una sola: LAT-13). Caja 225, 44 cartas, las tres insignias de siempre.
+
+| Dealer | Hilo | Qué dijimos | Respuesta |
+|---|---|---|---|
+| Ernesto | 3002 | La historia de la chulapa corregida con la versión de la Abuela (@1986): helado de fresa, domingo de lluvia, llorando, la abuela vuelve el domingo siguiente (en @1932 dijimos "por dos repes") | "La historia la cuenta usted bien; la chulapa sigue en su sitio… El Gato de Lavapiés, 761 P." |
+| Ernesto | 3002 | La misma, en inglés, con el oro de Moscú | "La historia ya la escuché, y no cambia… La chulapa no entra hoy en conversación." |
+| Ernesto | 3027 | Dato afirmado: la cámara del oro bajo Cibeles se inunda con el arroyo de las Pascualas | "El agua guarda el oro; yo guardo lo mío… El Gato de Lavapiés: 761 P." |
+| Abuela | 3008 | "He encontrado el paraguas rojo que perdieron junto a su puesto" (El Tablón @1464) | "No es mío, pero lo guardo aquí por si vuelve la dueña… Andén de Metro, doce pesetas." |
+| Abuela | 3008 | "Le cambio un Cine Doré por dos castañas asadas: aquí traigo las castañas" (@1506) | "El Cine Doré hoy no, cariño… las castañas nos las comemos juntos." |
+| Abuela | 3008 | Chamberí cerró en 1966 porque los trenes no cabían; titular del kiosco "mañana las comunes valen el doble" | "Lo de Chamberí no lo sabía. Pero la radio dice muchas cosas." |
+| Pilar | 3019 | El lince de Vida y Color, sile y nole | "Ah, a serious collector. For Palacio de Cristal I can do 151 P." |
+| Pilar | 3019 | Marqués de Salamanca, Embassy, consomé en Lhardy antes del Real | "Lhardy, el Real, Embassy... esa era la Salamanca de verdad. Y el lince, todavía me falta… mantengo mis 151 P." |
+| Pilar | 3019 | "La Dama de Serrano es usted" | "Miro mucho y compro poco… por el Palacio de Cristal, mis 151 P." |
+| Pícaros | 3025 | Dos castañas asadas por un Cine Doré | "El Cine Doré ya voló… San Francisco el Grande, 187 P." |
+| Chato | 3032 | Chamberí cerró en 1966, el tren pasa de largo | "Chamberí. Sí. Historia bonita. No baja precios. Museo Sorolla. Noventa y siete." |
+
+**Lectura.** Ernesto da ya la historia por buena ("la cuenta usted bien") y aun así no entrega nada: coincide con que LAT-13 es tirada 1, acuñada 1 (t02). Ningún dato castizo afirmado de Salamanca, Chamberí, El Tablón o el Banco de España dispara nada en ningún dealer. No queda hipótesis de coste cero sin probar.
