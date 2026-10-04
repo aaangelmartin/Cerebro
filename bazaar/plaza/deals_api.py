@@ -290,6 +290,8 @@ def card_view(board, ref: str, snap: dict, team: str | None) -> dict:
     out["deals"] = deals[-12:][::-1]
     out["reference_price"] = board.feed.team_prices().get(ref)      # None: no trade between teams yet
     out["possible_matches"] = possible[:20]
+    row = next((c for c in (snap.get("board") or {}).get("cards") or [] if c["ref"] == ref), None) or {}
+    out["minted"], out["print_run"] = row.get("minted"), row.get("print_run")     # copies out, of the print run
     you = _you(board, team, ref, snap)
     if you is not None:
         out["you"] = you

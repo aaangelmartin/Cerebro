@@ -21,7 +21,7 @@
     [/^\/plaza\/?$/, "landing"], [/^\/plaza\/connect$/, "connect"], [/^\/plaza\/how$/, "how"], [/^\/plaza\/agents$/, "agents"],
     [/^\/plaza\/(home|me)$/, "home"], [/^\/plaza\/(activity|floor)$/, "activity"], [/^\/plaza\/offers$/, "offers"],
     [/^\/plaza\/(?:offers|match)\/(m-[0-9a-f]{10})$/, "offers", (m) => ({ match: m[1] })],
-    [/^\/plaza\/cards$/, "cards"], [/^\/plaza\/(market|wall)$/, "market"], [/^\/plaza\/board$/, "board"],
+    [/^\/plaza\/cards$/, "cards"], [/^\/plaza\/(market|wall)$/, "market"], [/^\/plaza\/board$/, "board"], [/^\/plaza\/collections$/, "collections"],
     [/^\/plaza\/card\/([A-Z]{3}-\d{2})$/, "card", (m) => ({ ref: m[1] })],
     [/^\/plaza\/team\/(t\d{2})$/, "market", (m) => ({ team: m[1] })],
     [/^\/plaza\/settings$/, "settings"], [/^\/plaza\/suggest$/, "suggest"], [/^\/plaza\/docs$/, "docs"], [/^\/plaza\/_kit$/, "kit"],
@@ -30,7 +30,7 @@
     ? ["overview", "performance", "matchmaker", "trades", "teams", "activity", "suggestions", "venue", "docs"].map((n) => ({ name: n, path: "/plaza/admin/" + n, icon: { docs: "api", trades: "offers", suggestions: "suggest" }[n] || n }))
     : [{ name: "home", path: "/plaza/home", icon: "home" }, { name: "cards", path: "/plaza/cards", icon: "cards" },
        { name: "offers", path: "/plaza/offers", icon: "offers", badge: "trades" }, { name: "activity", path: "/plaza/activity", icon: "activity" },
-       { name: "market", path: "/plaza/market", icon: "market" }, { name: "board", path: "/plaza/board", icon: "performance" }, { name: "docs", path: "/plaza/docs", icon: "api" },
+       { name: "market", path: "/plaza/market", icon: "market" }, { name: "board", path: "/plaza/board", icon: "performance" }, { name: "collections", path: "/plaza/collections", icon: "cards" }, { name: "docs", path: "/plaza/docs", icon: "api" },
        { name: "agents", path: "/plaza/agents", icon: "doc" }, { name: "how", path: "/plaza/how", icon: "how" }];
 
   const screens = {};

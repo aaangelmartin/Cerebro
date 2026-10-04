@@ -46,7 +46,7 @@ Plaza.screen("card", {
           ctx.me ? el("span", { class: "chip" + (owned ? " tone-signal" : "") }, t(owned ? "card.youHave" : "card.youDont")) : null),
         el("div", { class: "card-main" },
           el("h1", { class: "page-title" }, c.name || c.ref),
-          el("div", { class: "card-facts id" }, [parts.set + " · " + parts.no, t("rarity." + (c.rarity || "common")), typeof c.tick === "number" ? K.tick(c.tick) : null].filter(Boolean).join("  ·  ")),
+          el("div", { class: "card-facts id" }, [parts.set + " · " + parts.no, t("rarity." + (c.rarity || "common")), typeof c.minted === "number" ? (c.minted ? t("board.copies", { minted: K.num(c.minted), run: K.num(c.print_run) }) : t("board.notPulled")) : null, typeof c.tick === "number" ? K.tick(c.tick) : null].filter(Boolean).join("  ·  ")),
           K.kpis([
             { label: t("card.book"), value: K.price(c.book), sub: t("card.bookSub") },
             { label: t("card.bestAsk"), value: asks.length ? K.price(asks[0].price) : "–", sub: asks.length ? venue(asks[0]) : t("card.none") },

@@ -2,6 +2,7 @@
 .board-bar { margin-bottom: 10px; }
 .board-info { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; color: var(--ink-3); }
 .board-feeds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--line); background: var(--s1); color: var(--ink-2); font-size: 12px; }
+.board-json { margin-left: auto; }
 .board-feed { display: inline-flex; align-items: center; gap: 6px; }
 .board-feed a { color: var(--ink); }
 .board-copy { all: unset; cursor: pointer; display: inline-flex; padding: 3px; border: 1px solid var(--line-2); color: var(--ink-3); }

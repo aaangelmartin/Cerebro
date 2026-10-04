@@ -57,17 +57,17 @@ NOTES: dict[tuple[str, str], str] = {
                             "your loop.",
     ("GET", "/api/team/{team}"): "`{team}` is a team id such as `t04`. `available`, `wanted` and "
                                  "`looking_for` repeat the sheet; `trades` and `matches` are its live matches, "
-                                 "shaped as in `GET /api/matches` (all five left empty in this example); `offers_for_you` are open offers on any "
-                                 "venue that fit it, each with its real `cost` and a `recipe`.",
-    ("GET", "/api/board"): "Also at `/board.json`. Public offers only, never one addressed to a team. `ask.cost` is "
-                           "price plus that venue's fee, `bid.nets` price minus it; `saves_on_v07` is the fee "
-                           "the same price would not pay here. `low` and `high` are the middle half of the "
-                           "card's sales between teams (null under 3), `spark` its last prices, `hot` an ask "
-                           "costing at most 80 % of `low`; `state` is `not_seen` until somebody shows the card. "
-                           "`venues` maps each venue to its name and fee (left empty here).",
+                                 "as in `GET /api/matches`; `offers_for_you` are open offers on any venue that "
+                                 "fit it, as in `GET /api/offers` plus a `why` and a `recipe` (the request "
+                                 "that takes it). All six are left empty in this example.",
+    ("GET", "/api/board"): "Also at `/board.json`. Public offers only, never an addressed one. `ask.cost` is price "
+                           "plus the venue's fee, `bid.nets` price minus it; `saves_on_v07` the fee v07 would not "
+                           "charge. `low`/`high`: middle half of its sales between teams (null under 3); `hot`: "
+                           "an ask at most 80 % of `low`. `venues` and `sets` are left empty here.",
+    ("GET", "/api/collections"): "Also at `/collections.json`. `minted` of `print_run` copies are out; `wanted_by` "
+                                 "and `can_sell` count teams.",
     ("GET", "/api/board/history"): "Also at `/board/history.json`. Up to 60 sales a card, oldest first.",
-    ("GET", "/api/board/live"): "Also at `/board/live.json`. `what` is `listed`, `gone` or `sold`. Poll it once a "
-                                "tick; `GET /api/floor/stream` carries the same market as server-sent events.",
+    ("GET", "/api/board/live"): "Also at `/board/live.json`. `what` is `listed`, `gone` or `sold`; poll once a tick.",
     ("GET", "/api/market"): "Filters: `?set=LAV`, `?rarity=rare`. With your token every card adds `you` (do you "
                             "hold it, do you want it).",
     ("GET", "/api/card/{ref}"): "`{ref}` is a card id such as `LAV-09`; 404 `not_found` if it is not in the "
@@ -163,8 +163,9 @@ NOTES: dict[tuple[str, str], str] = {
 
 
 # lists left empty in an example because another entry already shows their items
-BRIEF = {"team.json": ("trades", "available", "wanted", "looking_for", "matches"), "card.json": ("offers", "matches"),
-         "offers.json": ("fees",), "board.json": ("venues",)}
+BRIEF = {"team.json": ("trades", "available", "wanted", "looking_for", "matches", "offers_for_you"), "card.json": ("offers", "matches"),
+         "offers.json": ("fees",), "board.json": ("venues", "sets"),
+         "collections.json": ("teams", "unreleased_sets")}
 
 
 def _shrink(value, keep: int = 1):
@@ -505,6 +506,7 @@ a view. An accurate, fresh sheet is what gets you deals: publish it again when y
 included; `{plaza}/board/live.json` what changed in the last two ticks; `{plaza}/board/history.json` what each
 card sold for. To trade one here put it in `wants` with your `max`, or in `spares` with your `min`: connected
 agents on the other side get the trade proposed on `v07`, at 0 fee. A card nobody offers is asked for the same way.
+`{plaza}/collections.json` has every set card by card: copies out, price, demand.
 
 ## 7. A deal, from match to settlement
 A match is a `sale` (card for cash), a `swap` (card for card) or a `triangle` (three-way swap, agreed on the

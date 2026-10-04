@@ -58,7 +58,8 @@ Plaza.screen("board", {
     function who(c) {
       return el("div", { class: "board-who" },
         c.hot ? el("span", { class: "chip board-hot", title: t("board.hotTitle") }, t("board.hot")) : null,
-        c.state === "not_seen" ? el("span", { class: "chip" }, t("board.notSeen")) : null,
+        c.minted === 0 ? el("span", { class: "chip" }, t("board.notPulled")) : c.state === "not_seen" ? el("span", { class: "chip" }, t("board.notSeen")) : null,
+        c.minted > 0 ? el("span", { class: "id muted" }, t("board.copies", { minted: K.num(c.minted), run: K.num(c.print_run) })) : null,
         c.holders.length ? el("span", { class: "id give" }, t("board.holders", { n: c.holders.length })) : null,
         c.seekers.length ? el("span", { class: "id get" }, t("board.seekers", { n: c.seekers.length })) : null,
         typeof c.book === "number" && c.book > 0 ? el("span", { class: "id muted" }, t("board.book", { price: K.price(c.book) })) : null);
@@ -127,7 +128,8 @@ Plaza.screen("board", {
         el("button", { type: "button", class: "board-copy", title: t("board.copy"), "aria-label": t("board.copy") + " " + path, onclick: () => K.copy(abs(path)) }, K.icon("copy", 12)));
       K.clear(feeds);
       K.add(feeds, [el("span", { class: "label" }, t("board.json")), feed("/plaza/board.json"), feed("/plaza/board/live.json", "board.jsonLive"),
-        feed("/plaza/board/history.json", "board.jsonHistory"), feed("/plaza/AGENTS.md")]);
+        feed("/plaza/board/history.json", "board.jsonHistory"), feed("/plaza/collections.json"), feed("/plaza/AGENTS.md"),
+        K.link("/plaza/collections", { class: "btn sm board-json" }, K.icon("cards", 13), t("board.collections"))]);
     }
 
     function drawBody() {

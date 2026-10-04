@@ -72,10 +72,11 @@ ME_CARD_PATH = re.compile(r"/plaza/api/me/card/([A-Z]{3}-\d{2})")
 ME_TRADE_PATH = re.compile(r"/plaza/api/me/trade/(m-[0-9a-f]{10})")
 MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
 PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents"
-                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|_kit)")                                                              # deep links
+                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|collections|_kit)")                                                              # deep links
 BOARD_ALIASES = {"/plaza/board.json": "/plaza/api/board", "/plaza/board/history.json": "/plaza/api/board/history",
-                 "/plaza/board/live.json": "/plaza/api/board/live"}
-BOARD_VIEWS = {"/plaza/api/board": "board", "/plaza/api/board/history": "board_history", "/plaza/api/board/live": "board_live"}
+                 "/plaza/board/live.json": "/plaza/api/board/live", "/plaza/collections.json": "/plaza/api/collections"}
+BOARD_VIEWS = {"/plaza/api/board": "board", "/plaza/api/board/history": "board_history", "/plaza/api/board/live": "board_live",
+               "/plaza/api/collections": "collections"}
 TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)
 LOCAL_BASE = "http://127.0.0.1:8787/plaza"
 VERIFY_EVERY_S = 3.0
@@ -382,8 +383,9 @@ class Board:
             snap["board"], snap["board_history"] = prices.build(cat, snap["offers"], sales, sheets, fees, tick,
                                                                 self.record, snap["art"])
             snap["board_live"] = self.price_live.update(snap["offers"], sales, fees, tick)
+            snap["collections"] = prices.by_set(snap["board"], sheets)
         except Exception:  # noqa: BLE001 - the price board never takes the market down
-            snap["board"] = snap["board_history"] = snap["board_live"] = None
+            snap["board"] = snap["board_history"] = snap["board_live"] = snap["collections"] = None
         with self.lock:
             self.snap = snap
         self.save_hours()

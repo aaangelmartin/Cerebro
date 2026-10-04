@@ -64,6 +64,9 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 10,
+   "page": true,
+   "minted": 24,
+   "print_run": 300,
    "art": "/plaza/art/LAT-01.svg",
    "ask": {
     "price": 8,
@@ -78,7 +81,7 @@
     "saves_on_v07": 1
    },
    "bid": null,
-   "asks": 2,
+   "asks": 1,
    "bids": 0,
    "last": 8,
    "last_tick": 904,
@@ -95,7 +98,6 @@
     8
    ],
    "holders": [
-    "t06",
     "t09"
    ],
    "seekers": [
@@ -112,32 +114,24 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 25,
+   "page": true,
+   "minted": 19,
+   "print_run": 90,
    "art": "/plaza/art/LAT-08.svg",
-   "ask": {
-    "price": 30,
-    "fee": 2,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t06",
-    "offer": 20123,
-    "expires_tick": 1446,
-    "on_v07": false,
-    "cost": 32,
-    "saves_on_v07": 2
-   },
+   "ask": null,
    "bid": {
-    "price": 5,
-    "fee": 1,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t08",
-    "offer": 20266,
-    "expires_tick": 1455,
+    "price": 9,
+    "fee": 0,
+    "venue": "v15",
+    "venue_name": "Puesto de Team 15",
+    "team": "t05",
+    "offer": 20332,
+    "expires_tick": 1630,
     "on_v07": false,
-    "nets": 4,
-    "saves_on_v07": 1
+    "nets": 9,
+    "saves_on_v07": 0
    },
-   "asks": 1,
+   "asks": 0,
    "bids": 1,
    "last": 10,
    "last_tick": 1133,
@@ -151,11 +145,9 @@
     25,
     10
    ],
-   "holders": [
-    "t06"
-   ],
+   "holders": [],
    "seekers": [
-    "t08"
+    "t05"
    ],
    "moved": 10,
    "state": "in_play"
@@ -168,6 +160,9 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 10,
+   "page": true,
+   "minted": 27,
+   "print_run": 300,
    "art": "/plaza/art/LAT-02.svg",
    "ask": {
     "price": 8,
@@ -182,7 +177,7 @@
     "saves_on_v07": 1
    },
    "bid": null,
-   "asks": 2,
+   "asks": 1,
    "bids": 0,
    "last": 4,
    "last_tick": 648,
@@ -196,7 +191,6 @@
     4
    ],
    "holders": [
-    "t06",
     "t09"
    ],
    "seekers": [
@@ -214,6 +208,9 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 10,
+   "page": true,
+   "minted": 20,
+   "print_run": 300,
    "art": "/plaza/art/LAT-03.svg",
    "ask": {
     "price": 8,
@@ -260,6 +257,9 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 10,
+   "page": true,
+   "minted": 26,
+   "print_run": 300,
    "art": "/plaza/art/LAT-04.svg",
    "ask": {
     "price": 8,
@@ -274,7 +274,7 @@
     "saves_on_v07": 1
    },
    "bid": null,
-   "asks": 2,
+   "asks": 1,
    "bids": 0,
    "last": 4,
    "last_tick": 715,
@@ -288,7 +288,6 @@
     4
    ],
    "holders": [
-    "t06",
     "t09"
    ],
    "seekers": [
@@ -305,21 +304,24 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 10,
+   "page": true,
+   "minted": 23,
+   "print_run": 300,
    "art": "/plaza/art/LAT-05.svg",
    "ask": {
-    "price": 7,
+    "price": 8,
     "fee": 1,
     "venue": "rastro",
     "venue_name": "El Rastro",
-    "team": "t02",
-    "offer": 20250,
-    "expires_tick": 1462,
+    "team": "t09",
+    "offer": 20257,
+    "expires_tick": 1505,
     "on_v07": false,
-    "cost": 8,
+    "cost": 9,
     "saves_on_v07": 1
    },
    "bid": null,
-   "asks": 2,
+   "asks": 1,
    "bids": 0,
    "last": 5,
    "last_tick": 286,
@@ -333,7 +335,6 @@
     5
    ],
    "holders": [
-    "t02",
     "t09"
    ],
    "seekers": [
@@ -350,21 +351,13 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 25,
+   "page": true,
+   "minted": 16,
+   "print_run": 90,
    "art": "/plaza/art/LAT-06.svg",
-   "ask": {
-    "price": 30,
-    "fee": 2,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t06",
-    "offer": 20138,
-    "expires_tick": 1447,
-    "on_v07": false,
-    "cost": 32,
-    "saves_on_v07": 2
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": 20,
    "last_tick": 1303,
@@ -378,9 +371,7 @@
     20,
     20
    ],
-   "holders": [
-    "t06"
-   ],
+   "holders": [],
    "seekers": [
     "t16"
    ],
@@ -395,22 +386,25 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 25,
+   "page": true,
+   "minted": 18,
+   "print_run": 90,
    "art": "/plaza/art/LAT-07.svg",
-   "ask": {
-    "price": 30,
-    "fee": 2,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t06",
-    "offer": 20218,
-    "expires_tick": 1455,
+   "ask": null,
+   "bid": {
+    "price": 9,
+    "fee": 0,
+    "venue": "v15",
+    "venue_name": "Puesto de Team 15",
+    "team": "t05",
+    "offer": 20331,
+    "expires_tick": 1630,
     "on_v07": false,
-    "cost": 32,
-    "saves_on_v07": 2
+    "nets": 9,
+    "saves_on_v07": 0
    },
-   "bid": null,
-   "asks": 1,
-   "bids": 0,
+   "asks": 0,
+   "bids": 1,
    "last": 14,
    "last_tick": 1204,
    "low": 14,
@@ -425,10 +419,10 @@
     14,
     14
    ],
-   "holders": [
-    "t06"
+   "holders": [],
+   "seekers": [
+    "t05"
    ],
-   "seekers": [],
    "moved": 13,
    "state": "in_play"
   },
@@ -440,21 +434,13 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 180,
+   "page": false,
+   "minted": 2,
+   "print_run": 9,
    "art": "/plaza/art/LAT-11.svg",
-   "ask": {
-    "price": 247,
-    "fee": 13,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t16",
-    "offer": 20229,
-    "expires_tick": 1447,
-    "on_v07": false,
-    "cost": 260,
-    "saves_on_v07": 13
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": 160,
    "last_tick": 631,
@@ -467,9 +453,7 @@
    "spark": [
     160
    ],
-   "holders": [
-    "t16"
-   ],
+   "holders": [],
    "seekers": [
     "t08",
     "t14"
@@ -485,6 +469,9 @@
    "set_name": "La Latina",
    "color": "#F4A259",
    "book": 450,
+   "page": false,
+   "minted": 0,
+   "print_run": 3,
    "art": "/plaza/art/LAT-12.svg",
    "ask": null,
    "bid": null,
@@ -514,6 +501,9 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 10,
+   "page": true,
+   "minted": 28,
+   "print_run": 300,
    "art": "/plaza/art/LAV-02.svg",
    "ask": {
     "price": 10,
@@ -556,21 +546,13 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 10,
+   "page": true,
+   "minted": 30,
+   "print_run": 300,
    "art": "/plaza/art/LAV-04.svg",
-   "ask": {
-    "price": 10,
-    "fee": 2,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t08",
-    "offer": 20242,
-    "expires_tick": 1446,
-    "on_v07": false,
-    "cost": 12,
-    "saves_on_v07": 2
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": 9,
    "last_tick": 353,
@@ -583,9 +565,7 @@
    "spark": [
     9
    ],
-   "holders": [
-    "t08"
-   ],
+   "holders": [],
    "seekers": [],
    "moved": 4,
    "state": "in_play"
@@ -598,21 +578,13 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 10,
+   "page": true,
+   "minted": 26,
+   "print_run": 300,
    "art": "/plaza/art/LAV-05.svg",
-   "ask": {
-    "price": 9,
-    "fee": 1,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t08",
-    "offer": 20267,
-    "expires_tick": 1451,
-    "on_v07": false,
-    "cost": 10,
-    "saves_on_v07": 1
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": 4,
    "last_tick": 712,
@@ -628,9 +600,7 @@
     4,
     4
    ],
-   "holders": [
-    "t08"
-   ],
+   "holders": [],
    "seekers": [],
    "moved": 12,
    "state": "in_play"
@@ -643,21 +613,13 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 25,
+   "page": true,
+   "minted": 23,
+   "print_run": 90,
    "art": "/plaza/art/LAV-06.svg",
-   "ask": {
-    "price": 45,
-    "fee": 3,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t16",
-    "offer": 20231,
-    "expires_tick": 1447,
-    "on_v07": false,
-    "cost": 48,
-    "saves_on_v07": 3
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": null,
    "last_tick": null,
@@ -668,9 +630,7 @@
    "trend": null,
    "hot": false,
    "spark": [],
-   "holders": [
-    "t16"
-   ],
+   "holders": [],
    "seekers": [
     "t09",
     "t12",
@@ -687,21 +647,13 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 70,
+   "page": true,
+   "minted": 15,
+   "print_run": 30,
    "art": "/plaza/art/LAV-09.svg",
-   "ask": {
-    "price": 80,
-    "fee": 5,
-    "venue": "rastro",
-    "venue_name": "El Rastro",
-    "team": "t16",
-    "offer": 20230,
-    "expires_tick": 1447,
-    "on_v07": false,
-    "cost": 85,
-    "saves_on_v07": 5
-   },
+   "ask": null,
    "bid": null,
-   "asks": 1,
+   "asks": 0,
    "bids": 0,
    "last": null,
    "last_tick": null,
@@ -712,9 +664,7 @@
    "trend": null,
    "hot": false,
    "spark": [],
-   "holders": [
-    "t16"
-   ],
+   "holders": [],
    "seekers": [
     "t04",
     "t05",
@@ -733,6 +683,9 @@
    "set_name": "Lavapiés",
    "color": "#E4572E",
    "book": 450,
+   "page": false,
+   "minted": 0,
+   "print_run": 3,
    "art": "/plaza/art/LAV-12.svg",
    "ask": null,
    "bid": null,

@@ -74,6 +74,25 @@ def unreleased(record: Path) -> list[dict]:
             for s in cat.get("sets") or [] if isinstance(s, dict) and s.get("id") and not s.get("released", True)]
 
 
+def supply(record: Path | None) -> dict[str, dict]:
+    """ref -> {minted, print_run}: how many copies the game has handed out and how many it will ever print."""
+    if not record:
+        return {}
+    try:
+        cat = json.loads((Path(record) / "latest" / "catalog.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    cat = cat.get("data", cat) if isinstance(cat, dict) else {}
+    out = {}
+    for s in cat.get("sets") or []:
+        if not isinstance(s, dict) or not s.get("released", True):
+            continue
+        for c in s.get("cards") or []:
+            if isinstance(c, dict) and c.get("id") and not c.get("hidden"):
+                out[c["id"]] = {"minted": c.get("minted"), "print_run": c.get("print_run")}
+    return out
+
+
 def _side(o: dict, fees: dict) -> dict:
     v = fees.get(o.get("venue")) or {}
     return {"price": o["price"], "fee": o.get("fee") or 0, "venue": o.get("venue"),
@@ -105,6 +124,7 @@ def build(cat: dict, offers: list[dict], sales, sheets: dict, fees: dict, tick, 
     moved: dict[str, int] = {}
     for s in sales:
         moved[s["ref"]] = moved.get(s["ref"], 0) + 1
+    copies = supply(record)
     cards, history, sets = [], {}, {}
     for ref in sorted(cat):
         c = cat[ref]
@@ -122,10 +142,12 @@ def build(cat: dict, offers: list[dict], sales, sheets: dict, fees: dict, tick, 
             bid = {**_side(b[0], fees), "nets": b[0]["price"] - (b[0].get("fee") or 0)}
             bid["saves_on_v07"] = bid["fee"] if not bid["on_v07"] else 0
         hot = bool(ask and st["low"] and ask["cost"] <= HOT * st["low"])
-        seen = bool(mine or moved.get(ref) or holders.get(ref) or a)
+        made = copies.get(ref) or {}
+        seen = bool(mine or moved.get(ref) or holders.get(ref) or a or made.get("minted"))
         cards.append({
             "ref": ref, "name": c.get("name") or ref, "rarity": c.get("rarity"), "set": c.get("set") or ref[:3],
             "set_name": c.get("set_name"), "color": c.get("color"), "book": c.get("book"),
+            "page": bool(c.get("page", True)), "minted": made.get("minted"), "print_run": made.get("print_run"),
             "art": f"/plaza/art/{ref}.svg" if art and ref in art else None,
             "ask": ask, "bid": bid, "asks": len(a), "bids": len(b),
             "last": st["last"], "last_tick": st["last_tick"], "low": st["low"], "median": st["median"],
@@ -177,3 +199,28 @@ class Live:
         since = (tick or 0) - LIVE_TICKS + 1
         return {"tick": tick, "venue": VENUE, "since_tick": since, "stream": "/plaza/api/floor/stream",
                 "events": [e for e in self.events if (e.get("tick") or 0) >= since]}
+
+
+def by_set(live: dict, sheets: dict) -> dict:
+    """The board by set: each card's supply, price and demand, the scarcest and the most wanted of the set, and
+    what the game shows of every team's album. Demand is a count; whose page a card would finish is never said."""
+    by: dict[str, list[dict]] = {}
+    for c in live.get("cards") or []:
+        by.setdefault(c["set"], []).append({
+            "ref": c["ref"], "name": c["name"], "rarity": c["rarity"], "color": c.get("color"), "art": c.get("art"),
+            "page": c.get("page"), "minted": c.get("minted"), "print_run": c.get("print_run"), "state": c["state"],
+            "ask": (c.get("ask") or {}).get("cost"), "bid": (c.get("bid") or {}).get("nets"), "last": c.get("last"),
+            "can_sell": len(c.get("holders") or []), "wanted_by": len(c.get("seekers") or [])})
+    sets = []
+    for s in live.get("sets") or []:
+        cards = by.get(s["id"], [])
+        known = [c for c in cards if isinstance(c.get("minted"), int)]
+        sets.append({**s, "released": True, "cards": cards, "total": len(cards),
+                     "in_play": sum(1 for c in cards if c["state"] == "in_play"),
+                     "scarcest": [c["ref"] for c in sorted(known, key=lambda c: (c["minted"], c["ref"]))[:3]],
+                     "most_wanted": [c["ref"] for c in sorted(cards, key=lambda c: (-c["wanted_by"], c["ref"]))[:3]
+                                     if c["wanted_by"]]})
+    teams = [{"team": t, "name": s.get("name"), "album": s.get("album"), "pages": s.get("pages")}
+             for t, s in sorted((sheets or {}).items()) if not s.get("host") and (s.get("album") or s.get("pages") is not None)]
+    return {"tick": live.get("tick"), "venue": VENUE, "sets": sets,
+            "unreleased_sets": live.get("unreleased_sets") or [], "teams": teams}

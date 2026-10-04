@@ -92,6 +92,50 @@ class BoardTest(unittest.TestCase):
             self.assertEqual(live["unreleased_sets"][0]["name"], "Chamberí")
             self.assertNotIn("CHA-01", json.dumps(live))
 
+    def test_a_set_released_during_the_day_shows_up_with_its_new_rarity_and_exact_copies(self):
+        from bazaar.plaza import public
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "latest").mkdir()
+            path = Path(d) / "latest" / "catalog.json"
+            cha = {"id": "CHA", "name": "Chamberí", "released": False, "cards": [
+                {"id": "CHA-06", "name": "Estación de Chamberí", "rarity": "uncommon", "minted": 0, "print_run": 90, "page": True},
+                {"id": "CHA-11", "name": "Museo Sorolla", "rarity": "epic", "minted": 0, "print_run": 9, "page": False}]}
+            sal = {"id": "SAL", "name": "Salamanca", "released": True, "cards": [{"id": "SAL-10", "name": "Museo", "rarity": "rare", "minted": 4, "print_run": 40}]}
+            path.write_text(json.dumps({"sets": [sal, cha]}))
+            live, _ = prices.build(public.catalog(Path(d)), [], [], {}, FEES, 1, Path(d))
+            self.assertEqual(([s["id"] for s in live["unreleased_sets"]], [c["ref"] for c in live["cards"]]), (["CHA"], ["SAL-10"]))
+            cha["released"], cha["cards"][0]["minted"] = True, 3            # the game releases it and hands three copies out
+            path.write_text(json.dumps({"sets": [sal, cha]}))
+            live, _ = prices.build(public.catalog(Path(d)), [], [], {}, FEES, 2, Path(d))    # read again at every build
+            self.assertEqual(live["unreleased_sets"], [])                    # a released set is never called unreleased
+            by = {c["ref"]: c for c in live["cards"]}
+            self.assertEqual((by["CHA-06"]["rarity"], by["CHA-06"]["minted"], by["CHA-06"]["print_run"], by["CHA-06"]["state"]), ("uncommon", 3, 90, "in_play"))
+            self.assertEqual((by["CHA-11"]["page"], by["CHA-11"]["minted"], by["CHA-11"]["state"]), (False, 0, "not_seen"))
+            self.assertEqual([s["id"] for s in prices.by_set(live, {})["sets"]], ["CHA", "SAL"])
+
+
+class CollectionsTest(unittest.TestCase):
+    def test_sets_carry_supply_price_and_demand_as_counts_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "latest").mkdir()
+            (Path(d) / "latest" / "catalog.json").write_text(json.dumps({"sets": [{"id": "SAL", "name": "Salamanca", "cards": [
+                {"id": "SAL-10", "minted": 4, "print_run": 40}]}, {"id": "LAV", "cards": [{"id": "LAV-11", "minted": 0, "print_run": 8}]}]}))
+            sheets = {"t02": {"name": "Team 2", "album": "31/60", "pages": 2, "spares": [], "for_sale": [],
+                              "wants": [{"ref": "SAL-10", "finishes_page": True}]},
+                      "t10": {"host": True, "name": "Team 10", "album": "50/60", "pages": 3, "spares": [], "for_sale": [], "wants": []}}
+            live, _ = prices.build(CAT, [offer(1, "t04", "ask", "SAL-10", 60, "rastro", fee=4)], [], sheets, FEES, 9, Path(d))
+            out = prices.by_set(live, sheets)
+        sal = next(s for s in out["sets"] if s["id"] == "SAL")
+        card = sal["cards"][0]
+        self.assertEqual((card["minted"], card["print_run"], card["ask"], card["wanted_by"], card["can_sell"]), (4, 40, 64, 1, 1))
+        self.assertEqual((sal["scarcest"], sal["most_wanted"]), (["SAL-10"], ["SAL-10"]))
+        lav = next(c for c in live["cards"] if c["ref"] == "LAV-11")
+        self.assertEqual((lav["minted"], lav["state"]), (0, "not_seen"))
+        self.assertEqual(out["teams"], [{"team": "t02", "name": "Team 2", "album": "31/60", "pages": 2}])   # the host is not listed
+        text = json.dumps(out)
+        self.assertNotIn("finishes_page", text)                    # whose page a card would finish is never said
+        self.assertNotIn('"seekers"', text)                        # demand is a count here, not a list of teams
+
 
 class RecordedFeedTest(unittest.TestCase):
     """Against Saturday's recorded feed, when this checkout has it."""

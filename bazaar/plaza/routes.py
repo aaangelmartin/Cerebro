@@ -44,6 +44,8 @@ ROUTES: list[Route] = [
       "board_history.json", "board", "shell", True),
     R("GET", "/api/board/live", "anyone", "What changed in the last two ticks: public offers listed or gone, and "
       "sales.", None, "board_live.json", "board", "shell", True),
+    R("GET", "/api/collections", "anyone", "Every set card by card: copies handed out, price, how many teams "
+      "want it; and each team's album as the game shows it.", None, "collections.json", "collections", "shell", True),
     R("GET", "/api/offers", "anyone", "Open offers on every venue with their real cost.", None, "offers.json",
       "market", "shell", True),
     R("GET", "/api/matches", "anyone", "Live matches, by priority.", None, "matches.json", "activity", "shell", True),
