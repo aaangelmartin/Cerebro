@@ -17,7 +17,7 @@ from pathlib import Path
 from .store import TEAM_RX, write_atomic
 
 KINDS = ("connect", "sync", "limits", "queue", "ack", "message", "match", "offer", "settle", "order", "settings",
-         "suggestion")
+         "suggestion", "warning")
 BY = ("agent", "human", "market")
 EXTRA = {"match": r"m-[0-9a-f]{10}", "ref": r"[A-Z]{3}-\d{2}"}
 TEXT_MAX = 200

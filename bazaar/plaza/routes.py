@@ -112,7 +112,8 @@ ROUTES: list[Route] = [
     R("GET", "/admin/api/openapi", "admin", "This list with the panel's routes, for machines.", None, None,
       "admin docs", "shell", True),
     R("POST", "/admin/api/action", "admin", "One of our switches: on, off, refresh, pause, resume, hide, unhide, block, unblock, "
-      "exclude, include, force, expire, suggestion.", {"action": "pause"}, None, "admin", "B2", True),
+      "exclude, include, force, expire, suggestion, reset_team (a team connects again from nothing), forgive "
+      "(take a strike back), unban, ban, strikes (the rule: on, limit).", {"action": "pause"}, None, "admin", "B2", True),
 ]
 
 

@@ -7,6 +7,12 @@
     GET  /plaza/admin/api/suggestions    every suggestion
     GET  /plaza/admin/api/venue          the venue as the game shows it
     POST /plaza/admin/api/action         {"action": "suggestion", "id", "status", "reply"}
+                                         {"action": "forgive", "team", "strike"?}   take a strike back
+                                         {"action": "unban", "team"} / {"action": "ban", "team", "reason"?}
+                                         {"action": "strikes", "on"?, "limit"?, "accepter"?}   the rule itself
+
+Strikes (strikes.py): `teams` carries each team's `standing`, and `teams` and `performance` carry `strikes`, every
+strike with its evidence.
 
 The panel never sees a private limit: only "limits set" and "the two limits overlap", yes or no."""
 from __future__ import annotations
@@ -116,7 +122,9 @@ def teams_view(board, snap: dict) -> dict:
     paused = deals_api._paused(board)
     for t in teams:
         t["paused"] = t["team"] in paused
-    return {"tick": snap.get("tick"), "teams": teams, "connected": sum(1 for t in teams if t["connected"]),
+        t.setdefault("standing", board.strikes.summary(t["team"]))
+    return {"tick": snap.get("tick"), "teams": teams, "strikes": board.strikes.view(),
+            "connected": sum(1 for t in teams if t["connected"]),
             "agents": sum(1 for t in teams if t["agent"]), "verified": sum(1 for t in teams if t["verified"]),
             "online": sum(1 for t in teams if t["online"])}
 
@@ -162,7 +170,19 @@ def get(h, path: str, q: dict, snap: dict) -> bool:
         h._json(200, status_view(board, snap))
         return True
     if path == "/plaza/admin/api/performance":
-        h._json(200, deals_api._perf(board).performance(board, snap))
+        out = deals_api._perf(board).performance(board, snap)
+        view = board.strikes.view()
+        alerts = [{"kind": "strike", "tick": e.get("tick"),
+                   "text": (f"{e['team']} is banned: {e.get('strikes')} matched trades closed elsewhere. Talk to the "
+                            "team in person; lift it on Teams if it was a mistake."
+                            if e["kind"] == "banned" else
+                            f"{e['team']} got warning {e.get('strikes')} of {e.get('limit')}: {e.get('card')} closed "
+                            f"on {e.get('venue')}. Talk to the team; forgive it on Teams if it was a mistake."
+                            if e["kind"] == "warning" else
+                            f"{e.get('card')} between {' and '.join(e.get('teams') or [])} closed on {e.get('venue')} "
+                            "and the feed does not say who posted the offer: nobody was struck.")}
+                  for e in view["log"] if e.get("kind") in ("warning", "banned", "unknown")][:3]
+        h._json(200, {**out, "strikes": view, "alerts": alerts + list(out.get("alerts") or [])})
         return True
     if path == "/plaza/admin/api/trades":
         raw = deals_api.query(h)
@@ -187,6 +207,31 @@ def get(h, path: str, q: dict, snap: dict) -> bool:
 
 def action(h, action: str, body: dict) -> dict | None:
     """One of our panel's actions; None when it is not one of this module's."""
+    strikes = h.board.strikes
+    if action in ("forgive", "unban", "ban", "strikes"):
+        if action == "strikes":
+            if set(body) - {"action", "on", "limit", "accepter"}:
+                raise PlazaError(400, "bad_request", "send on (true, false), limit (1 to 9) or accepter (true, false)")
+            out = {"strikes": strikes.configure(body.get("on"), body.get("limit"), body.get("accepter"))}
+        elif action == "forgive":
+            if set(body) - {"action", "team", "strike"}:
+                raise PlazaError(400, "bad_request", "send team and, to name one, strike")
+            out = {"team": body.get("team"), "standing": strikes.forgive(body.get("team"), body.get("strike"))}
+        elif action == "unban":
+            if set(body) - {"action", "team"}:
+                raise PlazaError(400, "bad_request", "send team")
+            out = {"team": body.get("team"), "standing": strikes.unban(body.get("team"))}
+        else:
+            if set(body) - {"action", "team", "reason"}:
+                raise PlazaError(400, "bad_request", "send team and, if you like, reason")
+            out = {"team": body.get("team"), "standing": strikes.ban(body.get("team"), body.get("reason"),
+                                                                    h.board.snap.get("tick"))}
+        if body.get("team"):
+            deals_api.note(h.board, body["team"], "warning", {"forgive": "the host took one warning back",
+                           "unban": "the host let your team back in: one warning stays",
+                           "ban": "the host closed the market to your team"}[action], by="market")
+        h.board.rebuild()
+        return out
     if action != "suggestion":
         return None
     unknown = set(body) - {"action", "id", "status", "reply"}

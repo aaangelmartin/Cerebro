@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import admin_api, connect as connect_mod, deals as deals_mod, deals_api, matcher, private, public, routes, \
-    status as status_mod, team_api
+    status as status_mod, strikes as strikes_mod, team_api
 from .agentq import AgentQ
 from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
@@ -55,6 +55,7 @@ TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8
 STATIC_RX = re.compile(r"/plaza/static/((?:(?:screens|i18n|fixtures|fixtures/admin)/)?[a-z0-9_]{1,40}\.(js|css|json))")
 ADMIN_STATIC_RX = re.compile(r"/plaza/admin/static/screens/([a-z0-9_]{1,40}\.(js|css))")     # web/admin/<name>
 ADMIN_PAGE = re.compile(r"/plaza/admin/(?:overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs)")
+STANDING_PATHS = ("/plaza/api/me", "/plaza/api/status", "/plaza/api/agent/next")   # answers that carry `standing`
 EXTENSIONS = (team_api, deals_api)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
@@ -144,6 +145,7 @@ class Board:
         self.deals = Deals(self.live / "plaza_matches.json", VENUE)
         self.vault = private.Vault(private_dir or self.live.parent / "plaza_private")
         self.queue = AgentQ(self.live / "plaza_agentq.json")
+        self.strikes = strikes_mod.Strikes(self.live / "plaza_strikes.json", VENUE, NAME, host)
         self.hourly: dict[str, dict] = self._load_hours()
         self.verified_at = 0.0
         self.art: tuple[float, dict] = (0.0, {})
@@ -340,8 +342,13 @@ class Board:
         tick = self.feed.tick or report.get("tick")
         admin = self.store.admin()
         if hasattr(deals_api, "candidates") and hasattr(deals_api, "sync"):     # the deals fork's own rules
-            cands = deals_api.candidates(self, sheets, cat)
+            out = self.strikes.banned_teams()               # a banned team is in no match, new or live
+            cands = [c for c in deals_api.candidates(self, sheets, cat) if not out & set(deals_mod.parties(c))]
             events = deals_api.sync(self, cands, tick, admin)
+            try:
+                self._strikes(events)
+            except Exception:  # noqa: BLE001 - the rule never takes the board down
+                pass
         else:
             cands = matcher.find(sheets, cat, self.host, VENUE)
             events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
@@ -360,6 +367,49 @@ class Board:
             self.snap = snap
         self.save_hours()
         return snap
+
+    def _strikes(self, events: list[dict]) -> None:
+        """A trade we proposed closed on another venue: the team that posted the offer there is struck
+        (strikes.py has the rule). The maker comes from the game's feed only; when it does not say, nobody is."""
+        for e in events:
+            if e.get("kind") != "match" or e.get("state") != "settled_elsewhere" or e.get("match_kind") == "triangle":
+                continue
+            rec = self.deals.matches.get(e["match"]) or {}
+            teams = [t for t in (e.get("team"), e.get("to")) if t]
+            venue, tick = rec.get("settled_venue") or "another venue", e.get("tick") or 0
+            refs = {r for r in (e.get("ref"), e.get("ref_back")) if r}
+            born = rec.get("proposed_tick") or 0
+            maker = offer = made = None
+            for o in reversed(self.feed.venue_log):            # the addressed offer between the two, on that venue
+                if o.get("t") == "listed" and o.get("venue") == venue and {o.get("maker"), o.get("to")} == set(teams) \
+                        and (o.get("ref") in refs or o.get("ref_back") in refs) and (o.get("tick") or 0) <= tick:
+                    maker, offer, made = o["maker"], o.get("id"), o.get("tick") or 0
+                    break
+            if maker is None:                                  # or the public offer of one of them that the other took
+                mine = [o for o in self.feed.offers.values() if o.get("venue") == venue and o.get("maker") in teams
+                        and not o.get("to") and (o.get("ref") in refs or o.get("ref_back") in refs)
+                        and (o.get("created_tick") or 0) <= tick]
+                if len({o["maker"] for o in mine}) == 1:
+                    o = max(mine, key=lambda o: o.get("created_tick") or 0)
+                    maker, offer, made = o["maker"], o.get("id"), o.get("created_tick") or 0
+            declared, conn = self.store.declared(), self.connect.overview()
+            proved = {t for t in teams if (declared.get(t) or {}).get("verified")}
+            spoke = {m.get("team") for m in rec.get("messages") or []} | set(rec.get("agreed") or [])
+            saw = {t for t in teams if t in spoke
+                   or ((conn.get(t) or {}).get("agent_last_seen") or 0) >= (rec.get("proposed") or float("inf"))}
+            for r in self.strikes.record(f"{e['match']}|{rec.get('settlement') or tick}", match=e["match"],
+                                         ref=e.get("ref"), venue=venue, tick=tick, parties=teams, maker=maker,
+                                         verified=proved, saw=saw, settlement=rec.get("settlement"), offer=offer,
+                                         predates=made is not None and made < born):
+                self.hour("strike_" + r["kind"])
+                if r["kind"] in ("warning", "banned"):
+                    deals_api.note(self, r["team"], "warning", self.strikes.standing(r["team"])["message"] or "",
+                                   match=e["match"], ref=e.get("ref"), tick=tick)
+                elif r["kind"] == "notice":
+                    deals_api.note(self, r["team"], "warning", f"{r['card']} with {r['with']} was closed on "
+                                   f"{r['venue']}, not on {VENUE}: it did not count here. The team that posted the "
+                                   "offer there got a warning; yours did not.", match=e["match"], ref=e.get("ref"),
+                                   tick=tick)
 
     def stale(self) -> None:
         with self.lock:
@@ -586,6 +636,7 @@ class Board:
                           "last_sync": (d.get("declared") or {}).get("updated"),
                           "declared_at": (d.get("declared") or {}).get("updated"), "last_seen": d.get("seen"),
                           "last_post": last_post.get(team), "blocked": team in admin["blocked"],
+                          "standing": self.strikes.summary(team),
                           "wants": len(s["wants"]), "available": len(s["spares"]) + len(s["for_sale"]),
                           "matches": len(matcher.for_team(snap["matches"], team))})
         pairs = {(m["seller"], m["buyer"], m["ref"]) for m in snap["matches"] if m["kind"] == "sale"}
@@ -621,8 +672,10 @@ class Board:
         """The team's agent asks what to do next."""
         mine = matcher.for_team(snap["matches"], team)
         declared = ((self.store.declared().get(team) or {}).get("declared") or {}).get("updated")
-        return self.queue.build(team, mine, lambda ref, role, price: self.vault.within(team, ref, role, price),
-                                declared, snap["tick"], self.tick_seconds())
+        out = self.queue.build(team, mine, lambda ref, role, price: self.vault.within(team, ref, role, price),
+                               declared, snap["tick"], self.tick_seconds())
+        out["actions"] = self.strikes.actions(team) + out["actions"]      # a warning is read before anything else
+        return out
 
     def hours(self, last: int = 24) -> list[dict]:
         with self.lock:
@@ -803,6 +856,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, status: int, obj, cors: bool = False) -> None:
+        if status == 200 and isinstance(obj, dict) and obj.get("team") and self.command in ("GET", "HEAD") \
+                and urlparse(self.path).path in STANDING_PATHS and obj.get("verified") is not False:
+            obj = {**obj, "standing": self.board.strikes.standing(obj["team"])}     # the team's own warnings
         self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8", cors=cors)
 
     def _error(self, status: int, code: str, message: str) -> None:
@@ -855,6 +911,14 @@ class Handler(BaseHTTPRequestHandler):
             return False                                # never through a public hostname: our own machine only
         return bool(self.board.token) and hmac.compare_digest(given, self.board.token)
 
+    def _gate(self, team: str) -> str:
+        """A banned team is told so on every route but the two that explain it."""
+        if self.board.strikes.banned(team) and not (
+                self.command in ("GET", "HEAD") and urlparse(self.path).path in strikes_mod.ALLOWED_WHEN_BANNED):
+            raise PlazaError(403, "banned", self.board.strikes.standing(team)["message"]
+                             + " GET /plaza/api/me shows why.")
+        return team
+
     def _agent(self, need_proof: bool = True) -> tuple[str, bool]:
         """(team, verified) of the agent token. Until the team proved itself in the game the token only learns
         that it has to: it reads nothing of the team and writes nothing in its name."""
@@ -871,7 +935,7 @@ class Handler(BaseHTTPRequestHandler):
             team, verified = self.board.connect.auth(token)
         if need_proof and not verified:
             raise PlazaError(403, "prove_first", connect_mod.PROVE_FIRST)
-        return team, verified
+        return self._gate(team), verified
 
     def _actor(self, team: str | None = None) -> tuple[str, bool, bool]:
         """Who writes: (team, verified, by token). An agent token from the connection flow, or the team PIN."""
@@ -889,7 +953,7 @@ class Handler(BaseHTTPRequestHandler):
         if not rec.get("pin_proved"):                   # a PIN anybody could have set: nothing in the team's name
             raise PlazaError(403, "prove_first", "prove the claim first: send its code as text in a game thread "
                                                  f"with {HOST}, with your own game key")
-        return team, True, False
+        return self._gate(team), True, False
 
     def _session(self, q: dict) -> str | None:
         """The browser's connection session: its cookie. (`?session=` is read for /api/connect/status only, where
@@ -908,7 +972,7 @@ class Handler(BaseHTTPRequestHandler):
         st = self._status(q)
         if not st["verified"]:
             raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
-        return st["team"]
+        return self._gate(st["team"])
 
     def _status(self, q: dict) -> dict:
         board = self.board
@@ -1287,7 +1351,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
                 self.board.hour("agent_acks")
-                return self._json(200, self.board.queue.ack(team, body.get("id"), body.get("status"), body.get("note")))
+                out = self.board.queue.ack(team, body.get("id"), body.get("status"), body.get("note"))
+                self.board.strikes.ack(team, body.get("id"))       # a warning it has now read
+                return self._json(200, out)
             for ext in EXTENSIONS:
                 if ext.write(self, self.command, path, body):
                     return
