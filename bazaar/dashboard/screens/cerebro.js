@@ -15,6 +15,11 @@
   const add = (node, ...kids) => { for (const k of kids.flat(Infinity)) if (k !== null && k !== undefined && k !== false) node.append(k); return node; };
 
   const tr = (k, v) => window.I18N.t(k, v);
+  // A finding's evidence is a string, a list, or (deep research) an object {brief, files, ...}: show its words.
+  const evText = (e) => (e === null || e === undefined || e === "" ? "" : typeof e === "string" ? e
+    : Array.isArray(e) ? e.map(evText).filter(Boolean).join(" · ")
+      : typeof e === "object" ? (e.brief || e.text || e.summary || Object.entries(e).map(([k, v]) => k + ": " + (typeof v === "object" ? JSON.stringify(v) : v)).join(" · "))
+        : String(e));
   // labels in the tables below are i18n keys, resolved with tr() when rendered
   const DOMAINS = [["market", "cerebro.domain.market", "mercado"], ["dealers", "cerebro.domain.dealers", "dealer"], ["duels", "cerebro.domain.duels", "duelo"], ["broker", "cerebro.domain.broker", "flask"]];
   // finding topics: label, icon, colour
@@ -266,7 +271,7 @@
     const st = S.fbState || { types: null, q: "" };
     const q = (st.q || "").toLowerCase();
     const rows = (S.findAll || []).filter((r) => (!st.types || st.types.has(TOPICS[r.topic] ? r.topic : "general"))
-      && (!q || `${r.finding || ""} ${r.evidence || ""} ${r.fix || ""}`.toLowerCase().includes(q)));
+      && (!q || `${r.finding || ""} ${evText(r.evidence)} ${r.fix || ""}`.toLowerCase().includes(q)));
     if (!rows.length) { U().keyedList(host, [], { key: () => "", render: () => el("div"), tail: [U().empty(S.findAll && S.findAll.length ? tr("cerebro.find.noMatch") : tr("cerebro.find.empty"))] }); return; }
     U().keyedList(host, rows.slice(0, 150), {
       key: (r) => (r.ts || 0) + "|" + (r.topic || "") + "|" + (r.finding || "").slice(0, 40), sig: () => "",
@@ -274,7 +279,7 @@
         { v: el("span", { class: "num" }, when(r.ts)), cls: "cb-time" },
         topicChip(r.topic),
         { v: el("div", {}, el("div", { class: "cb-rowt" }, r.finding || ""),
-          r.evidence ? el("div", { class: "cb-rows" }, tr("cerebro.find.evidence", { text: r.evidence })) : null,
+          evText(r.evidence) ? el("div", { class: "cb-rows" }, tr("cerebro.find.evidence", { text: evText(r.evidence) })) : null,
           r.fix ? el("div", { class: "cb-rows" }, tr("cerebro.find.fix", { text: r.fix })) : null), cls: "wrap" },
         r.doc ? planSource(r.doc) : U().sourceTag("opus"),
         statusChip(r.status || (r.doc ? planStatus(r.doc) : "visto"))] }),
