@@ -15,3 +15,7 @@
   .settings-row { flex-direction: column; align-items: flex-start; gap: 12px; }
   .settings-agent { justify-content: flex-start; }
 }
+
+.settings-other { margin-top: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.settings-url { font-family: var(--mono, monospace); font-size: 12px; border: 1px solid var(--line-2); background: var(--s2); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; max-width: 100%; }
+.settings-link { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; max-width: 100%; }

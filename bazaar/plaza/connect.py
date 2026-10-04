@@ -23,6 +23,8 @@ from .store import TEAM_RX, PlazaError, read_json, write_atomic
 HOST = "t10"
 CODE_TTL_S = 60 * 60.0             # teams take a while to hand the prompt to their agent
 SESSION_TTL_S = 12 * 3600.0
+LINK_TTL_S = 10 * 60.0                # a viewer link: one use, ten minutes
+LINKS_PER_TEAM = 5
 ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
 # Every team at the venue sits behind one public address, so an address is a whole room. Nothing here is counted
@@ -155,7 +157,7 @@ class Connect:
                 s.pop(sid, None)
 
     # ---- the flow
-    def start(self, team, client: str, tick: int | None = None) -> dict:
+    def start(self, team, client: str, tick: int | None = None, keep: str | None = None) -> dict:
         """A session and its code. `tick` is the game's tick now: only a game message from then on proves it."""
         team = self._team(team)
         with self.lock:
@@ -170,13 +172,17 @@ class Connect:
             for sid in mine[:max(0, len(mine) - SESSIONS_PER_TEAM + 1)]:
                 s.pop(sid, None)
             session, code = secrets.token_urlsafe(24), new_code()
+            old = s.get(_h(keep)) if isinstance(keep, str) and TOKEN_RX.fullmatch(keep) else None
+            kept = bool(old and old["team"] == team and old.get("verified") and not old.get("viewer")
+                        and old.get("expires", 0) >= now)        # this browser is already in as the team: it stays in
             s[_h(session)] = {"team": team, "code": code, "created": now, "code_expires": now + CODE_TTL_S,
+                              **({"browser": _h(keep)} if kept else {}),
                               "tick": tick if isinstance(tick, int) and not isinstance(tick, bool) else None,
                               "expires": now + SESSION_TTL_S, "agent_called": None, "token": None,
                               "verified": False, "connected": False}
             self._save()
             return {"team": team, "connect_code": code, "session": session, "code_expires_in": int(CODE_TTL_S),
-                    "session_expires_in": int(SESSION_TTL_S)}
+                    "session_expires_in": int(SESSION_TTL_S), "kept": kept}
 
     def agent(self, team, code, client: str, team_verified: bool, current: str | None = None) -> dict:
         """The agent's half: the code for a token. `team_verified` says the team already proved itself before.
@@ -263,12 +269,56 @@ class Connect:
                 self._activate(team, s[hit])
             else:                                              # whoever held the team before the proof is out; the
                 self.data["agents"].pop(team, None)            # proved session's agent takes over when it calls
+            stays = s[hit].get("browser")                      # the browser that was in and asked for this code
             for k in [k for k, v in s.items() if v["team"] == team and k != hit]:
-                s.pop(k, None)                                 # older sessions too: one proof, one way in
+                s.pop(k, None)                                 # older sessions and viewers too: one proof, one way in
+            if stays:                                          # (a code fished by someone else carries no browser of
+                s[stays] = dict(s[hit], code="", browser=None)  # ours: whoever was in before is out, as always)
             self._save()
             self._say(team, "connect", "proved a new code in the game: the agent connected before is out"
                       if replaced else "proved its code in the game")
             return True
+
+    def viewer_link(self, team: str) -> dict:
+        """A one-use code that opens a browser of this team to WATCH: asked by the team's proved agent or by a
+        browser that is in. It reads what the team reads and changes nothing."""
+        team = self._team(team)
+        with self.lock:
+            now = self.clock()
+            links = self.data.setdefault("links", {})
+            for k in [k for k, v in links.items() if v.get("expires", 0) < now]:
+                links.pop(k, None)
+            mine = sorted((k for k, v in links.items() if v["team"] == team), key=lambda k: links[k]["created"])
+            for k in mine[:max(0, len(mine) - LINKS_PER_TEAM + 1)]:
+                links.pop(k, None)
+            code = secrets.token_urlsafe(24)
+            links[_h(code)] = {"team": team, "created": now, "expires": now + LINK_TTL_S}
+            self._save()
+            return {"team": team, "code": code, "expires_in": int(LINK_TTL_S)}
+
+    def viewer_open(self, code) -> dict:
+        """The link, opened once: a session of the team that only looks. 403 when used, wrong or too old."""
+        with self.lock:
+            now = self.clock()
+            links = self.data.setdefault("links", {})
+            rec = links.pop(_h(code), None) if isinstance(code, str) and TOKEN_RX.fullmatch(code) else None
+            a = self.data["agents"].get((rec or {}).get("team")) or {}
+            if not rec or rec.get("expires", 0) < now or not a.get("verified"):
+                self._save()
+                raise PlazaError(403, "bad_link", "this link was used or is too old; ask your agent for a new one")
+            session = secrets.token_urlsafe(24)
+            self.data["sessions"][_h(session)] = {
+                "team": rec["team"], "code": "", "created": now, "code_expires": 0, "tick": None,
+                "expires": now + SESSION_TTL_S, "agent_called": now, "token": a.get("token"), "verified": True,
+                "connected": False, "viewer": True}
+            self._save()
+        self._say(rec["team"], "connect", "a viewer link was opened on another device")
+        return {"team": rec["team"], "session": session, "session_expires_in": int(SESSION_TTL_S)}
+
+    def is_viewer(self, session) -> bool:
+        with self.lock:
+            rec = self.session(session)
+            return bool(rec and rec.get("viewer"))
 
     def reset(self, team: str) -> dict:
         """Ours: forgets the team's agent and every session of it, so that it connects again from nothing."""
@@ -278,6 +328,8 @@ class Connect:
             for k in gone:
                 self.data["sessions"].pop(k, None)
             had = self.data["agents"].pop(team, None) is not None
+            for k in [k for k, v in (self.data.get("links") or {}).items() if v["team"] == team]:
+                self.data["links"].pop(k, None)
             self._save()
         self._say(team, "connect", "the host reset this team's connection: connect again")
         return {"team": team, "agent": had, "sessions": len(gone)}

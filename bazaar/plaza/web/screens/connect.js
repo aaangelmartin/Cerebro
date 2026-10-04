@@ -18,6 +18,10 @@
       const ticks = (seconds) => Math.max(1, Math.round(seconds / tickS));
 
       root.appendChild(K.pageHead(t("connect.title"), t("connect.sub")));
+      if (ctx.query.link === "expired") {                          // a viewer link that was used or ran out
+        root.appendChild(el("div", { class: "connect-result is-bad", role: "alert" }, el("div", { class: "connect-result-title" }, t("connect.linkExpired")),
+          el("div", null, t("connect.twoWays"))));
+      }
       const cols = root.appendChild(el("div", { class: "connect-cols" }));
       const colTeam = cols.appendChild(el("section", { class: "panel connect-step" }));
       const colPrompt = cols.appendChild(el("section", { class: "panel connect-step" }));
@@ -121,7 +125,7 @@
       function check(byHand) {
         if (!st.start || st.left) return Promise.resolve();
         if (byHand) { st.checking = true; drawReady(); }
-        return API.get("/api/connect/status").then((s) => {
+        return API.get("/api/connect/status" + (st.start.kept ? "?session=" + encodeURIComponent(st.start.session) : "")).then((s) => {
           const step = API.mock ? MOCK_STEPS[ctx.query.step] : null;      // mock only: the states before "connected"
           if (step) s = { ...s, connected: false, agent_called: false, verified: false, cards_listed: false, agent_online: false, ...step };
           st.status = s; st.checking = false;

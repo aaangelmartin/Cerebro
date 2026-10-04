@@ -1024,6 +1024,8 @@ class Handler(BaseHTTPRequestHandler):
         st = self._status(q)
         if not st["verified"]:
             raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
+        if self.command != "GET" and self.board.connect.is_viewer(self._session(q)):
+            raise PlazaError(403, "viewer", "this device only watches: it was opened with a viewer link")
         return self._gate(st["team"])
 
     def _status(self, q: dict) -> dict:
@@ -1079,6 +1081,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(429, "slow_down", f"too many requests; try again in {RETRY_S} seconds")
         if path.startswith("/plaza/admin"):
             return self._admin_get(path, {k: v[-1] for k, v in parse_qs(u.query).items()})
+        if path == "/plaza/view":                         # a viewer link: one use, then this browser watches its team
+            self.route = "view"
+            try:
+                out = self.board.connect.viewer_open((parse_qs(u.query).get("key") or [""])[-1])
+            except PlazaError:
+                where = "/plaza/connect?link=expired"
+            else:
+                secure = "; Secure" if "https" in (self.headers.get("X-Plaza-Proto"),
+                                                   self.headers.get("X-Forwarded-Proto")) else ""
+                self.extra = (("Set-Cookie", f"{COOKIE}={out['session']}; Path=/plaza; Max-Age="
+                                             f"{out['session_expires_in']}; HttpOnly; SameSite=Lax{secure}"),)
+                where = "/plaza/home"
+            self.send_response(302)
+            self.send_header("Location", where)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            for k, v in self.extra:
+                self.send_header(k, v)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path in ("/", "/plaza", "/plaza/") or PAGE_PATH.fullmatch(path):
             if path in ("/", "/plaza"):                   # on its own hostname the root is the landing page
                 self.send_response(302 if path == "/" else 301)
@@ -1378,6 +1401,16 @@ class Handler(BaseHTTPRequestHandler):
                 out["prove"] = (f"open a thread with {HOST} on El Rastro (venue rastro) and send the code as the message text; "
                                 "the sheet turns verified within a minute")
                 return self._json(200, out)
+            if self.command == "POST" and path == "/plaza/api/me/viewer-link":
+                self.route = "viewer_link"
+                if not isinstance(body, dict):
+                    raise PlazaError(400, "bad_request", "send a JSON object")
+                team = self.me_team()                             # the team's agent, or a browser that is in
+                self.board.team_limiter.take(team, "write")
+                link = self.board.connect.viewer_link(team)
+                base = public_url(self.board.live) or LOCAL_BASE
+                return self._json(200, {"team": team, "url": f"{base}/view?key={link['code']}", "expires_in": link["expires_in"],
+                                        "once": True, "can": "watch"})
             if self.command == "POST" and path in ("/plaza/api/connect/start", "/plaza/api/connect/agent"):
                 self.route = "connect"
                 if not isinstance(body, dict):
@@ -1386,7 +1419,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(team, str) or team not in public.TEAMS:
                     raise PlazaError(400, "bad_request", "team ids look like t04")
                 if path.endswith("/start"):
-                    out = self.board.connect.start(team, self._client(), self.board.now_tick(self.board.snap.get("tick")))
+                    out = self.board.connect.start(team, self._client(), self.board.now_tick(self.board.snap.get("tick")),
+                                                   keep=self._session({}))
                     base = public_url(self.board.live) or LOCAL_BASE
                     lang = body.get("lang") if body.get("lang") in ("en", "es") else "en"
                     try:
@@ -1396,9 +1430,10 @@ class Handler(BaseHTTPRequestHandler):
                     out["agents_md"], out["status"] = base + "/AGENTS.md", "/plaza/api/connect/status"
                     secure = "; Secure" if "https" in (self.headers.get("X-Plaza-Proto"),
                                                        self.headers.get("X-Forwarded-Proto")) else ""
-                    self.extra = (("Set-Cookie", f"{COOKIE}={out['session']}; Path=/plaza; Max-Age="
-                                                 f"{out['session_expires_in']}; HttpOnly; SameSite=Lax{secure}"),)
-                    self.board.hour("connect_start")
+                    if not out.get("kept"):               # a browser already in as this team keeps its own session:
+                        self.extra = (("Set-Cookie", f"{COOKIE}={out['session']}; Path=/plaza; Max-Age="   # the page
+                                                     f"{out['session_expires_in']}; HttpOnly; SameSite=Lax{secure}"),)
+                    self.board.hour("connect_start")              # follows the new code with ?session=
                     return self._json(200, out)
                 known = bool((self.board.store.declared().get(team) or {}).get("verified"))
                 out = self.board.connect.agent(team, body.get("code"), self._client(), known,

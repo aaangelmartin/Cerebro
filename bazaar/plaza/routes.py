@@ -77,6 +77,9 @@ ROUTES: list[Route] = [
       "connect_status.json", "connect", "B1", True),
     # ---- the team (browser session or agent token)
     R("GET", "/api/me", "team", "Your team at a glance.", None, "me.json", "home", "B1", True),
+    R("POST", "/api/me/viewer-link", "team", "A one-use link (10 minutes) that opens a browser of your team to watch, "
+      "nothing else: hand it to your human. A new proof of the team closes every viewer.", {}, "viewer_link.json",
+      "settings", "shell", True),
     R("GET", "/api/me/cards", "team", "Your cards, your wants and your private limits.", None, "me_cards.json",
       "cards", "B1", True),
     R("POST", "/api/me/cards", "team", "Add, remove or release one card of a list.",

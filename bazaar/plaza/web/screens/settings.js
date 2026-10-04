@@ -8,7 +8,22 @@ Plaza.screen("settings", {
     root.appendChild(K.pageHead(t("nav.settings"), K.teamName(ctx.me.team) + " · " + ctx.me.team));
     const body = root.appendChild(el("div", { class: "settings-list" }));
     body.appendChild(K.state("loading"));
+    const other = root.appendChild(el("section", { class: "panel settings-other" }));
+    other.appendChild(el("h2", { class: "panel-title" }, t("settings.other")));
+    other.appendChild(el("p", { class: "muted" }, t("settings.otherText")));
+    const linkBox = el("div", { class: "settings-link", role: "status" });
+    other.appendChild(K.btn(t("settings.otherBtn"), { icon: "arrow", onclick: () => {
+      K.clear(linkBox).appendChild(K.state("loading"));
+      API.post("/api/me/viewer-link", {}).then((d) => {
+        K.clear(linkBox);
+        linkBox.appendChild(el("pre", { class: "settings-url", tabindex: "0" }, d.url));
+        linkBox.appendChild(K.btn(t("settings.otherCopy"), { small: true, icon: "copy", onclick: () => K.copy(d.url, t("settings.otherCopied")) }));
+        linkBox.appendChild(el("p", { class: "muted" }, t("settings.otherOnce", { n: Math.round((d.expires_in || 600) / 60) })));
+      }, (e) => { K.clear(linkBox).appendChild(el("p", { class: "muted" }, (e && e.message) || t("common.error"))); });
+    } }));
+    other.appendChild(linkBox);
     root.appendChild(K.endpoint("GET /plaza/api/me/settings", "POST /plaza/api/me/settings", t("settings.agentToo")));
+    root.appendChild(K.endpoint("POST /plaza/api/me/viewer-link"));
 
     function change(patch) {
       if (st.busy) return;
