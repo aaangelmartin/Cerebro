@@ -107,6 +107,15 @@ class ReadersTest(unittest.TestCase):
         self.assertEqual(S.prompt_block("market", self.live), "")
         self.assertEqual(S.overlay({"a": 1}, self.live), {"a": 1})
 
+    def test_a_stale_plan_still_holds_back_its_reserved_cards(self):
+        _write_plan(self.live, {"priorities": ["x"], "reserved_refs": ["SAL-01", "SAL-05"],
+                                "pause_domains": ["dealers"]}, updated=time.time() - 5 * 3600)
+        self.assertIsNone(S.current(self.live))                          # the plan itself is gone: no pause, no orders
+        self.assertEqual(S.overlay({"armed": True}, self.live), {"armed": True})
+        self.assertEqual(S.reserved_refs(self.live), {"SAL-01", "SAL-05"})
+        _write_plan(self.live, {"priorities": ["y"], "reserved_refs": []})   # a fresh plan frees them
+        self.assertEqual(S.reserved_refs(self.live), set())
+
     def test_prompt_block(self):
         _write_plan(self.live, {"situation": "behind on negotiation", "priorities": ["finish MAL"],
                                 "guidance": {"dealers": "haggle with Carmen"}, "goal_buys": {"MAL-09": 88}})

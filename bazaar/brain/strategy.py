@@ -371,8 +371,20 @@ def dealer_orders(live: Path | None = None) -> list[dict]:
 
 def reserved_refs(live: Path | None = None) -> set[str]:
     """Card refs the plan in force holds back from every team offer (kept for a dealer sale or a later deal):
-    the market's code and Opus posters neither list, swap nor hand them over."""
-    return {str(r) for r in _plan(live).get("reserved_refs") or []}
+    the market's code and Opus posters neither list, swap nor hand them over.
+
+    A hold outlives its plan. Every other part of a plan dies after STALE_S, but with no plan at all the code takes
+    the single copies of a page we are building for spares and lists them: on Sunday at 09:00 the night's plan is
+    hours old and the first new one takes more than a minute. Letting a card go is the brain's call, so the last
+    plan's holds stay until a fresh plan says otherwise (an empty list frees them)."""
+    plan = _plan(live)
+    if not plan:
+        try:
+            data = json.loads(path(live).read_text())
+            plan = (data.get("plan") or {}) if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            plan = {}
+    return {str(r) for r in plan.get("reserved_refs") or []}
 
 
 def ordered_sell_refs(live: Path | None = None) -> set[str]:

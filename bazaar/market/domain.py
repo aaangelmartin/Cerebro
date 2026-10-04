@@ -58,6 +58,7 @@ REPOST_COOLDOWN_TICKS = 60      # the same card is not offered to the same team 
 LLM_EVERY = 6                   # ticks between Claude calls when only listings are on the table
 MIN_LLM_S = 3.0
 SAFETY_S = 0.4
+CATALOG_TTL_S = 600             # the catalog is read again this often: sets are released mid-game (CHA on Sunday)
 VENUE_REFRESH_S = 45            # a venue's book is due for a re-read after this long
 VENUE_READS_PER_TICK = 1        # extra GETs per tick for venue books (shared budget ~5 req/s)
 
@@ -169,6 +170,8 @@ class MarketDomain:
         self.rivals = rivals or RivalModel()
         self.gw = gw
         self._catalog = catalog
+        self._catalog_at = time.time() if catalog else 0.0
+        self._catalog_tried = 0.0
         self._llm = llm
         self.model = model
         self.use_llm = use_llm
@@ -562,13 +565,19 @@ class MarketDomain:
         return self.gw if self.gw is not None else getattr(_g(ctx, "value"), "gw", None)
 
     def catalog(self, gw: Any = None) -> dict | None:
+        """The game's catalog, read again every CATALOG_TTL_S: a set released mid-game (Chamberí on Sunday) flips
+        `released` there, and a copy read once at start would call its cards unreleased all day. A failed read
+        keeps the last good copy."""
         gw = gw if gw is not None else self.gw
-        if self._catalog is None and gw is not None:
+        now = time.time()
+        stale = now - self._catalog_at >= CATALOG_TTL_S
+        if gw is not None and (self._catalog is None or stale) and now - self._catalog_tried >= 30:
+            self._catalog_tried = now
             try:
                 self.reads += 1
                 c = gw.get("/api/catalog")
                 if isinstance(c, dict) and c.get("sets"):
-                    self._catalog = c
+                    self._catalog, self._catalog_at = c, now
             except Exception:  # noqa: BLE001
                 pass
         return self._catalog
