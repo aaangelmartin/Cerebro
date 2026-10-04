@@ -18,6 +18,8 @@
 .connect-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font-num); font-size: 11px; color: var(--ink-3); }
 .connect-safe { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-3); font-size: 12px; }
 .connect-safe .ic-wrap { color: var(--ok); margin-top: 1px; }
+.connect-rule { margin: 16px 0 12px; border: 1px solid var(--line-2); padding: 9px 12px; max-width: 880px; color: var(--ink-2); }
+.connect-rule .ic-wrap { color: var(--ink-3); }
 .connect-ready.btn { justify-content: center; padding: 14px; font-size: 15px; font-weight: 600; }
 .connect-result { border: 1px solid var(--line-2); background: var(--s2); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .connect-result.is-ok { flex-direction: row; align-items: center; gap: 12px; border-color: var(--ok); background: var(--ok-soft); color: var(--ink-2); }

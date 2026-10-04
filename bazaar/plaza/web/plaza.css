@@ -104,6 +104,24 @@ h1, h2, h3, p { margin: 0; }
 .closed-count { font-family: var(--font-num); font-size: 44px; font-weight: 500; margin: 14px 0; letter-spacing: -.01em; }
 .closed-card p { color: var(--ink-2); margin: 0 0 16px; }
 .closed-card.is-paused { border-color: var(--pause); }
+/* warnings and the ban: the same card, amber for a warning (the one place amber is right), red for the ban */
+.standing-overlay { z-index: 40; }
+.standing-card { width: min(640px, 92%); max-height: calc(100vh - var(--topbar-h) - 24px); overflow: auto; }
+.standing-card.is-warning { border-color: var(--warn); }
+.standing-card.is-warning h2 .ic-wrap { color: var(--warn); }
+.standing-card.is-banned { border-color: var(--bad); }
+.standing-what { color: var(--ink); margin: 6px 0 12px; }
+.standing-evidence { border: 1px solid var(--line-2); background: var(--bg); padding: 10px 12px; margin: 0 0 14px; font-family: var(--font-num); font-size: 12px; line-height: 1.6; display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; }
+.standing-talk { font-weight: 600; margin: 0 0 10px; }
+.standing-note { font-family: var(--font-num); font-size: 12px; color: var(--ink-3); margin: 0 0 14px; }
+.standing-card.is-banned .standing-note { margin-bottom: 0; }
+.tb-standing { margin-left: auto; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--warn); background: var(--s2); color: var(--warn); font-family: var(--font-num); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; flex: none; white-space: nowrap; }
+.tb-standing[hidden] { display: none; }
+.tb-standing.is-banned { border-color: var(--bad); color: var(--bad); }
+.tb-standing:hover { background: var(--s3); }
+.tb-standing:focus-visible { outline: 1px solid var(--signal); outline-offset: 2px; }
+.tb-standing:not([hidden]) + .tb-clock { margin-left: 8px; }
+.no-nav .standing-overlay, .public .standing-overlay { left: 0; }
 .closed-card.is-paused h2 .ic-wrap, .closed-card.is-paused .closed-sub { color: var(--pause); }
 
 /* ---------- panels, buttons, chips, tables */
@@ -228,6 +246,10 @@ a.card:hover, button.card:hover { border-color: var(--ink-3); }
   .main { overflow: visible; }
   .page { padding: 16px 12px 32px; }
   .closed-overlay { position: fixed; inset: var(--topbar-h) 0 0 0; }
+  .tb-standing { padding: 0 7px; gap: 5px; font-size: 11px; letter-spacing: .04em; margin-left: auto; }
+  .tb-standing > span:not(.ic-wrap) { display: none; }
+  .tb-standing::after { content: attr(data-short); }
+  .standing-card { padding: 18px 16px; }
   .bare .layout, .public .layout { padding-top: 0; }
   .pubbar { padding: 0 10px; gap: 10px; }
   .pubbar-back > span:not(.ic-wrap), .pubbar-what, .pubbar .brand-name { display: none; }

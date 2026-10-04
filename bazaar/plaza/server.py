@@ -858,7 +858,11 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, status: int, obj, cors: bool = False) -> None:
         if status == 200 and isinstance(obj, dict) and obj.get("team") and self.command in ("GET", "HEAD") \
                 and urlparse(self.path).path in STANDING_PATHS and obj.get("verified") is not False:
-            obj = {**obj, "standing": self.board.strikes.standing(obj["team"])}     # the team's own warnings
+            standing = self.board.strikes.standing(obj["team"])                     # the team's own warnings
+            cat = self.board.snap.get("cat") or {}
+            for e in standing["evidence"]:                                          # with the card's name, for the page
+                e["name"] = (cat.get(e["card"]) or {}).get("name")
+            obj = {**obj, "standing": standing}
         self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8", cors=cors)
 
     def _error(self, status: int, code: str, message: str) -> None:

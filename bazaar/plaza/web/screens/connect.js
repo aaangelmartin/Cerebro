@@ -22,6 +22,7 @@
       const colTeam = cols.appendChild(el("section", { class: "panel connect-step" }));
       const colPrompt = cols.appendChild(el("section", { class: "panel connect-step" }));
       const colReady = cols.appendChild(el("section", { class: "panel connect-step" }));
+      root.appendChild(el("p", { class: "connect-safe connect-rule" }, K.icon("warning", 14), t("connect.rule")));
       root.appendChild(K.endpoint("POST /plaza/api/connect/start", "GET /plaza/api/connect/status", "GET /plaza/AGENTS.md"));
 
       const stepHead = (n, title, done) => el("div", { class: "connect-head" },

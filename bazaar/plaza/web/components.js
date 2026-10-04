@@ -51,6 +51,8 @@
     lock: '<rect x="4" y="11" width="16" height="10"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
     alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16.5v.5"/>',
+    warning: '<path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v5"/><path d="M12 17.3v.4"/>',
+    banned: '<circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     arrow: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
     back: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
@@ -210,7 +212,7 @@
                   paused: "pause", waiting: "pause", stale: "warn", unknown: "warn", suspended: "bad" };
   function statusBox(rows) {
     return el("div", { class: "status-box" }, rows.map((r) => el("div", { class: "sb-line" }, el("span", { class: "sb-name" }, r.name),
-      pill(t("status." + r.state), TONES[r.state] || "mute"))));
+      pill(r.label || t("status." + r.state), r.tone || TONES[r.state] || "mute"))));
   }
 
   // ---- cards

@@ -33,7 +33,9 @@ class RuleTest(unittest.TestCase):
         self.assertEqual([(e["team"], e["kind"]) for e in out], [("t01", "warning"), ("t02", "notice")])
         st = self.s.standing("t01")
         self.assertEqual((st["strikes"], st["limit"], st["banned"], st["acked"]), (1, 2, False, False))
-        self.assertEqual(st["last"], {"match": "m-1", "card": "SAL-09", "venue": "rastro", "tick": 40, "with": "t02"})
+        self.assertEqual(st["last"], {"match": "m-1", "card": "SAL-09", "venue": "rastro", "tick": 40, "with": "t02",
+                                      "seller": "t01", "buyer": "t02"})
+        self.assertEqual(st["evidence"], [st["last"]])
         self.assertIn("Warning 1 of 2", st["message"])
         self.assertIn("One more deal closed elsewhere", st["message"])
         self.assertFalse(self.s.banned("t01"))
@@ -142,7 +144,7 @@ class HttpTest(unittest.TestCase):
         me = self.call("GET", "/plaza/api/me", headers=t9)[1]
         self.assertEqual((me["standing"]["strikes"], me["standing"]["limit"], me["standing"]["banned"]), (1, 2, False))
         self.assertEqual(me["standing"]["last"], {"match": mid, "card": "LAT-06", "venue": "rastro", "tick": 83,
-                                                 "with": "t07"})
+                                                 "with": "t07", "seller": "t09", "buyer": "t07", "name": "La Chulapa"})
         self.assertEqual(self.call("GET", "/plaza/api/me", headers=t7)[1]["standing"]["strikes"], 0)   # it only accepted
         self.assertEqual(self.call("GET", "/plaza/api/status", headers=t9)[1]["standing"]["strikes"], 1)
         self.assertNotIn("standing", self.call("GET", "/plaza/api/status")[1])       # nobody else's business

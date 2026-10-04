@@ -4,7 +4,8 @@
 //   const stop = API.poll("/api/me/trades", 3000, draw, onError)
 //   const stop = API.stream((item) => …)            the floor, live
 // Mock mode: ?mock=1 answers from /plaza/static/fixtures (kept for the browser session; ?mock=0 leaves it).
-// ?mock=closed, paused, offline, empty and error switch the matching state; ?mock=anon is a visitor with no session.
+// ?mock=closed, paused, offline, empty and error switch the matching state; ?mock=anon is a visitor with no session;
+// ?mock=warned and ?mock=banned are a team with one strike and a team that lost its access.
 (function () {
   "use strict";
   const BASE = "/plaza";
@@ -40,7 +41,16 @@
     if (obj && typeof obj === "object") return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, Array.isArray(v) ? [] : v]));
     return obj;
   }
+  // ?mock=warned | banned: the standing the server would send with /api/status and /api/me
+  const EVIDENCE = [{ match: "m-04120a77c1", card: "SAL-10", name: "Museo Lázaro Galdiano", venue: "rastro", tick: 1502, with: "t04", seller: "t16", buyer: "t04" },
+                    { match: "m-04310b55e2", card: "LAT-06", name: "La Chulapa", venue: "v10", tick: 1538, with: "t09", seller: "t16", buyer: "t09" }];
+  function standing() {
+    if (mock === "warned") return { strikes: 1, limit: 2, banned: false, last: EVIDENCE[0], evidence: [EVIDENCE[0]], acked: false, rule: true, reason: null, message: "Warning 1 of 2" };
+    if (mock === "banned") return { strikes: 2, limit: 2, banned: true, last: EVIDENCE[1], evidence: EVIDENCE, acked: true, rule: true, reason: "2 matched trades closed on another venue", message: "Your team no longer has access to v07 Market" };
+    return null;
+  }
   function mocked(method, path, body) {
+    if (mock === "banned" && /^\/api\/(me\/|agent\/)/.test(path)) return Promise.reject({ status: 403, error: "banned", message: "Your team no longer has access to v07 Market" });
     if (mock === "error" && path !== "/api/status") return Promise.reject({ status: 500, error: "mock", message: "mock error" });
     if (mock === "anon" && /^\/api\/(me|agent)(\/|$)/.test(path)) return Promise.reject({ status: 401, error: "no_session", message: "no session" });
     const name = fixture(path);
@@ -49,7 +59,9 @@
       if (!r.ok && method !== "GET") return { ok: true, mock: true, sent: body };          // a write with no fixture: taken, nothing sent
       if (!r.ok) throw { status: 404, error: "not_found", message: "no fixture " + name };
       return r.json();
-    }).then((data) => (mock === "empty" && path !== "/api/status" && path !== "/api/me" ? emptied(data) : data));
+    }).then((data) => (mock === "empty" && path !== "/api/status" && path !== "/api/me" ? emptied(data) : data))
+      .then((data) => (standing() && (path === "/api/status" || path === "/api/me") && data && data.team
+        ? { ...data, standing: standing(), ...(mock === "banned" && path === "/api/status" ? { agent: "offline" } : {}) } : data));
   }
 
   // ---- real

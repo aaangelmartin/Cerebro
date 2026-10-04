@@ -354,5 +354,129 @@
   "mode": "smart",
   "detail": "last beat 9 s ago"
  },
- "scoring": "the game scores the value created between other teams on v07, not the count of trades"
+ "scoring": "the game scores the value created between other teams on v07, not the count of trades",
+ "strikes": {
+  "on": true,
+  "limit": 2,
+  "accepter": false,
+  "warned": 1,
+  "banned": 1,
+  "teams": [
+   {
+    "team": "t01",
+    "strikes": 1,
+    "limit": 2,
+    "banned": false,
+    "ban": null,
+    "evidence": [
+     {
+      "key": "m-04120a77c1|88121",
+      "match": "m-04120a77c1",
+      "card": "SAL-10",
+      "venue": "rastro",
+      "tick": 1502,
+      "settlement": 88121,
+      "offer": 20977,
+      "ts": 1791100000.0,
+      "seller": "t01",
+      "buyer": "t04",
+      "id": "a-7c1d2e3f4a5b",
+      "with": "t04",
+      "role": "posted",
+      "acked": true,
+      "forgiven": false
+     }
+    ]
+   },
+   {
+    "team": "t04",
+    "strikes": 2,
+    "limit": 2,
+    "banned": true,
+    "ban": {
+     "by": "rule",
+     "tick": 1538,
+     "ts": 1791100900.0,
+     "strikes": 2,
+     "reason": "2 matched trades closed on another venue"
+    },
+    "evidence": [
+     {
+      "key": "m-0388aa10f2|87010",
+      "match": "m-0388aa10f2",
+      "card": "RET-07",
+      "venue": "v10",
+      "tick": 1466,
+      "settlement": 87010,
+      "offer": 20410,
+      "ts": 1791100000.0,
+      "seller": "t04",
+      "buyer": "t09",
+      "id": "a-1a2b3c4d5e6f",
+      "with": "t09",
+      "role": "posted",
+      "acked": true,
+      "forgiven": false
+     },
+     {
+      "key": "m-04310b55e2|88410",
+      "match": "m-04310b55e2",
+      "card": "LAT-06",
+      "venue": "v10",
+      "tick": 1538,
+      "settlement": 88410,
+      "offer": 21102,
+      "ts": 1791100000.0,
+      "seller": "t04",
+      "buyer": "t09",
+      "id": "a-6f5e4d3c2b1a",
+      "with": "t09",
+      "role": "posted",
+      "acked": false,
+      "forgiven": false
+     }
+    ]
+   }
+  ],
+  "log": [
+   {
+    "key": "m-04310b55e2|88410",
+    "match": "m-04310b55e2",
+    "card": "LAT-06",
+    "venue": "v10",
+    "tick": 1538,
+    "settlement": 88410,
+    "offer": 21102,
+    "ts": 1791100000.0,
+    "seller": "t04",
+    "buyer": "t09",
+    "id": "a-6f5e4d3c2b1a",
+    "with": "t09",
+    "role": "posted",
+    "kind": "banned",
+    "team": "t04",
+    "strikes": 2,
+    "limit": 2
+   },
+   {
+    "key": "m-04120a77c1|88121",
+    "match": "m-04120a77c1",
+    "card": "SAL-10",
+    "venue": "rastro",
+    "tick": 1502,
+    "settlement": 88121,
+    "offer": 20977,
+    "ts": 1791100000.0,
+    "seller": "t01",
+    "buyer": "t04",
+    "id": "a-7c1d2e3f4a5b",
+    "with": "t04",
+    "role": "posted",
+    "kind": "warning",
+    "team": "t01",
+    "strikes": 1,
+    "limit": 2
+   }
+  ]
+ }
 }

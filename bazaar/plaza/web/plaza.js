@@ -87,10 +87,12 @@
       anon(false);
       Promise.all([loadStatus(), loadMe()]).then(render);
     } }, K.icon("refresh", 16));
+    dom.standing = K.el("button", { class: "tb-standing", type: "button", hidden: true, onclick: () => { state.warnOpen = true; drawStanding(); } });
     dom.topbar = K.el("header", { class: "topbar" },
       K.el("button", { class: "tb-btn tb-menu", type: "button", "aria-label": t("shell.menu"), onclick: () => document.body.classList.toggle("nav-open") }, K.icon("menu", 16)),
       K.link(ADMIN ? "/plaza/admin/" : hasTeam() ? "/plaza/home" : "/plaza/", { class: "brand" }, K.el("span", { class: "brand-mark" }, "M"),
         K.el("span", { class: "brand-name" }, "v07 Market"), ADMIN ? K.el("span", { class: "brand-sub" }, t("shell.admin")) : null),
+      dom.standing,
       K.el("div", { class: "tb-clock" },
         K.el("div", { class: "tb-cell tb-time" }, K.label(t("shell.time")), dom.time),
         K.el("div", { class: "tb-cell" }, K.label(t("shell.tick")), dom.tick),
@@ -113,7 +115,8 @@
     const rows = ADMIN
       ? ((state.admin && state.admin.processes) || []).map((p) => ({ name: p.name, state: p.state }))
       : [{ name: t("status.agent"), state: s.agent || (hasTeam() ? "offline" : "off") }, { name: t("status.market"), state: s.market || "stale" },
-         { name: t("status.matchmaker"), state: waiting ? "waiting" : s.matchmaker || "stale" }];
+         { name: t("status.matchmaker"), state: waiting ? "waiting" : s.matchmaker || "stale" }]
+        .concat(standing() ? [{ name: t("standing.row"), label: standingLabel(), tone: standing().banned ? "bad" : "warn" }] : []);
     const lang = K.el("div", { class: "lang-switch", role: "group", "aria-label": t("shell.language") }, I18N.LANGS.map((l) =>
       K.el("button", { type: "button", class: l === I18N.lang ? "active" : null, "aria-pressed": String(l === I18N.lang), onclick: () => I18N.setLang(l) }, l.toUpperCase())));
     K.clear(dom.nav);
@@ -144,7 +147,7 @@
       if (typeof s.seconds_to_tick === "number") state.tickAt = Date.now() + s.seconds_to_tick * 1000;
     }, () => { state.status = { ...(state.status || {}), market: "stale", matchmaker: "stale", feed: "stale" }; })];
     if (ADMIN) jobs.push(API.get("/admin/api/status").then((a) => { state.admin = a; }, () => {}));
-    return Promise.all(jobs).then(() => { drawNav(); drawClock(); drawOverlay(); });
+    return Promise.all(jobs).then(() => { drawNav(); drawClock(); drawOverlay(); drawStanding(); });
   }
   function anon(set) {
     try {
@@ -180,6 +183,65 @@
       hms ? K.el("div", { class: "closed-count" }, hms) : null,
       K.el("p", null, t("closed." + kind + ".text")),
       K.btn(t("closed.keepLooking"), { onclick: () => { state.dismissed = kind + ":" + s.tick; drawOverlay(); } }))));
+  }
+
+  // ---- warnings and the ban: a matched trade closed on another venue (the same card as closed and paused)
+  function standing() {
+    const st = !ADMIN && hasTeam() && ((state.status && state.status.standing) || state.me.standing);
+    return st && (st.banned || st.strikes > 0) ? st : null;
+  }
+  function standingLabel() {
+    const st = standing();
+    return st.banned ? t("standing.banned") : t("standing.warning", { n: st.strikes, limit: st.limit });
+  }
+  function seenWarning(key, set) {
+    try {
+      if (set) { sessionStorage.setItem(key, "1"); localStorage.setItem(key, "1"); }
+      return [sessionStorage.getItem(key) === "1", localStorage.getItem(key) === "1"];
+    } catch (e) { return [state.warnSeen === key, state.warnSeen === key]; }
+  }
+  function evidenceLine(e) {
+    const { set, no } = K.refParts(e.card);
+    const venue = e.venue === "rastro" ? "El Rastro" : e.venue;
+    return K.el("div", null, [set + " · " + no + (e.name ? " " + e.name : ""), (e.seller || "?") + " → " + (e.buyer || e.with || "?"), e.match,
+      t("standing.closedOn", { venue }), t("standing.tick", { tick: e.tick })].join(" · "));
+  }
+  function drawStanding() {
+    const st = standing();
+    const old = document.querySelector(".standing-overlay");
+    if (old) old.remove();
+    dom.standing.hidden = !st;
+    document.body.classList.toggle("is-banned", Boolean(st && st.banned));
+    if (!st) return;
+    dom.standing.className = "tb-standing" + (st.banned ? " is-banned" : "");
+    K.clear(dom.standing);
+    K.add(dom.standing, [K.icon(st.banned ? "banned" : "warning", 14), K.el("span", null, standingLabel())]);
+    dom.standing.dataset.short = st.banned ? "" : st.strikes + "/" + st.limit;
+    dom.standing.title = t(st.banned ? "standing.bannedTitle" : "standing.title", { n: st.strikes, limit: st.limit });
+    if (state.frame === "bare") return;
+    const key = "plaza.warned." + state.me.team + "." + st.strikes + "." + ((st.last && st.last.match) || "");
+    const [session, ever] = seenWarning(key);
+    // The ban cannot be closed. A warning opens by itself until this browser said "I understand" (and again in a
+    // new session while the agent has not acknowledged it); the indicator in the bar opens it again.
+    if (!st.banned && !state.warnOpen && (session || (ever && st.acked))) return;
+    const lines = (st.evidence && st.evidence.length ? st.evidence : st.last ? [st.last] : []);
+    const card = st.banned
+      ? K.el("div", { class: "closed-card standing-card is-banned", role: "alertdialog", "aria-modal": "true", "aria-label": t("standing.bannedTitle") },
+          K.el("h2", null, K.icon("banned", 18), t("standing.bannedTitle")),
+          K.el("div", { class: "standing-what" }, lines.length ? t("standing.bannedWhat", { n: lines.length }) : (st.reason || "")),
+          lines.length ? K.el("div", { class: "standing-evidence" }, lines.map(evidenceLine)) : null,
+          K.el("div", { class: "standing-talk" }, t("standing.talk")),
+          K.el("div", { class: "standing-note" }, t("standing.frozen")))
+      : K.el("div", { class: "closed-card standing-card is-warning", role: "alertdialog", "aria-modal": "true", "aria-label": t("standing.title", { n: st.strikes, limit: st.limit }) },
+          K.el("h2", null, K.icon("warning", 18), t("standing.title", { n: st.strikes, limit: st.limit })),
+          K.el("div", { class: "standing-what" }, t("standing.what")),
+          lines.length ? K.el("div", { class: "standing-evidence" }, lines.slice(-1).map(evidenceLine)) : null,
+          K.el("p", null, st.limit - st.strikes <= 1 ? t("standing.rule") : t("standing.ruleMore", { left: st.limit - st.strikes })),
+          K.el("div", { class: "standing-note" }, t("standing.free")),
+          K.btn(t("standing.understand"), { onclick: () => { seenWarning(key, true); state.warnSeen = key; state.warnOpen = false; drawStanding(); } }));
+    document.body.appendChild(K.el("div", { class: "closed-overlay standing-overlay" + (st.banned ? " is-banned" : "") }, card));
+    const first = card.querySelector("button");
+    if (first && state.warnOpen) first.focus();
   }
 
   // ---- drawing a screen
@@ -224,6 +286,7 @@
       K.clear(root).appendChild(K.state("error", t("common.error"), String(e && e.message || e)));
     }
     drawOverlay();
+    drawStanding();
   }
 
   function boot() {
@@ -233,7 +296,7 @@
     Promise.all([loadStatus(), loadMe()]).then(render, render);
     setInterval(drawClock, 250);
     setInterval(loadStatus, 5000);
-    setInterval(() => loadMe().then(drawNav), 15000);
+    setInterval(() => loadMe().then(() => { drawNav(); drawStanding(); }), 15000);
   }
 
   window.Plaza = { screen, adminScreen: screen, go, state, hasTeam, admin: ADMIN, refresh: () => { anon(false); return Promise.all([loadStatus(), loadMe()]).then(render); } };

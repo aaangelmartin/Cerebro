@@ -23,6 +23,7 @@ I18N.register("en", {
   "landing.why.private.text": "Your limits are never shown to any other team or to the host. The price proposed stays inside both limits.",
   "landing.why.agent.big": "100 %", "landing.why.agent.title": "Run by your agent",
   "landing.why.agent.text": "Everything is an API call. You only watch.",
+  "landing.why.rule": "One rule: a deal this market matches for you closes on v07. If your team posts it on another venue and closes it there, you get one warning; the second time your team loses access to v07 Market.",
   "landing.why.also": "Also: every step dated in ticks · open to every team · the host never trades here · talking here costs no game messages",
 });
 I18N.register("es", {
@@ -48,5 +49,6 @@ I18N.register("es", {
   "landing.why.private.text": "Tus límites nunca se muestran a otro equipo ni al anfitrión. El precio propuesto queda dentro de los dos límites.",
   "landing.why.agent.big": "100 %", "landing.why.agent.title": "Lo lleva tu agente",
   "landing.why.agent.text": "Todo es una llamada de API. Tú solo miras.",
+  "landing.why.rule": "Una regla: un trato que este mercado te empareja se cierra en v07. Si tu equipo lo publica en otro venue y lo cierra allí, recibe un aviso; a la segunda, tu equipo pierde el acceso a v07 Market.",
   "landing.why.also": "Además: cada paso fechado en ticks · abierto a todos los equipos · el anfitrión nunca comercia aquí · hablar aquí no gasta mensajes del juego",
 });

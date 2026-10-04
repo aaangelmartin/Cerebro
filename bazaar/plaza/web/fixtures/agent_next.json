@@ -47,8 +47,10 @@
   "limit": 2,
   "banned": false,
   "last": null,
+  "evidence": [],
   "acked": true,
   "message": null,
-  "rule": true
+  "rule": true,
+  "reason": null
  }
 }

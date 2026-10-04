@@ -83,7 +83,8 @@ class Strikes:
             self.seen.append(key)
             del self.seen[:-KEEP_SEEN]
             base = {"key": key, "match": match, "card": ref, "venue": venue, "tick": tick, "settlement": settlement,
-                    "offer": offer, "ts": self.clock()}
+                    "offer": offer, "ts": self.clock(), "seller": parties[0] if parties else None,
+                    "buyer": parties[1] if len(parties) > 1 else None}
             if not self.on:
                 self._note({**base, "kind": "skipped", "why": "the rule is switched off", "teams": parties})
                 self._save()
@@ -170,10 +171,13 @@ class Strikes:
                               f"to {self.name} for good."))
             else:
                 message = None
-            return {"strikes": n if self.on or banned else 0, "limit": self.limit, "banned": banned,
-                    "last": None if not last else {"match": last["match"], "card": last["card"],
-                                                   "venue": last["venue"], "tick": last["tick"], "with": last["with"]},
-                    "acked": all(s.get("acked") for s in active), "message": message, "rule": self.on}
+            shown = active if self.on or banned else []
+            evidence = [{k: s.get(k) for k in ("match", "card", "venue", "tick", "with", "seller", "buyer")}
+                        for s in shown]
+            return {"strikes": len(shown), "limit": self.limit, "banned": banned,
+                    "last": evidence[-1] if evidence else None, "evidence": evidence,
+                    "acked": all(s.get("acked") for s in active), "message": message, "rule": self.on,
+                    "reason": (t.get("banned") or {}).get("reason") if banned else None}
 
     def actions(self, team: str) -> list[dict]:
         """Queue actions: one `warning` per strike the agent has not acknowledged. Nothing to send: read and ack."""

@@ -10,9 +10,12 @@
     title: "nav.admin.teams",
     noOverlay: true,                                       // the panel is read with the game closed too
     render(root, ctx) {
-      let picked = ctx.query.team || "", stopDetail = null;
+      let picked = ctx.query.team || "", stopDetail = null, strikes = { teams: [], on: true, limit: 2 };
+      const standingOf = (x) => x.standing || { strikes: 0, limit: strikes.limit || 2, banned: false };
+      const standingPill = (x) => { const s = standingOf(x); return s.banned ? K.pill(t("admin.standing.banned"), "bad") : s.strikes ? K.pill(t("admin.standing.warning", { n: s.strikes, limit: s.limit }), "warn") : K.pill("OK", "ok"); };
+      const evidenceOf = (team) => ((strikes.teams || []).find((x) => x.team === team) || { evidence: [] });
       root.appendChild(A.head(t("nav.admin.teams"), t("admin.teams.sub")));
-      root.appendChild(K.endpoint("GET /plaza/admin/api/teams", "GET /plaza/admin/api/activity?team=", "GET /plaza/api/team/<id>", "POST /plaza/admin/api/action {block | unblock}"));
+      root.appendChild(K.endpoint("GET /plaza/admin/api/teams", "GET /plaza/admin/api/activity?team=", "GET /plaza/api/team/<id>", "POST /plaza/admin/api/action {block | unblock | forgive | unban | ban | reset_team | strikes}"));
       const body = root.appendChild(el("div", { class: "adm-teams" }));
       const side = root.appendChild(el("div", { class: "adm-teams-detail" }));
       const again = () => w.again();
@@ -35,6 +38,23 @@
           row.blocked ? A.actBtn(t("admin.teams.unblock"), { action: "unblock", team: row.team }, again, { kind: "primary" })
             : A.actBtn(t("admin.teams.block"), { action: "block", team: row.team }, again, { confirm: true, kind: "danger" }),
           K.btn(t("admin.teams.trades"), { small: true, iconAfter: "arrow", onclick: () => Plaza.go("/plaza/admin/trades?team=" + row.team) }))));
+
+        // standing: warnings and the ban for closing a matched trade elsewhere, with the evidence of each strike
+        const st = standingOf(row), rec0 = evidenceOf(row.team);
+        const ev = (rec0.evidence || []).map((e, i) => el("div", { class: "adm-teams-ev" + (e.forgiven ? " is-forgiven" : "") },
+          K.label(t("admin.standing.strike", { n: i + 1 }) + (e.forgiven ? " · " + t("admin.standing.forgiven") : "")),
+          el("div", null, t("admin.standing.match", { match: e.match, card: e.card, seller: e.seller || "?", buyer: e.buyer || e.with || "?" })),
+          el("div", { class: "adm-teams-ev-seen" }, t("admin.standing.seen", { venue: e.venue, tick: e.tick, settlement: e.settlement == null ? "–" : e.settlement, offer: e.offer == null ? "–" : e.offer, role: t("admin.standing.role." + (e.role || "posted")) })),
+          el("div", { class: "adm-quiet" }, t(e.acked ? "admin.standing.acked" : "admin.standing.notAcked"))));
+        side.insertBefore(K.panel({ title: t("admin.standing.title", { team: row.team }), icon: "warning" },
+          el("div", { class: "adm-strip" }, standingPill(row), el("span", { class: "adm-quiet" }, t("admin.standing.count", { n: st.strikes, limit: st.limit })),
+            rec0.ban ? el("span", { class: "adm-quiet" }, t("admin.standing.banBy", { by: rec0.ban.by === "host" ? t("admin.standing.byHost") : t("admin.standing.byRule"), reason: rec0.ban.reason || "" })) : null),
+          ev.length ? el("div", { class: "adm-teams-evs" }, ev) : el("div", { class: "adm-quiet adm-teams-noev" }, t("admin.standing.none")),
+          el("div", { class: "adm-actions" },
+            st.strikes ? A.actBtn(t("admin.standing.forgive"), { action: "forgive", team: row.team }, again, { confirm: true }) : null,
+            st.banned ? A.actBtn(t("admin.standing.unban"), { action: "unban", team: row.team }, again, { confirm: true, kind: "primary" })
+              : A.actBtn(t("admin.standing.ban"), { action: "ban", team: row.team }, again, { confirm: true, kind: "danger" }),
+            A.actBtn(t("admin.standing.reset"), { action: "reset_team", team: row.team }, again, { confirm: true, kind: "danger" }))), grid);
 
         const sheet = grid.appendChild(K.panel({ title: t("admin.teams.sheet", { team: row.team }), note: t("admin.teams.sheetNote"), icon: "cards" }, K.state("loading")));
         const sheetBody = sheet.querySelector(".panel-body");
@@ -59,6 +79,11 @@
 
       const w = A.watch(body, "/admin/api/teams", (d) => {
         const teams = d.teams || [];
+        strikes = d.strikes || strikes;
+        body.appendChild(el("div", { class: "adm-strip adm-teams-rule" }, K.label(t("admin.standing.rule")),
+          K.pill(t("status." + (strikes.on === false ? "off" : "on")), strikes.on === false ? "bad" : "ok"),
+          el("span", { class: "adm-quiet" }, t("admin.standing.ruleText", { limit: strikes.limit || 2, warned: strikes.warned || 0, banned: strikes.banned || 0 })),
+          A.actBtn(t(strikes.on === false ? "admin.standing.ruleOn" : "admin.standing.ruleOff"), { action: "strikes", on: strikes.on === false }, again, { confirm: true })));
         body.appendChild(K.kpis([{ label: t("admin.kpi.connected"), value: K.num(d.connected || 0) + " / " + K.num(teams.length) }, { label: t("admin.kpi.verified"), value: K.num(d.verified || 0) },
                                  { label: t("admin.kpi.online"), value: K.num(d.online || 0) }, { label: t("admin.teams.limitsKpi"), value: K.num(teams.filter((x) => x.limits_set).length) }]));
         if (!teams.length) { body.appendChild(K.state("empty", t("admin.noData"))); drawDetail(null); return; }
@@ -69,6 +94,8 @@
           { label: t("admin.col.team"), render: (x) => A.team(x.team) },
           { label: t("admin.col.state"), render: (x) => [K.chip(t("admin.team." + stateOf(x)), { verified: "ok", blocked: "bad", pending: "signal" }[stateOf(x)] || ""), x.paused ? K.chip(t("status.paused"), "pause") : null] },
           { label: t("admin.col.agent"), render: (x) => (x.agent ? K.pill(t("status." + (x.online ? "connected" : "offline")), x.online ? "ok" : "bad") : "–") },
+          { label: t("admin.standing.col"), render: standingPill },
+          { label: t("admin.standing.strikes"), num: true, render: (x) => K.num(standingOf(x).strikes) },
           { label: t("admin.col.lastSync"), render: (x) => A.ticksAgo(x.last_sync) },
           { label: t("admin.teams.available"), num: true, render: (x) => K.num(x.available || 0) },
           { label: t("admin.teams.wanted"), num: true, render: (x) => K.num(x.wants || 0) },
