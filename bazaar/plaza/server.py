@@ -704,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
         board.verify_soon()
 
         def listed(team: str) -> bool:
-            d = (board.store.declared().get(team) or {}).get("declared") or {}
+            d = (board.store.declared().get(team) or {}).get("declared") or {}     # counts once the team is proved
             return any(d.get(k) for k in ("wants", "spares", "for_sale"))
         return board.connect.status(self._session(q), listed)
 
@@ -790,6 +790,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "enabled": self.board.enabled(), "name": NAME, "api": 1}, cors=True)
         if path == "/plaza/api/openapi.json":
             return self._json(200, routes.openapi(NAME), cors=True)
+        if path == "/plaza/api/status":                  # answers with the market switched off too: it says so
+            try:
+                if team_api.get(self, path, self._filters({k: v[-1] for k, v in parse_qs(u.query).items()}), self.board.snap):
+                    return
+            except PlazaError as e:
+                return self._error(e.status, e.code, e.message)
         if not self.board.enabled():
             return self._error(503, "closed", "the plaza is closed for now")
         snap = self.board.get()
