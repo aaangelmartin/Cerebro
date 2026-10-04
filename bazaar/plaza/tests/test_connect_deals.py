@@ -62,22 +62,22 @@ class ConnectTest(unittest.TestCase):
         with self.assertRaises(PlazaError) as e:
             self.c.start("t10", "1.1.1.1")
         self.assertEqual(e.exception.status, 403)
-        for i in range(C.STARTS_PER_PAIR):
-            self.c.start("t16", "9.9.9.9")
-        with self.assertRaises(PlazaError) as e:
-            self.c.start("t16", "9.9.9.9")                                    # one client, one team
-        self.assertEqual(e.exception.status, 429)
-        self.c.start("t16", "8.8.8.8")                                        # nobody else is kept from that team,
-        self.c.start("t15", "9.9.9.9")                                        # nor that client from another team
-        for _ in range(C.TRIES_PER_PAIR):
+        real = self.c.start("t16", "9.9.9.9")
+        for i in range(60):                                                   # a room-mate asks and guesses in the
+            self.c.start("t16", "9.9.9.9")                                    # team's name, from the shared address
+            with self.assertRaises(PlazaError):
+                self.c.agent("t16", "PLAZA-222222", "9.9.9.9", False)
+        self.c.start("t16", "9.9.9.9")                                        # the team's human still starts,
+        a = self.c.agent("t16", real["connect_code"], "9.9.9.9", False)       # and a right code always passes
+        self.assertTrue(a["agent_token"])
+        for _ in range(C.TRIES_PER_CLIENT):
             with self.assertRaises(PlazaError):
                 self.c.agent("t01", "PLAZA-222222", "6.6.6.6", False)
-        for team, client, code in (("t01", "6.6.6.6", "locked"),            # the guesser waits, for that team;
-                                   ("t02", "6.6.6.6", "bad_code"),          # it is not locked for another team,
-                                   ("t01", "5.5.5.5", "bad_code")):         # and the team is not locked for others
-            with self.assertRaises(PlazaError) as e:
-                self.c.agent(team, "PLAZA-222222", client, False)
-            self.assertEqual(e.exception.code, code)
+        with self.assertRaises(PlazaError) as e:                              # only wrong codes wait, and only
+            self.c.agent("t01", "PLAZA-222222", "6.6.6.6", False)             # from the address that sent them
+        self.assertEqual(e.exception.code, "locked")
+        late = self.c.start("t02", "6.6.6.6")
+        self.assertTrue(self.c.agent("t02", late["connect_code"], "6.6.6.6", False)["agent_token"])
 
     def test_twenty_teams_connect_from_one_address_in_a_minute(self):
         """Every team at the venue shares one public address."""
@@ -143,25 +143,21 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual(e.exception.code, "prove_first")
         self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))               # the real agent is untouched
         self.assertFalse(self.c.prove("t15", thief["connect_code"]))                  # another team's message
-        # The team's agent is talked into sending the thief's code in the game: while that agent is at work, the
-        # proof alone does not hand the team over.
-        self.assertFalse(self.c.prove("t16", thief["connect_code"]))
-        self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))
+        # The newest proof wins, always: nothing is held for later, and a team that lost its agent takes it back.
+        self.assertTrue(self.c.prove("t16", thief["connect_code"]))                   # talked into sending it
+        with self.assertRaises(PlazaError):
+            self.c.auth(a["agent_token"])
+        mine = self.c.start("t16", "1.1.1.1", tick=1500)                              # the real team proves a fresh
+        c = self.c.agent("t16", mine["connect_code"], "2.2.2.2", True)                # code: it is back, and the
+        self.assertFalse(self.c.prove("t16", mine["connect_code"], 1499))             # (a message older than the
+        self.assertTrue(self.c.prove("t16", mine["connect_code"], 1500))              # session proves nothing)
+        self.assertEqual(self.c.auth(c["agent_token"]), ("t16", True))                # other one is out,
         with self.assertRaises(PlazaError):
             self.c.auth(b["agent_token"])
-        # The team's own agent asks for a new code with its token: that one takes over with the proof.
-        mine = self.c.start("t16", "1.1.1.1")
-        c = self.c.agent("t16", mine["connect_code"], "2.2.2.2", True, current=a["agent_token"])
-        self.assertTrue(self.c.prove("t16", mine["connect_code"]))
-        self.assertEqual(self.c.auth(c["agent_token"]), ("t16", True))
+        self.assertEqual(len([v for v in self.c.data["sessions"].values() if v["team"] == "t16"]), 1)
+        self.assertEqual(self.c.reset("t16")["agent"], True)                          # and we can clear a team
         with self.assertRaises(PlazaError):
-            self.c.auth(a["agent_token"])                                             # replaced
-        # An agent that went silent (it lost its token) is replaced by a proof alone.
-        late = self.c.start("t16", "1.1.1.1")
-        d = self.c.agent("t16", late["connect_code"], "3.3.3.3", True)
-        self.clock.now += C.REPLACE_AFTER_S + 1
-        self.assertTrue(self.c.prove("t16", late["connect_code"]))
-        self.assertEqual(self.c.auth(d["agent_token"]), ("t16", True))
+            self.c.auth(c["agent_token"])
 
     def test_prompt_is_ready_to_paste(self):
         p = C.prompt("t16", "PLAZA-7K2Q9M", "https://overhead-silicon-cork-citation.example.com/plaza")

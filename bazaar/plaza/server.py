@@ -86,6 +86,7 @@ THREADS_READ = 500                         # game threads looked at for a proof,
 FORCE_BAND = 0.25                          # a match we propose by hand stays this close to the public reference
 PUBLIC_HEADERS = ("CF-Connecting-IP", "CF-Ray", "X-Plaza-Public")   # the request came through a public hostname
 MAX_BUDGET_KEYS = 5000
+CONNECT_PATHS = ("/plaza/api/connect/start", "/plaza/api/connect/agent")
 LOCAL_HOST = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?", re.I)
 ADMIN_HEADER = "X-Plaza-Admin"             # the gateway proves a dashboard login with the token file
 SECURITY = {
@@ -285,7 +286,8 @@ class Board:
                         continue
                     if sender in codes:
                         self.store.verify(sender, m["text"])
-                    if sender in sessions and self.connect.prove(sender, m["text"]):
+                    at = m.get("tick") if isinstance(m.get("tick"), int) else None
+                    if sender in sessions and self.connect.prove(sender, m["text"], at):
                         if not (self.store.declared().get(sender) or {}).get("verified"):
                             self._forget_private(sender)        # limits left in its name before the proof
                         self.store.mark_verified(sender)
@@ -732,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.headers.get("Content-Length")
         if self.headers.get("Transfer-Encoding") or (raw is not None and raw.strip() != "0"):
             self.unread = True                                 # until _body reads all of it
+        if len(self.headers.get_all("Content-Length") or []) > 1:     # two lengths: two readings of one request
+            raw = "two"
         if raw is not None and not re.fullmatch(r"\d{1,9}", raw.strip()):
             self.close_connection = True
             self._error(400, "bad_request", "bad Content-Length")
@@ -890,7 +894,7 @@ class Handler(BaseHTTPRequestHandler):
     def _session(self, q: dict) -> str | None:
         """The browser's connection session: its cookie. (`?session=` is read for /api/connect/status only, where
         the page that just started the session asks about it.)"""
-        if q.get("session"):
+        if q.get("session") and urlparse(self.path).path == "/plaza/api/connect/status":
             return q["session"]
         m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
         return m.group(1) if m else None
@@ -1192,7 +1196,8 @@ class Handler(BaseHTTPRequestHandler):
     def _write_route(self):
         path = urlparse(self.path).path
         self.route = "write"
-        if not self.budget.take(self._budget_key(), "write"):
+        # Connecting has its own counts (connect.py): what a room-mate spends of the shared budget never locks it.
+        if path not in CONNECT_PATHS and not self.budget.take(self._budget_key(), "write"):
             return self._error(429, "slow_down", f"too many requests; try again in {RETRY_S} seconds")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._error(415, "bad_request", "send Content-Type: application/json")
@@ -1214,6 +1219,15 @@ class Handler(BaseHTTPRequestHandler):
                     self.board.tick_feed()
                     self.board.rebuild()
                     return self._json(200, {"ok": True, "admin": self.board.store.admin()})
+                if action == "reset_team":                 # a team that lost its agent connects again from nothing
+                    team = body.get("team")
+                    if not isinstance(team, str) or team not in public.TEAMS or team == HOST:
+                        raise PlazaError(400, "bad_request", "name a team, such as t04")
+                    out = self.board.connect.reset(team)
+                    self.board.store.reset(team)
+                    self.board._forget_private(team)
+                    self.board.rebuild()
+                    return self._json(200, {"ok": True, "reset": out})
                 if action == "force":
                     rec = self.board.force(body, self.board.get())
                     self.board.rebuild()
@@ -1244,7 +1258,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(team, str) or team not in public.TEAMS:
                     raise PlazaError(400, "bad_request", "team ids look like t04")
                 if path.endswith("/start"):
-                    out = self.board.connect.start(team, self._client())
+                    out = self.board.connect.start(team, self._client(), self.board.now_tick(self.board.snap.get("tick")))
                     base = public_url(self.board.live) or LOCAL_BASE
                     lang = body.get("lang") if body.get("lang") in ("en", "es") else "en"
                     try:
