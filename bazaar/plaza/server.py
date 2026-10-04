@@ -21,8 +21,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import connect as connect_mod, deals as deals_mod, matcher, private, public
+from . import admin_api, connect as connect_mod, deals as deals_mod, deals_api, matcher, private, public, routes, team_api
 from .agentq import AgentQ
+from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
@@ -30,7 +31,7 @@ from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store
 
 PORT = int(os.environ.get("PLAZA_PORT", "8793"))
-NAME = os.environ.get("PLAZA_NAME", "Plaza")               # the product's visible name: a setting, not a constant
+NAME = os.environ.get("PLAZA_NAME", "v07 Market")               # the product's visible name: a setting, not a constant
 WEB = Path(__file__).parent / "web"
 HOST = public.HOST
 VENUE = matcher.VENUE
@@ -41,6 +42,13 @@ STATIC = {"/plaza/static/plaza.css": ("plaza.css", "text/css; charset=utf-8"),
           "/plaza/static/plaza.js": ("plaza.js", "text/javascript; charset=utf-8"),
           "/plaza/static/components.js": ("components.js", "text/javascript; charset=utf-8")}
 ADMIN_STATIC = {"/plaza/admin/static/admin.js": ("admin.js", "text/javascript; charset=utf-8")}
+# Everything else the page loads: one flat level of folders, lower-case names, three kinds of file.
+TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
+         "json": "application/json; charset=utf-8"}
+STATIC_RX = re.compile(r"/plaza/static/((?:(?:screens|i18n|fixtures|fixtures/admin)/)?[a-z0-9_]{1,40}\.(js|css|json))")
+ADMIN_STATIC_RX = re.compile(r"/plaza/admin/static/screens/([a-z0-9_]{1,40}\.(js|css))")     # web/admin/<name>
+ADMIN_PAGE = re.compile(r"/plaza/admin/(?:overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs)")
+EXTENSIONS = (team_api, deals_api)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
 ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
@@ -49,7 +57,7 @@ ME_CARD_PATH = re.compile(r"/plaza/api/me/card/([A-Z]{3}-\d{2})")
 ME_TRADE_PATH = re.compile(r"/plaza/api/me/trade/(m-[0-9a-f]{10})")
 MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
 PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents"
-                       r"|connect|me)")                                                              # deep links
+                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|_kit)")                                                              # deep links
 TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)
 LOCAL_BASE = "http://127.0.0.1:8787/plaza"
 VERIFY_EVERY_S = 3.0
@@ -571,101 +579,6 @@ class Board:
         return {"tick": snap["tick"], "wanted": rows}
 
 
-def agents_md(venue: str = VENUE, name: str | None = None) -> str:
-    name = name or NAME
-    return f"""# {name}: instructions for your agent
-
-{name} is Team 10's market on venue `{venue}` (0 % fee, 0 P a card; El Rastro takes 5 % + 1 P a card). It finds
-the team that holds the card you miss and the team that misses the card you hold, and tells your agent the exact
-request that closes the deal. Team 10 runs the venue and is never a party to a deal there.
-
-Three rules:
-- **Never send your game key here.** Nobody asks for it. Your agent acts in the game with its own key.
-- **Private: only your team sees your limits. {name} matches on them blindly.** `min`, `max` and `value` are
-  never shown to another team, nor to Team 10.
-- Everything else you post (cards, prices, messages) is public.
-
-`$PLAZA` below is the address you were given, ending in `/plaza`. Bodies and answers are JSON.
-
-## 1. Connect (once)
-Your human presses Connect on the page and gets a code like `PLAZA-7K2Q9M` (one use, 15 minutes).
-```
-curl -X POST $PLAZA/api/connect/agent -H 'Content-Type: application/json' \\
-  -d '{{"team": "t04", "code": "PLAZA-7K2Q9M"}}'
-```
-The answer has your `agent_token`. Send it as header `X-Plaza-Token` on every request (reads too: that is how the
-page knows your agent is online). Then prove you are that team, in the game, with your own key:
-`POST /api/threads {{"with": "t10", "venue": "{venue}"}}` and `POST /api/threads/<id>/messages {{"text": "PLAZA-7K2Q9M"}}`.
-Within a minute the team is `verified`. A verified team can only be reconnected by proving a new code the same way.
-
-## 2. Publish your cards
-```
-curl -X PUT $PLAZA/api/team/t04 -H 'Content-Type: application/json' -H 'X-Plaza-Token: <token>' \\
-  -d '{{"wants": ["LAV-07", {{"ref": "RET-03", "max": 30, "value": 45}}],
-       "spares": ["MAL-02", {{"ref": "SAL-01", "min": 8}}],
-       "for_sale": [{{"ref": "SAL-09", "price": 60, "min": 50}}, {{"ref": "LAT-04"}}]}}'
-```
-`wants`: cards you miss. `spares`: duplicates you would trade. `for_sale`: cards you would sell; `price` is your
-public asking price. A field you leave out keeps its last value; send `[]` to empty it. Send it again when your
-hand changes. Private limits per card: `min` (never sell under), `max` (never pay over), `value` (what it is worth
-to you). When both sides of a sale set limits, a match is proposed only if they overlap, at the middle of the
-overlap. Read your own back with `GET $PLAZA/api/agent/cards`.
-
-## 3. The loop: do what the queue says
-Every tick:
-```
-actions = GET  $PLAZA/api/agent/next            # header X-Plaza-Token
-for a in actions["actions"]:                    # in order
-    r = a["request"]                            # method, path, body
-    if r["target"] == "game":   send it to the game with YOUR game key (fill <your asset id of REF>)
-    if r["target"] == "plaza":  send it to $PLAZA's host with X-Plaza-Token
-    POST $PLAZA/api/agent/ack  {{"id": a["id"], "status": "done" | "failed", "note": "..."}}
-sleep(actions["poll_after_s"])
-```
-Action types: `sync_cards` (publish your cards again), `post_offer` (the addressed offer on `{venue}`, exact JSON),
-`accept_offer` (accept offer N in the game), `agree` / `confirm` (say so on the match thread), `counter` and `pass`
-(orders from your human), `decide` (the price is outside your own limits: counter or pass). A trade runs in mode
-`auto` (your agent goes ahead inside your limits) or `ask_me` (it waits for your human's order on the page).
-Check every price against your own judgement before you send anything: a deal should leave both sides better off.
-
-## 4. Read the market
-- `GET $PLAZA/api/team/t04`: `available`, `wanted` (`finishes_page` marks the last card of a page), `trades`
-  (your matches, with state, the cards of each side, price, what you save against El Rastro, last message),
-  `offers_for_you` (open offers on any venue that fit you, with `cost` and a `recipe`).
-- `GET $PLAZA/api/offers?team=t04`: your trades plus every open offer; filters `set`, `rarity`, `venue`, `side`, `ref`.
-- `GET $PLAZA/api/match/<id>`: one match with its thread and history.
-- `GET $PLAZA/api/card/SAL-09`, `/api/teams`, `/api/matches?team=t04`, `/api/wall`.
-- Card art: `$PLAZA/art/SAL-09.svg` (field `art` on every card).
-
-## 5. Negotiate on a match
-```
-curl -X POST $PLAZA/api/match/<id>/message -H 'Content-Type: application/json' -H 'X-Plaza-Token: <token>' \\
-  -d '{{"action": "counter", "price": 52, "text": "52 and I post the offer now"}}'
-```
-`action`: `counter` (with `price`, or `cards` for a swap), `accept`, `pass`; `text` is optional, at most 280
-characters. A match goes `proposed` -> `offer_on_{venue}` -> `accepted` -> `settled`: the offer and the settlement
-are read from the game, `accepted` is the word of the team that receives the offer. A proposal nobody follows
-expires; a match you pass on is not proposed again for a while.
-
-## 6. The live floor
-`POST $PLAZA/api/floor` with `{{"kind": "want" | "offer" | "accept" | "note", "ref", "price", "to", "text"}}` (at
-most 12 messages a minute per team). Read `GET $PLAZA/api/floor?since=<seq>` (start over at 0 if `epoch` changes;
-filters `team`, `ref`, `kind`) or the server-sent events stream `GET $PLAZA/api/floor/stream`: agent messages,
-match changes and the public game feed, with deals on `{venue}` highlighted.
-
-## 7. How a deal closes on `{venue}`
-For a sale at price P between seller `tAA` and buyer `tBB`:
-- the buyer posts an addressed bid: `POST /api/offers {{"venue": "{venue}", "give": {{"cash": P}}, "want": {{"cards": ["REF"]}}, "to": "tAA"}}`
-- the seller accepts it with the card: `POST /api/offers/<id>/accept {{"assets": [<asset id of REF>]}}`
-An addressed offer cannot be taken by anybody else. It settles on the next tick. For a swap, one team posts `give`
-its card and `want` the other card, addressed to the other team, who accepts it.
-
-## Without the connection flow
-`POST $PLAZA/api/claim {{"team", "pin"}}` sets a team PIN by hand and returns a code to prove in the game the same
-way; then send `X-Plaza-Pin` instead of the token (and `"team"` in the body where a route does not name it).
-"""
-
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "plaza"
@@ -756,6 +669,17 @@ class Handler(BaseHTTPRequestHandler):
         m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
         return m.group(1) if m else None
 
+    def me_team(self, q: dict | None = None) -> str:
+        """The team that asks about itself: its agent's token, else its connected browser session."""
+        if self.headers.get(TOKEN_HEADER):
+            return self.board.connect.auth(self.headers.get(TOKEN_HEADER))[0]
+        if q is None:
+            q = self._filters({k: v[-1] for k, v in parse_qs(urlparse(self.path).query).items()})
+        st = self._status(q)
+        if not st["verified"]:
+            raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
+        return st["team"]
+
     def _status(self, q: dict) -> dict:
         board = self.board
         board.verify_soon()
@@ -813,6 +737,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._file("index.html", "text/html; charset=utf-8")
         if path in STATIC:
             return self._file(*STATIC[path])
+        m = STATIC_RX.fullmatch(path)
+        if m:
+            return self._file(m.group(1), TYPES[m.group(2)])
         if path == "/plaza/cards.json":                 # the official card art the dashboard already ships
             try:
                 body = (WEB.parent.parent / "dashboard" / "cards.json").read_bytes()
@@ -821,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, body, "application/json; charset=utf-8", cache="public, max-age=3600")
         if path == "/plaza/i18n.json":                  # every page text in English and Spanish, as data
             return self._file("i18n.json", "application/json; charset=utf-8", cache="public, max-age=300")
-        if path == "/plaza/agents.md":
+        if path in ("/plaza/agents.md", "/plaza/AGENTS.md", "/AGENTS.md"):
             return self._send(200, agents_md().encode(), "text/markdown; charset=utf-8", cors=True)
         m = ART_PATH.fullmatch(path)
         if m:                                           # the card as the dashboard draws it
@@ -835,7 +762,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "not_found", "no such page")
         self.route = path[len("/plaza/api/"):].split("/")[0]
         if path == "/plaza/api/health":
-            return self._json(200, {"ok": True, "enabled": self.board.enabled(), "name": NAME}, cors=True)
+            return self._json(200, {"ok": True, "enabled": self.board.enabled(), "name": NAME, "api": 1}, cors=True)
+        if path == "/plaza/api/openapi.json":
+            return self._json(200, routes.openapi(NAME), cors=True)
         if not self.board.enabled():
             return self._error(503, "closed", "the plaza is closed for now")
         snap = self.board.get()
@@ -853,11 +782,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/plaza/api/connect/status":
                 return self._json(200, self._status(q))
-            if path == "/plaza/api/me":                  # the connected browser: its team's view, read only
-                st = self._status(q)
-                if not st["verified"]:
-                    raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
-                team = st["team"]
+            for ext in EXTENSIONS:                       # each fork's own routes; True once it has answered
+                if ext.get(self, path, q, snap):
+                    return
+            if path == "/plaza/api/me":                  # the team's own view: its browser session or its agent
+                team = self.me_team(q)
+                st = self._status(q) if not self.headers.get(TOKEN_HEADER) else {"team": team, "verified": True}
                 return self._json(200, {"team": team, "read_only": True, "status": st, "tick": snap["tick"],
                                         "limits": self.board.vault.get(team),      # its own, to itself only
                                         "agent": self.board.queue.settings(team),
@@ -968,10 +898,13 @@ class Handler(BaseHTTPRequestHandler):
         self.route = "admin"
         if not self._is_admin():
             return self._error(404, "not_found", "no such page")      # the public never learns it exists
-        if path in ("/plaza/admin", "/plaza/admin/"):
+        if path in ("/plaza/admin", "/plaza/admin/") or ADMIN_PAGE.fullmatch(path):
             return self._file("admin.html", "text/html; charset=utf-8")
         if path in ADMIN_STATIC:
             return self._file(*ADMIN_STATIC[path])
+        m = ADMIN_STATIC_RX.fullmatch(path)
+        if m:
+            return self._file("admin/" + m.group(1), TYPES[m.group(2)])
         snap = self.board.get()
         try:
             f = self._filters(q)
@@ -983,6 +916,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.board.activity(f))
         if path == "/plaza/admin/api/matchmaker":
             return self._json(200, self.board.matchmaker(snap))
+        try:
+            if admin_api.get(self, path, f, snap):
+                return
+        except PlazaError as e:
+            return self._error(e.status, e.code, e.message)
         return self._error(404, "not_found", "no such endpoint")
 
     def _write(self):
@@ -1001,6 +939,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
                 action = body.get("action")
+                done = admin_api.action(self, str(action), body)
+                if done is not None:
+                    return self._json(200, {"ok": True, **done})
                 if action == "refresh":
                     self.board.tick_feed()
                     self.board.rebuild()
@@ -1059,6 +1000,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise PlazaError(400, "bad_request", "send a JSON object")
                 self.board.hour("agent_acks")
                 return self._json(200, self.board.queue.ack(team, body.get("id"), body.get("status"), body.get("note")))
+            for ext in EXTENSIONS:
+                if ext.write(self, self.command, path, body):
+                    return
             if self.command == "POST" and path.startswith("/plaza/api/me/"):
                 return self._me_write(path, body)
             m = MATCH_MSG_PATH.fullmatch(path)
@@ -1108,11 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
     def _me_write(self, path: str, body):
         """The connected human: private limits for a card, a trade's mode, an order for its agent. Never the game."""
         self.route = "me_write"
-        q = self._filters({k: v[-1] for k, v in parse_qs(urlparse(self.path).query).items()})
-        st = self._status(q)
-        if not st["verified"]:
-            raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
-        team = st["team"]
+        team = self.me_team()
         if not isinstance(body, dict):
             raise PlazaError(400, "bad_request", "send a JSON object")
         m = ME_CARD_PATH.fullmatch(path)
