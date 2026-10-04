@@ -1,1 +1,19 @@
 /* suggest: styles of this screen only, classes start with .suggest- */
+.suggest-grid { display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.suggest-form { display: flex; flex-direction: column; gap: 9px; }
+.suggest-seg { display: flex; align-self: flex-start; border: 1px solid var(--line-2); background: var(--s2); margin-bottom: 6px; }
+.suggest-seg button { all: unset; cursor: pointer; padding: 7px 13px; font-size: 12.5px; color: var(--ink-3); border-left: 1px solid var(--line-2); white-space: nowrap; }
+.suggest-seg button:first-child { border-left: 0; }
+.suggest-seg button.active { background: var(--s3); color: var(--ink); }
+.suggest-seg button:focus-visible { outline: 1px solid var(--signal); outline-offset: 2px; }
+.suggest-text { resize: vertical; min-height: 140px; background: var(--bg); }
+.suggest-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.suggest-foot .id { margin-left: auto; }
+.suggest-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 14px; border-top: 1px solid var(--line); }
+.suggest-row:first-child { border-top: 0; }
+.suggest-row > .id { flex: none; width: 52px; padding-top: 2px; }
+.suggest-kind { flex: none; width: 64px; padding-top: 3px; color: var(--ink-2); }
+.suggest-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.suggest-reply { color: var(--ink-2); font-size: 12px; }
+.suggest-none { padding: 14px; }
+@media (max-width: 900px) { .suggest-grid { grid-template-columns: 1fr; } .suggest-kind { display: none; } }

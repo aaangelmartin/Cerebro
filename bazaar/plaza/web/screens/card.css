@@ -1,1 +1,33 @@
-/* card: styles of this screen only, classes start with .card- */
+/* card: styles of this screen only, classes start with .card- that the shared sheet does not use */
+.card-top { display: flex; }
+.card-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; padding: 22px; background: var(--s1); border: 1px solid var(--line-2); align-items: start; }
+.card-side { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.card-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card-facts { text-transform: uppercase; letter-spacing: .06em; margin-top: -8px; }
+.card-zones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.card-zone { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid; }
+.card-zone.give { border-color: var(--zone-give); background: var(--zone-give-bg); } .card-zone.give .ic-wrap { color: var(--zone-give); }
+.card-zone.get { border-color: var(--zone-get); background: var(--zone-get-bg); } .card-zone.get .ic-wrap { color: var(--zone-get); }
+.card-zone b { font-weight: 600; margin-right: 4px; }
+.card-team { cursor: pointer; background: var(--s1); }
+.card-team:hover { border-color: var(--ink-3); color: var(--ink); }
+.card-list { display: flex; flex-direction: column; }
+.card-match, .card-deal { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.card-match:first-child, .card-deal:first-child { border-top: 0; }
+.card-match-price { flex: none; min-width: 58px; padding: 6px 8px; text-align: center; border: 1px solid var(--line-2); background: var(--s2); }
+.card-match-text { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.card-match-state { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.card-link:hover { color: var(--ink); }
+.card-deal .id { flex: none; width: 50px; }
+.card-deal-text { min-width: 0; overflow-wrap: anywhere; }
+.card-deal .num { margin-left: auto; flex: none; }
+.card-none { padding: 12px 14px; }
+.card-private { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line-2); font-family: var(--font-num); font-size: 12px; color: var(--ink-2); }
+@media (max-width: 900px) {
+  .card-layout { grid-template-columns: 1fr; padding: 14px; }
+  .card-side { flex-direction: row; align-items: flex-end; }
+  .card-side .card { width: 150px; }
+  .card-zones { grid-template-columns: 1fr; }
+  .card-match { flex-wrap: wrap; }
+  .card-match-state { margin-left: 0; }
+}
