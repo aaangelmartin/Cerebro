@@ -198,11 +198,29 @@ def one_per_card(pairs: list[dict]) -> list[dict]:
     return out
 
 
+def _bid_call(ref: str, price: int, venue: str, to: str | None = None) -> str:
+    """The game's own call for a bid on our venue, ready for an agent to send with its team key."""
+    body = {"venue": venue, "give": {"cash": int(price)}, "want": {"cards": [ref]}}
+    if to:
+        body["to"] = to
+    return "POST /api/offers " + json.dumps(body, separators=(",", ":"))
+
+
+def _ask_call(ref: str, price: int, venue: str, to: str | None = None) -> str:
+    body = {"venue": venue, "give": {"assets": ["<your " + ref + " asset id>"]}, "want": {"cash": int(price)}}
+    if to:
+        body["to"] = to
+    return "POST /api/offers " + json.dumps(body, separators=(",", ":"))
+
+
+ACCEPT = "POST /api/offers/<id>/accept"
+
+
 def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len: int = MAX_TEXT,
                  page: str | None = None) -> str | None:
-    """One public line per card, with who, what and at which price. The recipe is the one that settled every
-    team-venue deal on Saturday: one side posts the offer ADDRESSED to the other on a 0-fee venue and the
-    other accepts it; no broker wait and nobody can snipe it."""
+    """One public line per card, with who, what, at which price and the exact call. The recipe is the one that
+    settled every team-venue deal on Saturday: one side posts the offer on a 0-fee venue and the other accepts
+    it. An agent that reads the line can run it as it is, with its own key; nothing to connect."""
     lines = []
     for p in one_per_card(pairs)[:limit]:
         if p["kind"] == "swap":
@@ -210,27 +228,27 @@ def announcement(pairs: list[dict], venue: str = VENUE, limit: int = 3, max_len:
                          f"wants. {p['seller']}: post give {p['ref']} want {p['ref_back']} on {venue} to "
                          f"{p['buyer']}; {p['buyer']}: accept it. Card for card, no cash, no fee.")
         elif p["kind"] == "relist" and p["side"] == "ask":
-            lines.append(f"{p['ref']} ({p['rarity']}): {p['seller']} asks {p['price']} on El Rastro, where the "
-                         f"buyer pays {p['saves']:.0f} P of fee. {p['seller']}: list it on {venue} too; "
-                         f"buyers: take it here and pay 0.")
+            lines.append(f"{p['ref']} ({p['rarity']}): {p['seller']} asks {p['price']} on El Rastro (buyer pays "
+                         f"{p['saves']:.0f} P fee). {p['seller']}: {_ask_call(p['ref'], p['price'], venue)} ; "
+                         f"buyers: {ACCEPT}, pay 0 fee.")
         elif p["kind"] == "relist":
-            lines.append(f"{p['ref']} ({p['rarity']}): {p['buyer']} bids {p['price']} on El Rastro, where the "
-                         f"seller loses {p['saves']:.0f} P to the fee. {p['buyer']}: post the bid on {venue}; "
-                         f"holders: accept it here and keep the full {p['price']}.")
+            lines.append(f"{p['ref']} ({p['rarity']}): {p['buyer']} bids {p['price']} on El Rastro (seller loses "
+                         f"{p['saves']:.0f} P fee). {p['buyer']}: {_bid_call(p['ref'], p['price'], venue)} ; "
+                         f"holders: {ACCEPT}, keep the full {p['price']}.")
         elif p["kind"] == "wanted":
             lines.append(f"{p['ref']}: {p['buyer']} is hunting it at the dealers, {p['seller']} sells it at "
-                         f"{p['ask']:.0f}. {p['seller']}: post it on {venue} to {p['buyer']} at {p['price']}; "
-                         f"{p['buyer']}: accept it. 0 fee, done in one tick.")
+                         f"{p['ask']:.0f}. {p['seller']}: {_ask_call(p['ref'], p['price'], venue, p['buyer'])} ; "
+                         f"{p['buyer']}: {ACCEPT}. 0 fee.")
         else:
             lines.append(f"{p['ref']}: {p['buyer']} bids {p['bid']:.0f}, {p['seller']} asks {p['ask']:.0f}. "
-                         f"{p['seller']}: post it on {venue} to {p['buyer']} at {p['price']}; {p['buyer']}: "
-                         f"accept it. Saves {p['saves']:.0f} P of Rastro fee.")
+                         f"{p['seller']}: {_ask_call(p['ref'], p['price'], venue, p['buyer'])} ; {p['buyer']}: "
+                         f"{ACCEPT}. Saves {p['saves']:.0f} P of Rastro fee.")
     if not lines:
         return None
-    head = (f"{venue} (Team 10) matches cards to the team that needs them. 0 % fee, 0 P a card: post your "
-            f"offer here addressed to the other team and they accept it. Open now: ")
+    head = (f"{venue} (Team 10): 0 % fee, 0 P a card, nothing to connect. Post your offer on {venue} with your "
+            f"own key and the other team accepts it. Open now: ")
     text = head + " | ".join(lines)
-    tail = f" Every team's wants, spares and matches: {page}/" if page else ""   # the plaza (bazaar.plaza)
+    tail = f" Every card's best price and the call for it: {page}/board" if page else ""   # the plaza (bazaar.plaza)
     while len(text) + len(tail) > max_len and len(lines) > 1:
         lines.pop()
         text = head + " | ".join(lines)
@@ -355,11 +373,10 @@ class MatchMaker:
         self._results(tick, report)                            # before the list is rebuilt
         closed = [p for p in self.state.get("pairs", []) if p.get("result")]
         ctl = self.control_fn() or {}
+        # Every team is announced: the market vetoes nobody. `blocked_teams` is our own bot's rule for its own
+        # trades, not the venue's; only an explicit `matchmaker_exclude` list leaves a team out.
         exclude = ctl.get("matchmaker_exclude")
-        exclude = tuple(exclude) if isinstance(exclude, list) else top_rivals(report, 2, self.us)
-        blocked = ctl.get("blocked_teams")                     # the humans' veto always applies on top
-        if isinstance(blocked, list):
-            exclude = tuple(dict.fromkeys(list(exclude) + [str(x).strip().lower() for x in blocked]))
+        exclude = tuple(exclude) if isinstance(exclude, list) else ()
         rar = self.rarity_fn()
         pairs = find_pairs(report, rar, us=self.us, venue=self.venue, exclude=exclude)
         pairs = mix(pairs, big_tickets(report, rar, us=self.us, venue=self.venue, exclude=exclude))

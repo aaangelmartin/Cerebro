@@ -121,12 +121,14 @@ class Runner(unittest.TestCase):
         self.assertEqual({t for t, _ in self.messages}, {"t06", "t09"})
         self.assertEqual(m.step(170)["messages"], 2)
 
-    def test_the_two_best_placed_rivals_are_not_helped_by_default(self):
+    def test_every_team_is_announced_and_only_an_explicit_list_leaves_one_out(self):
         self.report = report(t05=rival(score=30, hunting={"LAT-06": {"bid": 22, "venue": "rastro"}}),
-                             t14=rival(score=29), t09=rival(score=9, selling={"LAT-06": {"ask": 18, "venue": "rastro"}}))
+                             t14=rival(score=29), t06=rival(score=9, selling={"LAT-06": {"ask": 18, "venue": "rastro"}}))
+        self.control = {"blocked_teams": ["t06"]}                 # our bot's own veto: not the venue's
+        self.assertTrue(self.mm().step(100)["announced"])         # the leaders and t06 are announced like anyone
+        self.assertIn("t05", self.announced[-1])
+        self.control = {"matchmaker_exclude": ["t05"]}
         self.assertFalse(self.mm().step(100)["announced"])
-        self.control = {"matchmaker_exclude": []}
-        self.assertTrue(self.mm().step(100)["announced"])
 
     def test_a_trade_after_the_proposal_is_recorded(self):
         m = self.mm()
@@ -178,7 +180,8 @@ class BigTicketsAndWording(unittest.TestCase):
         r = report(t07=rival(hunting={"LAT-06": {"bid": 20, "venue": "rastro", "offer": 1}}),
                    t09=rival(selling={"LAT-06": {"ask": 18, "venue": "rastro", "offer": 2}}))
         text = M.announcement(M.find_pairs(r, RARITY))
-        self.assertIn("t09: post it on v07 to t07 at 19; t07: accept it", text)
+        self.assertIn('t09: POST /api/offers {"venue":"v07","give":{"assets":["<your LAT-06 asset id>"]},'
+                      '"want":{"cash":19},"to":"t07"} ; t07: POST /api/offers/<id>/accept', text)
         self.assertNotIn("PUBLIC", text)
 
     def test_a_relist_message_goes_to_the_one_team_and_is_not_a_trade_request(self):
@@ -218,12 +221,12 @@ class PlazaLinkTest(unittest.TestCase):
         pair = {"kind": "wanted", "seller": "t09", "buyer": "t07", "ref": "LAT-06", "rarity": "uncommon",
                 "price": 20, "ask": 20.0, "bid": 0, "saves": 2}
         text = M.announcement([pair], page="https://example.org/plaza")
-        self.assertTrue(text.endswith("https://example.org/plaza/"))
+        self.assertTrue(text.endswith("https://example.org/plaza/board"))
         self.assertLessEqual(len(text), M.MAX_TEXT)
         self.assertNotIn("example.org", M.announcement([pair]))
         long = M.announcement([dict(pair, ref=f"LAT-{i:02d}") for i in range(1, 9)], limit=8, page="https://example.org/plaza")
         self.assertLessEqual(len(long), M.MAX_TEXT)
-        self.assertTrue(long.endswith("https://example.org/plaza/"))
+        self.assertTrue(long.endswith("https://example.org/plaza/board"))
 
     def test_declared_pairs_lead_and_respect_the_exclusions(self):
         with tempfile.TemporaryDirectory() as d:
@@ -350,7 +353,7 @@ class ThePlazaCannotHurtTheBroker(unittest.TestCase):
             mm = self.maker(d, said, declared_fn=lambda: [self.PAIR], page_fn=lambda: "https://example.org/plaza")
             self.assertTrue(mm.step(100)["announced"])
             self.assertIn("LAT-03", said[0])
-            self.assertTrue(said[0].endswith("https://example.org/plaza/"))
+            self.assertTrue(said[0].endswith("https://example.org/plaza/board"))
 
 
 class TheBrokerReportsBeforeTheSlowWork(unittest.TestCase):
