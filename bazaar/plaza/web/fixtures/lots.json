@@ -1,0 +1,114 @@
+{
+ "tick": 1514,
+ "venue": "v07",
+ "lots": [
+  {
+   "id": "l-3fa9c21d",
+   "seller": "t04",
+   "ref": "SAL-10",
+   "name": "Museo Lázaro Galdiano",
+   "rarity": "rare",
+   "start": 40,
+   "state": "open",
+   "state_tick": 1502,
+   "opened_tick": 1502,
+   "ends_tick": 1542,
+   "extensions": 0,
+   "winner": null,
+   "price": null,
+   "match": null,
+   "history": [
+    {
+     "state": "open",
+     "tick": 1502
+    }
+   ],
+   "best_bid": 65,
+   "best_bidder": "t16",
+   "next_bid": 70,
+   "ticks_left": 28,
+   "bids": [
+    {
+     "n": 1,
+     "team": "t09",
+     "price": 45,
+     "tick": 1505,
+     "state": "outbid"
+    },
+    {
+     "n": 2,
+     "team": "t16",
+     "price": 65,
+     "tick": 1511,
+     "state": "live"
+    }
+   ],
+   "bid_count": 2,
+   "venue": "v07",
+   "note": "bids are public: every team sees who bid and how much",
+   "wanted_by": 3
+  }
+ ],
+ "recent": [
+  {
+   "id": "l-77b01e42",
+   "seller": "t04",
+   "ref": "LAV-09",
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "start": 40,
+   "state": "settled",
+   "state_tick": 1490,
+   "opened_tick": 1502,
+   "ends_tick": 1480,
+   "extensions": 0,
+   "winner": "t05",
+   "price": 80,
+   "match": "m-ba346d6c75",
+   "history": [
+    {
+     "state": "open",
+     "tick": 1440
+    },
+    {
+     "state": "ended",
+     "tick": 1480
+    },
+    {
+     "state": "awarded",
+     "tick": 1481
+    },
+    {
+     "state": "settled",
+     "tick": 1490
+    }
+   ],
+   "best_bid": 80,
+   "best_bidder": "t05",
+   "next_bid": 85,
+   "ticks_left": 0,
+   "bids": [
+    {
+     "n": 1,
+     "team": "t05",
+     "price": 80,
+     "tick": 1466,
+     "state": "live"
+    }
+   ],
+   "bid_count": 1,
+   "venue": "v07",
+   "note": "bids are public: every team sees who bid and how much",
+   "wanted_by": 3
+  }
+ ],
+ "rules": {
+  "default_ticks": 40,
+  "max_ticks": 240,
+  "snipe_ticks": 4,
+  "post_ticks": 12,
+  "accept_ticks": 40,
+  "step": "1 P under 20, 5 P from 20",
+  "bids": "public"
+ }
+}

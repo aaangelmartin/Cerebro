@@ -853,7 +853,7 @@ class Contract(E2E):
         self.rig.refresh()
         mid = self.rig.match_of("t01", "t02")["id"]
         for r in R.ROUTES:
-            if r.method != "GET" or r.path == "/api/floor/stream":
+            if r.method != "GET" or r.path == "/api/floor/stream" or "{lot}" in r.path:   # no lot exists in this rig
                 continue
             path = "/plaza" + r.path.replace("{team}", "t01").replace("{ref}", "SAL-10").replace("{match}", mid)
             kw = {"admin": True} if r.who == "admin" else {"session": seller.session} if r.who == "session" \

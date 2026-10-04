@@ -625,10 +625,56 @@ the fourth answers 429.
 ## 9. Every route
 All paths are under `{plaza}`.
 
-{_reference(public)}
+{_reference([r for r in public if r.screen != "auctions"])}
+
+Auctions (a team sells a card to the best public bid, closed on `v07`): their routes and rules are in
+`{plaza}/AGENTS-AUCTIONS.md`.
 
 Not listed here: the host's own routes (`/admin/api/*`). They answer 404 to anyone but Team 10's machine; a
 team's agent has no use for them.
+"""
+
+
+def auctions_md(venue: str = VENUE, base: str | None = None) -> str:
+    """Auctions for a team's agent: the rules and the routes, apart from AGENTS.md so that one stays short."""
+    from . import lots
+    plaza = (base or "$PLAZA").rstrip("/")
+    rows = [r for r in routes.public() if r.screen == "auctions"]
+    return f"""# Auctions on v07 Market
+
+A team puts ONE card it holds up as a lot; other teams bid; the card stays with its seller until the best bid is
+accepted; the sale then closes on venue `{venue}` like any match of this market. All paths are under `{plaza}`,
+with the same `X-Plaza-Token` as in `{plaza}/AGENTS.md`. Only connected teams that proved themselves sell or bid;
+the host (Team 10) never sells, bids or awards, and can only cancel a lot.
+
+## Rules
+- **Bids are public.** Every team sees who bid, how much and when: `GET /lots.json` needs no credential.
+- **The reserve is private.** `reserve` is the least the seller takes. Nobody else sees it, the host included.
+- **A lot** names a `card` you hold (it must be on your sheet: `have`, `spares` or `for_sale`), a `start` price
+  (default and least: the floor of its rarity), an optional `reserve` (at least `start`) and `ticks` (default
+  {lots.TICKS}, {lots.MIN_TICKS} to {lots.MAX_TICKS}). One live lot per card; at most {lots.LOTS_PER_TEAM} live lots a team.
+- **A bid** is a whole number: the `start` price for the first, then at least the best bid plus the step (1 P under
+  20, 5 P from 20). `next_bid` says the least that is accepted. You do not bid on your own lot. A team leads at
+  most {lots.TOP_BIDS_PER_TEAM} lots at a time. A bid in the last {lots.SNIPE_TICKS} ticks moves the end {lots.SNIPE_TICKS} ticks later, {lots.MAX_EXTENSIONS} times at most.
+- **A bid is a commitment.** It cannot be taken back while it leads. If you win and the seller accepts, you have
+  {lots.POST_TICKS} ticks to post the offer on `{venue}`. A winner that does not, or that passes, loses the lot to the next
+  bid and takes a strike of this market's rule (AGENTS.md, "Standing"): two strikes end your access.
+- **The end.** When the lot runs out: a best bid at or over the reserve is accepted for a seller in `auto` mode;
+  with no reserve, or a best bid under it, the seller has {lots.ACCEPT_TICKS} ticks to `accept` (or the lot ends unsold). The
+  seller may `accept` the best bid at any time, and may `cancel` only while no bid has reached its reserve
+  (with no reserve: while nobody has bid).
+- **Closing.** An awarded lot is a match (`match` in the lot). The winner's queue (`GET /api/agent/next`) holds
+  `post_offer`, already written: an offer on `{venue}`, addressed to the seller, giving the bid in cash and
+  wanting the card. The seller's queue then holds `accept_offer`. The game's feed settles it: 0 fee.
+- **Being told.** When a card in your `wants` is put up, your queue holds one `auction` action: its `request`
+  reads the lot and its `bid` is the least bid, ready to send. Bid only what you would pay; acknowledge it either way.
+- States: `open`, `ended` (waiting for the seller), `awarded`, `settled`, `settled_elsewhere`, `unsold`,
+  `cancelled`. Errors: 409 `too_low` (the message says the least bid), 409 `closed`, 409 `no_bids`,
+  409 `has_bids`, 403 `own_lot`, 403 `not_a_party`, 400 `not_yours`, 404 `not_found`. Sending the same lot or
+  the same bid twice answers `"repeated": true` and changes nothing.
+
+## Routes
+{_reference(rows)}
 """
 
 
@@ -648,6 +694,7 @@ def host_md(name: str | None = None) -> str:
         "a price within 25 % of the reference. The agents always get it as `decide`. |\n"
         "| `expire` | `match` | End a live match. |\n"
         "| `suggestion` | `id`, `status`, `reply` | Answer a suggestion. |\n"
+        "| `lot_cancel` | `lot` | Cancel an auction lot (moderation). The host never bids, prices or awards. |\n"
         "| `reset_team` | `team` | The team connects again from nothing: its agent token, sessions, PIN, sheet and "
         "private limits are dropped. Use it when a team lost its agent or its token leaked. A verified team "
         "can no longer approve a reconnection with its current token: the newest proof in the game wins. |\n"

@@ -29,7 +29,7 @@ from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
-from . import prices
+from . import lots as lots_mod, prices
 from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store, read_json, write_atomic
 
@@ -57,7 +57,7 @@ STATIC_RX = re.compile(r"/plaza/static/((?:(?:screens|i18n|fixtures|fixtures/adm
 ADMIN_STATIC_RX = re.compile(r"/plaza/admin/static/screens/([a-z0-9_]{1,40}\.(js|css))")     # web/admin/<name>
 ADMIN_PAGE = re.compile(r"/plaza/admin/(?:overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs)")
 STANDING_PATHS = ("/plaza/api/me", "/plaza/api/status", "/plaza/api/agent/next")   # answers that carry `standing`
-EXTENSIONS = (team_api, deals_api)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
+EXTENSIONS = (team_api, deals_api, lots_mod)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
 ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
@@ -72,9 +72,10 @@ ME_CARD_PATH = re.compile(r"/plaza/api/me/card/([A-Z]{3}-\d{2})")
 ME_TRADE_PATH = re.compile(r"/plaza/api/me/trade/(m-[0-9a-f]{10})")
 MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
 PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents"
-                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|collections|_kit)")                                                              # deep links
+                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|collections|auctions|_kit)")                                                              # deep links
 BOARD_ALIASES = {"/plaza/board.json": "/plaza/api/board", "/plaza/board/history.json": "/plaza/api/board/history",
-                 "/plaza/board/live.json": "/plaza/api/board/live", "/plaza/collections.json": "/plaza/api/collections"}
+                 "/plaza/board/live.json": "/plaza/api/board/live", "/plaza/collections.json": "/plaza/api/collections",
+                 "/plaza/lots.json": "/plaza/api/lots"}
 BOARD_VIEWS = {"/plaza/api/board": "board", "/plaza/api/board/history": "board_history", "/plaza/api/board/live": "board_live",
                "/plaza/api/collections": "collections"}
 TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)
@@ -160,7 +161,7 @@ class Board:
         self.built_in = 0.0                                    # how long the last one took
         self.wait_until = 0.0                                  # a slow board is not rebuilt again before this
         self.stats_at: tuple = (None, 0, {"deals": 0, "volume": 0, "saved": 0, "last": None})
-        for ext in (team_api, deals_api, admin_api):          # a fork hangs its own stores on the board here:
+        for ext in (team_api, deals_api, admin_api, lots_mod):          # a fork hangs its own stores on the board here:
             if hasattr(ext, "attach"):                        # board.team_activity, board.suggest, board.perf
                 ext.attach(self)
 
@@ -367,6 +368,10 @@ class Board:
             cands = matcher.find(sheets, cat, self.host, VENUE)
             events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
                                      excluded_matches=frozenset(admin["excluded_matches"]))
+        try:                                                # auctions follow their matches
+            lots_mod.sync(self, self.now_tick(tick))
+        except Exception:  # noqa: BLE001 - an auction never takes the board down
+            pass
         proposed = [e for e in events if e.get("state") == "proposed"]
         for e in events:
             self.hour("match_" + str(e.get("state") or e.get("kind") or "event"))
@@ -704,6 +709,11 @@ class Board:
         out = self.queue.build(team, mine, lambda ref, role, price: self.vault.within(team, ref, role, price),
                                declared, snap["tick"], self.tick_seconds())
         out["actions"] = self.strikes.actions(team) + out["actions"]      # a warning is read before anything else
+        try:
+            wants = {e["ref"] for e in (snap["sheets"].get(team) or {}).get("wants") or []}
+            out["actions"] += lots_mod._lots(self).actions(team, wants)   # an auction of a card it wants: its call
+        except Exception:  # noqa: BLE001
+            pass
         return out
 
     def hours(self, last: int = 24) -> list[dict]:
@@ -1095,6 +1105,10 @@ class Handler(BaseHTTPRequestHandler):
             except TypeError:
                 md = agents_md()
             return self._send(200, md.encode(), "text/markdown; charset=utf-8", cors=True)
+        if path in ("/plaza/AGENTS-AUCTIONS.md", "/AGENTS-AUCTIONS.md"):
+            from .agentsdoc import auctions_md
+            return self._send(200, auctions_md(base=public_url(self.board.live)).encode(),
+                              "text/markdown; charset=utf-8", cors=True)
         m = ART_PATH.fullmatch(path)
         if m:                                           # the card as the dashboard draws it
             svg = self.board.card_art().get(m.group(1))
@@ -1397,6 +1411,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.board.hour("agent_acks")
                 out = self.board.queue.ack(team, body.get("id"), body.get("status"), body.get("note"))
                 self.board.strikes.ack(team, body.get("id"))       # a warning it has now read
+                lots_mod._lots(self.board).ack(team, body.get("id"))
                 return self._json(200, out)
             for ext in EXTENSIONS:
                 if ext.write(self, self.command, path, body):

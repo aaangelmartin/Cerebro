@@ -21,7 +21,7 @@
   const FIXTURES = [
     [/^\/api\/status$/, () => ({ closed: "status_closed", paused: "status_paused", offline: "status_offline" }[mock] || "status")],
     [/^\/api\/health$/, "health"], [/^\/api\/stats$/, "stats"], [/^\/api\/teams$/, "teams"], [/^\/api\/team\/t\d\d$/, "team"],
-    [/^\/api\/market$/, "market"], [/^\/api\/board$/, "board"], [/^\/api\/board\/history$/, "board_history"], [/^\/api\/board\/live$/, "board_live"], [/^\/api\/collections$/, "collections"], [/^\/api\/card\/[A-Z]{3}-\d\d$/, "card"], [/^\/api\/offers$/, "offers"],
+    [/^\/api\/market$/, "market"], [/^\/api\/board$/, "board"], [/^\/api\/board\/history$/, "board_history"], [/^\/api\/board\/live$/, "board_live"], [/^\/api\/collections$/, "collections"], [/^\/api\/lots$/, "lots"], [/^\/api\/lot\/l-[0-9a-f]+(\/[a-z]+)?$/, "lot"], [/^\/api\/card\/[A-Z]{3}-\d\d$/, "card"], [/^\/api\/offers$/, "offers"],
     [/^\/api\/matches$/, "matches"], [/^\/api\/match\/m-[0-9a-f]+$/, "match"], [/^\/api\/floor$/, "floor"],
     [/^\/api\/connect\/start$/, "connect_start"], [/^\/api\/connect\/status$/, "connect_status"],
     [/^\/api\/me$/, "me"], [/^\/api\/(me|agent)\/cards$/, "me_cards"], [/^\/api\/me\/trades$/, "me_trades"],

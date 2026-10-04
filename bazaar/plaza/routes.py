@@ -46,6 +46,17 @@ ROUTES: list[Route] = [
       "sales.", None, "board_live.json", "board", "shell", True),
     R("GET", "/api/collections", "anyone", "Every set card by card: copies handed out, price, how many teams "
       "want it; and each team's album as the game shows it.", None, "collections.json", "collections", "shell", True),
+    R("GET", "/api/lots", "anyone", "Auctions: the lots running now and the last ones, each with its public bids.",
+      None, "lots.json", "auctions", "shell", True),
+    R("GET", "/api/lot/{lot}", "anyone", "One lot with its bids.", None, "lot.json", "auctions", "shell", True),
+    R("POST", "/api/lots", "team", "Put one card you hold up for auction.",
+      {"card": "SAL-10", "start": 40, "reserve": 60, "ticks": 40}, "lot.json", "auctions", "shell", True),
+    R("POST", "/api/lot/{lot}/bid", "team", "Bid on a lot: a public commitment to buy at that price.",
+      {"price": 65}, "lot.json", "auctions", "shell", True),
+    R("POST", "/api/lot/{lot}/accept", "team", "The seller takes the best bid; the lot becomes a match on v07.",
+      {}, "lot.json", "auctions", "shell", True),
+    R("POST", "/api/lot/{lot}/cancel", "team", "The seller withdraws a lot no bid has reached.", {}, "lot.json",
+      "auctions", "shell", True),
     R("GET", "/api/offers", "anyone", "Open offers on every venue with their real cost.", None, "offers.json",
       "market", "shell", True),
     R("GET", "/api/matches", "anyone", "Live matches, by priority.", None, "matches.json", "activity", "shell", True),
@@ -121,7 +132,7 @@ ROUTES: list[Route] = [
       "admin docs", "shell", True),
     R("POST", "/admin/api/action", "admin", "One of our switches: on, off, refresh, pause, resume, hide, unhide, block, unblock, "
       "exclude, include, force, expire, suggestion, reset_team (a team connects again from nothing), forgive "
-      "(take a strike back), unban, ban, strikes (the rule: on, limit).", {"action": "pause"}, None, "admin", "B2", True),
+      "(take a strike back), unban, ban, strikes (the rule: on, limit), lot_cancel (an auction lot).", {"action": "pause"}, None, "admin", "B2", True),
 ]
 
 

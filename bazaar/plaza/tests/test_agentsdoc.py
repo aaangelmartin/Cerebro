@@ -58,12 +58,15 @@ def same_shape(example, real, where: str) -> list[str]:
 class DocumentTest(unittest.TestCase):
     def setUp(self):
         self.md = A.agents_md()
-        self.entries = {**entries(self.md), **entries(A.host_md())}
+        self.entries = {**entries(self.md), **entries(A.auctions_md()), **entries(A.host_md())}
         self.live = {(r.method, r.path): r for r in R.ROUTES if r.live}
 
     def test_every_live_route_and_no_other(self):
         self.assertEqual(set(self.entries), set(self.live))
-        self.assertEqual(A.documented(self.md), {k for k, r in self.live.items() if r.who != "admin"})
+        self.assertEqual(A.documented(self.md) | A.documented(A.auctions_md()),
+                         {k for k, r in self.live.items() if r.who != "admin"})
+        self.assertEqual(A.documented(A.auctions_md()), {k for k, r in self.live.items() if r.screen == "auctions"})
+        self.assertIn("AGENTS-AUCTIONS.md", self.md)
         self.assertEqual(A.documented(A.host_md()), {k for k, r in self.live.items() if r.who == "admin"})
         self.assertNotIn("/admin/api/status", self.md)          # a team's agent does not read the host's routes
         known = {(r.method, r.path) for r in R.ROUTES}
@@ -173,7 +176,7 @@ class RealAnswersTest(unittest.TestCase):
         for path in ("/plaza/AGENTS.md", "/plaza/agents.md", "/AGENTS.md"):
             st, md, h = self.call("GET", path)
             self.assertEqual((st, h["Content-Type"].split(";")[0]), (200, "text/markdown"), path)
-            self.assertEqual(A.documented(md), {(r.method, r.path) for r in R.public() if r.live})
+            self.assertEqual(A.documented(md), {(r.method, r.path) for r in R.public() if r.live and r.screen != "auctions"})
 
     def test_written_examples_have_the_real_shape(self):
         st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})

@@ -9,7 +9,7 @@ from bazaar.plaza.tests import test_gateway
 from bazaar.plaza.tests.test_server import ServerTest
 
 WEB = Path(routes.__file__).parent / "web"
-PARAMS = {"{team}": "t09", "{ref}": "LAT-06", "{match}": "m-0123456789"}
+PARAMS = {"{team}": "t09", "{ref}": "LAT-06", "{match}": "m-0123456789", "{lot}": "l-01234567"}
 ADMIN = {"X-Plaza-Admin": "test-admin-token"}
 
 

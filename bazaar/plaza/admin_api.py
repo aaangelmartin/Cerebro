@@ -232,6 +232,15 @@ def action(h, action: str, body: dict) -> dict | None:
                            "ban": "the host closed the market to your team"}[action], by="market")
         h.board.rebuild()
         return out
+    if action == "lot_cancel":                          # moderation only: we cancel a lot, we never price or award one
+        from . import lots as lots_mod
+        if set(body) - {"action", "lot"}:
+            raise PlazaError(400, "bad_request", "send lot")
+        lots = lots_mod._lots(h.board)
+        out = lots.cancel(None, body.get("lot"), lots.tick, lots_mod._expire(h.board))
+        deals_api.note(h.board, out["seller"], "auction", f"the host cancelled lot {out['id']}", by="market")
+        h.board.stale()
+        return {"lot": out}
     if action != "suggestion":
         return None
     unknown = set(body) - {"action", "id", "status", "reply"}
