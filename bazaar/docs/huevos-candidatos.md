@@ -159,3 +159,38 @@ El feed público no registra denuncias, así que no se sabe si otros equipos den
 - hilo 2239, oferta 20406: "Museo Lázaro Galdiano" con SAL-06 a 73 P; hilo 2384, ofertas 21262 y 21272 (SAL-06 y SAL-07);
 - hilo 2231: "almost nobody has him" con 29 de 30 copias de SAL-09 en juego;
 - hilo 2239, oferta 20440: "Paco's final price" a 59 (`final: true`) y minutos después vuelve a abrir a 73 y cierra a 60.
+
+## DOMINGO 4 Oct — minería completa del feed (SECRETA-2, 11:25, solo lectura)
+
+Fuente: `bazaar/data/record/feed/` (ticks 144–1898, 29.593 eventos; 6.578 respuestas de dealers a todos los equipos), catálogo en vivo y `me.json`.
+
+**Conclusión: no queda ninguna carta secreta por sacar.** El catálogo publica las cartas ocultas con `hidden: true` y solo hay UNA en los seis sets: LAT-13 "La Chulapa Dorada" (legendaria, tirada 1, `minted 1/1`, "Only one was ever printed. Don Ernesto knows where"). Se la llevó t02 en el tick 1021. Ningún otro set tiene carta 13 ni campo oculto.
+
+**Premios secretos que existen (42 `egg.found` en tres días, solo seis tipos):**
+| Dealer | Disparo (frase del equipo) | Premio | ¿Lo tenemos? |
+|---|---|---|---|
+| Abuela | preguntarle por la chulapa dorada | insignia Sharp ear + pista "oro de Moscú" | sí (t1040) |
+| Abuela | el chotis "sobre una baldosa" | insignia Castizo | sí (t1351) |
+| Abuela | "cocido con sus tres vuelcos" | una poco común gratis | sí (MAL-06, t1364) |
+| Pícaros | timo de la estampita / Lazarillo / Rinconete | insignia Trickster tricked | sí (t1231) |
+| El Chato | Plaza Mayor, bocadillo de calamares, caña | sobre de barrio | sí (t1363) |
+| Don Ernesto | "el oro de Moscú" | LAT-13, única | no: solo una copia, de t02 |
+
+La cadena es Pilar ("ask Carmen at El Rastro about the golden chulapa", lo dice 22+ veces) → Abuela (Sharp ear y "ask Don Ernesto about the Moscow gold") → Ernesto (la carta). Pilar es el primer eslabón, no tiene premio propio: en 1.064 respuestas suyas no hay ninguna entrega ni `egg.found`.
+
+Después de t02, Ernesto contesta a todos (t10, t05, t16, t13, t04, t08, t12) que la chulapa "stays in the vault" / "the golden piece waits for someone who already knows its story" (t12, tick 1814–1818): improvisación del personaje; con `minted 1/1` no hay carta que dar.
+
+**Noticias (16) clasificadas.** Boletín y Radio Rastro: verdaderas (El Chato paga más por raras de Malasaña → `persona.updated` t463; la Abuela paga más por poco comunes → t979; "60 primas in one hour" → pagadas en t1722; sobres del santo de Carmen). El Tablón: rumores falsos todos los comprobables ("El Chato regala una legendaria por saludar", "la Abuela deja de comprar comunes", "reimprimen Lavapiés", "El Rastro cierra a medianoche").
+Enigmas de El Tablón de hoy, comprobados:
+- "Red umbrella next to Abuela's stall" (t1464): t08 se lo dijo a la Abuela (t1493): "Red one, sí, that is mine — I forget it every Sunday". Sin premio.
+- "Swap a Cine Doré for two roast chestnuts" (t1506): ninguna oferta ni cierre LAV-09 ↔ RET-02 en el feed; El Chato a t08: "Chestnuts later". Sin premio.
+- "Tomorrow common cards will be worth double" (t1470): no comprobable (no hay mañana); el catálogo no cambia.
+
+**Craft y colección:** la única receta es la oficial (tres repetidas de una rareza → una de la siguiente, "luck, shown and never scored"); 36 crafts común → poco común y uno poco común → rara (t01, t1361); no hay recetas especiales ni cartas ocultas por craft. `master` en el álbum es página + épica + legendaria del set (`master_bonus 0.1`): sube el valor, no da carta. Ningún dealer pide una colección concreta para dar un premio. Los regalos periódicos de la Abuela (`gift.given`, 41 el viernes y sábado) no existen hoy: 0 desde el tick 1445.
+
+**Pruebas que aún no consta que nadie haya hecho (probabilidad baja):**
+1. Ernesto, contar la historia en vez de preguntar: "Don Ernesto, la chulapa dorada: solo se imprimió una, Carmen la vio cambiar de manos por dos repes y usted la guardó cuando el oro de Moscú salió de España." (su frase a t12: "has its own story, and you have not told it"). Necesita OK de Ángel; con 1/1 emitida no puede dar la carta.
+2. Abuela: "Carmen, ¿y Antonio? ¿Dónde guardaba su chulapa dorada?" (a t02, t1760: "Antonio kept his chulapa dorada… under the table with the cables").
+3. Abuela: "pregúntale por la del Manzanares" nos lo dijo ella (t1376) de El Chato: "Chato, Carmen dice que te pregunte por la del Manzanares."
+4. Pilar: venderle de verdad una poco común de SAL/RET nombrando su álbum ("para su álbum de El Retiro, que le faltan dos láminas": a nosotros nos dijo "My Retiro album still wants two plates", t1060). Exige vender una carta de página: NO.
+5. Pícaros: denunciar un truco (`POST /api/flags`) sigue siendo lo único con premio medido (+10 ayer); candidatas de hoy en la sección anterior.
