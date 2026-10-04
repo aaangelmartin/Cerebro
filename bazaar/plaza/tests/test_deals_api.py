@@ -307,7 +307,9 @@ class RoutesTest(unittest.TestCase):
         (self.record / "threads" / f"th-{team}.json").write_text(json.dumps(      # the proof in the game
             {"id": team, "kind": "team", "messages": [{"sender": team, "text": s["connect_code"]}]}) + "\n")
         self.board.verified_at = 0.0
-        return {"X-Plaza-Token": a["agent_token"]}
+        token = {"X-Plaza-Token": a["agent_token"]}
+        self.assertEqual(self.call("GET", "/plaza/api/me/cards", headers=token)[0], 200)   # seen: the team is proved
+        return token
 
     def event(self, **e):
         with (self.live / "events.jsonl").open("a") as f:

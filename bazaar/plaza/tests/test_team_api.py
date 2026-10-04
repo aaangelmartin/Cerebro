@@ -292,15 +292,23 @@ class CardsTest(Base):
         """Anyone can start a connection in another team's name: what it publishes is shown to nobody."""
         s = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})[1]
         tok = {"X-Plaza-Token": self.call("POST", "/plaza/api/connect/agent", {"team": "t08", "code": s["connect_code"]})[1]["agent_token"]}
-        self.assertEqual(self.call("PUT", "/plaza/api/team/t08", {"wants": ["LAT-06"], "spares": ["LAT-03"]}, tok)[0], 200)
+        body = {"wants": [{"ref": "LAT-06", "max": 1777}], "spares": ["LAT-03"], "have": ["LAT-03"]}
+        st, out, _ = self.call("PUT", "/plaza/api/team/t08", body, tok)
+        self.assertEqual((st, out["error"]), (403, "prove_first"))                  # nothing is taken before the proof
         sheet = self.call("GET", "/plaza/api/team/t08")[1]
         self.assertEqual((sheet["verified"], sheet["wants"], sheet["spares"], sheet["declared_at"]), (False, [], [], None))
-        self.assertEqual(self.board.store.declared()["t08"], {**self.board.store.declared()["t08"], "declared": None, "unproved": True})
-        self.assertEqual([c["ref"] for c in self.call("GET", "/plaza/api/me/cards", headers=tok)[1]["want"]], ["LAT-06"])   # its own view
+        self.assertIsNone(self.board.store.declared().get("t08", {}).get("declared"))
+        self.assertEqual((self.board.vault.get("t08"), self.board.vault.have("t08")), ({}, None))
+        self.assertEqual(self.call("GET", "/plaza/api/me/cards", headers=tok)[0], 403)
+        # A sheet and limits somebody left in the team's name before this rule are dropped by the proof.
+        self.board.store.declare("t08", None, {"wants": ["LAT-03"]})
+        self.board.vault.put("t08", "LAT-03", {"max": 1999})
         (self.record / "threads" / "th-t08.json").write_text(json.dumps(
             {"id": "x", "kind": "team", "messages": [{"sender": "t08", "text": s["connect_code"]}]}) + "\n")
         self.board.verified_at = 0.0
         self.assertTrue(self.call("GET", "/plaza/api/connect/status?session=" + s["session"])[1]["verified"])
+        self.assertEqual((self.board.store.declared()["t08"]["declared"], self.board.vault.get("t08")), (None, {}))
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t08", body, tok)[0], 200)
         self.board.stale()
         sheet = self.call("GET", "/plaza/api/team/t08")[1]
         self.assertEqual((sheet["verified"], [w["ref"] for w in sheet["wants"]]), (True, ["LAT-06"]))
@@ -362,7 +370,7 @@ class CardsTest(Base):
         self.assertEqual(self.call("GET", url)[1]["counts"]["overrides"], 0)        # nothing of it was stored
         for bad in ({"wants": ["ZZZ-99"]}, {"have": ["LAT-13"]}, {"have": "LAT-03"}, {"have": ["LAT-03"] * 201},
                     {"wants": [{"ref": "LAT-06", "max": 0}]}, {"spares": [{"ref": "LAT-03", "max": 3}]},
-                    {"pin": "1234"}, {"wants": ["LAT-06"], "extra": 1}, [], "x", {},
+                    {"pin": "12345678"}, {"wants": ["LAT-06"], "extra": 1}, [], "x", {},
                     {"for_sale": [{"ref": "LAT-06", "price": 99999}]}, {"wants": [{"ref": "ZZZ-99", "max": 5}]}):
             st, out, _ = self.call("PUT", "/plaza/api/team/t07", bad, tok7)
             self.assertEqual((st, out.get("error")), (400, "bad_request"), bad)
@@ -514,8 +522,8 @@ class FuzzTest(Base):
             self.assertEqual(self.call("POST", "/plaza/api/status", {})[0], 404)
             for query in ("?since=%00", "?limit=999999999999", "?since=-1", "?team=../../etc", "?session=%ff%fe"):
                 self.assertIn(self.call("GET", "/plaza/api/me/activity" + query, headers=tok7)[0], (200, 400), query)
-            head = (f"POST /plaza/api/me/cards{s7} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
-                    "Connection: close\r\n")
+            head = ("POST /plaza/api/me/cards HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                    f"Cookie: plaza_session={s7.split('=')[1]}\r\nConnection: close\r\n")
             for body in (b"\xff\xfe\x00not utf-8", b"{" * 2000, b"[" * 15000, b'{"op": "add", "list": "wants", "ref": "LAT-06"',
                          b"\x00" * 64, b'"\\ud800"'):
                 got = self.raw(head.encode() + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)

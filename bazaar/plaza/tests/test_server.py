@@ -1,5 +1,6 @@
 """The plaza is public: only its own routes answer, input is validated, and nothing private leaks."""
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -48,6 +49,11 @@ class ServerTest(unittest.TestCase):
     def call(self, method, path, body=None, headers=None):
         data = json.dumps(body).encode() if body is not None else None
         h = {"Content-Type": "application/json"} if body is not None else {}
+        m = re.search(r"[?&]session=([A-Za-z0-9_-]+)", path)
+        if m and "/connect/status" not in path:             # the browser sends its session as a cookie: an address
+            path = re.sub(r"[?&]session=[A-Za-z0-9_-]+", "", path, count=1)       # never carries it
+            path = re.sub(r"^([^?]*)&", r"\1?", path)
+            h["Cookie"] = "plaza_session=" + m.group(1)
         req = urllib.request.Request(self.base + path, data=data, method=method, headers={**h, **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
@@ -60,6 +66,15 @@ class ServerTest(unittest.TestCase):
                 return e.code, json.loads(raw), e.headers
             except ValueError:
                 return e.code, raw.decode(errors="replace"), e.headers
+
+    def pin(self, team, pin="42424242"):
+        """A team that set a PIN by hand and proved its code in the game."""
+        st, c, _ = self.call("POST", "/plaza/api/claim", {"team": team, "pin": pin})
+        self.assertEqual(st, 200, c)
+        (self.record / "threads" / f"pin-{team}.json").write_text(json.dumps(
+            {"id": team, "kind": "team", "messages": [{"sender": team, "text": c["code"]}]}) + "\n")
+        self.board.verified_at = 0.0
+        return {"X-Plaza-Pin": pin}
 
     def test_teams_team_matches_wall(self):
         st, teams, _ = self.call("GET", "/plaza/api/teams")
@@ -100,40 +115,42 @@ class ServerTest(unittest.TestCase):
         blob = ""
         for path in ("/plaza/api/teams", "/plaza/api/team/t09", "/plaza/api/matches", "/plaza/api/wall", "/plaza/api/health"):
             blob += json.dumps(self.call("GET", path)[1])
-        self.call("POST", "/plaza/api/claim", {"team": "t09", "pin": "4242"})
+        self.call("POST", "/plaza/api/claim", {"team": "t09", "pin": "42424242"})
         blob += json.dumps(self.call("GET", "/plaza/api/team/t09")[1]) + json.dumps(self.call("GET", "/plaza/api/teams")[1])
         for secret in ("hunter2", "secret_thing", "armed", "4242", "PLAZA-", "salt", "LAT-13"):
             self.assertNotIn(secret, blob)
 
     def test_claim_declare_and_see_it(self):
-        st, c, _ = self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})
+        st, c, _ = self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "42424242"})
         self.assertEqual(st, 200)
         self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-03"]})[0], 403)
-        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-03"]}, {"X-Plaza-Pin": "0000"})[1]["error"], "bad_pin")
-        st, out, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-03"], "spares": ["LAT-06"]}, {"X-Plaza-Pin": "4242"})
-        self.assertEqual((st, out["declared"]["wants"]), (200, ["LAT-03"]))
-        t7 = self.call("GET", "/plaza/api/team/t07")[1]
-        self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-06", "public")])   # not proved yet:
-        self.assertTrue(t7["claimed"])                                      # anyone could have claimed it, so the
-        self.assertFalse(t7["verified"])                                    # sheet is kept and shown to nobody
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-03"]}, {"X-Plaza-Pin": "00000000"})[1]["error"], "bad_pin")
+        sheet = {"wants": ["LAT-03"], "spares": ["LAT-06"]}
+        st, out, _ = self.call("PUT", "/plaza/api/team/t07", sheet, {"X-Plaza-Pin": "42424242"})
+        self.assertEqual((st, out["error"]), (403, "prove_first"))          # anyone could have claimed it: nothing
+        t7 = self.call("GET", "/plaza/api/team/t07")[1]                     # is written in its name before the proof
+        self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-06", "public")])
+        self.assertTrue(t7["claimed"])
+        self.assertFalse(t7["verified"])
         # the team proves the claim with a thread message to us in the game
         (self.record / "threads" / "9.json").write_text(json.dumps(
             {"id": 9, "kind": "team", "team": "t07", "with": "t10", "messages": [{"sender": "t07", "text": f"hi {c['code']}"}]}))
-        self.board.rebuild()
-        self.board.rebuild()
+        self.board.verified_at = 0.0
+        st, out, _ = self.call("PUT", "/plaza/api/team/t07", sheet, {"X-Plaza-Pin": "42424242"})
+        self.assertEqual((st, out["declared"]["wants"]), (200, ["LAT-03"]))
         t7 = self.call("GET", "/plaza/api/team/t07")[1]
         self.assertTrue(t7["verified"])
         self.assertEqual([(w["ref"], w["source"]) for w in t7["wants"]], [("LAT-03", "agent")])
 
     def test_a_message_from_another_team_does_not_verify(self):
-        c = self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})[1]
+        c = self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "42424242"})[1]
         (self.record / "threads" / "9.json").write_text(json.dumps(
             {"id": 9, "kind": "team", "team": "t09", "with": "t10", "messages": [{"sender": "t09", "text": c["code"]}]}))
         self.board.rebuild()
         self.assertFalse(self.call("GET", "/plaza/api/team/t07")[1]["verified"])
 
     def test_bad_writes(self):
-        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t10", "pin": "4242"})[0], 403)
+        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t10", "pin": "42424242"})[0], 403)
         self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t07"})[0], 400)
         self.assertEqual(self.call("POST", "/plaza/api/claim", ["t07"])[0], 400)
         self.assertEqual(self.call("POST", "/plaza/api/teams", {})[0], 404)
@@ -152,13 +169,20 @@ class ServerTest(unittest.TestCase):
     def test_switch_and_budget(self):
         (self.live / "control.json").write_text(json.dumps({"plaza": "off"}))
         self.assertEqual(self.call("GET", "/plaza/api/teams")[0], 503)
-        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})[0], 503)
+        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "42424242"})[0], 503)
         self.assertEqual(self.call("GET", "/plaza/")[0], 200)              # the page itself still loads
         b = S.Budget(clock=lambda: 0.0)
-        self.assertTrue(all(b.take("1.2.3.4", "write") for _ in range(S.WRITES_PER_MIN)))
+        self.assertTrue(all(b.take("k:t07", "write") for _ in range(S.WRITES_PER_MIN)))
+        self.assertFalse(b.take("k:t07", "write"))
+        self.assertTrue(b.take("k:t08", "write"))                          # another team has its own budget
+        self.assertTrue(b.take("k:t07", "read"))
+        room = S.WRITES_PER_MIN * S.SHARED_READS                           # no credential: a whole room behind one
+        self.assertTrue(all(b.take("1.2.3.4", "write") for _ in range(room)))      # address shares a wider one
         self.assertFalse(b.take("1.2.3.4", "write"))
-        self.assertTrue(b.take("5.6.7.8", "write"))                        # another client has its own budget
-        self.assertTrue(b.take("1.2.3.4", "read"))
+        for i in range(S.MAX_BUDGET_KEYS + 50):                            # many keys: the old ones go, never
+            b.take(f"9.9.{i // 250}.{i % 250}", "read")                    # everybody's count at once
+        self.assertLessEqual(len(b.hits), S.MAX_BUDGET_KEYS + 1)
+        self.assertGreater(len(b.hits), S.MAX_BUDGET_KEYS // 2 - 1)        # half is kept: the newest
 
     def event(self, **e):
         with (self.live / "events.jsonl").open("a") as f:
@@ -220,8 +244,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/plaza/api/card/XXX-01")[0], 404)
 
     def test_floor_post_poll_filters_and_moderation(self):
-        self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})
-        pin = {"X-Plaza-Pin": "4242"}
+        pin = self.pin("t07")
         self.assertEqual(self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "want", "ref": "LAT-06"})[0], 403)
         st, out, _ = self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "want", "ref": "LAT-06", "price": 15,
                                                             "text": "  <b>last</b>\none  "}, pin)
@@ -255,19 +278,19 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": "hi"}, pin)[1]["error"], "blocked")
 
     def test_floor_rate_per_team(self):
-        self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})
-        codes = [self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": f"n{i}"}, {"X-Plaza-Pin": "4242"})[0]
+        self.pin("t07")
+        codes = [self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": f"n{i}"}, {"X-Plaza-Pin": "42424242"})[0]
                  for i in range(13)]
         self.assertEqual((codes[:12], codes[12]), ([200] * 12, 429))
 
     def test_floor_stream(self):
         import http.client
-        self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})
+        self.pin("t07")
         conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
         conn.request("GET", "/plaza/api/floor/stream?since=0")
         r = conn.getresponse()
         self.assertEqual((r.status, r.getheader("Content-Type")), (200, "text/event-stream; charset=utf-8"))
-        self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": "live now"}, {"X-Plaza-Pin": "4242"})
+        self.call("POST", "/plaza/api/floor", {"team": "t07", "kind": "note", "text": "live now"}, {"X-Plaza-Pin": "42424242"})
         seen = b""
         while b"live now" not in seen:
             seen += r.fp.readline()
@@ -282,7 +305,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/plaza/admin/api/action", {"action": "off"})[0], 404)
         admin = {"X-Plaza-Admin": "test-admin-token"}
         self.assertEqual(self.call("GET", "/plaza/admin/", headers=admin)[0], 200)
-        self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})
+        self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "42424242"})
         self.call("GET", "/plaza/api/nope")
         st, o, _ = self.call("GET", "/plaza/admin/api/overview", headers=admin)
         self.assertEqual((st, o["active_teams"], o["verified_teams"], len(o["teams"])), (200, 1, 0, 17))
@@ -319,11 +342,11 @@ class ServerTest(unittest.TestCase):
     def test_declared_pairs_for_the_matchmaker(self):
         self.assertEqual(S.declared_pairs(self.live, self.record), [])
         for team, body in (("t07", {"wants": ["LAT-06"]}), ("t09", {"spares": ["LAT-06"]})):       # a declared spare meets a declared want
-            self.call("POST", "/plaza/api/claim", {"team": team, "pin": "4242"})
-            self.call("PUT", f"/plaza/api/team/{team}", body, {"X-Plaza-Pin": "4242"})
+            self.call("POST", "/plaza/api/claim", {"team": team, "pin": "42424242"})
+            self.assertEqual(self.call("PUT", f"/plaza/api/team/{team}", body, {"X-Plaza-Pin": "42424242"})[0], 403)
         self.assertEqual(S.declared_pairs(self.live, self.record), [])       # claimed, not proved in the game: nothing
-        for team in ("t07", "t09"):
-            self.board.store.mark_verified(team)
+        for team, body in (("t07", {"wants": ["LAT-06"]}), ("t09", {"spares": ["LAT-06"]})):
+            self.assertEqual(self.call("PUT", f"/plaza/api/team/{team}", body, self.pin(team))[0], 200)
         pairs = S.declared_pairs(self.live, self.record)
         self.assertEqual([(p["seller"], p["buyer"], p["ref"]) for p in pairs], [("t09", "t07", "LAT-06")])
 

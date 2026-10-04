@@ -22,64 +22,89 @@ class StoreTest(unittest.TestCase):
         self.dir.cleanup()
 
     def test_claim_then_declare(self):
-        got = self.store.claim("t04", "4242")
+        got = self.store.claim("t04", "42424242")
         self.assertFalse(got["verified"])
         self.assertTrue(got["code"].startswith("PLAZA-"))
-        d = self.store.declare("t04", "4242", {"wants": ["LAV-07", "LAV-07"], "for_sale": [{"ref": "SAL-09", "price": 60}, "LAT-04"]})
+        d = self.store.declare("t04", "42424242", {"wants": ["LAV-07", "LAV-07"], "for_sale": [{"ref": "SAL-09", "price": 60}, "LAT-04"]})
         self.assertEqual(d["wants"], ["LAV-07"])
         self.assertEqual(d["for_sale"], [{"ref": "SAL-09", "price": 60}, {"ref": "LAT-04"}])
         self.assertEqual((self.store.declared()["t04"]["declared"], self.store.declared()["t04"]["unproved"]), (None, True))
-        self.assertTrue(self.store.verify("t04", got["code"]))                # proved in the game: now it shows
-        self.assertEqual(self.store.declared()["t04"]["declared"]["wants"], ["LAV-07"])
+        self.assertTrue(self.store.verify("t04", got["code"]))                # proved in the game: what anybody
+        self.assertEqual(self.store.declared()["t04"]["declared"], None)       # could have left before is dropped
         self.assertFalse(self.store.declared()["t04"]["unproved"])
+        self.store.declare("t04", "42424242", {"wants": ["LAV-07"]})          # and what the proved team says shows
+        self.assertEqual(self.store.declared()["t04"]["declared"]["wants"], ["LAV-07"])
+
+    def test_a_pin_set_before_the_team_connected_dies_with_the_proof(self):
+        self.store.claim("t04", "42424242")                                   # anybody, in the team's name
+        self.store.declare("t04", "42424242", {"wants": ["LAV-07"]})
+        self.store.mark_verified("t04")                                       # the real team proves itself by Connect
+        with self.assertRaises(PlazaError) as c:
+            self.store.check("t04", "42424242")
+        self.assertEqual(c.exception.code, "unclaimed")
+        self.assertEqual(self.store.declared()["t04"]["declared"], None)
+        with self.assertRaises(PlazaError) as c:
+            self.store.claim("t04", "99999999")                               # and nobody sets a new one over it
+        self.assertEqual(c.exception.code, "claimed")
+
+    def test_the_guesser_waits_not_the_team(self):
+        code = self.store.claim("t04", "42424242", "1.1.1.1")["code"]
+        self.store.verify("t04", code)
+        for _ in range(5):
+            with self.assertRaises(PlazaError):
+                self.store.check("t04", "00000000", "6.6.6.6")
+        with self.assertRaises(PlazaError) as c:
+            self.store.check("t04", "42424242", "6.6.6.6")
+        self.assertEqual(c.exception.status, 429)
+        self.assertTrue(self.store.check("t04", "42424242", "1.1.1.1")["verified"])   # the team itself goes on
 
     def test_a_field_left_out_keeps_its_value(self):
-        self.store.claim("t04", "4242")
-        self.store.declare("t04", "4242", {"wants": ["LAV-07"], "spares": ["MAL-02"]})
-        d = self.store.declare("t04", "4242", {"spares": []})
+        self.store.claim("t04", "42424242")
+        self.store.declare("t04", "42424242", {"wants": ["LAV-07"], "spares": ["MAL-02"]})
+        d = self.store.declare("t04", "42424242", {"spares": []})
         self.assertEqual((d["wants"], d["spares"]), (["LAV-07"], []))
 
     def test_wrong_pin_and_lock(self):
-        self.store.claim("t04", "4242")
+        self.store.claim("t04", "42424242")
         for _ in range(5):
             with self.assertRaises(PlazaError) as c:
-                self.store.declare("t04", "0000", {"wants": []})
+                self.store.declare("t04", "00000000", {"wants": []})
             self.assertEqual(c.exception.code, "bad_pin")
         with self.assertRaises(PlazaError) as c:
-            self.store.declare("t04", "4242", {"wants": []})
+            self.store.declare("t04", "42424242", {"wants": []})
         self.assertEqual(c.exception.status, 429)
         self.now[0] += 61
-        self.assertEqual(self.store.declare("t04", "4242", {"wants": []})["wants"], [])
+        self.assertEqual(self.store.declare("t04", "42424242", {"wants": []})["wants"], [])
 
     def test_unclaimed_and_host_and_bad_input(self):
         for team, code in (("t05", "unclaimed"), ("t10", "host"), ("tXX", "bad_request"), ("../x", "bad_request")):
             with self.assertRaises(PlazaError) as c:
-                self.store.declare(team, "4242", {"wants": []})
+                self.store.declare(team, "42424242", {"wants": []})
             self.assertEqual(c.exception.code, code, team)
-        self.store.claim("t05", "abcd")
+        self.store.claim("t05", "abcdefgh")
         for body in ({"wants": ["lav-07"]}, {"wants": "LAV-07"}, {"wants": ["LAV-07"] * 61}, {"key": "x"},
                      {"for_sale": [{"ref": "SAL-09", "price": -1}]}, {"for_sale": [{"ref": "SAL-09", "price": True}]}, []):
             with self.assertRaises(PlazaError):
-                self.store.declare("t05", "abcd", body)
-        for pin in ("1", "has space", "x" * 17, None, 1234):
+                self.store.declare("t05", "abcdefgh", body)
+        for pin in ("1", "4242", "has space", "x" * 33, None, 12345678):
             with self.assertRaises(PlazaError):
                 self.store.claim("t06", pin)
 
     def test_verified_team_cannot_be_reclaimed(self):
-        code = self.store.claim("t04", "4242")["code"]
-        self.store.declare("t04", "4242", {"wants": ["LAV-07"]})
-        other = self.store.claim("t04", "9999")                 # unverified: a new claim replaces it and its sheet
+        code = self.store.claim("t04", "42424242")["code"]
+        self.store.declare("t04", "42424242", {"wants": ["LAV-07"]})
+        other = self.store.claim("t04", "99999999")                 # unverified: a new claim replaces it and its sheet
         self.assertNotEqual(other["code"], code)
         self.assertIsNone(self.store.declared()["t04"]["declared"])
         self.assertFalse(self.store.verify("t04", "hello " + code))     # the old code no longer counts
         self.assertTrue(self.store.verify("t04", f"here: {other['code'].lower()}"))
         with self.assertRaises(PlazaError) as c:
-            self.store.claim("t04", "4242")
+            self.store.claim("t04", "42424242")
         self.assertEqual(c.exception.code, "claimed")
-        self.assertTrue(self.store.claim("t04", "9999")["verified"])
+        self.assertTrue(self.store.claim("t04", "99999999")["verified"])
 
     def test_nothing_secret_is_stored_in_clear_or_returned(self):
-        self.store.claim("t04", "4242")
+        self.store.claim("t04", "42424242")
         raw = (Path(self.dir.name) / "plaza.json").read_text()
         self.assertNotIn("4242", raw)
         self.assertNotIn("pin", json.dumps(self.store.declared()))
@@ -111,9 +136,8 @@ class FilesTest(unittest.TestCase):
 
     def test_a_write_killed_half_way_leaves_the_store_readable(self):
         store = Store(self.root / "plaza.json")
-        store.claim("t04", "4242")
-        store.mark_verified("t04")
-        store.declare("t04", "4242", {"wants": ["LAV-07"]})
+        store.verify("t04", store.claim("t04", "42424242")["code"])
+        store.declare("t04", "42424242", {"wants": ["LAV-07"]})
         real = os.replace
 
         def dies(src, dst):                                    # the process dies before the new file is in place
@@ -121,13 +145,13 @@ class FilesTest(unittest.TestCase):
                 raise OSError("killed")
             return real(src, dst)
         with mock.patch.object(ST.os, "replace", dies), self.assertRaises(OSError):
-            store.declare("t04", "4242", {"wants": ["LAV-08"]})
+            store.declare("t04", "42424242", {"wants": ["LAV-08"]})
         self.assertEqual(Store(self.root / "plaza.json").declared()["t04"]["declared"]["wants"], ["LAV-07"])
         # the file itself cut short (a full disk, a crash while it was written in place): the copy is read
         (self.root / "plaza.json").write_text('{"teams": {"t04": {"decl')
         again = Store(self.root / "plaza.json")
         self.assertTrue(again.declared()["t04"]["claimed"])
-        again.declare("t04", "4242", {"wants": ["LAV-09"]})                        # and it goes on from there
+        again.declare("t04", "42424242", {"wants": ["LAV-09"]})                        # and it goes on from there
         self.assertEqual(Store(self.root / "plaza.json").declared()["t04"]["declared"]["wants"], ["LAV-09"])
         for junk in ("", "[]", "null", "\x00\x00"):
             (self.root / "plaza.json").write_text(junk)

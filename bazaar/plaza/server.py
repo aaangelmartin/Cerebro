@@ -22,14 +22,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import admin_api, connect as connect_mod, deals as deals_mod, deals_api, matcher, private, public, routes, team_api
+from . import admin_api, connect as connect_mod, deals as deals_mod, deals_api, matcher, private, public, routes, \
+    status as status_mod, team_api
 from .agentq import AgentQ
 from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
 from .floor import KINDS, Floor
-from .store import REF_RX, TEAM_RX, PlazaError, Store
+from .store import REF_RX, TEAM_RX, PlazaError, Store, read_json, write_atomic
 
 PORT = int(os.environ.get("PLAZA_PORT", "8793"))
 NAME = os.environ.get("PLAZA_NAME", "v07 Market")               # the product's visible name: a setting, not a constant
@@ -67,7 +68,15 @@ HOURS_KEPT = 72
 PROPOSED_ON_FLOOR = 8                      # a rebuild that proposes more than this does not flood the floor
 TICK_S = 2.0                               # how often the game feed is read for the live floor
 STREAM_MAX_S = 600.0                       # an SSE connection is closed after this; the page reconnects
-STREAMS_MAX, STREAMS_PER_CLIENT = 80, 4
+STREAMS_MAX, STREAMS_PER_CLIENT = 200, 4   # per connected team; a whole room may share one address, so
+STREAMS_PER_ADDRESS, STREAMS_ANON = 60, 100 # anonymous watchers get a wider share per address and half the total
+SOCKET_TIMEOUT_S = 20.0                    # a request that stops sending is dropped, never parked
+SLOW_REBUILD_S, REBUILD_WAIT_S = 2.0, 2.0  # a board this slow to build is rebuilt less often; nobody waits longer
+THREADS_READ = 500                         # game threads looked at for a proof, newest first
+FORCE_BAND = 0.25                          # a match we propose by hand stays this close to the public reference
+PUBLIC_HEADERS = ("CF-Connecting-IP", "CF-Ray", "X-Plaza-Public")   # the request came through a public hostname
+MAX_BUDGET_KEYS = 5000
+LOCAL_HOST = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?", re.I)
 ADMIN_HEADER = "X-Plaza-Admin"             # the gateway proves a dashboard login with the token file
 SECURITY = {
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
@@ -85,12 +94,15 @@ class Budget:
 
     def take(self, client: str, kind: str) -> bool:
         limit = WRITES_PER_MIN if kind == "write" else READS_PER_MIN
-        if kind != "write" and not client.startswith(("k:", "s:")):
+        if not client.startswith("k:"):
             limit *= SHARED_READS                             # no credential: a whole room may sit behind one address
         now = self.clock()
         with self.lock:
-            if len(self.hits) > 5000:                         # never grow without bound
-                self.hits.clear()
+            if len(self.hits) > MAX_BUDGET_KEYS:              # never grow without bound, never forget everybody:
+                live = {k: v for k, v in self.hits.items() if v and now - v[-1] < 60.0}      # spent windows go,
+                if len(live) > MAX_BUDGET_KEYS:                                            # then the oldest
+                    live = dict(sorted(live.items(), key=lambda kv: kv[1][-1])[len(live) - MAX_BUDGET_KEYS // 2:])
+                self.hits = live
             q = [t for t in self.hits.get((client, kind), []) if now - t < 60.0]
             if len(q) >= limit:
                 self.hits[(client, kind)] = q
@@ -124,17 +136,17 @@ class Board:
         self.hourly: dict[str, dict] = self._load_hours()
         self.verified_at = 0.0
         self.art: tuple[float, dict] = (0.0, {})
+        self.build_lock = threading.Lock()                     # one rebuild at a time, whoever asks
+        self.built_in = 0.0                                    # how long the last one took
+        self.wait_until = 0.0                                  # a slow board is not rebuilt again before this
+        self.stats_at: tuple = (None, 0, {"deals": 0, "volume": 0, "saved": 0, "last": None})
         for ext in (team_api, deals_api, admin_api):          # a fork hangs its own stores on the board here:
             if hasattr(ext, "attach"):                        # board.team_activity, board.suggest, board.perf
                 ext.attach(self)
 
     # ---- hourly counters for our panel
     def _load_hours(self) -> dict:
-        try:
-            data = json.loads((self.live / "plaza_hourly.json").read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, ValueError):
-            return {}
+        return read_json(self.live / "plaza_hourly.json")
 
     def hour(self, name: str, n: int = 1) -> None:
         key = time.strftime("%Y-%m-%dT%H")
@@ -149,9 +161,7 @@ class Board:
         with self.lock:
             body = json.dumps(self.hourly)
         try:
-            tmp = self.live / "plaza_hourly.tmp"
-            tmp.write_text(body, encoding="utf-8")
-            os.replace(tmp, self.live / "plaza_hourly.json")
+            write_atomic(self.live / "plaza_hourly.json", body.encode("utf-8"))
         except OSError:
             pass
 
@@ -206,25 +216,36 @@ class Board:
 
     def _stats(self) -> dict:
         """Deals closed on our venue and what their takers saved against El Rastro, from the public feed."""
-        deals, volume, saved, last = 0, 0, 0, None
+        path = self.live / "events.jsonl"
+        ident, offset, tot = self.stats_at
         try:
-            with (self.live / "events.jsonl").open(encoding="utf-8") as f:
-                for line in f:
-                    if '"settlement"' not in line or f'"{VENUE}"' not in line:
+            st = path.stat()
+            if ident != st.st_ino or st.st_size < offset:      # another file, or a shorter one: count again
+                offset, tot = 0, {"deals": 0, "volume": 0, "saved": 0, "last": None}
+            tot = dict(tot)
+            with path.open("rb") as f:                         # only what was written since the last build
+                f.seek(offset)
+                for raw in f:
+                    if not raw.endswith(b"\n"):
+                        break                                  # a line still being written: next time
+                    offset += len(raw)
+                    if b'"settlement"' not in raw or f'"{VENUE}"'.encode() not in raw:
                         continue
                     try:
-                        e = json.loads(line)
+                        e = json.loads(raw)
                     except ValueError:
                         continue
-                    p = e.get("payload") or {}
+                    p = (e.get("payload") if isinstance(e, dict) else None) or {}
                     if e.get("type") != "settlement" or p.get("venue") != VENUE:
                         continue
-                    price = p.get("price") or 0
-                    deals, volume, last = deals + 1, volume + price, e.get("tick")
-                    saved += matcher.rastro_fee(price)
+                    price = p.get("price") if isinstance(p.get("price"), (int, float)) else 0
+                    tot["deals"], tot["volume"], tot["last"] = tot["deals"] + 1, tot["volume"] + price, e.get("tick")
+                    tot["saved"] += matcher.rastro_fee(price)
+            self.stats_at = (st.st_ino, offset, tot)
         except OSError:
             pass
-        return {"venue": VENUE, "deals": deals, "volume": volume, "saved_fees": saved, "last_deal_tick": last}
+        return {"venue": VENUE, "deals": tot["deals"], "volume": tot["volume"], "saved_fees": tot["saved"],
+                "last_deal_tick": tot["last"]}
 
     def _verify(self) -> None:
         """A team proves a claim by sending us, in the game, a thread message with its code."""
@@ -234,10 +255,12 @@ class Board:
         if not codes and not sessions:
             return
         folder = self.record / "threads"
+        since = min([self.connect.pending_since()] + ([0.0] if codes else [])) - 120.0
         try:
-            files = sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:60]
+            files = sorted(((p.stat().st_mtime, p) for p in folder.glob("*.json")), key=lambda x: x[0], reverse=True)
         except OSError:
             return
+        files = [p for mtime, p in files if mtime >= since][:THREADS_READ]    # a thread older than the code cannot
         for path in files:
             try:
                 rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
@@ -253,9 +276,19 @@ class Board:
                     if sender in codes:
                         self.store.verify(sender, m["text"])
                     if sender in sessions and self.connect.prove(sender, m["text"]):
+                        if not (self.store.declared().get(sender) or {}).get("verified"):
+                            self._forget_private(sender)        # limits left in its name before the proof
                         self.store.mark_verified(sender)
                         self.hour("verified")
                         self.stale()
+
+    def _forget_private(self, team: str) -> None:
+        try:
+            for ref in list(self.vault.get(team)):
+                self.vault.drop(team, ref)
+            self.vault.set_have(team, None)
+        except Exception:  # noqa: BLE001 - a vault that cannot be read holds nothing to forget
+            pass
 
     def verify_soon(self) -> None:
         """The Ready button is waiting: look at the recorded threads now, a few seconds apart at most."""
@@ -266,6 +299,18 @@ class Board:
                 pass
 
     def rebuild(self) -> dict:
+        """Builds the board. One at a time: a second caller waits for the first and takes what it built."""
+        with self.build_lock:
+            t0 = time.monotonic()
+            try:
+                return self._rebuild()
+            finally:
+                self.built_in = time.monotonic() - t0
+                # A board that is slow to build (many sheets) is not rebuilt at every write: it would hold a thread
+                # all the time. Readers get the last one meanwhile.
+                self.wait_until = time.monotonic() + (5 * self.built_in if self.built_in > SLOW_REBUILD_S else 0.0)
+
+    def _rebuild(self) -> dict:
         report = self._report()
         cat = public.catalog(self.record)
         try:
@@ -286,7 +331,7 @@ class Board:
             cands = deals_api.candidates(self, sheets, cat)
             events = deals_api.sync(self, cands, tick, admin)
         else:
-            cands = matcher.find(sheets, cat, self.host, VENUE, gate=self.vault.gate)
+            cands = matcher.find(sheets, cat, self.host, VENUE)
             events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
                                      excluded_matches=frozenset(admin["excluded_matches"]))
         proposed = [e for e in events if e.get("state") == "proposed"]
@@ -308,15 +353,41 @@ class Board:
         with self.lock:
             self.snap = {**self.snap, "built": 0.0}
 
+    def now_tick(self, fallback=None):
+        """The tick the game is at now, from the recorder's clock: the same every answer of the market gives."""
+        try:
+            tick = status_mod.status(self.record, VENUE, True, False).get("tick")
+        except Exception:  # noqa: BLE001
+            tick = None
+        if isinstance(tick, int) and (not isinstance(fallback, int) or tick >= fallback):
+            return tick
+        return fallback
+
     def get(self) -> dict:
+        """The last board, with the tick of now. A stale one is rebuilt by whoever asks first; the others wait a
+        moment for it and otherwise read the last good one. Nobody piles up behind a slow build."""
         with self.lock:
             snap = self.snap
-        if time.time() - snap["built"] > REFRESH_S:
-            try:
-                snap = self.rebuild()
-            except Exception:  # noqa: BLE001 - serve the last good board
-                pass
-        return snap
+        if time.time() - snap["built"] > REFRESH_S and time.monotonic() >= self.wait_until:
+            if self.build_lock.acquire(blocking=False):
+                self.build_lock.release()
+                try:
+                    snap = self.rebuild()
+                except Exception:  # noqa: BLE001 - serve the last good board
+                    pass
+            elif self.build_lock.acquire(timeout=REBUILD_WAIT_S):
+                self.build_lock.release()
+                with self.lock:
+                    snap = self.snap
+        tick = self.now_tick(snap.get("tick"))
+        return snap if tick == snap.get("tick") else {**snap, "tick": tick}
+
+    def keep_fresh(self) -> None:
+        """The ticker's part: a stale board is rebuilt here, in the background, so that a request rarely has to."""
+        with self.lock:
+            old = time.time() - self.snap["built"] > REFRESH_S
+        if old and time.monotonic() >= self.wait_until and not self.build_lock.locked():
+            self.rebuild()
 
     # ---- views
     def card(self, ref: str, snap: dict) -> dict:
@@ -524,7 +595,7 @@ class Board:
         q = self.deals.queue()
         for row in q["queue"]:                                 # yes or no, never the limits themselves
             row["overlap"] = None if row["kind"] != "sale" else \
-                self.vault.gate(row["seller"], row["buyer"], row["ref"], row["price"] or 0)[1]
+                deals_api._quoter(self).overlap(row["seller"], row["buyer"], row["ref"])
         return {**q, "paused": admin["mm_paused"],
                 "excluded_matches": admin["excluded_matches"], "candidates": snap.get("candidates", 0),
                 "rules": {"proposal_ticks": deals_mod.PROPOSAL_TICKS, "offer_ticks": deals_mod.OFFER_TICKS,
@@ -539,10 +610,22 @@ class Board:
         if seller == buyer or not isinstance(ref, str) or ref not in snap["cat"]:
             raise PlazaError(400, "bad_request", "name two different teams and a card of the catalog")
         card = snap["cat"][ref]
-        price = body.get("price", card.get("book") or matcher.BOOK.get(card.get("rarity") or "", 0))
-        if isinstance(price, bool) or not isinstance(price, (int, float)) \
+        holds = {e["ref"] for e in list(snap["sheets"][seller]["spares"]) + list(snap["sheets"][seller]["for_sale"])}
+        if ref not in holds or ref not in {e["ref"] for e in snap["sheets"][buyer]["wants"]}:
+            raise PlazaError(400, "not_listed", "the seller must list this card and the buyer must look for it: "
+                                                "the venue pairs what teams said, it does not make trades up")
+        try:
+            known = self.feed.team_prices().get(ref)
+        except Exception:  # noqa: BLE001
+            known = None
+        reference = known or card.get("book") or matcher.BOOK.get(card.get("rarity") or "", 0)
+        price = body.get("price", reference)
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or price != price \
                 or price < matcher.FLOOR.get(card.get("rarity") or "", 1) or price > 2000:
             raise PlazaError(400, "below_floor", "the price is a number at or above the floor of the rarity")
+        if reference and abs(price - reference) > FORCE_BAND * reference + 1:
+            raise PlazaError(400, "off_reference", f"a match proposed by the venue stays within {int(FORCE_BAND * 100)} % "
+                                                   f"of the card's public reference ({int(round(reference))})")
         price = int(round(price))
         m = {"kind": "sale", "seller": seller, "buyer": buyer, "ref": ref, "name": card.get("name"),
              "rarity": card.get("rarity"), "price": price, "basis": "forced", "saves": matcher.rastro_fee(price),
@@ -598,31 +681,66 @@ class Handler(BaseHTTPRequestHandler):
     budget: Budget = None      # type: ignore[assignment]
     route = "other"
     extra: tuple = ()
+    timeout = SOCKET_TIMEOUT_S           # a peer that stops sending never parks a thread
+    unread = False                       # the request carries a body nobody read: the connection ends with the answer
 
     def log_message(self, fmt, *args):   # quiet
         pass
 
+    def parse_request(self):
+        """Each request on a kept-alive connection starts clean, and one whose body we may not read ends it."""
+        self.extra, self.route, self.unread = (), "other", False
+        if not super().parse_request():
+            return False
+        raw = self.headers.get("Content-Length")
+        if self.headers.get("Transfer-Encoding") or (raw is not None and raw.strip() != "0"):
+            self.unread = True                                 # until _body reads all of it
+        if raw is not None and not re.fullmatch(r"\d{1,9}", raw.strip()):
+            self.close_connection = True
+            self._error(400, "bad_request", "bad Content-Length")
+            return False
+        return True
+
+    def _guard(self, fn):
+        """Runs a route; whatever goes wrong inside answers as JSON, without a trace, and the server goes on."""
+        try:
+            return fn()
+        except PlazaError as e:
+            return self._error(e.status, e.code, e.message)
+        except RecursionError:
+            return self._error(400, "bad_request", "the body is nested too deep")
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            self.close_connection = True
+        except Exception:  # noqa: BLE001 - never a trace, never a dead thread without an answer
+            try:
+                return self._error(500, "server_error", "the market could not answer this; try again")
+            except OSError:
+                self.close_connection = True
+
     # ---- plumbing
     def _client(self) -> str:
         local = self.client_address[0] in ("127.0.0.1", "::1")
-        cf = self.headers.get("CF-Connecting-IP")       # a tunnel straight to this process: Cloudflare sets it
-        if cf and local and re.fullmatch(r"[0-9a-fA-F:.]{3,45}", cf):
-            return cf
+        for name in ("CF-Connecting-IP", "X-Forwarded-For"):     # a tunnel straight to this process sets one of them;
+            given = (self.headers.get(name) or "").split(",")[0].strip()      # believed from this machine only
+            if given and local and re.fullmatch(r"[0-9a-fA-F:.]{3,45}", given):
+                return given
         fwd = self.headers.get("X-Plaza-Client")        # set by our gateway from the tunnel's client address
         if fwd and self.client_address[0] in ("127.0.0.1", "::1") and re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd):
             return fwd
         return self.client_address[0]
 
+    def _known_team(self) -> str | None:
+        """The team behind a credential that checks out (an agent token, a browser session), else None."""
+        try:
+            return self.board.connect.team_of(session=self._session({}), token=self.headers.get(TOKEN_HEADER))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _budget_key(self) -> str:
-        """Who a request counts against: the agent's token or the browser's session when there is one (teams at the
-        venue share an address), else the address."""
-        token = self.headers.get(TOKEN_HEADER) or ""
-        if 20 <= len(token) <= 80:
-            return "k:" + hashlib.sha256(token.encode()).hexdigest()[:24] + ":" + self._client()
-        m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
-        if m:
-            return "s:" + hashlib.sha256(m.group(1).encode()).hexdigest()[:24] + ":" + self._client()
-        return self._client()
+        """Who a request counts against: the team, once its token or session checks out (teams at the venue share
+        an address); otherwise the address. A made-up token is nobody: it counts against the address."""
+        team = self._known_team()
+        return "k:" + team if team else self._client()
 
     def _send(self, status: int, body: bytes, ctype: str, cache: str = "no-store", cors: bool = False) -> None:
         self.board.count(self.route, status)
@@ -634,6 +752,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         for k, v in self.extra:
             self.send_header(k, v)
+        if self.unread:                                 # a body left on the wire would be read as the next request
+            self.close_connection = True
+            self.send_header("Connection", "close")
         if cors:                                        # reads only: agents and pages elsewhere may read the board
             self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
@@ -658,34 +779,74 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             raise PlazaError(400, "bad_request", "bad Content-Length") from None
+        if length < 0 or self.headers.get("Transfer-Encoding"):
+            raise PlazaError(400, "bad_request", "send the body with a Content-Length")
         if length > MAX_BODY:
             raise PlazaError(413, "too_large", "the body is too large")
         raw = self.rfile.read(length) if length else b""
+        if len(raw) == length:
+            self.unread = False
         try:
             return json.loads(raw.decode("utf-8")) if raw else {}
         except (ValueError, UnicodeDecodeError):
             raise PlazaError(400, "bad_request", "the body is not JSON") from None
+        except RecursionError:
+            raise PlazaError(400, "bad_request", "the body is nested too deep") from None
+
+    def _public(self) -> bool:
+        """The request came through a public hostname (a tunnel) or from another machine."""
+        host = (self.headers.get("X-Plaza-Host") or self.headers.get("Host") or "").strip()
+        return bool(any(self.headers.get(h) for h in PUBLIC_HEADERS) or self.headers.get("X-Forwarded-For")
+                    or self.client_address[0] not in ("127.0.0.1", "::1")
+                    or (self.headers.get("X-Plaza-Host") and not LOCAL_HOST.fullmatch(host)))
 
     def _is_admin(self) -> bool:
         """Our own panel: only the gateway, after a dashboard login, knows the token."""
         given = self.headers.get(ADMIN_HEADER) or ""
-        if self.headers.get("CF-Connecting-IP") or self.headers.get("CF-Ray"):
-            return False                                # never through the public hostname: the dashboard only
+        if any(self.headers.get(h) for h in PUBLIC_HEADERS) or self.headers.get("X-Forwarded-For") \
+                or self.client_address[0] not in ("127.0.0.1", "::1"):
+            return False                                # never through a public hostname: our own machine only
         return bool(self.board.token) and hmac.compare_digest(given, self.board.token)
+
+    def _agent(self, need_proof: bool = True) -> tuple[str, bool]:
+        """(team, verified) of the agent token. Until the team proved itself in the game the token only learns
+        that it has to: it reads nothing of the team and writes nothing in its name."""
+        token = self.headers.get(TOKEN_HEADER)
+        try:
+            team, verified = self.board.connect.auth(token)
+        except PlazaError as e:
+            if e.code != "prove_first":
+                raise
+            self.board.verify_soon()                    # the proof may have just arrived in the game
+            team, verified = self.board.connect.auth(token)
+        if not verified:
+            self.board.verify_soon()
+            team, verified = self.board.connect.auth(token)
+        if need_proof and not verified:
+            raise PlazaError(403, "prove_first", connect_mod.PROVE_FIRST)
+        return team, verified
 
     def _actor(self, team: str | None = None) -> tuple[str, bool, bool]:
         """Who writes: (team, verified, by token). An agent token from the connection flow, or the team PIN."""
         token = self.headers.get(TOKEN_HEADER)
         if token:
-            who, verified = self.board.connect.auth(token)
+            who, _ = self._agent(need_proof=False)
             if team is not None and team != who:
                 raise PlazaError(403, "wrong_team", "this token writes for another team")
-            return who, verified, True
-        rec = self.board.store.check(team, self.headers.get("X-Plaza-Pin") or "")
-        return team, bool(rec.get("verified")), False
+            return who, self._agent()[1], True
+        pin = self.headers.get("X-Plaza-Pin") or ""
+        rec = self.board.store.check(team, pin, self._client())
+        if not rec.get("pin_proved"):
+            self.board.verify_soon()                    # the proof may have just arrived in the game
+            rec = self.board.store.check(team, pin, self._client())
+        if not rec.get("pin_proved"):                   # a PIN anybody could have set: nothing in the team's name
+            raise PlazaError(403, "prove_first", "prove the claim first: send its code as text in a game thread "
+                                                 f"with {HOST}, with your own game key")
+        return team, True, False
 
     def _session(self, q: dict) -> str | None:
-        """The browser's connection session: the query parameter, else the cookie."""
+        """The browser's connection session: its cookie. (`?session=` is read for /api/connect/status only, where
+        the page that just started the session asks about it.)"""
         if q.get("session"):
             return q["session"]
         m = re.search(rf"(?:^|;\s*){COOKIE}=([A-Za-z0-9_-]{{20,64}})(?:;|$)", self.headers.get("Cookie") or "")
@@ -694,7 +855,7 @@ class Handler(BaseHTTPRequestHandler):
     def me_team(self, q: dict | None = None) -> str:
         """The team that asks about itself: its agent's token, else its connected browser session."""
         if self.headers.get(TOKEN_HEADER):
-            return self.board.connect.auth(self.headers.get(TOKEN_HEADER))[0]
+            return self._agent()[0]
         if q is None:
             q = self._filters({k: v[-1] for k, v in parse_qs(urlparse(self.path).query).items()})
         st = self._status(q)
@@ -732,7 +893,8 @@ class Handler(BaseHTTPRequestHandler):
         if q.get("session") is not None:
             if not connect_mod.TOKEN_RX.fullmatch(q["session"]):
                 raise PlazaError(400, "bad_request", "bad session")
-            out["session"] = q["session"]
+            if urlparse(self.path).path == "/plaza/api/connect/status":    # nowhere else: a session in an address
+                out["session"] = q["session"]                              # ends up in logs and histories
         for key in ("since", "limit"):
             if q.get(key) is not None:
                 if not re.fullmatch(r"\d{1,9}", q[key]):
@@ -742,6 +904,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routes
     def do_GET(self):
+        return self._guard(self._get)
+
+    def _get(self):
         u = urlparse(self.path)
         path = u.path
         self.route = "page"
@@ -758,6 +923,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+            if path == "/plaza/_kit" and self._public():  # the page of components is ours to look at
+                return self._error(404, "not_found", "no such page")
             return self._file("index.html", "text/html; charset=utf-8")
         if path in STATIC:
             return self._file(*STATIC[path])
@@ -819,21 +986,12 @@ class Handler(BaseHTTPRequestHandler):
             for ext in EXTENSIONS:                       # each fork's own routes; True once it has answered
                 if ext.get(self, path, q, snap):
                     return
-            if path == "/plaza/api/me":                  # the team's own view: its browser session or its agent
-                team = self.me_team(q)
-                st = self._status(q) if not self.headers.get(TOKEN_HEADER) else {"team": team, "verified": True}
-                return self._json(200, {"team": team, "read_only": True, "status": st, "tick": snap["tick"],
-                                        "limits": self.board.vault.get(team),      # its own, to itself only
-                                        "agent": self.board.queue.settings(team),
-                                        "venue": VENUE, "home": {**self.board.team_view(team, snap),
-                                                                 "matches": self.board.matches_view(snap, team)["matches"]}})
-            if path in ("/plaza/api/agent/next", "/plaza/api/agent/cards"):
-                team, _ = self.board.connect.auth(self.headers.get(TOKEN_HEADER))
-                if path.endswith("/cards"):
-                    return self._json(200, {"team": team, "limits": self.board.vault.get(team),
-                                            "private": "only your team sees your limits",
-                                            **{k: v for k, v in self.board.team_view(team, snap).items()
-                                               if k in ("available", "wanted")}})
+            if path == "/plaza/api/agent/next":
+                team, verified = self._agent(need_proof=False)
+                if not verified:                        # nothing of the team yet: only what is still to do
+                    return self._json(200, {"team": team, "tick": snap["tick"], "verified": False, "actions": [],
+                                            "waiting": [], "failed": [], "poll_after_s": 5,
+                                            "next": connect_mod.PROVE_FIRST})
                 return self._json(200, self.board.agent_next(team, snap))
             m = MATCH_PATH.fullmatch(path)
             if m:
@@ -885,9 +1043,13 @@ class Handler(BaseHTTPRequestHandler):
         """Server-sent events: the floor as it happens. One connection lasts at most STREAM_MAX_S."""
         if self.command == "HEAD":
             return self._error(405, "not_allowed", "streams answer GET")
-        client, board = self._client(), self.board
+        board, team = self.board, self._known_team()
+        client = "k:" + team if team else self._client()      # a connected team has its own share of streams
         with board.lock:
-            if sum(board.streams.values()) >= STREAMS_MAX or board.streams.get(client, 0) >= STREAMS_PER_CLIENT:
+            total = sum(board.streams.values())
+            anon = sum(n for k, n in board.streams.items() if not k.startswith("k:"))
+            if total >= STREAMS_MAX or (team and board.streams.get(client, 0) >= STREAMS_PER_CLIENT) or (
+                    not team and (anon >= STREAMS_ANON or board.streams.get(client, 0) >= STREAMS_PER_ADDRESS)):
                 busy = True
             else:
                 busy = False
@@ -959,13 +1121,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e.status, e.code, e.message)
         return self._error(404, "not_found", "no such endpoint")
 
+    def _cross_site(self) -> bool:
+        """A browser sending this from another site: its session cookie must not write for it."""
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if site and site not in ("same-origin", "none"):
+            return True
+        origin = self.headers.get("Origin")
+        if not origin or origin == "null" and not self.headers.get("Cookie"):
+            return False
+        host = urlparse(origin).netloc.lower()
+        ours = {(self.headers.get(h) or "").lower() for h in ("Host", "X-Forwarded-Host", "X-Plaza-Host")}
+        ours.add(urlparse(public_url(self.board.live) or "").netloc.lower())
+        return host not in ours - {""}
+
     def _write(self):
+        return self._guard(self._write_route)
+
+    def _write_route(self):
         path = urlparse(self.path).path
         self.route = "write"
         if not self.budget.take(self._budget_key(), "write"):
             return self._error(429, "slow_down", "too many requests; try again in a minute")
-        if "json" not in (self.headers.get("Content-Type") or "").lower():
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._error(415, "bad_request", "send Content-Type: application/json")
+        if not self.headers.get(TOKEN_HEADER) and self._cross_site():
+            return self._error(403, "cross_site", "this request comes from another site")
         try:
             body = self._body()
             if self.command == "POST" and path == "/plaza/admin/api/action":
@@ -1000,7 +1180,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.route = "claim"
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
-                out = self.board.store.claim(body.get("team"), body.get("pin"))
+                out = self.board.store.claim(body.get("team"), body.get("pin"), self._client())
                 out["prove"] = (f"open a thread with {HOST} in the game and send the code as the message text; "
                                 "the sheet turns verified within a minute")
                 return self._json(200, out)
@@ -1027,15 +1207,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.board.hour("connect_start")
                     return self._json(200, out)
                 known = bool((self.board.store.declared().get(team) or {}).get("verified"))
-                out = self.board.connect.agent(team, body.get("code"), self._client(), known)
+                out = self.board.connect.agent(team, body.get("code"), self._client(), known,
+                                               current=self.headers.get(TOKEN_HEADER))
                 out["next"] = (f"prove it is you: open a thread with {HOST} in the game and send the code as the "
-                               f"message text; then PUT /plaza/api/team/{team} with header {TOKEN_HEADER}")
+                               f"message text; GET /plaza/api/agent/next says verified within seconds; only then "
+                               f"PUT /plaza/api/team/{team} with header {TOKEN_HEADER} (403 prove_first before)")
                 self.board.hour("connect_agent")
                 self.board.stale()
                 return self._json(200, out)
             if self.command == "POST" and path == "/plaza/api/agent/ack":
                 self.route = "agent_ack"
-                team, _ = self.board.connect.auth(self.headers.get(TOKEN_HEADER))
+                team, _ = self._agent()
                 if not isinstance(body, dict):
                     raise PlazaError(400, "bad_request", "send a JSON object")
                 self.board.hour("agent_acks")
@@ -1043,8 +1225,6 @@ class Handler(BaseHTTPRequestHandler):
             for ext in EXTENSIONS:
                 if ext.write(self, self.command, path, body):
                     return
-            if self.command == "POST" and path.startswith("/plaza/api/me/"):
-                return self._me_write(path, body)
             m = MATCH_MSG_PATH.fullmatch(path)
             if self.command == "POST" and m:
                 self.route = "match_post"
@@ -1072,70 +1252,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.board.store.touch(team)
                 self.board.hour("floor_posts")
                 return self._json(200, {"posted": item})
-            m = TEAM_PATH.fullmatch(path)
-            if self.command == "PUT" and m:
-                self.route = "declare"
-                team, _, by_token = self._actor(m.group(1))
-                body, limits = private.split(body)             # private limits never reach the public sheet
-                declared = self.board.store.declare(team, None if by_token else self.headers.get("X-Plaza-Pin") or "",
-                                                    body)
-                for ref, fields in limits.items():
-                    self.board.vault.put(team, ref, fields)
-                self.board.hour("declares")
-                self.board.stale()                                           # show it on the next read
-                return self._json(200, {"team": team, "declared": declared, "limits_saved": len(limits),
-                                        "private": "only your team sees your limits"})
             return self._error(404, "not_found", "no such endpoint")
         except PlazaError as e:
             return self._error(e.status, e.code, e.message)
-
-    def _me_write(self, path: str, body):
-        """The connected human: private limits for a card, a trade's mode, an order for its agent. Never the game."""
-        self.route = "me_write"
-        team = self.me_team()
-        if not isinstance(body, dict):
-            raise PlazaError(400, "bad_request", "send a JSON object")
-        m = ME_CARD_PATH.fullmatch(path)
-        if m:
-            if m.group(1) not in self.board.get()["cat"]:
-                raise PlazaError(404, "not_found", "no such card")
-            if set(body) - set(private.FIELDS):
-                raise PlazaError(400, "bad_request", "send any of min, max, value")
-            self.board.vault.put(team, m.group(1), private.limits(body, private.FIELDS))
-            self.board.stale()
-            return self._json(200, {"team": team, "ref": m.group(1), "limits": self.board.vault.get(team).get(m.group(1), {}),
-                                    "private": "only your team sees your limits"})
-        m = ME_TRADE_PATH.fullmatch(path)
-        if m:
-            rec = self.board.deals.get(m.group(1))
-            if team not in deals_mod.parties(rec):
-                raise PlazaError(403, "not_a_party", "this is not your trade")
-            if set(body) - {"mode", "order", "price"} or not (body.get("mode") or body.get("order")):
-                raise PlazaError(400, "bad_request", "send mode (auto, ask_me) or order (accept, counter, pass)")
-            if body.get("mode") is not None:
-                self.board.queue.set_mode(team, body["mode"], rec["id"])
-            if body.get("order") is not None:
-                if rec["state"] not in deals_mod.LIVE_STATES:
-                    raise PlazaError(409, "closed", f"this match is {rec['state']}")
-                if body["order"] == "counter" and rec["kind"] == "sale" and isinstance(body.get("price"), (int, float)) \
-                        and not isinstance(body.get("price"), bool) \
-                        and body["price"] < matcher.FLOOR.get(rec.get("rarity") or "", 1):
-                    raise PlazaError(400, "below_floor", "under the floor of this rarity on this venue")
-                self.board.queue.order(team, rec["id"], body["order"], body.get("price"))
-                self.board.hour("human_orders")
-            return self._json(200, {"team": team, "match": rec["id"], "agent": self.board.queue.settings(team)})
-        if path == "/plaza/api/me/settings":
-            if set(body) - {"default_mode"}:
-                raise PlazaError(400, "bad_request", "send default_mode (auto, ask_me)")
-            self.board.queue.set_mode(team, body.get("default_mode"))
-            return self._json(200, {"team": team, "agent": self.board.queue.settings(team)})
-        raise PlazaError(404, "not_found", "no such endpoint")
 
     do_POST = _write
     do_PUT = _write
 
     def do_OPTIONS(self):                               # no cross-site writes: no preflight is ever granted
         self.route = "other"
+        self.unread = True
         self._error(405, "not_allowed", "cross-site writes are not allowed")
 
     do_DELETE = do_PATCH = do_TRACE = do_CONNECT = do_PROPFIND = do_OPTIONS
@@ -1143,6 +1269,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_error(self, code, message=None, explain=None):
         """The standard library's own refusals (an unknown method, a broken request line): ours, as JSON, 4xx."""
         self.route = "other"
+        self.close_connection = True
         try:
             self._error(405 if code == 501 else code if 400 <= code < 500 else 400, "bad_request", "this request is not understood")
         except OSError:
@@ -1176,6 +1303,7 @@ def run_ticker(board: Board, stop: threading.Event, every: float = TICK_S) -> No
     while not stop.wait(every):
         try:
             board.tick_feed()
+            board.keep_fresh()
         except Exception:  # noqa: BLE001 - the floor keeps what it has
             pass
 

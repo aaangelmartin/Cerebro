@@ -18,14 +18,15 @@ from pathlib import Path
 
 REF_RX = re.compile(r"^[A-Z]{3}-\d{2}$")
 TEAM_RX = re.compile(r"^t\d{2}$")
-PIN_RX = re.compile(r"^[A-Za-z0-9]{4,16}$")
+PIN_RX = re.compile(r"^[A-Za-z0-9]{8,32}$")       # long enough that guessing it is not a plan
 MAX_REFS = 60                      # per list: an album has 60-odd cards
 MAX_HAVE = 200                     # every card a team holds
 MAX_PRICE = 2000
 LISTS = ("wants", "spares", "for_sale")
 LANGS = ("en", "es")
-PIN_TRIES = 5                      # wrong PINs before a team's sheet locks for LOCK_S
-LOCK_S = 60.0
+PIN_TRIES = 5                      # wrong PINs from one client for one team before that client waits LOCK_S:
+LOCK_S = 60.0                      # the guesser waits, never the team (its own client is counted apart)
+MAX_FAILS = 5000
 HOST = "t10"
 
 
@@ -147,47 +148,54 @@ class Store:
             raise PlazaError(403, "host", "the host team runs this market and has no trading sheet")
         return team
 
-    def _locked(self, team: str) -> bool:
+    def _locked(self, team: str, client: str = "") -> bool:
         now = self.clock()
-        recent = [t for t in self.fails.get(team, []) if now - t < LOCK_S]
-        self.fails[team] = recent
+        if len(self.fails) > MAX_FAILS:
+            self.fails = {k: v for k, v in self.fails.items() if v and now - v[-1] < LOCK_S}
+        recent = [t for t in self.fails.get((client, team), []) if now - t < LOCK_S]
+        if recent:
+            self.fails[(client, team)] = recent
+        else:
+            self.fails.pop((client, team), None)
         return len(recent) >= PIN_TRIES
 
     def _pin_ok(self, rec: dict, pin: str) -> bool:
         return bool(rec.get("pin")) and isinstance(pin, str) and hmac.compare_digest(
             _hash(pin, rec["salt"]), rec["pin"])
 
-    def claim(self, team: str, pin: str) -> dict:
-        """Sets the team's PIN. Returns the code to prove in the game. A verified sheet needs its own PIN."""
+    def claim(self, team: str, pin: str, client: str = "") -> dict:
+        """Sets the team's PIN. Returns the code to prove in the game. A verified team's PIN is only the one it
+        proved: nobody sets a new one over it here."""
         team = self._team(team)
         if not isinstance(pin, str) or not PIN_RX.fullmatch(pin):
-            raise PlazaError(400, "bad_request", "pin: 4 to 16 letters or digits")
+            raise PlazaError(400, "bad_request", "pin: 8 to 32 letters or digits")
         with self.lock:
-            if self._locked(team):
-                raise PlazaError(429, "locked", "too many wrong PINs for this team; wait a minute")
+            if self._locked(team, client):
+                raise PlazaError(429, "locked", "too many wrong PINs; wait a minute")
             data = self._load()
             rec = (data.get("teams") or {}).get(team) or {}
             if rec.get("verified") and not self._pin_ok(rec, pin):
-                self.fails.setdefault(team, []).append(self.clock())
-                raise PlazaError(403, "claimed", "this team is verified; use its PIN")
-            if not self._pin_ok(rec, pin):                     # a new or replaced (unverified) claim
-                salt = secrets.token_hex(8)
-                rec = {"salt": salt, "pin": _hash(pin, salt), "verified": False,
-                       "code": "PLAZA-" + secrets.token_hex(3).upper(), "claimed": self.clock()}
+                self.fails.setdefault((client, team), []).append(self.clock())
+                raise PlazaError(403, "claimed", "this team is verified; use its PIN, or connect its agent")
+            if not self._pin_ok(rec, pin):                     # a new or replaced (unverified) claim: only the PIN
+                salt = secrets.token_hex(8)                    # and its code change; nothing is published before proof
+                rec = {**{k: v for k, v in rec.items() if k in ("settings", "seen")},
+                       "salt": salt, "pin": _hash(pin, salt), "verified": False, "pin_proved": False,
+                       "code": "PLAZA-" + secrets.token_hex(4).upper(), "claimed": self.clock()}
             data.setdefault("teams", {})[team] = rec
             self._save(data)
             return {"team": team, "verified": bool(rec.get("verified")), "code": rec.get("code")}
 
-    def check(self, team: str, pin: str) -> dict:
+    def check(self, team: str, pin: str, client: str = "") -> dict:
         team = self._team(team)
         with self.lock:
-            if self._locked(team):
-                raise PlazaError(429, "locked", "too many wrong PINs for this team; wait a minute")
+            if self._locked(team, client):
+                raise PlazaError(429, "locked", "too many wrong PINs; wait a minute")
             rec = (self._load().get("teams") or {}).get(team) or {}
             if not rec.get("pin"):
                 raise PlazaError(403, "unclaimed", "claim this team first: POST /plaza/api/claim")
             if not self._pin_ok(rec, pin or ""):
-                self.fails.setdefault(team, []).append(self.clock())
+                self.fails.setdefault((client, team), []).append(self.clock())
                 raise PlazaError(403, "bad_pin", "wrong PIN")
             return rec
 
@@ -205,7 +213,7 @@ class Store:
             new["spares"] = clean_refs(body["spares"], "spares")
         if "for_sale" in body:
             new["for_sale"] = clean_sale(body["for_sale"])
-        if pin is not None:                                    # None: the caller already checked an agent token
+        if pin is not None:                                    # None: the caller already checked the credential
             self.check(team, pin)
         else:
             self._team(team)
@@ -227,9 +235,12 @@ class Store:
         with self.lock:
             data = self._load()
             rec = (data.get("teams") or {}).get(team)
-            if not rec or rec.get("verified") or not rec.get("code") or rec["code"] not in text.upper():
+            if not rec or rec.get("pin_proved") or not rec.get("code") or rec["code"] not in text.upper():
                 return False
-            rec["verified"] = True
+            if not rec.get("verified"):                        # whatever was there before the proof is nobody's
+                for key in ("declared", "overrides"):
+                    rec.pop(key, None)
+            rec["verified"] = rec["pin_proved"] = True
             self._save(data)
             return True
 
@@ -239,6 +250,10 @@ class Store:
             data = self._load()
             rec = data.setdefault("teams", {}).setdefault(self._team(team), {})
             if not rec.get("verified"):
+                # Anyone could set a PIN or leave a sheet in this team's name before it proved itself: the PIN that
+                # was never proved in the game stops working and nothing left behind goes live.
+                for key in ("pin", "salt", "code", "claimed", "declared", "overrides"):
+                    rec.pop(key, None)
                 rec["verified"] = True
                 self._save(data)
 
@@ -428,7 +443,7 @@ class Store:
 
     def pending_codes(self) -> dict[str, str]:
         return {t: r["code"] for t, r in (self._load().get("teams") or {}).items()
-                if r.get("code") and not r.get("verified")}
+                if r.get("code") and r.get("pin") and not r.get("pin_proved")}
 
 
 def _overrides(rec: dict) -> dict:

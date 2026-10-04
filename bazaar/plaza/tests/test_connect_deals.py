@@ -62,21 +62,54 @@ class ConnectTest(unittest.TestCase):
         with self.assertRaises(PlazaError) as e:
             self.c.start("t10", "1.1.1.1")
         self.assertEqual(e.exception.status, 403)
-        for i in range(C.STARTS_PER_TEAM):
-            self.c.start("t16", f"9.9.9.{i}")
+        for i in range(C.STARTS_PER_PAIR):
+            self.c.start("t16", "9.9.9.9")
         with self.assertRaises(PlazaError) as e:
-            self.c.start("t16", "8.8.8.8")                                    # per team
+            self.c.start("t16", "9.9.9.9")                                    # one client, one team
         self.assertEqual(e.exception.status, 429)
-        for i in range(C.STARTS_PER_CLIENT):
-            self.c.start(f"t0{1 + i % 5}", "7.7.7.7")
-        with self.assertRaises(PlazaError):
-            self.c.start("t06", "7.7.7.7")                                    # per client
-        for _ in range(C.TRIES_PER_CLIENT):
+        self.c.start("t16", "8.8.8.8")                                        # nobody else is kept from that team,
+        self.c.start("t15", "9.9.9.9")                                        # nor that client from another team
+        for _ in range(C.TRIES_PER_PAIR):
             with self.assertRaises(PlazaError):
                 self.c.agent("t01", "PLAZA-222222", "6.6.6.6", False)
-        with self.assertRaises(PlazaError) as e:
-            self.c.agent("t02", "PLAZA-222222", "6.6.6.6", False)
-        self.assertEqual(e.exception.code, "locked")
+        for team, client, code in (("t01", "6.6.6.6", "locked"),            # the guesser waits, for that team;
+                                   ("t02", "6.6.6.6", "bad_code"),          # it is not locked for another team,
+                                   ("t01", "5.5.5.5", "bad_code")):         # and the team is not locked for others
+            with self.assertRaises(PlazaError) as e:
+                self.c.agent(team, "PLAZA-222222", client, False)
+            self.assertEqual(e.exception.code, code)
+
+    def test_twenty_teams_connect_from_one_address_in_a_minute(self):
+        """Every team at the venue shares one public address."""
+        room = "83.40.1.7"
+        for n in [x for x in range(1, 22) if x != 10]:
+            team = f"t{n:02d}"
+            s = self.c.start(team, room)
+            self.c.start(team, room)                                          # a second try by the same team
+            a = self.c.agent(team, s["connect_code"], room, False)
+            self.assertTrue(self.c.prove(team, s["connect_code"]))
+            self.assertEqual(self.c.auth(a["agent_token"]), (team, True))
+            self.clock.now += 3
+
+    def test_nobody_keeps_a_team_from_connecting(self):
+        real = self.c.start("t16", "1.1.1.1")
+        a = self.c.agent("t16", real["connect_code"], "1.1.1.1", False)       # the real agent answered its code
+        for i in range(40):                                                   # somebody floods starts for that team
+            self.c.start("t16", f"9.9.{i}.1")
+        self.assertIsNotNone(self.c.session(real["session"]))                 # the real session is still there
+        self.assertTrue(self.c.prove("t16", real["connect_code"]))
+        self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))
+
+    def test_an_agent_planted_before_the_proof_does_not_survive_it(self):
+        mine = self.c.start("t16", "1.1.1.1")
+        other = self.c.start("t16", "6.6.6.6")
+        thief = self.c.agent("t16", other["connect_code"], "6.6.6.6", False)  # anybody can ask a code and redeem it
+        self.assertEqual(self.c.auth(thief["agent_token"]), ("t16", False))   # never verified: the server gives it nothing
+        self.assertTrue(self.c.prove("t16", mine["connect_code"]))            # the team proves ITS code first...
+        with self.assertRaises(PlazaError):
+            self.c.auth(thief["agent_token"])                                 # ...and the planted token is out
+        a = self.c.agent("t16", mine["connect_code"], "1.1.1.1", True)
+        self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))
         self.clock.now += C.WINDOW_S + 1
         self.c.start("t16", "8.8.8.8")                                        # the window passed
 
@@ -110,10 +143,25 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual(e.exception.code, "prove_first")
         self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))               # the real agent is untouched
         self.assertFalse(self.c.prove("t15", thief["connect_code"]))                  # another team's message
-        self.assertTrue(self.c.prove("t16", thief["connect_code"]))                   # the real team reconnects
-        self.assertEqual(self.c.auth(b["agent_token"]), ("t16", True))
+        # The team's agent is talked into sending the thief's code in the game: while that agent is at work, the
+        # proof alone does not hand the team over.
+        self.assertFalse(self.c.prove("t16", thief["connect_code"]))
+        self.assertEqual(self.c.auth(a["agent_token"]), ("t16", True))
+        with self.assertRaises(PlazaError):
+            self.c.auth(b["agent_token"])
+        # The team's own agent asks for a new code with its token: that one takes over with the proof.
+        mine = self.c.start("t16", "1.1.1.1")
+        c = self.c.agent("t16", mine["connect_code"], "2.2.2.2", True, current=a["agent_token"])
+        self.assertTrue(self.c.prove("t16", mine["connect_code"]))
+        self.assertEqual(self.c.auth(c["agent_token"]), ("t16", True))
         with self.assertRaises(PlazaError):
             self.c.auth(a["agent_token"])                                             # replaced
+        # An agent that went silent (it lost its token) is replaced by a proof alone.
+        late = self.c.start("t16", "1.1.1.1")
+        d = self.c.agent("t16", late["connect_code"], "3.3.3.3", True)
+        self.clock.now += C.REPLACE_AFTER_S + 1
+        self.assertTrue(self.c.prove("t16", late["connect_code"]))
+        self.assertEqual(self.c.auth(d["agent_token"]), ("t16", True))
 
     def test_prompt_is_ready_to_paste(self):
         p = C.prompt("t16", "PLAZA-7K2Q9M", "https://overhead-silicon-cork-citation.example.com/plaza")
@@ -275,11 +323,15 @@ class FlowTest(unittest.TestCase):
             {"id": name, "kind": "team", "messages": [{"sender": team, "text": text}]}) + "\n")
         self.board.verified_at = 0.0
 
-    def connect(self, team):
+    def connect(self, team, prove=True):
         st, s, h = self.call("POST", "/plaza/api/connect/start", {"team": team})
         self.assertEqual(st, 200, s)
         st, a, _ = self.call("POST", "/plaza/api/connect/agent", {"team": team, "code": s["connect_code"]})
         self.assertEqual(st, 200, a)
+        if prove:                                          # the proof in the game
+            (self.record / "threads" / f"proof-{team}.json").write_text(json.dumps(
+                {"id": team, "kind": "team", "messages": [{"sender": team, "text": s["connect_code"]}]}) + "\n")
+            self.board.verified_at = 0.0
         return s, a["agent_token"], h
 
     def event(self, **e):
@@ -306,15 +358,28 @@ class FlowTest(unittest.TestCase):
         self.assertEqual((st, a["header"]), (200, "X-Plaza-Token"))
         token = {"X-Plaza-Token": a["agent_token"]}
         self.assertEqual(self.call("POST", "/plaza/api/connect/agent", {"team": "t07", "code": s["connect_code"]})[0], 403)
-        st, d, _ = self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-06"], "spares": ["LAT-03"]}, token)
-        self.assertEqual((st, d["declared"]["wants"]), (200, ["LAT-06"]))
-        self.assertEqual(self.call("PUT", "/plaza/api/team/t08", {"wants": []}, token)[0], 403)   # another team
+        # Until the team proves itself in the game the token reads nothing of the team and writes nothing for it.
+        sheet = {"wants": ["LAT-06"], "spares": ["LAT-03"]}
+        for method, path, body in (("PUT", "/plaza/api/team/t07", sheet), ("GET", "/plaza/api/me/cards", None),
+                                   ("GET", "/plaza/api/agent/cards", None), ("GET", "/plaza/api/me/trades", None),
+                                   ("POST", "/plaza/api/agent/ack", {"id": "x", "status": "done"}),
+                                   ("POST", "/plaza/api/floor", {"kind": "wtb", "ref": "LAT-06"}),
+                                   ("POST", "/plaza/api/me/settings", {"paused": True})):
+            st, out, _ = self.call(method, path, body, token)
+            self.assertEqual((st, out["error"]), (403, "prove_first"), path)
+        st, me, _ = self.call("GET", "/plaza/api/me", headers=token)
+        self.assertEqual((st, me["verified"], sorted(set(me) & {"limits", "home", "owned"})), (200, False, []))
+        st, nxt, _ = self.call("GET", "/plaza/api/agent/next", headers=token)
+        self.assertEqual((st, nxt["verified"], nxt["actions"]), (200, False, []))
         self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": []}, {"X-Plaza-Token": "x" * 32})[0], 401)
         st, status, _ = self.call("GET", q)
-        self.assertEqual(status["missing"], ["verified", "cards_listed"])    # a sheet counts once the team is proved
+        self.assertEqual(status["missing"], ["verified", "cards_listed"])
         self.game_says("t08", s["connect_code"], "other")                                      # somebody else: no
         self.assertEqual(self.call("GET", q)[1]["verified"], False)
         self.game_says("t07", f"hi, {s['connect_code']}")
+        st, d, _ = self.call("PUT", "/plaza/api/team/t07", sheet, token)                       # proved: it writes
+        self.assertEqual((st, d["declared"]["wants"]), (200, ["LAT-06"]))
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t08", {"wants": []}, token)[0], 403)   # another team
         st, status, _ = self.call("GET", "/plaza/api/connect/status", headers={"Cookie": cookie.split(";")[0]})
         self.assertEqual((status["missing"], status["connected"], status["team"]), ([], True, "t07"))
         st, me, _ = self.call("GET", "/plaza/api/me", headers={"Cookie": "a=b; " + cookie.split(";")[0]})
@@ -341,13 +406,13 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(self.call("POST", "/plaza/api/connect/start", {"team": "t10"})[0], 403)
         self.assertEqual(self.call("POST", "/plaza/api/connect/start", {"team": "t77"})[0], 400)
         self.assertEqual(self.call("POST", "/plaza/api/connect/start", ["t07"])[0], 400)
-        s, token, _ = self.connect("t07")
+        s, token, _ = self.connect("t07", prove=False)
         self.game_says("t07", s["connect_code"])
         self.assertTrue(self.call("GET", "/plaza/api/connect/status?session=" + s["session"])[1]["verified"])
-        s2, token2, _ = self.connect("t07")                                    # somebody asks again for a verified team
+        s2, token2, _ = self.connect("t07", prove=False)                       # somebody asks again for a verified team
         self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": []}, {"X-Plaza-Token": token2})[1]["error"], "prove_first")
         self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": ["LAT-06"]}, {"X-Plaza-Token": token})[0], 200)
-        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "4242"})[0], 403)   # nor by PIN
+        self.assertEqual(self.call("POST", "/plaza/api/claim", {"team": "t07", "pin": "42424242"})[0], 403)   # nor by PIN
         s3 = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})[1]
         real = time.time
         self.board.connect.clock = lambda: real() + C.CODE_TTL_S + 5
@@ -380,8 +445,11 @@ class FlowTest(unittest.TestCase):
         self.event(tick=80, type="offer.listed", payload={"venue": "v07", "offer": offer})
         st, th, _ = self.call("GET", f"/plaza/api/match/{mid}")
         self.assertEqual((th["state"], th["offer"], len(th["thread"]), th["thread"][0]["text"]), ("offer_on_v07", 900, 1, "15 and we close now"))
-        self.call("POST", "/plaza/api/claim", {"team": "t09", "pin": "4242"})                    # the PIN still works
-        st, out, _ = self.call("POST", url, {"team": "t09", "action": "accept"}, {"X-Plaza-Pin": "4242"})
+        claim = self.call("POST", "/plaza/api/claim", {"team": "t09", "pin": "42424242"})[1]     # the PIN still works,
+        st, out, _ = self.call("POST", url, {"team": "t09", "action": "accept"}, {"X-Plaza-Pin": "42424242"})
+        self.assertEqual((st, out["error"]), (403, "prove_first"))                               # once it is proved
+        self.game_says("t09", claim["code"], "pin-proof")
+        st, out, _ = self.call("POST", url, {"team": "t09", "action": "accept"}, {"X-Plaza-Pin": "42424242"})
         self.assertEqual((st, out["match"]["state"]), (200, "accepted"))
         self.event(tick=81, type="settlement", payload={"venue": "v07", "price": 15, "parties": ["t07", "t09"],
                                                          "items": [{"ref": "LAT-06", "frm": "t09", "to": "t07"}]})
@@ -440,12 +508,18 @@ class FlowTest(unittest.TestCase):
                      {"action": "force", "seller": "t09", "buyer": "t07", "ref": "LAT-03", "price": 1}):
             self.assertEqual(self.call("POST", "/plaza/admin/api/action", body, admin)[0], 400, body)
         st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t02", "buyer": "t03", "ref": "LAT-03"}, admin)
-        self.assertEqual(st, 200)
+        self.assertEqual((st, out["error"]), (400, "not_listed"))               # the venue never makes a trade up
+        ref_price = self.board.feed.team_prices().get("LAT-06") or 25
+        st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07",
+                                                                   "ref": "LAT-06", "price": ref_price * 3}, admin)
+        self.assertEqual((st, out["error"]), (400, "off_reference"))            # nor picks its price
+        st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07", "ref": "LAT-06"}, admin)
+        self.assertEqual(st, 200, out)
         mm = self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1]
-        self.assertEqual([(r["id"], r["forced"], r["price"]) for r in mm["queue"]], [(out["match"], True, 10)])
+        self.assertEqual([(r["id"], r["forced"], r["price"]) for r in mm["queue"]], [(out["match"], True, ref_price)])
         self.assertEqual(self.call("POST", "/plaza/admin/api/action", {"action": "expire", "match": out["match"]}, admin)[1]["state"], "expired")
         self.call("POST", "/plaza/admin/api/action", {"action": "resume"}, admin)
-        self.assertEqual(len(self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1]["queue"]), 1)
+        self.assertFalse(self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)[1]["paused"])
 
 
 class SuperviseTest(unittest.TestCase):

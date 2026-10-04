@@ -25,9 +25,12 @@ CODE_TTL_S = 15 * 60.0
 SESSION_TTL_S = 12 * 3600.0
 ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
-STARTS_PER_CLIENT = 10                              # per WINDOW_S and per client: nobody spends a team's share
-TRIES_PER_CLIENT = 10                               # wrong codes per WINDOW_S, per client: a team is never locked
-MAX_SESSIONS, SESSIONS_PER_TEAM = 400, 12           # more than one client can start: it cannot push a real one out
+# Every team at the venue sits behind one public address, so an address is a whole room: what is counted is one
+# address asking for one team, with a wide ceiling for the address. Nobody's share is spent by somebody else's team.
+STARTS_PER_PAIR, STARTS_PER_CLIENT = 6, 400         # per WINDOW_S: (client, team), and the client over every team
+TRIES_PER_PAIR, TRIES_PER_CLIENT = 10, 200          # wrong codes per WINDOW_S: the same two counts
+MAX_SESSIONS, SESSIONS_PER_TEAM = 2000, 60          # unanswered ones; a client pushes out its own first (3 a team),
+SESSIONS_PER_PAIR = 3                               # so somebody else's starts do not push a real one out
 MAX_HITS = 5000
 REPLACE_AFTER_S = 10 * 60.0                         # a verified team's agent this silent is replaced by a proof alone
 SAVE_SEEN_EVERY_S = 10.0
@@ -157,18 +160,23 @@ class Connect:
     def start(self, team, client: str) -> dict:
         team = self._team(team)
         with self.lock:
-            if not self._take(("start", "c", client), STARTS_PER_CLIENT):
+            if self._count(("start", "c", client)) >= STARTS_PER_CLIENT \
+                    or not self._take(("start", "p", client, team), STARTS_PER_PAIR):
                 raise PlazaError(429, "slow_down", "too many connection attempts; wait a few minutes")
+            self._take(("start", "c", client), STARTS_PER_CLIENT)
             self._prune()
             now = self.clock()
             s = self.data["sessions"]
             mine = sorted((k for k, v in s.items() if v["team"] == team and not v.get("verified")
                            and not v.get("agent_called")),     # a session whose agent answered is never pushed out
                           key=lambda k: s[k].get("created", 0))
-            for sid in mine[:max(0, len(mine) - SESSIONS_PER_TEAM + 1)]:
+            me = hashlib.sha256(client.encode()).hexdigest()[:16]
+            own = [k for k in mine if s[k].get("client") == me]
+            for sid in own[:max(0, len(own) - SESSIONS_PER_PAIR + 1)] + mine[:max(0, len(mine) - SESSIONS_PER_TEAM + 1)]:
                 s.pop(sid, None)
             session, code = secrets.token_urlsafe(24), new_code()
             s[_h(session)] = {"team": team, "code": code, "created": now, "code_expires": now + CODE_TTL_S,
+                              "client": hashlib.sha256(client.encode()).hexdigest()[:16],
                               "expires": now + SESSION_TTL_S, "agent_called": None, "token": None,
                               "verified": False, "connected": False}
             self._save()
@@ -181,7 +189,8 @@ class Connect:
         new one is what lets a proof replace an agent that is still at work."""
         team = self._team(team)
         with self.lock:
-            if self._count(("try", "c", client)) >= TRIES_PER_CLIENT:
+            if self._count(("try", "c", client)) >= TRIES_PER_CLIENT \
+                    or self._count(("try", "p", client, team)) >= TRIES_PER_PAIR:
                 raise PlazaError(429, "locked", "too many wrong codes; wait a few minutes")
             now = self.clock()
             code = code.strip().upper() if isinstance(code, str) else ""
@@ -193,6 +202,7 @@ class Connect:
                         break
             if rec is None or rec.get("agent_called") or rec["code_expires"] < now or rec["expires"] < now:
                 self._take(("try", "c", client), TRIES_PER_CLIENT)
+                self._take(("try", "p", client, team), TRIES_PER_PAIR)
                 why = "this code was already used" if rec and rec.get("agent_called") else \
                     "this code expired; ask for a new one" if rec else "wrong code for this team"
                 raise PlazaError(403, "bad_code", why)
@@ -226,6 +236,13 @@ class Connect:
                 if not v.get("verified") and v.get("expires", 0) >= now:
                     out.setdefault(v["team"], []).append(v["code"])
         return out
+
+    def pending_since(self) -> float:
+        """When the oldest session still waiting for its proof was started (now, when there is none)."""
+        now = self.clock()
+        with self.lock:
+            return min([v.get("created", now) for v in self.data["sessions"].values()
+                        if not v.get("verified") and v.get("expires", 0) >= now] or [now])
 
     def prove(self, team: str, text: str) -> bool:
         """A message this team sent us in the game carries one of its codes: that session is verified, its agent

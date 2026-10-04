@@ -556,6 +556,10 @@ class Contract(E2E):
         s, start, _ = self.rig.call("POST", "/plaza/api/connect/start", {"team": "t07"})
         s, got, _ = self.rig.call("POST", "/plaza/api/connect/agent", {"team": "t07", "code": start["connect_code"]})
         s, q, _ = self.rig.call("GET", "/plaza/api/agent/next", token=got["agent_token"])
+        self.assertEqual((q["verified"], q["actions"]), (False, []))      # before the proof: only "prove it is you"
+        self.rig.game.request("t07", "POST", "/api/threads", {"to": self.rig.game_host(), "text": start["connect_code"]})
+        self.rig.refresh()
+        s, q, _ = self.rig.call("GET", "/plaza/api/agent/next", token=got["agent_token"])
         sync = next((a for a in q["actions"] if a["type"] == "sync_cards"), None)
         self.assertIsNotNone(sync, q)
         body = {k: [] for k in sync["request"]["body"]}       # its keys, with empty lists in place of the hints

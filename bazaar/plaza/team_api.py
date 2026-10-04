@@ -11,7 +11,8 @@ import re
 import threading
 import time
 
-from . import activity as activity_mod, matcher, private, status as status_mod, suggest as suggest_mod
+from . import activity as activity_mod, connect as connect_mod, matcher, private, status as status_mod, \
+    suggest as suggest_mod
 from .store import LISTS, MAX_HAVE, MAX_REFS, REF_RX, PlazaError, clean_refs, whole
 
 API = "/plaza/api"
@@ -175,8 +176,16 @@ def get(h, path: str, q: dict, snap: dict) -> bool:
         h._json(200, status_mod.status(board.record, matcher.VENUE, board.enabled(), admin["mm_paused"], team,
                                        board.connect.online(team) if team else None), cors=team is None)
         return True
-    if path == API + "/agent/cards":
-        team, _ = board.connect.auth(h.headers.get(TOKEN_HEADER))
+    if path == API + "/me" and h.headers.get(TOKEN_HEADER):
+        team, verified = h._agent(need_proof=False)
+        if not verified:                                        # nothing of the team before its proof in the game
+            h.route = "me"
+            h._json(200, {"team": team, "verified": False, "read_only": True, "tick": snap.get("tick"),
+                          "venue": matcher.VENUE, "status": board.connect.agent_status(team, False),
+                          "next": connect_mod.PROVE_FIRST})
+            return True
+    elif path == API + "/agent/cards":
+        team, _ = h._agent()
     elif path in (API + "/me", API + "/me/cards", API + "/me/settings", API + "/me/activity", API + "/me/suggestions"):
         team = h.me_team(q)
     else:
@@ -331,7 +340,7 @@ def _declare(h, team: str, body, log, tick) -> bool:
     for ref, fields in limits.items():                         # all of it or none: a limit moved too soon is a 429
         if board.vault.cooling(team, ref, _mine(board, team, ref, fields, "agent"), tick):
             raise PlazaError(429, "slow_down", f"the limit of {ref} changes once every {private.COOL_TICKS} ticks")
-    declared = board.store.declare(team, None if by_token else h.headers.get("X-Plaza-Pin") or "", public)
+    declared = board.store.declare(team, None, public)
     for ref, fields in limits.items():
         _put_limits(board, team, ref, fields, "agent")
     if have is not None:
