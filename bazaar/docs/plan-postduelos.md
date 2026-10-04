@@ -115,3 +115,23 @@ Mejores cruces de `opportunities` y frase para cada lado:
 
 **Riesgo acotado**
 4. Ninguno recomendado: sin dealers no hay puente y cualquier compra a equipo por encima de valor resta entero.
+
+## Lecciones del domingo
+
+Tres errores de la tarde del domingo y la regla que deja cada uno.
+
+1. **La venta de CHA-11 a t06 se cerró en v10 y dio el liderato a t05.** Un trato de 184 P en el venue de un rival
+   le da el máximo de mercado a su dueño: t05 pasó de 33,6 a 35,4 en un corte. Regla: antes de publicar una venta
+   se decide el venue, y nunca es el de un equipo que va por delante o pegado (v10 de t05, v02 de t12, v28 de t18).
+   El venue se pregunta antes de publicar, no después.
+2. **Se cedió a 190 P con el tope del comprador en 200.** t05 puso 190 a nuestro nombre y se aceptó en ocho ticks
+   porque la orden interna llevaba suelo 190. En puntos era lo mismo (el tope de +50 se alcanza a 176), pero el
+   precio lo fija Ángel. Regla (política P149 del cerebro): el precio objetivo es el precio; no se acepta la primera
+   cifra ni se baja sin una orden nueva; una puja por debajo se deja sin aceptar.
+3. **El bot listó solo la CHA-11 recién comprada** (162 P en El Rastro, en el mismo tick de la compra). Se canceló a
+   tiempo. Regla: una carta comprada para un puente se protege antes de comprarla y no se lista hasta tener precio,
+   comprador y venue.
+
+En el código: `control.min_asks` (`POST /control {"min_asks": {"RET-11": 228}}`) fija el precio mínimo por carta.
+Ya lo respetaban las ofertas que publica el bot y sus respuestas en hilos con equipos; desde hoy tampoco se acepta
+una puja que deje menos que ese mínimo (`below_min_ask` en `bazaar/market/domain.py`).

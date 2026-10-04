@@ -3,7 +3,7 @@
 import unittest
 
 from bazaar.brain.strategy import sanitize
-from bazaar.market.domain import REPOST_COOLDOWN_TICKS, MarketDomain, PostCand, capped_ask
+from bazaar.market.domain import REPOST_COOLDOWN_TICKS, AcceptCand, MarketDomain, PostCand, below_min_ask, capped_ask
 
 
 def cand(ask=24, max_ask=30, fans=("t03",), target="t03", ref="SAL-08", aid=540):
@@ -67,6 +67,34 @@ class CappedAskTest(unittest.TestCase):
     def test_an_ask_already_under_the_cap_is_kept(self):
         self.assertEqual(capped_ask(24, 22.5, 24, 30, 25), 24)
 
+
+
+def bid(cash_in, out_refs=("CHA-11",), fee=0, value_in=0.0, cash_out=0):
+    return AcceptCand(id="a1", offer={"id": 1}, venue="v17", team="t05", in_refs=[], in_assets=[], out_ids=[1],
+                      out_refs=list(out_refs), cash_in=cash_in, cash_out=cash_out, fee=fee, value_in=value_in,
+                      loss=126.0, gain=cash_in - 126.0, cost=126.0)
+
+
+class AcceptFloorTest(unittest.TestCase):
+    """A bid under control.min_asks is never accepted, however good it looks against our value (CHA-11 went at
+    190 P to t05 on Sunday when the price to hold was 200)."""
+
+    def test_bid_under_the_floor_is_left(self):
+        self.assertTrue(below_min_ask(bid(190), {"CHA-11": 200}))
+
+    def test_bid_at_the_floor_is_fine(self):
+        self.assertFalse(below_min_ask(bid(200), {"CHA-11": 200}))
+
+    def test_fee_counts_against_the_floor(self):
+        self.assertTrue(below_min_ask(bid(200, fee=11), {"CHA-11": 200}))
+
+    def test_no_floor_no_veto(self):
+        self.assertFalse(below_min_ask(bid(130), {}))
+        self.assertFalse(below_min_ask(bid(130), {"RET-11": 228}))
+
+    def test_floor_key_case_and_bad_value(self):
+        self.assertTrue(below_min_ask(bid(100, out_refs=("ret-11",)), {"RET-11": 228}))
+        self.assertFalse(below_min_ask(bid(100), {"CHA-11": "x"}))
 
 if __name__ == "__main__":
     unittest.main()

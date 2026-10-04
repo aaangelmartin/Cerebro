@@ -125,6 +125,18 @@ def ask_gain(value: float) -> float:
     return max(ASK_GAIN_P, ASK_GAIN_FRAC * value)
 
 
+def below_min_ask(c, floors: dict | None) -> bool:
+    """True when accepting c would hand over a card for less than the minimum ask control.min_asks sets for it
+    (what we receive, cash and card value net of fee and of the cash we pay, against the sum of those floors)."""
+    need = 0.0
+    for ref in c.out_refs:
+        try:
+            need += float((floors or {}).get(str(ref).upper()) or 0)
+        except (TypeError, ValueError):
+            continue
+    return need > 0 and (c.cash_in + c.value_in - c.cash_out - c.fee) < need
+
+
 def capped_ask(ask: int, value: float, min_ask: int, market: float | None, book: float) -> int:
     """The code poster's default ask, kept near what the card is worth to us and to the market: at most
     max(value + ASK_CAP_OVER_VALUE_P, cheapest other live ask of the card, or the usual ask of its rarity,
@@ -952,6 +964,9 @@ class MarketDomain:
         swaps = [x for x in swaps if not _avoided(x.want, control)]
         accepts = [c for c in accepts if not any(_avoided(r, control) for r in c.in_refs)]
         brain_accepts = [c for c in brain_accepts if not any(_avoided(r, control) for r in c.in_refs)]
+        _floors = control.get("min_asks") or {}       # a bid under a card's minimum ask is left unaccepted
+        accepts = [c for c in accepts if not below_min_ask(c, _floors)]
+        brain_accepts = [c for c in brain_accepts if not below_min_ask(c, _floors)]
 
         stale = proto.stale_offers(own_market, values, counts, CANCELS_PER_TICK)
         try:                                        # the brain flagged these offers (outliers or outbid)

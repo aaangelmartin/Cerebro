@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "page_buys", "no_packs", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "page_buys", "min_asks", "no_packs", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
 GET  /dealer-chat?dealer=banco   our own thread with a dealer; POST /dealer-chat/{send,accept,close,release}  (api/dealerchat.py)
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
@@ -213,6 +213,12 @@ def apply_control(live: Path, body: dict) -> dict:
                                               for v in g.values()):
             raise ValueError("goal_buys must be an object of card -> max price")
         change["goal_buys"] = {str(k).upper(): int(v) for k, v in g.items()}
+    if "min_asks" in body:                       # per-card price floor: never post, quote or accept below it
+        g = body["min_asks"]
+        if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                                              for v in g.values()):
+            raise ValueError("min_asks must be an object of card -> minimum price")
+        change["min_asks"] = {str(k).upper(): int(v) for k, v in g.items() if v > 0}
     if "page_buys" in body:                      # cards that finish a page: the human dealer chat may pay up to this
         g = body["page_buys"]
         if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 100

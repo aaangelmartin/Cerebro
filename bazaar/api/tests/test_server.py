@@ -105,3 +105,13 @@ class DuelSwitches(unittest.TestCase):
             self.assertEqual((c["duel_claude_mode"], c["duel_days_sign"]), ("full", "cost"))
             with self.assertRaises(ValueError):
                 apply_control(Path(d), {"duel_claude_mode": "yolo"})
+
+
+class MinAsks(unittest.TestCase):
+    def test_min_asks_are_stored_upper_case_and_validated(self):
+        from bazaar.api.server import apply_control
+        with tempfile.TemporaryDirectory() as d:
+            c = apply_control(Path(d), {"min_asks": {"ret-11": 228, "LAT-02": 58, "SAL-01": 0}})
+            self.assertEqual(c["min_asks"], {"RET-11": 228, "LAT-02": 58})
+            with self.assertRaises(ValueError):
+                apply_control(Path(d), {"min_asks": {"RET-11": "cheap"}})
