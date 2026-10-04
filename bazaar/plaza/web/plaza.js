@@ -54,7 +54,8 @@
   }
 
   // ---- who is looking, and the frame their screen gets. The one place that answers "is there a team session?".
-  function hasTeam() { return !ADMIN && Boolean(state.me); }
+  // Without a verified session /api/me answers only { verified: false, next }: that is a visitor, not a team.
+  function hasTeam() { return !ADMIN && Boolean(state.me && state.me.team && state.me.verified !== false); }
   function frameOf(def, query) {
     if (ADMIN || !def) return ADMIN ? "app" : hasTeam() ? "app" : "public";
     let f = typeof def.frame === "function" ? def.frame({ team: hasTeam(), query }) : def.frame;
@@ -88,7 +89,7 @@
     } }, K.icon("refresh", 16));
     dom.topbar = K.el("header", { class: "topbar" },
       K.el("button", { class: "tb-btn tb-menu", type: "button", "aria-label": t("shell.menu"), onclick: () => document.body.classList.toggle("nav-open") }, K.icon("menu", 16)),
-      K.link(ADMIN ? "/plaza/admin/" : state.me ? "/plaza/home" : "/plaza/", { class: "brand" }, K.el("span", { class: "brand-mark" }, "M"),
+      K.link(ADMIN ? "/plaza/admin/" : hasTeam() ? "/plaza/home" : "/plaza/", { class: "brand" }, K.el("span", { class: "brand-mark" }, "M"),
         K.el("span", { class: "brand-name" }, "v07 Market"), ADMIN ? K.el("span", { class: "brand-sub" }, t("shell.admin")) : null),
       K.el("div", { class: "tb-clock" },
         K.el("div", { class: "tb-cell tb-time" }, K.label(t("shell.time")), dom.time),
@@ -103,7 +104,7 @@
   }
 
   function drawNav() {
-    const trades = state.me && state.me.trades ? (state.me.trades.proposed || 0) + (state.me.trades.offer_on_v07 || 0) + (state.me.trades.accepted || 0) : 0;
+    const trades = hasTeam() && state.me.trades ? (state.me.trades.proposed || 0) + (state.me.trades.offer_on_v07 || 0) + (state.me.trades.accepted || 0) : 0;
     const items = NAV.map((n) => K.link(n.path, { class: "nav-item" + (state.current === n.name ? " active" : ""), "aria-current": state.current === n.name ? "page" : null },
       K.icon(n.icon, 16), K.el("span", null, t("nav." + (ADMIN ? "admin." : "") + n.name)),
       n.badge === "trades" && trades ? K.el("span", { class: "nav-badge" }, String(trades)) : null));
@@ -111,7 +112,7 @@
     const waiting = s.market && s.market !== "open";
     const rows = ADMIN
       ? ((state.admin && state.admin.processes) || []).map((p) => ({ name: p.name, state: p.state }))
-      : [{ name: t("status.agent"), state: s.agent || (state.me ? "offline" : "off") }, { name: t("status.market"), state: s.market || "stale" },
+      : [{ name: t("status.agent"), state: s.agent || (hasTeam() ? "offline" : "off") }, { name: t("status.market"), state: s.market || "stale" },
          { name: t("status.matchmaker"), state: waiting ? "waiting" : s.matchmaker || "stale" }];
     const lang = K.el("div", { class: "lang-switch", role: "group", "aria-label": t("shell.language") }, I18N.LANGS.map((l) =>
       K.el("button", { type: "button", class: l === I18N.lang ? "active" : null, "aria-pressed": String(l === I18N.lang), onclick: () => I18N.setLang(l) }, l.toUpperCase())));
@@ -156,7 +157,7 @@
     if (ADMIN) return Promise.resolve();
     // A browser that was told "no session" stops asking (no 401 every poll) until Connect starts a new one.
     if (!API.mock && anon()) { state.me = null; state.meError = false; return Promise.resolve(); }
-    return API.get("/api/me").then((me) => { state.me = me; state.meError = false; }, (e) => {
+    return API.get("/api/me").then((me) => { state.me = me && me.team ? me : null; state.meError = false; }, (e) => {
       const none = e && [401, 403, 404].includes(e.status);
       if (none) { state.me = null; if (!API.mock) anon(true); }
       state.meError = !none;                        // the market did not answer: keep what we knew, say so
@@ -214,7 +215,7 @@
       root.appendChild(K.state("error", t("common.error"), t("shell.noAnswer"), K.btn(t("common.retry"), { onclick: () => loadMe().then(render) })));
       return;
     }
-    const ctx = { params: found.params, query, me: state.me, status: state.status, frame, go, t };
+    const ctx = { params: found.params, query, me: hasTeam() ? state.me : null, status: state.status, frame, go, t };
     try {
       const leave = def.render(root, ctx);
       state.leave = typeof leave === "function" ? leave : null;

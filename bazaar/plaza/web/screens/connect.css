@@ -29,6 +29,12 @@
 .connect-checks li { display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
 .connect-checks li .ic-wrap { color: var(--bad); }
 .connect-checks li.is-ok .ic-wrap { color: var(--ok); }
+.connect-checks li { align-items: flex-start; }
+.connect-checks li .ic-wrap { margin-top: 3px; }
+.connect-checks li:not(.is-ok):not(.is-now) .ic-wrap { color: var(--ink-3); }
+.connect-checks li.is-now { color: var(--ink); }
+.connect-checks li.is-now .ic-wrap { color: var(--signal); }
+.connect-check-help { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 
 @media (max-width: 1100px) {
   .connect-cols { grid-template-columns: 1fr 1fr; }

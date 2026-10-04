@@ -1,10 +1,12 @@
 // connect: the only thing a human does. Pick the team, paste one prompt to the agent, and the page watches the
-// agent connect, prove who it is in the game and list its cards. Then How it works, then Home.
+// agent, in this order: it redeems the code, sends it in the game with its own key, the market sees it (identity
+// verified), only then it lists its cards, and it starts reading its queue. Then How it works, then Home.
 (function () {
   "use strict";
   const { el } = K;
   const CHECKS = ["agent_called", "verified", "cards_listed", "agent_online"];
-  const MOCK_STEPS = { waiting: {}, called: { agent_called: true }, verified: { agent_called: true, verified: true } };
+  const MOCK_STEPS = { waiting: {}, called: { agent_called: true }, verified: { agent_called: true, verified: true },
+                       listed: { agent_called: true, verified: true, cards_listed: true } };
 
   Plaza.screen("connect", {
     title: "nav.connect",
@@ -69,11 +71,13 @@
           colReady.appendChild(K.btn(t("connect.seeHow"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");
           return;
         }
-        const box = colReady.appendChild(el("div", { class: "connect-result" + (s && s.agent_called ? " is-bad" : ""), role: "status" }));
+        const box = colReady.appendChild(el("div", { class: "connect-result", role: "status" }));
         box.appendChild(el("div", { class: "connect-result-title" }, s && s.agent_called ? t("connect.notYet") : t("connect.waiting")));
-        box.appendChild(el("ul", { class: "connect-checks" }, CHECKS.map((k) => {
+        const now = CHECKS.find((k) => !(s && s[k]));                 // the checks happen in this order: the first one missing is the one to wait for
+        box.appendChild(el("ol", { class: "connect-checks" }, CHECKS.map((k) => {
           const ok = Boolean(s && s[k]);
-          return el("li", { class: ok ? "is-ok" : "" }, K.icon(ok ? "check" : "close", 13), t("connect.check." + k));
+          return el("li", { class: ok ? "is-ok" : k === now ? "is-now" : "" }, K.icon(ok ? "check" : k === now ? "clock" : "close", 13),
+            el("span", null, t("connect.check." + k), !ok && k === now ? el("span", { class: "connect-check-help" }, t("connect.help." + k)) : null));
         })));
         colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.listedHint")));
         colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.auto")));
