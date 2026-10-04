@@ -616,6 +616,174 @@ class Sunday(E2E):
         self.assertEqual([r for r in self.rig.game.requests if r[2] == "/api/offers"], [])
 
 
+class Auctions(E2E):
+    def lot(self, reserve=63, ticks=6, start=40):
+        self.seller = self.rig.agent("t01", spares=["SAL-10"], have=["SAL-10"])
+        self.b1 = self.rig.agent("t02", wants=["LAV-01"])
+        self.b2 = self.rig.agent("t03", wants=["LAV-01"])
+        self.rig.refresh()
+        body = {"card": "SAL-10", "start": start, "ticks": ticks, **({"reserve": reserve} if reserve else {})}
+        s, lot, _ = self.seller.api("POST", "/plaza/api/lots", body)
+        self.assertIn(s, (200, 201), lot)
+        return lot["id"]
+
+    def bid(self, agent, lid, price):
+        return agent.api("POST", f"/plaza/api/lot/{lid}/bid", {"price": price})
+
+    def lot_now(self, lid):
+        return self.rig.board.lots.lots[lid]
+
+    def test_a_lot_runs_is_extended_awarded_and_settles_on_v07(self):
+        lid = self.lot()
+        s, out, _ = self.bid(self.seller, lid, 50)
+        self.assertEqual((s, out["error"]), (403, "own_lot"))
+        self.assertEqual(self.bid(self.b1, lid, 45)[0], 200)
+        s, out, _ = self.bid(self.b2, lid, 46)
+        self.assertEqual((s, out["error"]), (409, "too_low"))
+        self.rig.game.advance(4)
+        self.rig.refresh()
+        self.assertEqual(self.bid(self.b2, lid, 65)[0], 200)                 # two ticks from the end
+        self.assertEqual((self.lot_now(lid)["ends_tick"], self.lot_now(lid)["extensions"]), (1510, 1))
+        self.rig.game.advance(8)
+        self.rig.refresh()
+        lot = self.lot_now(lid)
+        self.assertEqual((lot["state"], lot["winner"], lot["price"]), ("awarded", "t03", 65))   # over the reserve
+        self.assertEqual([a["type"] for a in self.b2.queue()["actions"] if a.get("match") == lot["match"]], ["post_offer"])
+        self.rig.run(6, until=lambda: self.lot_now(lid)["state"] == "settled")
+        self.assertEqual(self.lot_now(lid)["state"], "settled")
+        self.assertIn("SAL-10", self.rig.game.hand("t03"))
+        offers = [r for r in self.rig.game.requests if r[2] == "/api/offers"]
+        self.assertEqual([(r[0], r[3]["venue"], r[3]["to"], r[3]["give"]["cash"]) for r in offers], [("t03", "v07", "t01", 65)])
+        self.assertEqual(self.rig.game.venue_stats["trades"], 1)
+        s, out, _ = self.bid(self.b1, lid, 90)
+        self.assertEqual(s, 409, out)                                         # nothing after the end
+
+    def test_the_reserve_is_in_no_answer_and_no_file(self):
+        lid = self.lot(reserve=1873, start=40)
+        self.bid(self.b1, lid, 45)
+        self.rig.refresh()
+        rx = re.compile(r"(?<![\d.])1873(?![\d.])")
+        paths = ["/plaza/api/lots", f"/plaza/api/lot/{lid}", "/plaza/api/floor", "/plaza/api/board", "/plaza/api/board/live",
+                 "/plaza/api/board/history", "/plaza/api/collections", "/plaza/api/market", "/plaza/api/card/SAL-10",
+                 "/plaza/api/team/t01", "/plaza/api/matches", "/plaza/api/stats"]
+        for path in paths:
+            for who, kw in (("a visitor", {"client": "10.7.0.1"}), ("a bidder", {"token": self.b1.token, "client": self.b1.client})):
+                s, out, _ = self.rig.call("GET", path, **kw)
+                self.assertEqual(s, 200, path)
+                self.assertIsNone(rx.search(json.dumps(out)), f"the reserve is shown to {who} in {path}")
+        for r in R.ROUTES:
+            if r.who == "admin" and r.method == "GET" and r.live:
+                s, out, _ = self.rig.call("GET", "/plaza" + r.path, admin=True)
+                self.assertIsNone(rx.search(json.dumps(out)), f"the reserve is shown to our panel in {r.path}")
+        for path in self.rig.game.live.rglob("*"):
+            if path.is_file() and path.name != "events.jsonl":
+                self.assertIsNone(rx.search(path.read_text(errors="replace")), f"the reserve is in {path.name}")
+        for path in (self.rig.root / "private").rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"1873", path.read_bytes(), f"the reserve is in the clear in {path.name}")
+
+    def test_who_cannot_open_or_bid(self):
+        lid = self.lot()
+        start = self.rig.call("POST", "/plaza/api/connect/start", {"team": "t04"})[1]
+        tok = self.rig.call("POST", "/plaza/api/connect/agent", {"team": "t04", "code": start["connect_code"]})[1]["agent_token"]
+        s, out, _ = self.rig.call("POST", f"/plaza/api/lot/{lid}/bid", {"price": 50}, token=tok)
+        self.assertEqual((s, out["error"]), (403, "prove_first"))                 # not proved
+        self.assertIn(self.rig.call("POST", f"/plaza/api/lot/{lid}/bid", {"price": 50})[0], (401, 403))   # nobody
+        self.rig.call("POST", "/plaza/admin/api/action", {"action": "ban", "team": "t03", "reason": "test"}, admin=True)
+        s, out, _ = self.bid(self.b2, lid, 50)
+        self.assertEqual((s, out["error"]), (403, "banned"))
+        s, out, _ = self.b2.api("POST", "/plaza/api/lots", {"card": "SAL-10", "start": 10})
+        self.assertEqual(s, 403, out)
+        s, out, _ = self.b1.api("POST", "/plaza/api/lots", {"card": "SAL-10", "start": 10})   # a card it does not hold
+        self.assertEqual((s, out["error"]), (400, "not_yours"))
+        s, out, _ = self.b1.api("POST", f"/plaza/api/lot/{lid}/accept", {})
+        self.assertEqual(s, 403, out)                                             # only the seller awards
+        s, out, _ = self.b1.api("POST", f"/plaza/api/lot/{lid}/cancel", {})
+        self.assertEqual(s, 403, out)
+        self.assertEqual(self.lot_now(lid)["bids"], [])
+
+    def test_a_winner_that_does_not_pay_loses_the_lot_to_the_next_bid(self):
+        from bazaar.plaza import lots as L
+        lid = self.lot(reserve=45)
+        self.bid(self.b1, lid, 45)
+        self.bid(self.b2, lid, 60)
+        self.rig.game.advance(7)
+        self.rig.refresh()
+        self.assertEqual(self.lot_now(lid)["winner"], "t03")
+        self.b2.queue()                                       # it saw what it owes, and does nothing
+        self.b2.alive = False
+        for _ in range(L.POST_TICKS + 3):
+            self.rig.game.advance()
+            self.rig.refresh()
+        lot = self.lot_now(lid)
+        self.assertEqual(lot["winner"], "t02", lot)           # the next bid stands, at its own price
+        self.assertEqual(lot["price"], 45)
+        self.assertEqual([(b["team"], b["state"]) for b in lot["bids"]], [("t02", "live"), ("t03", "defaulted")])
+        st = self.rig.call("GET", "/plaza/api/me", token=self.b2.token)[1]["standing"]
+        self.finding(st["strikes"] == 1, "lots", f"a winner that never posted its offer has {st['strikes']} strikes, not 1")
+        self.assertEqual(self.seller.api("GET", "/plaza/api/me")[1]["standing"]["strikes"], 0)
+        self.rig.run(6, until=lambda: self.lot_now(lid)["state"] == "settled")
+        self.assertEqual(self.lot_now(lid)["state"], "settled")
+        self.assertIn("SAL-10", self.rig.game.hand("t02"))
+        self.close()
+
+    def test_a_seller_that_awards_and_then_never_accepts_in_the_game(self):
+        """The winner did its part: it must not be struck, must not stay tied for ever, and the lot must end."""
+        from bazaar.plaza import lots as L
+        lid = self.lot(reserve=None)
+        self.bid(self.b2, lid, 60)
+        s, out, _ = self.seller.api("POST", f"/plaza/api/lot/{lid}/accept", {})
+        self.assertEqual(s, 200, out)
+        self.rig.refresh()
+        mid = self.lot_now(lid)["match"]
+        self.seller.alive = False                             # the seller walks away
+        self.rig.run(3)
+        self.assertEqual(self.rig.board.deals.get(mid)["state"], "offer_on_v07")
+        cash_before = self.rig.game.cash["t03"]
+        for _ in range(D.OFFER_TICKS + L.ACCEPT_TICKS + 20):
+            self.rig.game.advance()
+            if self.rig.game.tick % 5 == 0:
+                self.rig.refresh()
+                self.b2.queue()
+        self.rig.refresh()
+        lot, m = self.lot_now(lid), self.rig.board.deals.get(mid)
+        self.finding(m["state"] not in D.LIVE_STATES, "lots", f"the match of a lot whose seller never accepts stays {m['state']}")
+        self.finding(lot["state"] in L.DONE, "lots", f"the lot stays '{lot['state']}' for ever after its seller walked away")
+        st = self.b2.api("GET", "/plaza/api/me")[1]["standing"]
+        self.assertEqual(st["strikes"], 0, "the winner posted its offer and is struck for the seller's silence")
+        self.finding([b["state"] for b in lot["bids"]] != ["defaulted"], "lots", "the winner's bid is marked defaulted")
+        self.assertEqual(self.rig.game.cash["t03"], cash_before)             # and it paid nothing
+        types = [a["type"] for a in self.b2.queue()["actions"]]
+        self.finding("post_offer" not in types and "accept_offer" not in types, "lots",
+                     f"the winner's queue still asks for {types} on a lot that is over")
+        self.close()
+
+    def test_a_winner_whose_offer_ran_out_unaccepted_is_not_struck(self):
+        """The seller awards, the winner posts on v07, the seller never accepts, the game drops the offer."""
+        lid = self.lot(reserve=None)
+        self.bid(self.b2, lid, 60)
+        self.assertEqual(self.seller.api("POST", f"/plaza/api/lot/{lid}/accept", {})[0], 200)
+        self.rig.refresh()
+        self.seller.alive = False
+        self.rig.run(3)
+        mid = self.lot_now(lid)["match"]
+        offer = self.rig.board.deals.get(mid)["offer"]
+        self.assertIsNotNone(offer)                           # the winner did post it, on v07
+        self.rig.game.advance(61)
+        self.rig.game.offers[offer]["status"] = "expired"
+        self.rig.game.emit("offer.cancelled", {"offer": offer, "venue": "v07"})     # as the real feed says it
+        self.b2.alive = False
+        for _ in range(20):
+            self.rig.game.advance()
+            self.rig.refresh()
+        lot = self.lot_now(lid)
+        st = self.b2.api("GET", "/plaza/api/me")[1]["standing"]
+        self.finding(st["strikes"] == 0, "lots", "a winner that posted its offer on v07 gets a strike when the SELLER "
+                     "never accepts and the game drops the offer (bid marked "
+                     f"{[b['state'] for b in lot['bids']]}, lot {lot['state']})")
+        self.close()
+
+
 class ClosedAndPaused(E2E):
     def test_our_switch_turns_the_api_off_and_on(self):
         seller, _ = self.pair()
