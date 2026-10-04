@@ -77,7 +77,7 @@ More: [`bazaar/plaza/README.md`](bazaar/plaza/README.md), [`CONTRACT.md`](bazaar
 
 ## Run it
 
-Python 3.14, standard library plus the Anthropic SDK. Copy `.env.example` to `.env` and fill in your own keys; `.env` is never committed.
+Python 3.14, standard library only (the Claude API is called over plain HTTPS). Copy `.env.example` to `.env` and fill in your own keys; `.env` is never committed.
 
 ```bash
 # Tests (about 1,600; they write to a temporary folder)
