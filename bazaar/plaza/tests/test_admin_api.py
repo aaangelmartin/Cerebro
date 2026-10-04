@@ -1,5 +1,6 @@
 """Our panel: only behind the admin check, every screen answers, and no private limit is ever in an answer."""
 import json
+import re
 import time
 import unittest
 
@@ -9,6 +10,11 @@ from bazaar.plaza.tests import test_server as T
 ADMIN = {"X-Plaza-Admin": "test-admin-token"}
 ROUTES = ("status", "performance", "trades", "teams", "suggestions", "venue")
 SECRETS = ("1333", "1771", "1991")
+
+
+def leaks(text: str, secret: str) -> bool:
+    """The number on its own, not four digits inside a timestamp."""
+    return re.search(rf"(?<![\d.]){secret}(?![\d.])", text) is not None
 
 
 class AdminTest(unittest.TestCase):
@@ -138,9 +144,9 @@ class AdminTest(unittest.TestCase):
             blob += json.dumps(self.call("GET", path, headers=cred or {})[1])
         mine = json.dumps(self.call("GET", "/plaza/api/me/trades", headers=t7)[1]) + \
             json.dumps(self.call("GET", "/plaza/api/agent/next", headers=t7)[1])
-        self.assertNotIn("1333", mine)                               # the seller's floor is not in the buyer's answers
+        self.assertFalse(leaks(mine, "1333"))                        # the seller's floor is not in the buyer's answers
         for secret in ("1333", "1991", "1501"):
-            self.assertNotIn(secret, blob, secret)
+            self.assertFalse(leaks(blob, secret), secret)
         trades = self.call("GET", "/plaza/admin/api/trades", headers=ADMIN)[1]["trades"]
         self.assertEqual((trades[0]["overlap"], trades[0]["basis"]), (True, "limits"))    # yes or no, and a word
         self.assertTrue(1333 <= trades[0]["price"] <= 1771)
@@ -148,7 +154,7 @@ class AdminTest(unittest.TestCase):
             if path.is_file():
                 raw = path.read_text(errors="ignore")
                 for secret in SECRETS:
-                    self.assertNotIn(secret, raw, (path.name, secret))
+                    self.assertFalse(leaks(raw, secret), (path.name, secret))
 
 
 if __name__ == "__main__":

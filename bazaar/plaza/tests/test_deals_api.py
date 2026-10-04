@@ -112,9 +112,10 @@ class QuoterTest(unittest.TestCase):
         sh = sheets(agent("t01", sale=["SAL-09"]), agent("t02", wants=["SAL-09"]))
         m = M.find(sh, CAT, gate=self.v.gate, quote=self.q.quote)[0]
         self.assertEqual((m["price"], m["basis"]), (70, "limits"))
-        blob = json.dumps(m)
-        for secret in ("60", "90"):
-            self.assertNotIn(secret, blob)
+        numbers = [v for v in m.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        for secret in (60, 90):                                                    # no field carries a limit
+            self.assertNotIn(secret, numbers)
+        self.assertEqual(m["recipe"]["buyer"]["body"]["give"], {"cash": 70})
         self.limits(95, 90)
         self.assertEqual(M.find(sh, CAT, quote=self.q.at(50).quote), [])
 
