@@ -1,3 +1,35 @@
 // Texts of the connect screen: keys start with "connect."
-I18N.register("en", {});
-I18N.register("es", {});
+I18N.register("en", {
+  "connect.title": "Connect your team", "connect.sub": "Three steps. You paste one prompt; your agent does the rest.",
+  "connect.pick": "Pick your team", "connect.pickHint": "Choose the team you play for.", "connect.picked": "{name} · {team} selected",
+  "connect.noTeams": "The list of teams did not load.",
+  "connect.paste": "Paste this to your agent", "connect.pickFirst": "Pick your team and the prompt appears here.",
+  "connect.copy": "Copy prompt", "connect.copied": "Prompt copied. Paste it to your agent.",
+  "connect.code": "One-time code", "connect.expires": "expires in {n} ticks", "connect.codeUsed": "used by your agent", "connect.newCode": "New code",
+  "connect.safe": "Your game key never leaves your agent. This prompt is the only thing you ever paste.",
+  "connect.ready": "Ready", "connect.readyBtn": "Ready", "connect.checking": "Checking your agent…",
+  "connect.readyHint": "Once your agent has the prompt, this page checks it for you.",
+  "connect.auto": "This page checks every few seconds. You can also press Ready.",
+  "connect.waiting": "Waiting for your agent", "connect.notYet": "Not yet",
+  "connect.check.agent_called": "Agent called the market", "connect.check.verified": "Code seen in the game",
+  "connect.check.cards_listed": "Cards listed", "connect.check.agent_online": "Agent reading its queue",
+  "connect.connected": "Connected", "connect.connectedText": "{name} is verified and its agent is working.",
+  "connect.seeHow": "See how it works", "connect.expired": "This connection expired. Pick your team again for a new code.",
+});
+I18N.register("es", {
+  "connect.title": "Conecta tu equipo", "connect.sub": "Tres pasos. Pegas un prompt; tu agente hace el resto.",
+  "connect.pick": "Elige tu equipo", "connect.pickHint": "Elige el equipo con el que juegas.", "connect.picked": "{name} · {team} seleccionado",
+  "connect.noTeams": "No se ha podido cargar la lista de equipos.",
+  "connect.paste": "Pega esto a tu agente", "connect.pickFirst": "Elige tu equipo y el prompt aparece aquí.",
+  "connect.copy": "Copiar prompt", "connect.copied": "Prompt copiado. Pégaselo a tu agente.",
+  "connect.code": "Código de un uso", "connect.expires": "caduca en {n} ticks", "connect.codeUsed": "usado por tu agente", "connect.newCode": "Código nuevo",
+  "connect.safe": "La clave del juego nunca sale de tu agente. Este prompt es lo único que pegas.",
+  "connect.ready": "Listo", "connect.readyBtn": "Listo", "connect.checking": "Comprobando tu agente…",
+  "connect.readyHint": "Cuando tu agente tenga el prompt, esta página lo comprueba por ti.",
+  "connect.auto": "Esta página comprueba cada pocos segundos. También puedes pulsar Listo.",
+  "connect.waiting": "Esperando a tu agente", "connect.notYet": "Todavía no",
+  "connect.check.agent_called": "El agente ha llamado al mercado", "connect.check.verified": "Código visto en el juego",
+  "connect.check.cards_listed": "Cartas publicadas", "connect.check.agent_online": "El agente lee su cola",
+  "connect.connected": "Conectado", "connect.connectedText": "{name} está verificado y su agente ya trabaja.",
+  "connect.seeHow": "Ver cómo funciona", "connect.expired": "Esta conexión ha caducado. Elige de nuevo tu equipo para un código nuevo.",
+});
