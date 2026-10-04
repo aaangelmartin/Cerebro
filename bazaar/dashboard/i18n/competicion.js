@@ -1,7 +1,11 @@
 /* competicion.* — dictionary for the competicion screen (prices and venues + all markets). */
 I18N.register("es", {
   "competicion.global.title": "Clasificación de los tres días",
-  "competicion.global.sub": "tick {tick} · el domingo cuenta al {pct} %",
+  "competicion.global.last": "último corte {time} · tick {tick} · el domingo cuenta al {pct} %",
+  "competicion.global.next": "próxima actualización en {in} · tick {tick}",
+  "competicion.global.due": "actualizando · tick {tick}",
+  "competicion.global.up": "subiría {n} puestos",
+  "competicion.global.down": "bajaría {n} puestos",
   "competicion.global.fri": "Viernes",
   "competicion.global.sat": "Sábado",
   "competicion.global.sun": "Domingo (neg · mer)",
@@ -124,7 +128,11 @@ I18N.register("es", {
 });
 I18N.register("en", {
   "competicion.global.title": "Standings over the three days",
-  "competicion.global.sub": "tick {tick} · Sunday counts {pct} %",
+  "competicion.global.last": "last cut {time} · tick {tick} · Sunday counts {pct} %",
+  "competicion.global.next": "next update in {in} · tick {tick}",
+  "competicion.global.due": "updating · tick {tick}",
+  "competicion.global.up": "would climb {n} places",
+  "competicion.global.down": "would drop {n} places",
   "competicion.global.fri": "Friday",
   "competicion.global.sat": "Saturday",
   "competicion.global.sun": "Sunday (neg · mkt)",

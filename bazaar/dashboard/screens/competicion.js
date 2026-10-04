@@ -361,7 +361,7 @@
       const phase = {}, weight = {}, byTeam = {};
       for (const r of rounds) { phase[r.round] = num(r.phase) || 0; weight[r.round] = num(r.weight) || 0; }
       for (const t of teams) if (t && t.team) byTeam[t.team] = t;
-      cuts.push({ ts: num(row.ts), tick: d.tick, phase, weight, teams: byTeam });
+      cuts.push({ ts: num(row.ts), tick: d.tick, phase, weight, teams: byTeam, snap: num(d.snapshot_tick), next: num(d.next_refresh_tick) });
     }
     if (!cuts.length) return null;
     const now = cuts[cuts.length - 1];
@@ -387,31 +387,44 @@
     for (const key of ["r1", "r2", "r3", "table", "final"]) {
       teams.filter((t) => t[key] != null).sort((a, b) => b[key] - a[key]).forEach((t, i) => { t["rank_" + key] = i + 1; });
     }
-    teams.sort((a, b) => b.table - a.table);
-    const top = teams.slice(0, 5).map((t) => t.team); if (!top.includes(US)) top.push(US);
+    const top = teams.slice().sort((a, b) => b.table - a.table).slice(0, 5).map((t) => t.team); if (!top.includes(US)) top.push(US);
+    teams.sort((a, b) => b.final - a.final);        // by where each team would end
     const seen = new Map();
     for (const c of sunday) seen.set(c.tick, { ts: c.ts, tick: c.tick, scores: Object.fromEntries(top.map((id) => [id, c.teams[id] ? num(c.teams[id].score) : null])) });
-    return { tick: now.tick, ts: now.ts, phase: ph, teams, top, timeline: [...seen.values()] };
+    return { tick: now.tick, ts: now.ts, phase: ph, teams, top, timeline: [...seen.values()], snap: now.snap, next: now.next };
+  }
+
+  // the countdown to the next cut: the server says at which tick it refreshes the table
+  function tickGlobal(root) {
+    const sub = root.querySelector(".c-global-sub"), g = S && S.global; if (!sub || !g) return;
+    const wall = g.next != null ? window.ui.tickWall(g.next) : null;
+    const left = wall == null ? null : Math.round(wall - Date.now() / 1000);
+    const mmss = (s) => String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    const last = tr("competicion.global.last", { time: g.ts ? window.ui.fmtTime(g.ts) : "—", tick: g.snap, pct: g.pct });
+    const next = left == null ? "" : left > 0 ? tr("competicion.global.next", { in: mmss(left), tick: g.next }) : tr("competicion.global.due", { tick: g.next });
+    D.replace(sub, el("span", { class: "c-g-clock num" + (left != null && left <= 0 ? " c-g-due" : "") }, next), el("span", { class: "c-g-last" }, last));
+    if (left != null && left <= -4 && Date.now() - (S.globalPulled || 0) > 5000) { S.globalPulled = Date.now(); renderGlobal(root).catch(() => {}); }
   }
 
   async function renderGlobal(root) {
     const box = root.querySelector(".c-global-body"); if (!box) return;
     let doc = null;
-    try { doc = globalBoard(((await D.cached("global:lb", 30000, () => api.recStream("leaderboard", { tail: 400 }))) || {}).rows); }
+    try { doc = globalBoard(((await D.cached("global:lb", 8000, () => api.recStream("leaderboard", { tail: 400 }))) || {}).rows); }
     catch (e) { return D.replace(box, D.state("error", D.errText(e))); }
     if (!doc) return D.replace(box, D.state("empty", tr("competicion.global.none")));
     const f = (x, nd = 1) => (x == null ? "—" : fmt(Math.abs(x) < 0.05 ? 0 : x, nd));
+    const move = (t) => { const d = t.rank_table - t.rank_final; return d ? el("i", { class: "c-g-move " + (d > 0 ? "c-g-up" : "c-g-down"), title: tr(d > 0 ? "competicion.global.up" : "competicion.global.down", { n: Math.abs(d) }) }, (d > 0 ? "▲" : "▼") + Math.abs(d)) : null; };
     const cell = (v, rank, extra) => el("span", { class: "num c-g-cell" }, f(v), rank ? el("i", { class: "c-g-rank" }, "#" + rank) : null, extra || null);
     const head = el("div", { class: "c-g-row c-g-head t10-cap" },
       el("span", {}, "#"), el("span", {}, tr("common.team")), el("span", {}, tr("competicion.global.fri")), el("span", {}, tr("competicion.global.sat")),
-      el("span", {}, tr("competicion.global.sun")), el("span", {}, tr("competicion.global.now")), el("span", {}, tr("competicion.global.final")));
+      el("span", {}, tr("competicion.global.sun")), el("span", {}, tr("competicion.global.now")), el("span", {}, tr("competicion.global.final") + " ↓"));
     const lines = doc.teams.map((t) => el("div", { class: "c-g-row" + (t.team === US ? " c-g-us" : "") },
-      el("span", { class: "num" }, String(t.rank_table)),
-      el("span", { class: "c-g-name" }, t.team === US ? tr("common.team10us") : t.name),
+      el("span", { class: "num" }, String(t.rank_final)),
+      el("span", { class: "c-g-name" }, t.team === US ? tr("common.team10us") : t.name, move(t)),
       cell(t.r1, t.rank_r1), cell(t.r2, t.rank_r2),
       cell(t.r3, t.rank_r3, el("i", { class: "c-g-split" }, f(t.parts.negotiating.r3) + " · " + f(t.parts.market.r3))),
-      el("span", { class: "num c-g-cell c-g-strong" }, f(t.table, 2)),
-      cell(t.final, t.rank_final)));
+      cell(t.table, t.rank_table),
+      el("span", { class: "num c-g-cell c-g-strong" }, f(t.final, 2))));
     // today, cut by cut: one line per team of the top five (and us)
     const tl = doc.timeline; let chart = null;
     if (tl.length > 1) {
@@ -432,8 +445,9 @@
       });
       chart = el("div", { class: "c-g-today" }, el("div", { class: "t10-cap" }, tr("competicion.global.today")), svg);
     }
-    const sub = root.querySelector(".c-global-sub");
-    if (sub) sub.textContent = tr("competicion.global.sub", { tick: doc.tick, pct: fmt(doc.phase * 100, 0) });
+    S.global = { snap: doc.snap || doc.tick, next: doc.next, ts: doc.ts, pct: fmt(doc.phase * 100, 0) };
+    tickGlobal(root);
+    if (!S.globalTimer) S.globalTimer = setInterval(() => { if (S) tickGlobal(root); }, 1000);
     D.replace(box, [el("div", { class: "c-g-table" }, head, lines), chart, el("div", { class: "t10-small t10-muted c-g-note" }, tr("competicion.global.note"))]);
   }
 
@@ -628,7 +642,7 @@
     mount(root, params) { mount(root); S.params = params; },
     onParams(root, params) { if (S) S.params = params; },
     async refresh(root, data, params) { if (window.T10Markets) window.T10Markets.refresh(); return refresh(root, data, params); },
-    unmount() { S = null; },
+    unmount() { if (S && S.globalTimer) clearInterval(S.globalTimer); S = null; },
   };
 })();
 /* ---- TODOS LOS MERCADOS (sección de Competición) ----

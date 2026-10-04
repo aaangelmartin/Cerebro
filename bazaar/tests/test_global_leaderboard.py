@@ -38,7 +38,8 @@ class GlobalLeaderboardTest(unittest.TestCase):
         self.assertAlmostEqual(us["market"]["r3"], 11.25, places=6)
         # the table once Sunday counts in full
         self.assertAlmostEqual(us["final"], (0.5 * 20 + 45 + 21.25) / 2.5, places=6)
-        self.assertEqual([t["team"] for t in doc["teams"]], ["t12", "t10"])      # by the table now
+        self.assertEqual([t["team"] for t in doc["teams"]], ["t12", "t10"])      # by the projected final
+        self.assertEqual(doc["teams"][0]["rank_final"], 1)
         self.assertEqual(us["rank_r2"], 1)
 
     def test_no_cuts_is_an_empty_table(self):

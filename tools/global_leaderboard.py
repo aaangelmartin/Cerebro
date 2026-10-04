@@ -94,8 +94,8 @@ def build(rows: list[dict]) -> dict:
         order = sorted((t for t in teams if t[key] is not None), key=lambda t: -t[key])
         for i, t in enumerate(order, 1):
             t["rank_" + key] = i
-    teams.sort(key=lambda t: -t["table"])
-    top = [t["team"] for t in teams[:5]]
+    top = [t["team"] for t in sorted(teams, key=lambda t: -t["table"])[:5]]
+    teams.sort(key=lambda t: -t["final"])            # by where each team would end
     if US not in top:
         top.append(US)
     timeline = [{"ts": r["ts"], "tick": r["tick"], "phase": r["phase"].get(3, 0.0),
@@ -115,6 +115,11 @@ def _f(x, nd=1) -> str:
     return f"{x + 0.0:.{nd}f}".replace("-0,", "0,").replace(".", ",").replace("-0,0", "0,0")
 
 
+def _move(t: dict) -> str:
+    d = t["rank_table"] - t["rank_final"]
+    return "" if not d else f" ▲{d}" if d > 0 else f" ▼{-d}"
+
+
 def markdown(doc: dict) -> str:
     when = time.strftime("%H:%M", time.localtime(doc["ts"])) if doc.get("ts") else "?"
     out = [
@@ -128,6 +133,9 @@ def markdown(doc: dict) -> str:
         "Las notas por ronda están reconstruidas a partir de la tabla publicada; el sábado incluye la corrección",
         "de mercado que hizo la organización esa noche.",
         "",
+        "Ordenada por el resultado final proyectado; la flecha dice cuántos puestos sube o baja cada equipo desde su puesto de ahora.",
+        "La clasificación se actualiza cada 20 ticks (5 minutos con ticks de 15 s).",
+        "",
         "| # | Equipo | Viernes | Sábado | Domingo (neg · mer) | Tabla ahora | Final si acabara así |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -135,9 +143,9 @@ def markdown(doc: dict) -> str:
         name = f"**{t['name']}**" if t["team"] == US else t["name"]
         b = "**" if t["team"] == US else ""
         out.append(
-            f"| {t['rank_table']} | {name} | {_f(t['r1'])} ({t.get('rank_r1', '—')}.º) | {_f(t['r2'])} ({t.get('rank_r2', '—')}.º) | "
+            f"| {t['rank_final']} | {name}{_move(t)} | {_f(t['r1'])} ({t.get('rank_r1', '—')}.º) | {_f(t['r2'])} ({t.get('rank_r2', '—')}.º) | "
             f"{_f(t['r3'])} ({_f(t['negotiating']['r3'])} · {_f(t['market']['r3'])}) ({t['rank_r3']}.º) | "
-            f"{b}{_f(t['table'], 2)}{b} | {b}{_f(t['final'], 2)}{b} ({t['rank_final']}.º) |")
+            f"{_f(t['table'], 2)} ({t['rank_table']}.º) | {b}{_f(t['final'], 2)}{b} |")
     out += ["", "## Hoy, corte a corte", "", "| Hora | Tick | Peso domingo | " + " | ".join(doc["top"]) + " |",
             "|---|---|---|" + "---|" * len(doc["top"])]
     for r in doc["timeline"]:
