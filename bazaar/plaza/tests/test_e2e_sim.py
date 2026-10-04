@@ -369,6 +369,253 @@ class Standing(E2E):
         self.close()
 
 
+class Sunday(E2E):
+    """What changed for the final: the connection, the price, the veil, exact offers and what a close cleans."""
+
+    def start(self, team, client):
+        s, out, _ = self.rig.call("POST", "/plaza/api/connect/start", {"team": team}, client=client)
+        self.assertEqual(s, 200, out)
+        return out
+
+    def token(self, team, code, client):
+        return self.rig.call("POST", "/plaza/api/connect/agent", {"team": team, "code": code}, client=client)
+
+    def test_a_token_is_nobody_until_its_team_proves_itself(self):
+        first = self.start("t01", "10.3.0.1")
+        s, got, _ = self.token("t01", first["connect_code"], "10.3.0.1")
+        self.assertEqual((s, got["verified"]), (200, False))
+        old = got["agent_token"]
+        for method, path, body in (("PUT", "/plaza/api/team/t01", {"wants": ["LAV-01"]}),
+                                   ("GET", "/plaza/api/me/cards", None), ("GET", "/plaza/api/me/trades", None),
+                                   ("POST", "/plaza/api/floor", {"kind": "note", "text": "hi"})):
+            s, out, _ = self.rig.call(method, path, body, token=old, client="10.3.0.1")
+            self.assertEqual((s, out.get("error")), (403, "prove_first"), (method, path, out))
+        s, q, _ = self.rig.call("GET", "/plaza/api/agent/next", token=old, client="10.3.0.1")
+        self.assertEqual((s, q["verified"], q["actions"]), (200, False, []))
+        self.rig.refresh()
+        self.assertNotIn("LAV-01", json.dumps(self.rig.call("GET", "/plaza/api/team/t01")[1]))
+        self.rig.game.request("t01", "POST", "/api/threads", {"to": "t10", "text": first["connect_code"]})
+        self.rig.refresh()
+        self.assertEqual(self.rig.call("PUT", "/plaza/api/team/t01", {"wants": ["LAV-01"]}, token=old)[0], 200)
+        # somebody else proves the same team later (a new laptop, a new agent): the newest proof is the team
+        second = self.start("t01", "10.3.0.2")
+        s, got, _ = self.token("t01", second["connect_code"], "10.3.0.2")
+        new = got["agent_token"]
+        self.assertEqual(self.rig.call("PUT", "/plaza/api/team/t01", {"wants": ["LAV-02"]}, token=new)[0], 403)
+        self.assertEqual(self.rig.call("PUT", "/plaza/api/team/t01", {"wants": ["LAV-03"]}, token=old)[0], 200)
+        self.rig.game.request("t01", "POST", "/api/threads", {"to": "t10", "text": "here: " + second["connect_code"]})
+        self.rig.refresh()
+        self.assertEqual(self.rig.call("PUT", "/plaza/api/team/t01", {"wants": ["LAV-02"]}, token=new)[0], 200)
+        s, out, _ = self.rig.call("PUT", "/plaza/api/team/t01", {"wants": ["LAV-04"]}, token=old)
+        self.assertIn(s, (401, 403), out)                     # the older agent is no longer the team
+        # a code sent by ANOTHER team proves nothing
+        third = self.start("t02", "10.3.0.3")
+        s, got, _ = self.token("t02", third["connect_code"], "10.3.0.3")
+        self.rig.game.request("t03", "POST", "/api/threads", {"to": "t10", "text": third["connect_code"]})
+        self.rig.refresh()
+        s, out, _ = self.rig.call("PUT", "/plaza/api/team/t02", {"wants": ["LAV-01"]}, token=got["agent_token"])
+        self.assertEqual((s, out.get("error")), (403, "prove_first"))
+
+    def test_wrong_codes_from_others_do_not_lock_out_the_right_one(self):
+        mine = self.start("t01", "10.4.0.1")
+        for i in range(30):                                   # somebody guesses codes for my team from elsewhere
+            s, out, _ = self.token("t01", "PLAZA-222222", f"10.4.{1 + i // 8}.9")
+            self.assertIn(s, (400, 403, 404, 429), out)
+        s, got, _ = self.token("t01", mine["connect_code"], "10.4.0.1")
+        self.assertEqual(s, 200, got)
+
+    def test_a_whole_room_behind_one_address_connects(self):
+        teams = [f"t{i:02d}" for i in range(1, 19) if i != 10]
+        for team in teams + teams[:3]:                        # twenty connections from one address, no 429
+            start = self.start(team, "10.5.0.1")
+            s, got, _ = self.token(team, start["connect_code"], "10.5.0.1")
+            self.assertEqual(s, 200, (team, got))
+        self.healthy()
+
+    def test_the_price_is_inside_the_overlap_on_the_grid_and_stands(self):
+        from bazaar.plaza import matcher as M
+        self.rig.stop()
+        for lo, hi, ref in ((60, 90, "SAL-10"), (61, 79, "SAL-09"), (7, 13, "SAL-01"), (200, 260, "SAL-11")):
+            self.rig = Rig().start()
+            self.addCleanup(self.rig.stop)
+            seller = self.rig.agent("t01", for_sale=[{"ref": ref, "price": hi + 10, "min": lo}], have=[ref])
+            self.rig.agent("t02", wants=[{"ref": ref, "max": hi}])
+            self.rig.refresh()
+            m = self.rig.match_of("t01", "t02")
+            self.assertIsNotNone(m, (lo, hi))
+            price = m["price"]
+            self.assertTrue(lo < price < hi, (lo, hi, price))                 # never on a limit
+            self.assertEqual(price, M.grid(price), (lo, hi, price))           # whole P under 20, fives above
+            # the seller moves its limit to probe the other side: the answer does not move for 60 ticks
+            for new_min in (lo + 1, lo - 3, lo + 2):
+                seller.publish({**seller.sheet, "for_sale": [{"ref": ref, "price": hi + 10, "min": new_min}]})
+                self.rig.game.advance(5)
+                self.rig.refresh()
+                again = self.rig.match_of("t01", "t02")
+                self.assertEqual((again["id"], again["price"]), (m["id"], price), (lo, hi, new_min))
+        self.rig = Rig().start()
+        self.addCleanup(self.rig.stop)
+        self.rig.agent("t01", for_sale=[{"ref": "SAL-10", "price": 99, "min": 70}], have=["SAL-10"])
+        self.rig.agent("t02", wants=[{"ref": "SAL-10", "max": 71}])
+        self.rig.agent("t03", for_sale=[{"ref": "RET-11", "price": 150, "min": 100}], have=["RET-11"])
+        self.rig.agent("t04", wants=[{"ref": "RET-11", "max": 104}])
+        self.rig.refresh()
+        self.assertIsNone(self.rig.match_of("t01", "t02"))    # an overlap with no inside is no match
+        self.assertIsNone(self.rig.match_of("t03", "t04"))    # nor one with no grid price inside (101 would tell)
+
+    def test_a_trade_is_veiled_to_everybody_but_its_two_teams(self):
+        import http.client
+        seller = self.rig.agent("t01", for_sale=[{"ref": "SAL-12", "price": 1900, "min": 1300}], have=["SAL-12"])
+        buyer = self.rig.agent("t02", wants=[{"ref": "SAL-12", "max": 1600}])
+        other = self.rig.agent("t03", wants=["LAV-01"])
+        self.rig.refresh()
+        m = self.rig.match_of("t01", "t02")
+        first = int(m["price"])                               # `m` is the live record: keep the numbers
+        price, counter = str(first), str(first + 5)
+        self.assertTrue(1300 < first < 1600)
+        s, out, _ = seller.api("POST", f"/plaza/api/match/{m['id']}/message",
+                               {"action": "counter", "price": first + 5, "text": "a little more"})
+        self.assertEqual(s, 200, out)
+        self.rig.refresh()
+        paths = ["/plaza/api/matches", f"/plaza/api/match/{m['id']}", "/plaza/api/floor", "/plaza/api/card/SAL-12",
+                 "/plaza/api/team/t01", "/plaza/api/team/t02", "/plaza/api/market", "/plaza/api/wall",
+                 "/plaza/api/offers", "/plaza/api/stats"]
+        for who, kw in (("a visitor", {"client": "10.6.0.1"}), ("another team", {"token": other.token, "client": other.client})):
+            for path in paths:
+                s, out, _ = self.rig.call("GET", path, **kw)
+                self.assertEqual(s, 200, path)
+                text = json.dumps(out)
+                for number in (price, counter):
+                    self.assertIsNone(re.search(rf"(?<![\d.]){number}(?![\d.])", text), f"{number} shown to {who} in {path}")
+            s, pub, _ = self.rig.call("GET", f"/plaza/api/match/{m['id']}", **kw)
+            self.assertEqual((pub["price"], pub["veiled"]), (None, True), who)
+            self.assertNotIn("a little more", json.dumps(pub))            # nor what the agents say
+        s, mine, _ = buyer.api("GET", f"/plaza/api/match/{m['id']}")
+        self.assertIsNotNone(mine["price"])                                 # its two teams see everything
+        self.assertIn(counter, json.dumps(mine))
+        self.assertIn("a little more", json.dumps(mine))
+        conn = http.client.HTTPConnection("127.0.0.1", self.rig.port, timeout=3)
+        conn.request("GET", "/plaza/api/floor/stream", headers={"X-Plaza-Client": "10.6.0.2"})
+        res = conn.getresponse()
+        seen = b""
+        try:
+            while len(seen) < 20000:
+                chunk = res.read1(4096)
+                if not chunk:
+                    break
+                seen += chunk
+        except Exception:  # noqa: BLE001 - the stream stays open: the timeout is how the read ends
+            pass
+        conn.close()
+        self.assertIn(b"SAL-12", seen)                                      # the match is on the stream...
+        for number in (price, counter):
+            self.assertIsNone(re.search(rf"(?<![\d.]){number}(?![\d.])".encode(), seen), "the stream shows the price")
+        self.rig.agent("t04", for_sale=[{"ref": "RET-09", "price": 80, "min": 50}], have=["RET-09"])
+        self.rig.agent("t05", wants=[{"ref": "RET-09", "max": 75}])
+        seller.alive = buyer.alive = False                    # the first pair stays where it is
+        self.rig.run(8, until=lambda: self.state("t04", "t05") == "settled")
+        self.assertEqual(self.state("t04", "t05"), "settled")
+        done = self.rig.match_of("t04", "t05")
+        s, pub, _ = self.rig.call("GET", f"/plaza/api/match/{done['id']}", client="10.6.0.3")
+        self.assertEqual(s, 200, pub)
+        self.finding(pub.get("price") is not None and not pub.get("veiled"), "B2",
+                     f"a settled trade is still veiled to visitors: price {pub.get('price')}, veiled {pub.get('veiled')}")
+        self.close()
+
+    def test_an_offer_that_is_not_exactly_the_match_does_not_count(self):
+        seller, buyer = self.pair()
+        self.rig.game.give("t01", "SAL-02")
+        self.rig.refresh()
+        mid = self.rig.match_of("t01", "t02")["id"]
+        price = self.rig.match_of("t01", "t02")["price"]
+        bad = [  # the card plus another one; a different card; on another venue; addressed to somebody else
+            ("t02", {"venue": "v07", "give": {"cash": price}, "want": {"cards": ["SAL-10", "SAL-02"]}, "to": "t01"}),
+            ("t02", {"venue": "v07", "give": {"cash": price}, "want": {"cards": ["SAL-02"]}, "to": "t01"}),
+            ("t02", {"venue": "rastro", "give": {"cash": price}, "want": {"cards": ["SAL-10"]}, "to": "t01"}),
+            ("t02", {"venue": "v07", "give": {"cash": price}, "want": {"cards": ["SAL-10"]}, "to": "t03"}),
+        ]
+        for team, body in bad:
+            oid = self.rig.game.post_offer(team, body)["id"]
+            self.rig.refresh()
+            s, out, _ = buyer.api("POST", f"/plaza/api/me/trade/{mid}", {"offer_id": oid})
+            self.assertEqual((s, out.get("error")), (409, "conflict"), (body, out))
+            self.assertEqual(self.state(), "proposed", body)
+            self.rig.game.cancel(team, oid)
+            self.rig.refresh()
+        s, out, _ = buyer.api("POST", f"/plaza/api/me/trade/{mid}", {"offer_id": 999999})     # an id nobody posted
+        self.assertEqual(self.state(), "proposed")
+        self.assertEqual(self.rig.game.venue_stats["trades"], 0)
+        self.assertEqual(buyer.api("GET", "/plaza/api/me")[1]["standing"]["strikes"], 0)
+
+    def test_a_public_listing_elsewhere_strikes_nobody(self):
+        """S1: the seller had it listed for everybody on El Rastro and the buyer takes it there."""
+        seller, buyer = self.pair()
+        self.rig.refresh()
+        for a in (seller, buyer):
+            a.queue()
+        oid = self.rig.game.post_offer("t01", {"venue": "rastro", "give": {"assets": [self.rig.game.asset_of("t01", "SAL-10")]},
+                                               "want": {"cash": 75}})["id"]                  # to nobody in particular
+        self.rig.game.advance()
+        self.rig.refresh()
+        self.rig.game.accept("t02", oid)
+        self.rig.game.advance()
+        self.rig.refresh()
+        self.assertEqual(self.state(), "settled_elsewhere")
+        self.assertEqual(self.rig.board.strikes.view()["teams"], [])
+        for a in (seller, buyer):
+            st = a.api("GET", "/plaza/api/me")[1]["standing"]
+            self.assertEqual((st["strikes"], st["banned"]), (0, False))
+            self.assertNotIn("warning", [x["type"] for x in a.queue()["actions"]])
+
+    def test_a_close_cleans_the_sheets_and_the_limits(self):
+        seller = self.rig.agent("t01", for_sale=[{"ref": "SAL-10", "price": 70, "min": 61}], have=["SAL-10", "SAL-01"])
+        buyer = self.rig.agent("t02", wants=[{"ref": "SAL-10", "max": 89}])
+        for _ in range(6):
+            self.rig.refresh()
+            if self.state() == "settled":
+                break
+            seller.step()
+            buyer.step()                                      # no resync: the market cleans up by itself
+            self.rig.game.advance()
+        self.rig.refresh()
+        self.assertEqual(self.state(), "settled")
+        s, mine, _ = seller.api("GET", "/plaza/api/me/cards")
+        text = json.dumps(mine)
+        self.finding("SAL-10" not in json.dumps([mine.get("for_sale"), mine.get("spares")]), "B1/B2",
+                     "the seller still lists the card it sold")
+        self.finding(re.search(r"(?<![\d.])61(?![\d.])", text) is None, "B1/B2", "the seller's limit for the sold card is kept")
+        s, his, _ = buyer.api("GET", "/plaza/api/me/cards")
+        self.finding("SAL-10" not in json.dumps(his.get("wants")), "B1/B2", "the buyer still wants the card it bought")
+        self.finding(re.search(r"(?<![\d.])89(?![\d.])", json.dumps(his)) is None, "B1/B2",
+                     "the buyer's limit for the card it bought is kept")
+        self.rig.game.advance(3)
+        self.rig.refresh()
+        live_now = [m for m in self.rig.board.deals.all() if m["state"] in D.LIVE_STATES]
+        self.assertEqual(live_now, [])                        # and nothing is proposed again for that card
+        self.close()
+
+    def test_the_agent_is_asked_to_decide_when_the_price_is_not_its_own(self):
+        seller = self.rig.agent("t04", for_sale=[{"ref": "RET-09", "price": 60, "min": 50}], have=["RET-09"])
+        buyer = self.rig.agent("t05", wants=[{"ref": "RET-09", "max": 80}])
+        self.rig.refresh()
+        mid = self.rig.match_of("t04", "t05")["id"]
+        self.assertEqual(buyer.api("POST", f"/plaza/api/match/{mid}/message", {"action": "counter", "price": 55})[0], 200)
+        self.rig.refresh()
+        types = [a["type"] for a in seller.queue()["actions"] if a.get("match") == mid]
+        self.assertEqual(types, ["decide"])                   # a price the other team set is never auto-accepted
+        # a match the host forced, between teams with no limits of their own
+        a = self.rig.agent("t06", for_sale=[{"ref": "MAL-09", "price": 70}], have=["MAL-09"])
+        b = self.rig.agent("t07", wants=["MAL-09"])
+        s, out, _ = self.rig.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t06", "buyer": "t07",
+                                                                       "ref": "MAL-09", "price": 70}, admin=True)
+        self.assertEqual(s, 200, out)
+        self.rig.refresh()
+        for agent in (a, b):
+            types = [x["type"] for x in agent.queue()["actions"] if x.get("match") == out["match"]]
+            self.assertEqual(types, ["decide"], (agent.team, types))
+        self.assertEqual([r for r in self.rig.game.requests if r[2] == "/api/offers"], [])
+
+
 class ClosedAndPaused(E2E):
     def test_our_switch_turns_the_api_off_and_on(self):
         seller, _ = self.pair()
