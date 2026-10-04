@@ -60,6 +60,12 @@ TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
 ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
 MATCH_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})")
+VIEWED = ("/plaza/api/matches", "/plaza/api/offers", "/plaza/api/floor")      # reads that depend on who asks
+VIEWED_UNDER = ("/plaza/api/team/", "/plaza/api/card/")
+# what anybody may read of a match that is not theirs; the price joins it once the game has settled the trade
+PUBLIC_MATCH = ("id", "kind", "seller", "buyer", "teams", "legs", "ref", "ref_back", "name", "rarity", "state",
+                "state_tick", "proposed_tick", "venue", "offer", "settlement", "settled_venue", "history")
+BUYERS_ONLY = ("last_of_page", "priority", "score")
 ME_CARD_PATH = re.compile(r"/plaza/api/me/card/([A-Z]{3}-\d{2})")
 ME_TRADE_PATH = re.compile(r"/plaza/api/me/trade/(m-[0-9a-f]{10})")
 MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
@@ -427,20 +433,35 @@ class Board:
             out["thread"], out["history"] = msgs, r.get("history") or []
         return out
 
+    def veil(self, m: dict, viewer: str | None = None) -> dict:
+        """A match as `viewer` may read it. Its two teams read the terms and the thread; everybody else (no
+        credential, another team) reads who, which card and the state, and the price only once the game has
+        settled it, when it is public anyway. That the card ends the buyer's page is told to the buyer alone:
+        it would be a reason for the seller to ask for more."""
+        if viewer is not None and viewer in (m.get("teams") or [m["seller"], m["buyer"]]):
+            if m["kind"] == "sale" and viewer == m["buyer"]:
+                return m
+            return {k: v for k, v in m.items() if k not in BUYERS_ONLY}
+        out = {k: m[k] for k in PUBLIC_MATCH if k in m}
+        out["price"] = m.get("price") if m.get("state") == "settled" else None
+        out["veiled"] = True
+        return out
+
     def trade_view(self, m: dict, snap: dict) -> dict:
         """The same match, drawn: the cards each side puts on the table."""
         card = lambda ref: self.card(ref, snap)   # noqa: E731
         if m["kind"] == "sale":
-            sides = [{"team": m["seller"], "gives": [card(m["ref"])], "receives_cash": m["price"]},
-                     {"team": m["buyer"], "gives": [], "pays": m["price"]}]
+            cash = m.get("price")
+            sides = [{"team": m["seller"], "gives": [card(m["ref"])], **({"receives_cash": cash} if cash else {})},
+                     {"team": m["buyer"], "gives": [], **({"pays": cash} if cash else {})}]
         elif m["kind"] == "swap":
             sides = [{"team": m["seller"], "gives": [card(m["ref"])]}, {"team": m["buyer"], "gives": [card(m["ref_back"])]}]
         else:
             sides = [{"team": leg["from"], "to": leg["to"], "gives": [card(leg["ref"])]} for leg in m.get("legs") or []]
         return {**m, "sides": sides, "name": self.card(m["ref"], snap)["name"]}
 
-    def trades_for(self, team: str, snap: dict) -> list[dict]:
-        return [self.trade_view(m, snap) for m in matcher.for_team(snap["matches"], team)]
+    def trades_for(self, team: str, snap: dict, viewer: str | None = None) -> list[dict]:
+        return [self.trade_view(self.veil(m, viewer), snap) for m in matcher.for_team(snap["matches"], team)]
 
     def offer_view(self, o: dict, snap: dict) -> dict:
         return {**o, **{k: v for k, v in self.card(o["ref"], snap).items() if k != "ref"},
@@ -472,15 +493,18 @@ class Board:
         out.sort(key=lambda x: (not x["addressed_to_you"], not x["finishes_page"], x.get("cost") or 0, x["id"]))
         return out[:80]
 
-    def team_view(self, team: str, snap: dict) -> dict:
+    def team_view(self, team: str, snap: dict, viewer: str | None = None) -> dict:
+        """A team's public sheet. What only the team itself should know (which wanted card ends a page, the
+        offers that fit it, the terms of its trades) is there only when the team itself asks."""
         s = snap["sheets"][team]
+        own = viewer == team
         dress = lambda rows: [{**e, **self.card(e["ref"], snap)} for e in rows]   # noqa: E731
         available: dict[str, dict] = {}
         for e in s["spares"]:
             available[e["ref"]] = {**e, "as": "duplicate"}
         for e in s["for_sale"]:
             available[e["ref"]] = {**available.get(e["ref"], {}), **e, "as": "for_sale"}
-        looking = [{**e, "finishes_page": matcher.last_of_page(s, e["ref"])} for e in s["wants"]]
+        looking = [{**e, **({"finishes_page": matcher.last_of_page(s, e["ref"])} if own else {})} for e in s["wants"]]
         wanted = dress(looking)
         return {"team": team, "name": s["name"], "host": bool(s.get("host")), "pages": s.get("pages"),
                 "album": s.get("album"), "claimed": s["claimed"], "verified": s["verified"],
@@ -488,10 +512,11 @@ class Board:
                 "for_sale": dress(s["for_sale"]), "available": dress(list(available.values())),
                 "wanted": wanted, "looking_for": wanted,
                 "agent_online": self.connect.online(team),
-                "trades": self.trades_for(team, snap),
-                "offers_for_you": [] if s.get("host") else self.offers_for(team, snap)}
+                "trades": self.trades_for(team, snap, viewer),
+                "offers_for_you": [] if s.get("host") else
+                [o if own else {k: v for k, v in o.items() if k != "finishes_page"} for o in self.offers_for(team, snap)]}
 
-    def offers_view(self, snap: dict, q: dict) -> dict:
+    def offers_view(self, snap: dict, q: dict, viewer: str | None = None) -> dict:
         """The market board: every open offer on every venue, filtered."""
         rows = []
         for o in snap["offers"]:
@@ -511,11 +536,11 @@ class Board:
             rows.append(v)
         venues = sorted({o["venue"] for o in snap["offers"] if o.get("venue")})
         return {"tick": snap["tick"], "offers": rows[:400], "total": len(rows), "venues": venues,
-                **({"trades": self.trades_for(q["team"], snap)} if q.get("team") else {}),
+                **({"trades": self.trades_for(q["team"], snap, viewer)} if q.get("team") else {}),
                 "fees": {v: {"bps": f["bps"], "per_card": f["per_card"], "name": f["name"]}
                          for v, f in snap["fees"].items() if v in venues or v == VENUE}}
 
-    def card_view(self, ref: str, snap: dict) -> dict:
+    def card_view(self, ref: str, snap: dict, viewer: str | None = None) -> dict:
         holders, seekers = [], []
         for team, s in snap["sheets"].items():
             for e in list(s["for_sale"]) + list(s["spares"]):
@@ -526,14 +551,14 @@ class Board:
                 if e["ref"] == ref:
                     seekers.append({"team": team, "source": e.get("source"),
                                     **({"bid": e["bid"]} if e.get("bid") else {}),
-                                    "finishes_page": matcher.last_of_page(s, ref)})
+                                    **({"finishes_page": matcher.last_of_page(s, ref)} if team == viewer else {})})
         offers = [self.offer_view(o, snap) for o in snap["offers"] if ref in (o["ref"], o.get("ref_back"))]
         sales = self.feed.sales_of(ref)
         prices = [x["price"] for x in sales if x.get("price")]
         return {**self.card(ref, snap), "book": (snap["cat"].get(ref) or {}).get("book"), "tick": snap["tick"],
                 "holders": holders, "seekers": seekers, "offers": offers, "sales": sales,
                 "last_price": prices[0] if prices else None,
-                "matches": [m for m in snap["matches"] if ref in (m["ref"], m.get("ref_back"))
+                "matches": [self.veil(m, viewer) for m in snap["matches"] if ref in (m["ref"], m.get("ref_back"))
                             or any(leg.get("ref") == ref for leg in m.get("legs") or [])][:30]}
 
     # ---- ours, behind the dashboard login
@@ -664,9 +689,10 @@ class Board:
         return {"tick": snap["tick"], "venue": VENUE, "host": self.host, "teams": rows, "stats": snap["stats"],
                 "updated": snap["built"]}
 
-    def matches_view(self, snap: dict, team: str | None = None, limit: int = 60) -> dict:
+    def matches_view(self, snap: dict, team: str | None = None, limit: int = 60, viewer: str | None = None) -> dict:
         rows = matcher.for_team(snap["matches"], team) if team else snap["matches"]
-        return {"tick": snap["tick"], "venue": VENUE, "team": team, "matches": rows[:limit], "total": len(rows)}
+        return {"tick": snap["tick"], "venue": VENUE, "team": team,
+                "matches": [self.veil(m, viewer) for m in rows[:limit]], "total": len(rows)}
 
     def wall_view(self, snap: dict) -> dict:
         wanted: dict[str, dict] = {}
@@ -1013,47 +1039,54 @@ class Handler(BaseHTTPRequestHandler):
             m = MATCH_PATH.fullmatch(path)
             if m:
                 rec = self.board.deals.get(m.group(1))
-                view = self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True)
+                viewer = deals_api._team_or_none(self, q)
+                view = self.board.veil(self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True), viewer)
                 return self._json(200, {**self.board.trade_view(view, snap), "tick": snap["tick"], "venue": VENUE},
-                                  cors=True)
+                                  cors=viewer is None)
         except PlazaError as e:
             return self._error(e.status, e.code, e.message)
         if path == "/plaza/api/teams":
             return self._json(200, self.board.teams_view(snap), cors=True)
+        viewer = deals_api._team_or_none(self, q) if path in VIEWED or path.startswith(VIEWED_UNDER) else None
         m = TEAM_PATH.fullmatch(path)
         if m:
             team = m.group(1)
             if team not in snap["sheets"]:
                 return self._error(404, "not_found", "no such team")
-            return self._json(200, {**self.board.team_view(team, snap),
-                                    **{"matches": self.board.matches_view(snap, team)["matches"]},
-                                    "tick": snap["tick"], "venue": VENUE}, cors=True)
+            return self._json(200, {**self.board.team_view(team, snap, viewer),
+                                    **{"matches": self.board.matches_view(snap, team, viewer=viewer)["matches"]},
+                                    "tick": snap["tick"], "venue": VENUE}, cors=viewer is None)
         if path == "/plaza/api/matches":
-            return self._json(200, self.board.matches_view(snap, q.get("team")), cors=True)
+            return self._json(200, self.board.matches_view(snap, q.get("team"), viewer=viewer), cors=viewer is None)
         if path == "/plaza/api/wall":
             return self._json(200, self.board.wall_view(snap), cors=True)
         if path == "/plaza/api/offers":
-            return self._json(200, self.board.offers_view(snap, q), cors=True)
+            return self._json(200, self.board.offers_view(snap, q, viewer), cors=viewer is None)
         m = CARD_PATH.fullmatch(path)
         if m:
             if m.group(1) not in snap["cat"]:
                 return self._error(404, "not_found", "no such card")
-            return self._json(200, self.board.card_view(m.group(1), snap), cors=True)
+            return self._json(200, self.board.card_view(m.group(1), snap, viewer), cors=viewer is None)
         if path == "/plaza/api/floor":
-            return self._json(200, self._floor(q), cors=True)
+            return self._json(200, self._floor(q, viewer), cors=viewer is None)
         if path == "/plaza/api/floor/stream":
             return self._stream(q)
         return self._error(404, "not_found", "no such endpoint")
 
     do_HEAD = do_GET
 
-    def _floor(self, q: dict) -> dict:
+    def _floor(self, q: dict, viewer: str | None = None) -> dict:
+        """The floor. What the market itself says about a match (a proposal, a counter, a note on its thread) is
+        shown without its price, cards and text to whoever is not one of its teams, until the game settles it."""
         admin = self.board.store.admin()
         blocked, gone = set(admin["blocked"]), set(admin["hidden_msgs"])
         out = self.board.floor.poll(q.get("since", 0), team=q.get("team"), ref=q.get("ref"), kind=q.get("kind"),
                                     limit=q.get("limit", 100), hidden=set(admin["hidden"]), blocked=blocked)
         out["items"] = [i for i in out["items"] if not (i.get("src") == "plaza" and i.get("msg") is not None and (
             i.get("team") in blocked or f"{i.get('match')}:{i['msg']}" in gone))]
+        out["items"] = [i if i.get("src") != "plaza" or i.get("state") == "settled" or (
+            viewer is not None and viewer in (i.get("team"), i.get("to")))
+            else {k: v for k, v in i.items() if k not in ("price", "cards", "text")} for i in out["items"]]
         return out
 
     def _stream(self, q: dict) -> None:
@@ -1061,6 +1094,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "HEAD":
             return self._error(405, "not_allowed", "streams answer GET")
         board, team = self.board, self._known_team()
+        viewer = deals_api._team_or_none(self, q)
         client = "k:" + team if team else self._client()      # a connected team has its own share of streams
         with board.lock:
             total = sum(board.streams.values())
@@ -1092,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             end = time.monotonic() + STREAM_MAX_S
             while time.monotonic() < end:
-                got = self._floor({**q, "since": since, "limit": 200})
+                got = self._floor({**q, "since": since, "limit": 200}, viewer)
                 for item in got["items"]:
                     self.wfile.write(f"id: {item['seq']}\ndata: {json.dumps(item, ensure_ascii=False)}\n\n".encode())
                 since = max(since, got["seq"])

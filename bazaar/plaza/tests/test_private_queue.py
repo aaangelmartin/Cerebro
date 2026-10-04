@@ -206,7 +206,8 @@ class PrivateFlowTest(FlowTest):
         self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers=tok9)[1]["limits"], {"LAT-06": {"min": 1333, "value": 1991}})
         self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers=tok7)[1]["limits"], {"LAT-06": {"max": 1771}})
         self.assertEqual(self.call("GET", "/plaza/api/me?session=" + s7)[1]["limits"], {"LAT-06": {"max": 1771}})
-        st, home, _ = self.call("GET", "/plaza/api/team/t07")
+        self.assertIsNone(self.call("GET", "/plaza/api/team/t07")[1]["trades"][0]["price"])   # not for everybody
+        st, home, _ = self.call("GET", "/plaza/api/team/t07", headers=tok7)
         price = home["trades"][0]["price"]                                 # inside the overlap, and not its middle:
         self.assertTrue(1333 <= price <= 1771 and price != 1552, price)    # a team cannot work the other limit out
         mid = home["trades"][0]["id"]

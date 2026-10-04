@@ -160,7 +160,8 @@ def me_view(h, team: str, q: dict, snap: dict) -> dict:
            "limits": board.vault.get(team), "owned": [c["ref"] for c in cards["have"]], "counts": cards["counts"],
            "trades": trades, "activity_seq": activity_mod.of(board).seq_of(team), "read_only": False}
     if team in snap.get("sheets", {}):                         # the public sheet, as the first page drew it
-        out["home"] = {**board.team_view(team, snap), "matches": board.matches_view(snap, team)["matches"]}
+        out["home"] = {**board.team_view(team, snap, team),
+                       "matches": board.matches_view(snap, team, viewer=team)["matches"]}
     return out
 
 

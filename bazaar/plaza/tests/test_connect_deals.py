@@ -423,14 +423,17 @@ class FlowTest(unittest.TestCase):
 
     def test_match_thread_from_proposal_to_settlement(self):
         st, home, _ = self.call("GET", "/plaza/api/team/t07")
-        trade = home["trades"][0]
+        trade = home["trades"][0]                                  # anybody: who and which card, never the terms
+        self.assertEqual((trade["state"], trade["kind"], trade["price"], "saves" in trade), ("proposed", "sale", None, False))
+        _, tok7, _ = self.connect("t07")
+        _, tok8, _ = self.connect("t08")
+        me7 = {"X-Plaza-Token": tok7}
+        trade = self.call("GET", "/plaza/api/team/t07", headers=me7)[1]["trades"][0]
         mid = trade["id"]
         self.assertEqual((trade["state"], trade["kind"], trade["price"], trade["saves"]), ("proposed", "sale", 20, 2))
         self.assertEqual([(x["team"], [c["ref"] for c in x["gives"]]) for x in trade["sides"]], [("t09", ["LAT-06"]), ("t07", [])])
         self.assertEqual(trade["sides"][0]["gives"][0]["name"], "La Chulapa")
         self.assertEqual(self.call("GET", "/plaza/api/offers?team=t07")[1]["trades"][0]["id"], mid)
-        _, tok7, _ = self.connect("t07")
-        _, tok8, _ = self.connect("t08")
         url = f"/plaza/api/match/{mid}/message"
         self.assertEqual(self.call("POST", url, {"action": "counter", "price": 15})[0], 400)       # nobody
         self.assertEqual(self.call("POST", url, {"action": "counter", "price": 15}, {"X-Plaza-Token": tok8})[1]["error"], "not_a_party")
@@ -438,13 +441,19 @@ class FlowTest(unittest.TestCase):
         st, out, _ = self.call("POST", url, {"action": "counter", "price": 15, "text": "15 and we close now"}, {"X-Plaza-Token": tok7})
         self.assertEqual((st, out["match"]["price"], out["match"]["recipe"]["buyer"]["body"]["give"]), (200, 15, {"cash": 15}))
         self.assertEqual(self.call("POST", "/plaza/api/match/m-0000000000/message", {"text": "x"}, {"X-Plaza-Token": tok7})[0], 404)
-        floor = self.call("GET", "/plaza/api/floor?kind=counter")[1]["items"]
+        floor = self.call("GET", "/plaza/api/floor?kind=counter", headers=me7)[1]["items"]
         self.assertEqual([(i["team"], i["to"], i["price"], i["match"]) for i in floor], [("t07", "t09", 15, mid)])
+        for who in (None, {"X-Plaza-Token": tok8}):                # not its teams: that it happened, not the terms
+            seen = self.call("GET", "/plaza/api/floor?kind=counter", headers=who)[1]["items"]
+            self.assertEqual([(i["team"], i["to"], i["match"], "price" in i, "text" in i) for i in seen],
+                             [("t07", "t09", mid, False, False)])
         offer = {"id": 900, "maker": "t07", "to": "t09", "venue": "v07", "thread": None, "created_tick": 80, "expires_tick": 140,
                  "give": {"cash": 15, "assets": [], "types": []}, "want": {"cash": 0, "assets": [], "types": ["card:LAT-06"]}}
         self.event(tick=80, type="offer.listed", payload={"venue": "v07", "offer": offer})
-        st, th, _ = self.call("GET", f"/plaza/api/match/{mid}")
+        st, th, _ = self.call("GET", f"/plaza/api/match/{mid}", headers=me7)
         self.assertEqual((th["state"], th["offer"], len(th["thread"]), th["thread"][0]["text"]), ("offer_on_v07", 900, 1, "15 and we close now"))
+        st, th, _ = self.call("GET", f"/plaza/api/match/{mid}")
+        self.assertEqual((th["state"], th["price"], "thread" in th, "recipe" in th, "why" in th), ("offer_on_v07", None, False, False, False))
         claim = self.call("POST", "/plaza/api/claim", {"team": "t09", "pin": "42424242"})[1]     # the PIN still works,
         st, out, _ = self.call("POST", url, {"team": "t09", "action": "accept"}, {"X-Plaza-Pin": "42424242"})
         self.assertEqual((st, out["error"]), (403, "prove_first"))                               # once it is proved
@@ -454,8 +463,8 @@ class FlowTest(unittest.TestCase):
         self.event(tick=81, type="settlement", payload={"venue": "v07", "price": 15, "parties": ["t07", "t09"],
                                                          "items": [{"ref": "LAT-06", "frm": "t09", "to": "t07"}]})
         st, th, _ = self.call("GET", f"/plaza/api/match/{mid}")
-        self.assertEqual(([x["state"] for x in th["history"]], th["state"]),
-                         (["proposed", "offer_on_v07", "accepted", "settled"], "settled"))
+        self.assertEqual(([x["state"] for x in th["history"]], th["state"], th["price"], "thread" in th),
+                         (["proposed", "offer_on_v07", "accepted", "settled"], "settled", 15, False))   # settled: the price is public
         self.assertEqual(self.call("GET", "/plaza/api/team/t07")[1]["trades"], [])               # done: off the table
         states = [i["state"] for i in self.call("GET", "/plaza/api/floor?kind=match")[1]["items"] if i["match"] == mid]
         self.assertEqual(states[-3:], ["offer_on_v07", "accepted", "settled"])
@@ -476,7 +485,7 @@ class FlowTest(unittest.TestCase):
         url = f"/plaza/api/match/{mid}/message"
         n = self.call("POST", url, {"text": "something rude"}, {"X-Plaza-Token": tok7})[1]["posted"]
         self.assertEqual(self.call("POST", "/plaza/admin/api/action", {"action": "hide", "match": mid, "message": n}, admin)[0], 200)
-        self.assertEqual(self.call("GET", f"/plaza/api/match/{mid}")[1]["thread"], [])
+        self.assertEqual(self.call("GET", f"/plaza/api/match/{mid}", headers={"X-Plaza-Token": tok7})[1]["thread"], [])
         self.assertEqual([i for i in self.call("GET", "/plaza/api/floor")[1]["items"] if i.get("msg") == n], [])
         self.call("POST", "/plaza/admin/api/action", {"action": "block", "team": "t07"}, admin)
         self.assertEqual(self.call("POST", url, {"text": "again"}, {"X-Plaza-Token": tok7})[1]["error"], "blocked")

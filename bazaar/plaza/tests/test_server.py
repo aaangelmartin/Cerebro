@@ -86,7 +86,7 @@ class ServerTest(unittest.TestCase):
         st, t7, _ = self.call("GET", "/plaza/api/team/t07")
         self.assertEqual([w["ref"] for w in t7["wants"]], ["LAT-06"])
         self.assertEqual(t7["wants"][0]["name"], "La Chulapa")
-        self.assertEqual((t7["matches"][0]["seller"], t7["matches"][0]["price"]), ("t09", 20))
+        self.assertEqual((t7["matches"][0]["seller"], t7["matches"][0]["price"]), ("t09", None))   # the terms: its teams only
         st, ms, _ = self.call("GET", "/plaza/api/matches?team=t09")
         self.assertEqual((st, ms["total"]), (200, 1))
         st, wall, _ = self.call("GET", "/plaza/api/wall")
@@ -202,12 +202,12 @@ class ServerTest(unittest.TestCase):
         self.board.tick_feed()
         st, home, _ = self.call("GET", "/plaza/api/team/t07")
         self.assertEqual(st, 200)
-        self.assertEqual([(e["ref"], e["finishes_page"]) for e in home["looking_for"]], [("LAT-06", True)])
+        self.assertEqual([(e["ref"], "finishes_page" in e) for e in home["looking_for"]], [("LAT-06", False)])   # its own business
         self.assertEqual(home["available"], [])
         mine = home["offers_for_you"]
         self.assertEqual([o["id"] for o in mine], [101])
         self.assertEqual((mine[0]["maker"], mine[0]["price"], mine[0]["fee"], mine[0]["cost"]), ("t03", 20, 2, 22))
-        self.assertTrue(mine[0]["finishes_page"])
+        self.assertNotIn("finishes_page", mine[0])
         self.assertEqual(mine[0]["recipe"], {"method": "POST", "path": "/api/offers/101/accept", "body": {}})
         self.assertEqual(home["matches"][0]["seller"], "t09")
         t9 = self.call("GET", "/plaza/api/team/t09")[1]
@@ -238,7 +238,7 @@ class ServerTest(unittest.TestCase):
         st, card, _ = self.call("GET", "/plaza/api/card/LAT-06")
         self.assertEqual((st, card["name"], card["last_price"]), (200, "La Chulapa", 18))
         self.assertEqual([h["team"] for h in card["holders"]], ["t09"])
-        self.assertEqual([(k["team"], k["finishes_page"]) for k in card["seekers"]], [("t07", True)])
+        self.assertEqual([(k["team"], "finishes_page" in k) for k in card["seekers"]], [("t07", False)])
         self.assertEqual(sorted(o["id"] for o in card["offers"]), [101, 103])
         self.assertEqual((card["sales"][0]["from"], card["sales"][0]["to"]), ("t03", "t08"))
         self.assertEqual(self.call("GET", "/plaza/api/card/LAT-13")[0], 404)                         # hidden cards stay hidden

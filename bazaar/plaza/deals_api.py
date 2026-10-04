@@ -226,7 +226,7 @@ def market_view(board, snap: dict, q: dict, team: str | None) -> dict:
 
 
 def card_view(board, ref: str, snap: dict, team: str | None) -> dict:
-    out = board.card_view(ref, snap)
+    out = board.card_view(ref, snap, team)
     deals = []
     for s in board.feed.sales:                                 # sales between two teams only: the public record
         if s["ref"] == ref and not s.get("dealer") and s.get("price") and \
@@ -236,11 +236,14 @@ def card_view(board, ref: str, snap: dict, team: str | None) -> dict:
     possible = []
     for m in out.get("matches") or []:
         possible.append({"kind": m["kind"], "seller": m["seller"], "buyer": m["buyer"], "price": m.get("price"),
-                         "state": m["state"], "id": m["id"], "finishes_page": bool(m.get("last_of_page"))})
+                         "state": m["state"], "id": m["id"],
+                         **({"finishes_page": bool(m["last_of_page"])} if "last_of_page" in m else {})})
+    for m in snap.get("matches") or []:                         # what waits behind a live match: who, never a price
         for a in m.get("alternatives") or []:
             if a.get("ref") == ref:
-                possible.append({"kind": a["kind"], "seller": a["seller"], "buyer": a["buyer"], "price": a.get("price"),
-                                 "state": "waiting", "id": a["id"], "finishes_page": False})
+                possible.append({"kind": a["kind"], "seller": a["seller"], "buyer": a["buyer"],
+                                 "price": a.get("price") if team in (a["seller"], a["buyer"]) else None,
+                                 "state": "waiting", "id": a["id"]})
     out["deals"] = deals[-12:][::-1]
     out["reference_price"] = board.feed.team_prices().get(ref)      # None: no trade between teams yet
     out["possible_matches"] = possible[:20]

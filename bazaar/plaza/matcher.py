@@ -294,7 +294,7 @@ def find(sheets: dict[str, dict], cat: dict[str, dict], host: str = HOST, venue:
                 score = 1.0 + RARITY_SCORE.get(rarity or "", 0.0) + (3.0 if last else 0.0) \
                     + (2.0 if declared else 0.0) + (1.0 if q.get("overlap") else 0.0) \
                     + (0.0 if pair else 0.5) + min(2.0, rastro_fee(price) / 5)
-                why = f"{a} can part with {ref}; {b} looks for it" + (" (probably the last card of its page)" if last else "")
+                why = f"{a} can part with {ref}; {b} looks for it"   # that it ends b's page is b's business, not a's
                 out.append({"kind": "sale", "seller": a, "buyer": b, "ref": ref, "name": card.get("name"),
                             "rarity": rarity, "price": price, "basis": basis, "saves": rastro_fee(price),
                             "last_of_page": last, "priority": priority("sale", rarity, last),
