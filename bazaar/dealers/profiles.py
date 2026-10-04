@@ -123,9 +123,6 @@ def prior_from_traits(traits: dict | None, kind: str) -> dict[str, float]:
     }
 
 
-UNTESTED_FIX = "drop-untested-limit-ratio"     # see ProfileStore.__init__ and learn_thread(tested=...)
-
-
 class ProfileStore:
     """Dealer profiles + our dealer history (deals, quotas, cooloffs). Thread-safe, persisted as JSON."""
 
@@ -137,11 +134,9 @@ class ProfileStore:
         self.lock = threading.RLock()
         self.data: dict[str, Any] = {"profiles": {}, "deals": [], "cooloff": {}, "quota_hit": {}, "threads": {},
                                      "menus": {}}
-        loaded = False
         if self.path.exists():
             try:
                 self.data.update(json.loads(self.path.read_text()))
-                loaded = True
             except (OSError, ValueError):
                 pass
         if seed:
@@ -163,14 +158,6 @@ class ProfileStore:
                         for name, xs in samples.items():
                             k[name] = (list(k.get(name) or []) + list(xs))[-MAX_SAMPLES:]
                 applied.append(sid)
-            if UNTESTED_FIX not in applied:             # once, on a live memory: forget what the buy threads we
-                if loaded:                              # closed at the opening taught (see learn_thread)...
-                    for kinds in self.data["profiles"].values():
-                        for kind, k in kinds.items():
-                            if kind.startswith("buy:") and k.get("limit_ratio"):
-                                k["limit_ratio"] = [r for r in k["limit_ratio"] if float(r) != 1.0]
-                    self.data["stuck"] = {}             # ...and the refusals counted from those same threads
-                applied.append(UNTESTED_FIX)
         for d in self.data.get("deals") or []:           # deals stored before limit_fallback existed
             if d.get("limit_est") is None and d.get("opening") and d.get("price") is not None:
                 buying = d.get("side") == "buy"
@@ -252,10 +239,8 @@ class ProfileStore:
 
     # --- learning ------------------------------------------------------------------
     def learn_thread(self, dealer: str, kind: str, opening: int | None, theirs: list[int], ours: list[int],
-                     final: bool, buying: bool, tested: bool = True) -> None:
-        """Add one finished (or final-offer) thread's evidence to the profile. `tested`: the dealer gave a final
-        offer, a deal, or an answer to a price of ours; otherwise its only price is its opening and says nothing
-        about its limit (a ratio of 1.0 that taught the code "it stops at its opening")."""
+                     final: bool, buying: bool) -> None:
+        """Add one finished (or final-offer) thread's evidence to the profile."""
         if not opening or not theirs:
             return
         with self.lock:
@@ -268,8 +253,7 @@ class ProfileStore:
 
             add("open", opening)
             best = min(theirs) if buying else max(theirs)
-            if tested:
-                add("limit_ratio", best / opening)
+            add("limit_ratio", best / opening)
             mirrors = []
             # dealer theirs[0]; we ours[0]; dealer theirs[1]; we ours[1] -> dealer answers with theirs[2] ...
             for i in range(1, min(len(ours) - 1, len(theirs) - 2) + 1):

@@ -232,19 +232,14 @@ class DealersDomain:
                                     "why": f"loop: bought at {j.get('paid')} P from {j.get('from')}, resell"}]
         return orders
 
-    def _note_stuck(self, dealer: str, kind: str, deal: bool, theirs: list, limit_est, tick: int,
-                    tested: bool = True) -> None:
-        """A buy thread ended: count the ones a dealer closed above our max, in a row, per kind of card.
-        `tested`: it gave a final offer or answered our bids. A thread we closed at its opening ask says nothing
-        about where it stops (Sunday, tick 1519: Los Pícaros at 73 for a rare they settle at 54-59)."""
+    def _note_stuck(self, dealer: str, kind: str, deal: bool, theirs: list, limit_est, tick: int) -> None:
+        """A buy thread ended: count the ones a dealer closed above our max, in a row, per kind of card."""
         if not kind.startswith("buy:") or kind.endswith("pack"):
             return
         stuck = self.store.data.setdefault("stuck", {})
         key = f"{dealer}|{kind}"
         if deal:
             stuck.pop(key, None)
-            return
-        if not tested:
             return
         prices = [float(p) for p in theirs or [] if isinstance(p, (int, float))]
         floor = min(prices) if prices else (float(limit_est) if isinstance(limit_est, (int, float)) else None)
@@ -642,19 +637,16 @@ class DealersDomain:
             price = (t.get("ours") or [None])[-1]
         kind = t.get("kind") or "?"
         buying = t.get("side") == "buy"
+        self.store.learn_thread(dealer, kind, t.get("opening"), t.get("theirs") or [], t.get("ours") or [],
+                                bool(t.get("final")), buying)
         deal = price is not None and (status in (None, "deal"))
-        ours, theirs = t.get("ours") or [], t.get("theirs") or []
-        answered = len(ours) >= 1 and len(theirs) >= 2          # it heard a price of ours and named another
-        self.store.learn_thread(dealer, kind, t.get("opening"), theirs, ours, bool(t.get("final")), buying,
-                                tested=deal or bool(t.get("final")) or answered)
         if deal:
             level = int((dealers.get(dealer) or {}).get("level") or t.get("level") or 1)
             self.store.record_deal(dealer, level, kind, t.get("item", "?"), t.get("opening"), int(price),
                                    t.get("limit_est"), buying, t.get("value"), thread=tid, tick=tick)
         okey = (dealer, t.get("side"), str(t.get("item") or "").upper())
         if buying:
-            self._note_stuck(dealer, str(kind), deal, theirs, t.get("limit_est"), tick,
-                             tested=bool(t.get("final")) or (answered and len(ours) >= 2))
+            self._note_stuck(dealer, str(kind), deal, t.get("theirs") or [], t.get("limit_est"), tick)
         jobs = self.store.data.setdefault("loop", [])
         if buying and deal:                                 # bought under a loop order: resell it at once
             src = next((o for o in self._orders_last if o.get("resell_to") and o["dealer"] == dealer
@@ -770,9 +762,9 @@ class DealersDomain:
         return 0 < gap <= max(1, int(HOLD_GAP_SHARE * limit))
 
     @staticmethod
-    def _stale_or_hopeless(v: ThreadView, limit: int, limit_est: float, tick: int, ordered: bool = False) -> str:
+    def _stale_or_hopeless(v: ThreadView, limit: int, limit_est: float, tick: int) -> str:
         """Why this thread should be closed now ("" to keep it). A dealer has one slot per team: a dead
-        thread blocks every other deal with it. `ordered`: the thread runs a brain order."""
+        thread blocks every other deal with it."""
         if v.final:
             return ""
         since = max(v.created_tick, v.last_our_tick or 0)
@@ -786,13 +778,7 @@ class DealersDomain:
             ok_side = v.last_theirs <= limit if v.buying else v.last_theirs >= limit
             if not ok_side:
                 return f"dealer at {v.last_theirs}, within 2 P of our limit {limit} but outside it: free the slot"
-        # An estimate is not a refusal: an opening ask is where a dealer starts, not where it stops (tick 1519:
-        # a brain order closed on Los Pícaros' opening 73 with a cap of 59; they sold that card at 59 seven ticks
-        # later). A brain order walks away on the estimate only once the dealer has heard our own limit and still
-        # answered outside it; until then its ladder runs.
-        told = not ordered or (v.last_ours is not None and v.last_sender == "dealer"
-                               and (v.last_ours >= limit if v.buying else v.last_ours <= limit))
-        if v.theirs and told:
+        if v.theirs:
             gap = max(2.0, 0.15 * max(limit, 1))
             best = v.last_theirs
             if v.buying and limit_est and limit < limit_est - gap and best is not None and best > limit:
@@ -921,7 +907,7 @@ class DealersDomain:
                 move = Move("wait", None, "cash committed to our other buy bids: hold this one") \
                     if waited < CASH_HOLD_TICKS else \
                     Move("close", None, f"cash caps our bid for {waited} ticks: close and free the dealer's slot")
-            force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick, ordered=order is not None)
+            force = "" if ok else self._stale_or_hopeless(v, value_limit, limit_est, tick)
             max_msgs = int((order or {}).get("max_messages") or (4 if order is not None else HOLD_MESSAGES))
             if prof is not None:
                 max_msgs = steps.messages_for(prof, order)
