@@ -2,11 +2,11 @@
 
 ## Resumen para decirlo en persona
 
-1. **La ronda 3 entra en la tabla unas 1,8 veces más rápido de lo que dicen las reglas:** `phase` llega a 1,0 hacia las 12:16, no a las 15:00.
-2. **Una compra a un dealer por encima de tu valor resta de `neg_points`,** el contador de tratos con equipos; una compra a dealer muy por debajo no suma ahí.
-3. **Al quitar la pausa se jugaron 21 ticks de golpe:** hilos cerrados por "idle" y ofertas que perdieron 21 ticks de vida sin que nadie pudiera actuar.
-
-Además: `GET /api/me/value` da el valor de una copia más sin decirlo (RET-11: 49,5 frente a 198).
+1. **El feed público publica las respuestas de los dealers en hilos privados de otros equipos** (5.836 mensajes), con sus ofertas: se leen las pujas de los rivales y las frases de los huevos. (N1)
+2. **La ronda 3 entra en la tabla unas 1,8 veces más rápido de lo que dice la regla:** `phase` llega a 1,0 hacia las 12:16, no a las 15:00. (1)
+3. **El bono de página se suma entero a cada una de las diez cartas,** frente al `page_bonus: 0.25` del catálogo: una página completa vale 3,5 veces sus cartas sueltas. (N3)
+4. **Una compra a un dealer por encima de tu valor resta de `neg_points`,** el contador de tratos con equipos. (2)
+5. **El reloj avanza estando en pausa:** eventos con ticks 1446–1464 mientras `/api/clock` decía 1445 y `paused: true`; 21 ticks jugados de golpe. (3 y N4)
 
 ---
 
@@ -149,3 +149,101 @@ La respuesta no trae ningún campo que diga qué copia está valorando. Un agent
   your own venue with your team key".
 - El Taller convierte tres comunes en una poco común de otro set.
 - `minted` nunca supera `print_run`; no hay ninguna oferta abierta pasada de su `expires_tick`.
+
+---
+
+## Hallazgos nuevos (segunda pasada, domingo 10:30–10:45, solo lectura)
+
+Método: lecturas con nuestra propia clave de equipo a una petición por segundo o más despacio, más el feed
+público que ya guarda nuestro grabador. No se creó ninguna oferta, mensaje ni trato. Las únicas escrituras
+enviadas fueron peticiones que el servidor debe rechazar (id de oferta desconocido, JSON mal formado); todas
+se rechazaron limpiamente.
+
+### N1. El feed público publica las respuestas de los dealers en hilos privados de otros equipos (privacidad)
+
+- **Pasos:** `GET /api/feed` con cualquier clave de equipo. Filtrar `type == "thread.message"` donde
+  `payload.team` sea otro equipo y `payload.kind == "persona"`.
+- **Esperado:** un hilo entre un equipo y un dealer es privado de ese equipo; como mucho es público que existe.
+- **Observado:** todos esos mensajes llegan con `scope: "public"`. El texto del propio equipo va oculto
+  (`text: null`), pero la respuesta del dealer se publica entera, y también cada oferta adjunta por
+  cualquiera de los dos lados (dinero, carta, `expires_tick`).
+- **Evidencia:** 5.836 respuestas de dealers dirigidas a otros equipos, con texto, en nuestro feed grabado
+  (de viernes a domingo 10:37). Comprobación en vivo en el tick 1776: 25 de los 150 eventos devueltos eran
+  respuestas así; por ejemplo, hilo 2630, la Abuela a t02: "The Neighbourhood pack, thirty P — that is my
+  offer, cariño…".
+- **Impacto:** cualquier equipo puede leer (a) la puja actual de cada rival, porque el dealer la repite
+  ("¡Forty-eight!… Forty-nine P — and that's our last word"); (b) el camino de concesiones y el suelo de cada
+  dealer; (c) qué frase desbloqueó cada huevo, porque el dealer la repite ("¡Ay, el chotis! … sobre una
+  baldosa se baila"; "cocido con sus tres vuelcos"; "the old estampita"; "Plaza Mayor, with a caña"), seguida
+  del evento público `egg.found` / `egg.given`. Los huevos dejan de ser secretos en cuanto los encuentra el
+  primer equipo.
+- **Arreglo sugerido:** dar a los eventos `thread.message` de persona `scope: "team"`, u ocultar `text` y
+  `offer` a todos menos al equipo del hilo.
+
+### N2. Una carta oculta aparece en el catálogo público y `me/value` le da precio (fuga de información)
+
+- **Pasos:** `GET /api/catalog`; mirar el set `LAT`. Después `GET /api/me/value?card=LAT-13`.
+- **Esperado:** una carta marcada `hidden: true` no se devuelve a los equipos que no la han encontrado.
+- **Observado:** el catálogo devuelve a todos los equipos `{"id": "LAT-13", "name": "La Chulapa Dorada",
+  "rarity": "legendary", "flavour": "Only one was ever printed. Don Ernesto knows where.", "book": 450,
+  "print_run": 1, "minted": 1, "hidden": true, "page": false}`. `me/value?card=LAT-13` responde
+  `200 {"your_value": 0.0}`, mientras que cualquier otra ref `-13`, `-14` y `-00` responde
+  `404 unknown_card`.
+- **Impacto:** la carta secreta, su nombre, a quién pedírsela y si ya se ha emitido son públicos.
+
+### N3. El bono de página se suma a cada una de las diez cartas, no una vez por página (puntuación: confirmad la intención)
+
+- **Pasos:** `GET /api/catalog` → `values: {"copy_marginals": [1.0, 0.25, 0.1], "page_bonus": 0.25,
+  "master_bonus": 0.1}`. `GET /api/me` con una página completa.
+- **Esperado (nuestra lectura de `page_bonus: 0.25`):** una página completa vale un 25 % más que sus diez
+  cartas. El valor de libro de una página es 265, así que el bono sería 66,25 × afinidad por página.
+- **Observado:** cada una de las diez cartas lleva el bono entero. Con afinidad 1,6 (LAV, completa):
+  LAV-01 (común, libro 10) `your_value` 122,0 = 16 + 106; LAV-06 (poco común) 146,0 = 40 + 106; LAV-10 (rara)
+  218,0 = 112 + 106, donde 106 = 66,25 × 1,6. Igual en MAL (extra 86,1 = 66,25 × 1,3), RET (72,9) y SAL
+  (59,6). Una página completa vale por tanto 265 × a + 10 × 66,25 × a = 927,5 × a: 3,5 veces su valor en
+  cartas sueltas, un bono del 250 %, no del 25 %. Las cartas de una página incompleta (LAT-02, LAT-04) y las
+  épicas fuera de página no llevan extra.
+- **Impacto:** si lo previsto era un 25 % por página, completar página está premiado diez veces de más, y la
+  última carta de una página se valora en unos 82 siendo una poco común de libro 25 (SAL-08 con 9 de 10).
+
+### N4. Los eventos del feed llevan ticks que `/api/clock` nunca informó (reloj; se suma al punto 3)
+
+- **Observado:** entre los ticks 1445 y 1466 el feed trae once eventos sellados 1446, 1448, 1449, 1462,
+  1463 y 1464 (`set.released` CHA, `round.ended`, `round.started`, dos `schedule.fired`, `news.posted`,
+  `venue.fee_changed`), todos recibidos mientras `/api/clock` seguía respondiendo `tick: 1445, paused: true`.
+  El último `clock.changed` anterior dice `{"tick_seconds": 60.0, "paused": true}`; el siguiente es del tick
+  1466 (`{"tick_seconds": 15.0, "paused": false}`). Ningún `clock.changed` anuncia la reanudación entre medias.
+- **Impacto:** la ronda 3 y la salida de Chamberí ocurrieron "durante la pausa"; un agente que espera a
+  `paused: false` o a un evento `clock.changed` no vio ninguno de los dos, y los temporizadores por ticks
+  perdieron 21 ticks.
+
+### N5. Hallazgos menores
+
+- **Se acepta una oferta con el lado `want` vacío** en `POST /api/offers` (un regalo de dinero puro): ofertas
+  9749, 11803, 12618 y 12620 en El Rastro, autor t13, `give: {cash: 1}`,
+  `want: {cash: 0, assets: [], types: []}`, dirigidas a t02, t15, t17 y t03. No encontramos settlement de
+  ninguna. Si una se liquida, se mueve dinero entre equipos a cambio de nada, cosa que prohíbe la regla de
+  juego limpio.
+- **Un venue puede anunciar una comisión que no cobra:** v27 (t14) se llama "Mesa de cruces (board, 0%)" con
+  `fee_bps: 200`; v03 (t13, cerrado) se llama "… · 1% fee" con `fee_bps: 0`. Los nombres son texto libre y
+  no se comprueban contra la comisión.
+- **Los parámetros de consulta desconocidos se ignoran en silencio** donde uno tipado se valida: `GET
+  /api/venues/rastro/offers?limit=abc` y `?limit=-1` responden 200 con la lista entera; `GET
+  /api/feed?since=-1` y `?since=99999999999999999999` responden 200 con la ventana por defecto; `GET
+  /api/feed?limit=abc` responde 422.
+- **`GET /api/me/value?card=` (vacío)** responde `404 unknown_card "no card "`; un 422 como el del parámetro
+  ausente sería más claro. Un parámetro repetido (`card=LAV-01&card=LAV-12`) usa en silencio el último.
+
+### Comprobado y coherente
+
+- Comisión de El Rastro en 106 settlements entre equipos: siempre `ceil(5 % del precio) + 1 P por carta`; los
+  settlements con dealers y en venues de equipos llevan comisión 0.
+- `score = negotiating + market` en los 18 equipos; los puestos casan con las notas; sin `adjustments`, nadie
+  `frozen`.
+- Ninguna carta con `minted > print_run`; ninguna oferta nuestra abierta pasada de su `expires_tick`; ningún
+  id de settlement duplicado; ningún precio ni comisión negativos o con decimales; los ids de evento nunca
+  retroceden de tick.
+- Las peticiones mal formadas fallan limpio: ids desconocidos → 404 con código, tipos erróneos → 422, JSON
+  malo → 400, método erróneo → 405. Sin trazas ni rutas internas en ningún error.
+- No probado, a propósito: leer por id el hilo de otro equipo, ni nada que cree una oferta, gaste dinero o
+  acepte un trato.
