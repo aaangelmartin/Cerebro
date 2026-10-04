@@ -10,7 +10,7 @@ Plaza.screen("home", {
     const sig = {};
 
     const slot = (cls) => root.appendChild(el("div", { class: cls }));
-    const dom = { head: slot("home-head"), api: slot("home-api"), banner: slot("home-banner"), agent: slot("home-agent"),
+    const dom = { head: slot("home-head"), api: slot("home-api"), banner: slot("home-banner"), signals: root.appendChild(Signals.block(ctx, "both")), agent: slot("home-agent"),
                   zones: slot("home-zones"), trades: slot("home-trades") };
     dom.api.appendChild(K.endpoint("GET /plaza/api/me", "GET /plaza/api/me/activity?since=<seq>", "GET /plaza/api/me/cards", "GET /plaza/api/me/trades"));
     dom.agent.appendChild(K.state("loading"));

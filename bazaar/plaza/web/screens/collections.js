@@ -9,6 +9,7 @@ Plaza.screen("collections", {
 
     root.appendChild(K.pageHead(t("nav.collections"), t("coll.sub"), K.link("/plaza/board", { class: "btn sm" }, K.icon("performance", 13), t("coll.toBoard"))));
     const own = root.appendChild(el("div"));
+    root.appendChild(Signals.block(ctx, "buy"));
     const body = root.appendChild(el("div", { class: "coll-body" }));
     body.appendChild(K.state("loading"));
     root.appendChild(K.endpoint("GET /plaza/collections.json", "GET /plaza/board.json", ctx.me ? "POST /plaza/api/me/cards" : null));

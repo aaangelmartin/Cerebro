@@ -11,6 +11,7 @@ Plaza.screen("cards", {
     const st = { data: null, market: {}, catalog: [], editing: false, edits: {}, more: false, saving: false, error: null };
 
     const head = root.appendChild(el("div"));
+    root.appendChild(Signals.block(ctx, "both"));
     const body = root.appendChild(el("div", { class: "cards-body" }));
     body.appendChild(K.state("loading", t("cards.loading")));
     root.appendChild(K.endpoint("GET /plaza/api/me/cards", "POST /plaza/api/me/cards", "POST /plaza/api/me/card/<ref>", "PUT /plaza/api/team/<team>"));

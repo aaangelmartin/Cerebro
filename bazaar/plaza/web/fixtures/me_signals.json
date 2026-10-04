@@ -1,0 +1,85 @@
+{
+ "team": "t16",
+ "tick": 1514,
+ "next_refresh_tick": 1560,
+ "sell": [
+  {
+   "ref": "MAL-01",
+   "level": "strong",
+   "teams": "2-3",
+   "basis": "public",
+   "best_public_bid": 6,
+   "reference_price": null,
+   "name": "Vinilo de la Movida",
+   "rarity": "common",
+   "set": "MAL",
+   "color": "#7B2CBF",
+   "art": "/plaza/art/MAL-01.svg",
+   "action": {
+    "target": "plaza",
+    "method": "POST",
+    "auth": "X-Plaza-Token",
+    "path": "/plaza/api/me/cards",
+    "body": {
+     "op": "add",
+     "list": "spares",
+     "ref": "MAL-01",
+     "min": "<your min>"
+    }
+   }
+  },
+  {
+   "ref": "LAT-02",
+   "level": "some",
+   "teams": "4+",
+   "basis": "reference",
+   "best_public_bid": null,
+   "reference_price": 10,
+   "name": "Puesto del Rastro",
+   "rarity": "common",
+   "set": "LAT",
+   "color": "#F4A259",
+   "art": "/plaza/art/LAT-02.svg",
+   "action": {
+    "target": "plaza",
+    "method": "POST",
+    "auth": "X-Plaza-Token",
+    "path": "/plaza/api/me/cards",
+    "body": {
+     "op": "add",
+     "list": "spares",
+     "ref": "LAT-02",
+     "min": "<your min>"
+    }
+   }
+  }
+ ],
+ "buy": [
+  {
+   "ref": "LAV-09",
+   "level": "some",
+   "teams": "2-3",
+   "basis": "public",
+   "best_public_ask": 85,
+   "reference_price": null,
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "set": "LAV",
+   "color": "#E4572E",
+   "art": "/plaza/art/LAV-09.svg",
+   "action": {
+    "target": "plaza",
+    "method": "POST",
+    "auth": "X-Plaza-Token",
+    "path": "/plaza/api/me/cards",
+    "body": {
+     "op": "add",
+     "list": "wants",
+     "ref": "LAV-09",
+     "max": "<your max>"
+    }
+   }
+  }
+ ],
+ "note": "levels and counts are coarse on purpose: no price and no team is ever named"
+}

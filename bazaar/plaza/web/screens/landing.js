@@ -19,6 +19,7 @@
         el("div", { class: "landing-arg-big" }, t("landing.why." + k + ".big")),
         el("div", { class: "landing-arg-title" }, t("landing.why." + k + ".title")),
         el("p", { class: "landing-arg-text" }, t("landing.why." + k + ".text"))))),
+      el("p", { class: "landing-hidden" }, t("landing.hidden")),
       el("p", { class: "landing-also" }, t("landing.why.also")),
       el("p", { class: "landing-rule" }, K.icon("warning", 13), t("landing.why.rule")));
   }

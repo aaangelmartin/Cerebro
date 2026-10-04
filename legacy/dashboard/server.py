@@ -242,7 +242,7 @@ PLAZA_RX = re.compile(
     r"|art/[A-Z]{3}-\d{2}\.svg"
     r"|api/(?:health|openapi\.json|status|stats|market|board|board/history|board/live|collections|lots|lot/l-[0-9a-f]{8}|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}"
     r"|card/[A-Z]{3}-\d{2}|connect/status|match/m-[0-9a-f]{10}|agent/next|agent/cards"
-    r"|me|me/cards|me/settings|me/activity|me/suggestions|me/trades))?)?")
+    r"|me|me/cards|me/settings|me/activity|me/suggestions|me/trades|me/signals))?)?")
 PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")
 PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent|agent/ack|suggestions"
                                    r"|lots|lot/l-[0-9a-f]{8}/(?:bid|accept|cancel)"

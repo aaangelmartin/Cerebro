@@ -96,6 +96,8 @@ ROUTES: list[Route] = [
       "suggestions.json", "suggest", "B1", True),
     R("POST", "/api/suggestions", "team", "Send a suggestion to the host.",
       {"text": "Show the last three deals of each card.", "topic": "feature"}, None, "suggest", "B1", True),
+    R("GET", "/api/me/signals", "team", "Hidden demand and supply for your own cards: coarse levels, no price, "
+      "no team.", None, "me_signals.json", "signals", "shell", True),
     # ---- deals
     R("GET", "/api/me/trades", "team", "Your matches with what you give, what you receive and what comes next.",
       None, "me_trades.json", "offers", "B2", True),

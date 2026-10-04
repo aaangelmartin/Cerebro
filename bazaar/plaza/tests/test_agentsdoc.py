@@ -65,7 +65,7 @@ class DocumentTest(unittest.TestCase):
         self.assertEqual(set(self.entries), set(self.live))
         self.assertEqual(A.documented(self.md) | A.documented(A.auctions_md()),
                          {k for k, r in self.live.items() if r.who != "admin"})
-        self.assertEqual(A.documented(A.auctions_md()), {k for k, r in self.live.items() if r.screen == "auctions"})
+        self.assertEqual(A.documented(A.auctions_md()), {k for k, r in self.live.items() if r.screen in A.EXTRA})
         self.assertIn("AGENTS-AUCTIONS.md", self.md)
         self.assertEqual(A.documented(A.host_md()), {k for k, r in self.live.items() if r.who == "admin"})
         self.assertNotIn("/admin/api/status", self.md)          # a team's agent does not read the host's routes
@@ -176,7 +176,7 @@ class RealAnswersTest(unittest.TestCase):
         for path in ("/plaza/AGENTS.md", "/plaza/agents.md", "/AGENTS.md"):
             st, md, h = self.call("GET", path)
             self.assertEqual((st, h["Content-Type"].split(";")[0]), (200, "text/markdown"), path)
-            self.assertEqual(A.documented(md), {(r.method, r.path) for r in R.public() if r.live and r.screen != "auctions"})
+            self.assertEqual(A.documented(md), {(r.method, r.path) for r in R.public() if r.live and r.screen not in A.EXTRA})
 
     def test_written_examples_have_the_real_shape(self):
         st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})
