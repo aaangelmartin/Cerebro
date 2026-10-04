@@ -80,11 +80,17 @@ def rivals(feed: list[dict], leaderboard: dict, catalog: dict, since_ts: float, 
     book = _book(catalog)
     per: dict[str, dict] = {t: {"buys": [], "sells": [], "partners": {}, "messages": 0, "threads": 0,
                                  "listings": 0} for t in lead}
+    eggs: list[dict] = []
     for r in feed:
         if float(r.get("ts") or 0) < since_ts:
             continue
         p = r.get("payload") or {}
         typ = r.get("type")
+        if typ in ("egg.found", "egg.given"):
+            # a dealer egg found again this round, and what it paid: cards are free value we can copy
+            eggs.append({"tick": r.get("tick"), "team": p.get("team"), "dealer": p.get("persona") or r.get("actor"),
+                         "cards": p.get("cards") or [], "cash": p.get("cash") or 0, "given": typ == "egg.given"})
+            continue
         if typ == "settlement":
             price = p.get("price")
             parties = p.get("parties") or []
@@ -122,13 +128,31 @@ def rivals(feed: list[dict], leaderboard: dict, catalog: dict, since_ts: float, 
             sets[s] = sets.get(s, 0) + 1
         paid = [b["price"] for b in d["buys"] if isinstance(b.get("price"), (int, float))]
         sc = by_score.get(t) or {}
+        # page cards (01-10) bought per set in the window: 10 distinct ones is a page built from scratch; a page
+        # card bought from a TEAM is the +50 "last card of a page" play when it is the one that completes it
+        page_refs: dict[str, set] = {}
+        from_teams = []
+        for b in d["buys"]:
+            ref = str(b["ref"] or "")
+            st, _, num = ref.partition("-")
+            if num.isdigit() and 1 <= int(num) <= 10:
+                page_refs.setdefault(st, set()).add(ref)
+                if str(b.get("from") or "").startswith("t"):
+                    from_teams.append({"ref": ref, "price": b.get("price"), "book": b.get("book"), "from": b["from"]})
         out[t] = {"score": sc.get("score"), "negotiating": sc.get("negotiating"), "market": sc.get("market"),
+                  "pages_complete": sc.get("pages_complete"), "album_filled": sc.get("album_filled"),
+                  "page_cards_bought": {st: len(v) for st, v in page_refs.items()},
+                  "page_cards_from_teams": from_teams[-6:],
                   "deals_total": sc.get("deals"), "buys": len(d["buys"]), "sells": len(d["sells"]),
                   "spent": sum(paid), "sets_bought": sets, "partners": d["partners"],
                   "dealer_messages": d["messages"], "threads_opened": d["threads"], "listings": d["listings"],
                   "messages_per_deal": round(d["messages"] / max(1, len(d["buys"]) + len(d["sells"])), 1),
                   "last_buys": d["buys"][-8:], "last_sells": d["sells"][-6:]}
-    return {"since_minutes": round((time.time() - since_ts) / 60), "teams": out}
+    return {"since_minutes": round((time.time() - since_ts) / 60), "teams": out, "eggs": eggs[-12:],
+            "how_to_read": "page_cards_bought near 10 for a set means a rival is building that page; the page "
+                           "bonus lands on the card that completes it, and buying that last card from a team "
+                           "scores up to +50 while a dealer buy only fills a ladder slot. eggs with cards are "
+                           "dealer easter eggs paying out again this round."}
 
 
 def idle(live: Path, me: dict, my_offers: list[dict], goals: dict, decisions: list[dict], outcomes: list[dict],

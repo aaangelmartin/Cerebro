@@ -27,6 +27,27 @@ class AnalysisTest(unittest.TestCase):
         self.assertEqual(r["partners"], {"abuela": 1})
         self.assertEqual(A.gap(lb)["gap_negotiating"], 10)
 
+    def test_rivals_show_a_page_being_built_and_the_eggs(self):
+        now = time.time()
+        buy = lambda ref, frm, price: {"ts": now - 30, "type": "settlement", "payload": {
+            "parties": ["t18", frm], "price": price, "items": [{"ref": ref, "frm": frm, "to": "t18"}]}}
+        feed = [buy(f"CHA-{n:02d}", "abuela", 9) for n in range(2, 11)] + [buy("CHA-01", "t13", 72),
+                buy("CHA-11", "picaros", 145),
+                {"ts": now - 20, "tick": 1482, "type": "egg.given", "actor": "abuela",
+                 "payload": {"team": "t18", "cards": ["LAV-08"], "cash": 0}},
+                {"ts": now - 99999, "tick": 9, "type": "egg.given", "payload": {"team": "t01", "cards": ["OLD-01"]}}]
+        lb = {"teams": [{"team": "t18", "score": 31, "negotiating": 24, "market": 6, "rank": 1,
+                         "pages_complete": 4, "album_filled": 48},
+                        {"team": "t10", "score": 30, "negotiating": 23, "market": 10, "rank": 2}]}
+        r = A.rivals(feed, lb, {}, now - 3600)
+        t18 = r["teams"]["t18"]
+        self.assertEqual(t18["page_cards_bought"], {"CHA": 10})  # the epic 11 is off the page
+        self.assertEqual(t18["page_cards_from_teams"], [{"ref": "CHA-01", "price": 72, "book": None, "from": "t13"}])
+        self.assertEqual((t18["pages_complete"], t18["album_filled"]), (4, 48))
+        self.assertEqual(r["eggs"], [{"tick": 1482, "team": "t18", "dealer": "abuela", "cards": ["LAV-08"],
+                                      "cash": 0, "given": True}])
+        self.assertIn("+50", r["how_to_read"])
+
     def test_idle_diagnosis(self):
         me = {"cash": 66}
         offers = [{"maker": "t10", "status": "open", "thread": None, "give": {"cash": 40}},
