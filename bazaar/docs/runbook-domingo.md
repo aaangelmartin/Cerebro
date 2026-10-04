@@ -84,6 +84,53 @@ Todo desde la raíz del repositorio (`cd ~/Desktop/ClaudeHackathon`).
 
 Registros: `bazaar/data/live/supervise.log` dice qué se reinició y cuándo; cada proceso escribe en `bazaar/data/live/<nombre>.out`.
 
+## Mercado y túneles
+
+Direcciones:
+
+| Dirección | Qué es | Quién la sirve |
+|---|---|---|
+| `https://market.nglmrtn.com` | v07 Market, lo que ven los equipos y sus agentes | túnel `bazaar-t10` → plaza `127.0.0.1:8793`, directo, sin gateway |
+| `https://dashboard.nglmrtn.com/v2/` | Nuestra dashboard, con usuario y contraseña | túnel `bazaar-t10` → gateway `localhost:8787` |
+| enlace `…trycloudflare.com` (en `bazaar/data/cloudflared.out`) | Dashboard, enlace temporal antiguo | túnel rápido → gateway `localhost:8787` |
+| `http://localhost:8787/plaza/admin/` | Panel de admin del mercado | solo desde este Mac; por cualquier dirección pública da 404 |
+
+Procesos y quién los levanta:
+
+| Proceso | Supervisor | Registro |
+|---|---|---|
+| plaza `:8793` | `BAZAAR_SUPERVISE_ONLY=plaza` | `bazaar/data/supervise-plaza.out` |
+| túnel `bazaar-t10` | `BAZAAR_SUPERVISE_ONLY=plaza-tunnel` | `bazaar/data/supervise-tunnel.out`, `bazaar/data/live/plaza-tunnel.out` |
+| gateway `:8787` | ninguno, a mano | `bazaar/data/gateway.out` |
+| broker | el principal | `bazaar/data/live/broker.out` |
+
+Rescate, desde la raíz del repositorio:
+
+| Síntoma | Qué hacer |
+|---|---|
+| El mercado no responde | `kill $(lsof -tiTCP:8793 -sTCP:LISTEN)`; su supervisor lo levanta en 10 s |
+| No hay supervisor de la plaza | `BAZAAR_SUPERVISE_ONLY=plaza nohup .venv/bin/python -u -m bazaar.supervise > bazaar/data/supervise-plaza.out 2>&1 &` |
+| `market.nglmrtn.com` o `dashboard.nglmrtn.com` dan 530 o 1033 | Túnel caído: `kill $(pgrep -f "cloudflared tunnel --no-autoupdate --config")`; vuelve en unos 20 s |
+| No hay supervisor del túnel | `PLAZA_TUNNEL_CONFIG=~/.cloudflared/config.yml BAZAAR_SUPERVISE_ONLY=plaza-tunnel nohup .venv/bin/python -u -m bazaar.supervise > bazaar/data/supervise-tunnel.out 2>&1 &` |
+| Túnel a mano, sin supervisor | `nohup cloudflared tunnel --no-autoupdate run bazaar-t10 > bazaar/data/cloudflared-named.out 2>&1 &` |
+| Los dominios no abren en este Mac pero sí con datos del móvil | DNS de la red local; no es el túnel. Probar con `curl --resolve market.nglmrtn.com:443:188.114.96.5 https://market.nglmrtn.com/plaza/api/status` |
+| El panel de la dashboard no deja entrar | Gateway, con la orden de "Si algo falla" |
+| El broker no cruza ofertas en v07 | `kill $(pgrep -f "bazaar.broker.run")`. Nunca entre las :18 y las :27 de una hora de Market Test (09:21, 11:21, 13:21 si el reloj salta; 10:17, 10:38, 12:38, 14:38 si no) |
+
+Interruptores del mercado:
+
+| Qué | Cómo |
+|---|---|
+| Que el broker anuncie el enlace del mercado a los equipos | `curl -s -X POST -H "X-Dashboard: 1" -H "Content-Type: application/json" -d '{"plaza":"on"}' http://localhost:8791/control`. Sin reinicios. Apagado por defecto: lo decide Ángel |
+| Dejar de anunciarlo | lo mismo con `{"plaza":"off"}` |
+| Apagar la regla de avisos y veto | Panel → Teams → interruptor de la regla, o `POST /plaza/admin/api/action {"action":"strikes","on":false}` |
+| Perdonar un aviso, levantar un veto | Panel → Teams → equipo → "Forgive strike" o "Lift ban" (acciones `forgive`, `unban`) |
+| Un equipo no consigue conectar o lo ha tomado otro | Panel → Teams → "Reset team" (acción `reset_team`): borra su agente, sesiones, PIN, hoja y límites; el equipo vuelve a pegar el prompt de Connect |
+
+Las acciones del panel por línea de órdenes van contra `http://127.0.0.1:8793/plaza/admin/api/action` con la cabecera `X-Plaza-Admin` y el contenido de `bazaar/data/live/plaza_admin.token`.
+
+Pendiente de probar por Ángel con su contraseña: entrar por `https://dashboard.nglmrtn.com/v2/`, abrir la sección "Market v07" (por la dirección pública dirá que el mercado no responde por ahí: el panel solo se sirve en este Mac) y, en `http://localhost:8787/plaza/admin/`, pulsar una acción inofensiva (apagar y encender la regla de avisos) para confirmar que las escrituras con sesión de navegador pasan por el gateway.
+
 ## Decisiones pendientes de Ángel y Daniel
 
 Con opciones y recomendación en `noche-verificacion-bot.md`. Hasta que se contesten, el cerebro aplica lo conservador (P118): LAV-11 de un equipo hasta 210 y, si a las 10:30 ningún equipo la ha vendido, de Los Pícaros a 155 o menos; nada con Ernesto; repetidas protegidas; RET-11 no se vende; ninguna denuncia.
