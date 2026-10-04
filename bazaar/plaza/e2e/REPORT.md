@@ -1,28 +1,15 @@
 # End-to-end report
 
-Last run: 2026-10-04 05:06:11 (430.1 s). Written by `.venv/bin/python -m bazaar.plaza.e2e.run`; the numbers are that run's.
+Last run: 2026-10-04 11:42:33 (108.3 s). Written by `.venv/bin/python -m bazaar.plaza.e2e.run`; the numbers are that run's.
 
 ## Result
 
-- Simulation: 37 cases, 37 clean, 0 hard failures, 0 open findings.
-- Browser: 210 pages, 0 hard failures, 17 notes. Screenshots in `design/plaza/build/e2e-final/`.
-- Replay of the recorded feed: 137 real trades between teams, 11 on v07 and 116 elsewhere; 0 read wrong, 0 false strikes.
-- Public address https://market.nglmrtn.com: 8 pages, 0 hard failures, 5 notes.
+- Simulation: 43 cases, 43 clean, 0 hard failures, 0 open findings.
+- Replay of the recorded feed: 155 real trades between teams, 11 on v07 and 133 elsewhere; 0 read wrong, 0 false strikes.
 
 ## Open
 
 Nothing hard.
-
-Notes (not failures):
-
-- console errors: Failed to load resource: the server responded with a status of 401 (Unauthorized) (14)
-- console errors: Failed to load resource: the server responded with a status of 403 (Forbidden) (2)
-- mock: How it works shows the app's side nav (it is a full page without the shell) (1)
-- public: landing: no Strict-Transport-Security header
-- public: the mock fixtures are served on the public address (example data, no real team)
-- public: during the pass the gateway was being restarted and six pages answered 502 for a moment; the check was repeated afterwards and is clean
-- public: dashboard.nglmrtn.com: `/` and `/v2/` answer 401 without credentials, `/plaza/admin/` answers 404, `/plaza/` and `/plaza/api/status` answer 200
-- public: every visitor page logs one 401 in the browser console (the page asks who it is)
 
 ## The recorded feed
 
@@ -31,22 +18,15 @@ Every trade between two teams in `data/live/events.jsonl`, replayed with the gam
 | Trades | Venue | Offer in the feed | The match ends | Strike |
 |---|---|---|---|---|
 | 3 | another venue | addressed | settled_elsewhere | nobody |
-| 14 | another venue | addressed | settled_elsewhere | yes |
+| 18 | another venue | addressed | settled_elsewhere | yes |
 | 4 | another venue | addressed | skipped: the host is never in a match | nobody |
-| 3 | another venue | no offer in the feed | settled_elsewhere | nobody |
-| 96 | another venue | public | settled_elsewhere | nobody |
-| 6 | another venue | public | skipped: the host is never in a match | nobody |
+| 4 | another venue | no offer in the feed | settled_elsewhere | nobody |
+| 108 | another venue | public | settled_elsewhere | nobody |
+| 7 | another venue | public | skipped: the host is never in a match | nobody |
 | 1 | v07 | addressed | settled | nobody |
 | 10 | v07 | public | settled | nobody |
 
 What the detector reads from a real `settlement`: `payload.venue`, `payload.parties`, `payload.items[].ref`, `.frm`, `.to`, `payload.price`, `payload.settlement` (kept as the match's settlement id) and the event's `tick`. The real event carries no offer id: an offer is tied to its settlement by the two teams, the card and the venue, and by still being open. Every real settlement has the same nine keys (`fee, items, kind, parties, persona, price, settlement, tick, venue`); no format went unrecognised. Ten of the eleven real trades on v07 were public offers crossed by the broker, with no addressed offer: they settle a match all the same.
-
-Strikes in the replay: of the 116 real trades closed outside v07 (10 more involve the host and are skipped), 14 would
-strike the team that posted the offer. All 14 had an offer addressed between the two teams, on the venue where it
-closed, still open at the settlement (checked in the feed); that the rule's other conditions hold for each of them
-(same price, no public offer of the pair at that price) is the code's own decision and was not re-derived here. The 96 that closed on a public listing, the 3 with no
-offer visible in the feed and 3 addressed ones that do not meet the rule strike nobody. No strike without an
-addressed offer; none on v07.
 
 ## Covered
 
