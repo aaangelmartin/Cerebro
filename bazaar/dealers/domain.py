@@ -54,6 +54,16 @@ STALE_TICKS = 3                              # close a thread the dealer left un
 SWITCH_CLOSE = 3                             # close after this many dealer offers in a row for another card
 #                                              (thread 1693: two switches in a row, then back to our card)
 BUDGET_BLOCK_TICKS = 120                     # a dealer out of budget (persona_budget) buys again next game hour
+
+
+def budget_block_ticks(tick_seconds) -> int:
+    """Ticks in one game hour. t_hours follows the wall clock, so it is 120 ticks of 30 s and 240 of 15 s; the
+    simulator's and the tests' fast clocks keep the constant."""
+    try:
+        ts = float(tick_seconds or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    return int(round(3600.0 / ts)) if 5.0 <= ts <= 60.0 else BUDGET_BLOCK_TICKS
 LOOP_MARGIN_P = 15                           # dealer -> dealer loop: the proven resale must beat the buy by this
 LOOP_RECENT_S = 3 * 3600                     # ...and "proven" means our own sales to that dealer this recent
 HOLD_MESSAGES = 5                            # without a brain order: our messages before a near-limit thread closes
@@ -471,7 +481,7 @@ class DealersDomain:
             self.store.set_quota_hit(dealer)
         elif "budget" in code:
             self.store.set_budget_hit(dealer, int(getattr(outcome, "tick", None) or getattr(self, "_tick", 0) or 0)
-                                      + BUDGET_BLOCK_TICKS)
+                                      + getattr(self, "_block_ticks", BUDGET_BLOCK_TICKS))
         elif code == "sold_out":
             self._sold_out[(dealer, meta.get("item", ""))] = time.time()
         if meta["kind"] == "accept_offer" and outcome.status in ("sent", "deal"):
@@ -574,7 +584,7 @@ class DealersDomain:
         if "quota" in reason:
             self.store.set_quota_hit(dealer)
         if "budget" in reason:                              # it has no cash left to buy from us this hour
-            self.store.set_budget_hit(dealer, tick + BUDGET_BLOCK_TICKS)
+            self.store.set_budget_hit(dealer, tick + getattr(self, "_block_ticks", BUDGET_BLOCK_TICKS))
         if "sold_out" in reason:
             self._sold_out[(dealer, t.get("item", ""))] = time.time()
         price = settlements.get(dealer)
@@ -771,6 +781,7 @@ class DealersDomain:
     def _prepare(self, sit, ctx) -> Plan:
         self._ledger = _g(ctx, "ledger", None) or self._ledger
         tick = int(_g(sit, "tick", 0) or 0)
+        self._block_ticks = budget_block_ticks(_g(sit, "tick_seconds", None))
         me = _g(sit, "me") or {}
         values = Values(me, self.catalog(), self._exact)
         dealers = self._dealers(sit)

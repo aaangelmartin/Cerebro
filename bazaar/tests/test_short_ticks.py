@@ -106,3 +106,13 @@ class DuelFirstTickTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DealerHourTest(unittest.TestCase):
+    def test_a_dealer_out_of_budget_waits_one_game_hour_at_any_tick_length(self):
+        from bazaar.dealers.domain import BUDGET_BLOCK_TICKS, budget_block_ticks
+        self.assertEqual(budget_block_ticks(30.0), 120)
+        self.assertEqual(budget_block_ticks(15.0), 240)          # Sunday: an hour is 240 ticks
+        self.assertEqual(budget_block_ticks(60.0), 60)
+        self.assertEqual(budget_block_ticks(0.05), BUDGET_BLOCK_TICKS)      # the simulator's fast clock
+        self.assertEqual(budget_block_ticks(None), BUDGET_BLOCK_TICKS)
