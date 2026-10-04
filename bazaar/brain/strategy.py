@@ -278,7 +278,8 @@ def _post_offers(raw) -> list[dict]:
         if not REF_RX.match(give) or (want_card and not REF_RX.match(want_card)) or not (want_card or want_cash):
             continue
         to = str(x.get("to") or "").strip() or None
-        out.append({"give": give, "want_card": want_card, "want_cash": None if want_card else want_cash,
+        # a swap may ask for cash on top of the card (RET-11 for SAL-11 + 90 P)
+        out.append({"give": give, "want_card": want_card, "want_cash": want_cash,
                     "to": to if to and re.match(r"^t\d{2}$", to) else None,
                     "venue": _clean(x.get("venue"), 12) or "rastro", "why": _clean(x.get("why"), 200)})
     return out

@@ -31,6 +31,17 @@ class BrainPostsTest(unittest.TestCase):
         with mock.patch.object(S, "post_offers", return_value=posts):
             return d._brain_posts(ME, [], lambda a, c: True, {"SAL-07": 1}, {}, tick)
 
+    def test_a_swap_can_ask_for_cash_on_top_of_the_card(self):
+        post = {**POST, "want_card": "SAL-11", "want_cash": 90, "to": "t04"}
+        acts = self.run_once(domain(), [post])
+        self.assertEqual(len(acts), 1)
+        self.assertEqual(acts[0].params["want"], {"cards": ["SAL-11"], "cash": 90})
+        self.assertEqual(acts[0].params["to"], "t04")
+        self.assertEqual(S._post_offers([{"give": "RET-11", "want_card": "SAL-11", "want_cash": 90, "to": "t04"}])[0]
+                         ["want_cash"], 90)
+        plain = self.run_once(domain(), [{**POST, "want_card": "SAL-11", "want_cash": None, "to": "t04"}])
+        self.assertEqual(plain[0].params["want"], {"cards": ["SAL-11"]})
+
     def test_vetoed_identical_post_is_never_resent_but_a_corrected_one_is(self):
         d = domain()
         acts = self.run_once(d, [POST])

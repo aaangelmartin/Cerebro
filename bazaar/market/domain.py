@@ -356,7 +356,8 @@ class MarketDomain:
                          p.get("give"), p.get("to"), venue)
                 venue = "rastro"
             params = {"venue": venue, "give": {"assets": [a["id"]]},
-                      "want": {"cards": [p["want_card"]]} if p.get("want_card") else {"cash": int(p["want_cash"])},
+                      "want": ({"cards": [p["want_card"]], **({"cash": int(p["want_cash"])} if p.get("want_cash") else {})}
+                               if p.get("want_card") else {"cash": int(p["want_cash"])}),
                       "expires_in_ticks": SWAP_EXPIRES if p.get("want_card") else LIST_EXPIRES}
             if p.get("to"):
                 params["to"] = p["to"]
