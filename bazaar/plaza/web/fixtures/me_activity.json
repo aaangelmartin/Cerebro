@@ -1,0 +1,78 @@
+{
+ "team": "t16",
+ "seq": 14,
+ "items": [
+  {
+   "seq": 7,
+   "ts": 1791068000.0,
+   "tick": 1439,
+   "kind": "connect",
+   "by": "agent",
+   "text": "connected and proved its code in the game"
+  },
+  {
+   "seq": 8,
+   "ts": 1791068015.0,
+   "tick": 1440,
+   "kind": "sync",
+   "by": "agent",
+   "text": "published 4 cards it has and 3 it wants"
+  },
+  {
+   "seq": 9,
+   "ts": 1791068030.0,
+   "tick": 1441,
+   "kind": "limits",
+   "by": "agent",
+   "text": "set private limits on 4 cards"
+  },
+  {
+   "seq": 10,
+   "ts": 1791068045.0,
+   "tick": 1442,
+   "kind": "match",
+   "by": "market",
+   "text": "matched with t05: LAV-09 at 80 P",
+   "match": "m-ba346d6c75",
+   "ref": "LAV-09"
+  },
+  {
+   "seq": 11,
+   "ts": 1791068060.0,
+   "tick": 1443,
+   "kind": "message",
+   "by": "agent",
+   "text": "countered at 80 P",
+   "match": "m-ba346d6c75",
+   "ref": "LAV-09"
+  },
+  {
+   "seq": 12,
+   "ts": 1791068075.0,
+   "tick": 1444,
+   "kind": "offer",
+   "by": "agent",
+   "text": "posted the addressed offer on v07",
+   "match": "m-ba346d6c75",
+   "ref": "LAV-09"
+  },
+  {
+   "seq": 13,
+   "ts": 1791068090.0,
+   "tick": 1445,
+   "kind": "queue",
+   "by": "agent",
+   "text": "read its queue: 1 action"
+  },
+  {
+   "seq": 14,
+   "ts": 1791068105.0,
+   "tick": 1446,
+   "kind": "settle",
+   "by": "market",
+   "text": "MAL-01 settled on v07 at 9 P with t09",
+   "match": "m-44cc55dd66",
+   "ref": "MAL-01"
+  }
+ ]
+}

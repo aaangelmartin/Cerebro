@@ -97,3 +97,65 @@
   .scr-mercado .mk-main, .scr-mercado .mk-side { overflow: visible; }
 }
 @media (max-width: 760px) { .scr-mercado .mk-chats { grid-template-columns: minmax(0, 1fr); } }
+/* historial · conversaciones */
+.scr-mercado .mk-conv { display: flex; flex-direction: column; gap: 8px; }
+.scr-mercado .mk-conv-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.scr-mercado .mk-conv-list > .state, .scr-mercado .mk-conv-list > .mk-more { grid-column: 1 / -1; }
+.scr-mercado .mk-chat-hist .mk-msgs { max-height: 420px; overflow: auto; }
+.scr-mercado .mk-chat-hist .mk-chat-f { display: none; }
+.scr-mercado .mk-chat-hist.mk-st-deal .mk-status { color: var(--ok, #3ddc97); }
+.scr-mercado .mk-chat-hist.mk-st-closed .mk-status { color: var(--ink-3, #6A727B); }
+.scr-mercado .mk-histview { margin-right: 8px; }
+@media (max-width: 1300px) { .scr-mercado .mk-conv-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .scr-mercado .mk-conv-list { grid-template-columns: minmax(0, 1fr); } }
+/* duelos · historial uses these same cards (screens/duelos.js) */
+.scr-mercado .mk-chat.mk-duel { border-top-color: var(--tc-duelo); cursor: pointer; }
+.scr-mercado .mk-duel .mk-msg { border-left-color: var(--tc-duelo); }
+.scr-mercado .mk-duel .mk-msg.is-us { border-left: 0; }
+.scr-mercado .mk-duel .mk-msg-h { color: var(--tc-duelo); }
+.scr-mercado .mk-duel .mk-msg.is-us .mk-msg-h { color: var(--m-ink); }
+.scr-mercado .mk-duel-f { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--m-line); font-size: 12px; }
+.scr-mercado .mk-chat-hist.mk-st-open .mk-status { color: var(--tc-duelo); background: color-mix(in srgb, var(--tc-duelo) 15%, transparent); }
+.scr-duelos .dl-hist .dl-score { margin: 0; }
+.scr-mercado .mk-duel .pb-nodeal { display: none; } /* the status chip already says it */
+/* live grid: how each conversation stands or ended */
+.scr-mercado .mk-end { border: 1px solid currentColor; padding: 0 6px; font-size: 11px; white-space: nowrap; }
+.scr-mercado .mk-end.is-live { color: var(--ok); background: var(--ok-soft); }
+.scr-mercado .mk-end.is-deal { color: var(--ok); }
+.scr-mercado .mk-end.is-walked { color: var(--bad); }
+.scr-mercado .mk-end.is-closed { color: var(--ink-3); }
+.scr-mercado .mk-end-when { font-family: var(--font-num); font-size: 11px; margin-left: 6px; white-space: nowrap; }
+.scr-mercado .mk-chat.is-ended { opacity: .88; }
+.scr-mercado .mk-chat.is-ended .mk-chat-f { display: none; }
+
+/* Conversaciones con equipos */
+.scr-mercado .mk-teams { margin: 4px 0 18px; }
+.scr-mercado .mk-dealers-h { margin-bottom: 10px; }
+.scr-mercado .mk-team .mk-msgs { max-height: 220px; }
+.scr-mercado .mk-teams-h h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.scr-mercado .mk-teams-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+@media (max-width: 1400px) { .scr-mercado .mk-teams-list { grid-template-columns: minmax(0, 1fr); } }
+.scr-mercado .mk-team { border-top-color: var(--t-cambio); }
+.scr-mercado .mk-team.is-focus { outline: 2px solid var(--signal); outline-offset: -1px; }
+.scr-mercado .mk-team .mk-msgs { max-height: 320px; }
+.scr-mercado .mk-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--line-2); border-left: 3px solid var(--tc, var(--line-2)); background: var(--bg); font-size: 12.5px; }
+.scr-mercado .mk-teams-list > .mk-more { grid-column: 1 / -1; text-align: center; text-decoration: none; }
+
+/* hablar con un dealer */
+.scr-mercado .mk-talk { margin-bottom: 14px; }
+.scr-mercado .mk-talk-box { background: var(--m-s1); border: 1px solid var(--m-line); border-top: 2px solid var(--tc-dealer); }
+.scr-mercado .mk-talk .mk-msgs { max-height: 300px; min-height: 80px; }
+.scr-mercado .mk-talk-standing { border-top: 1px solid var(--m-line); }
+.scr-mercado .mk-talk-val { font-family: var(--m-mono); color: var(--m-muted); }
+.scr-mercado .mk-talk-gain { font-family: var(--m-mono); }
+.scr-mercado .mk-talk-gain.is-up { color: var(--tc-compra); }
+.scr-mercado .mk-talk-gain.is-down, .scr-mercado .mk-talk-block { color: var(--tc-venta); }
+.scr-mercado .mk-talk-block { flex-basis: 100%; }
+.scr-mercado .mk-talk-form { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.scr-mercado .mk-talk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scr-mercado .mk-talk-text { width: 100%; resize: vertical; box-sizing: border-box; }
+.scr-mercado .mk-talk-item { width: 220px; }
+.scr-mercado .mk-talk-price { width: 150px; }
+.scr-mercado .mk-talk-hint { font-size: 11px; }
+.scr-mercado .mk-talk button:disabled, .scr-mercado .mk-talk .mk-input:disabled { opacity: .45; cursor: default; }
+.scr-mercado .mk-talk .mk-grow { flex: 1; }

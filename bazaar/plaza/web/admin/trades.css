@@ -1,0 +1,21 @@
+/* admin trades: classes start with .adm-trades- (and the shared list .adm-list) */
+.adm-trades { grid-template-columns: minmax(380px, 5fr) 7fr; }
+.adm-list { display: flex; flex-direction: column; max-height: 720px; overflow-y: auto; }
+.adm-list-row { display: grid; grid-template-columns: auto auto 62px 54px 1fr auto; align-items: center; gap: 10px; padding: 10px 14px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; color: var(--ink-2); text-align: left; cursor: pointer; font-size: 12.5px; }
+.adm-list-row:hover { background: var(--s2); }
+.adm-list-row.active { background: var(--s3); border-left-color: var(--signal); color: var(--ink); }
+.adm-list-row .chip { justify-self: start; }
+.adm-list-tick { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-3); }
+.adm-trades-top { display: flex; gap: 16px; align-items: flex-start; padding: 14px; flex-wrap: wrap; }
+.adm-trades-ids { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.adm-trades-sides { display: flex; flex-direction: column; gap: 4px; padding: 0 14px; font-family: var(--font-num); font-size: 12px; color: var(--ink-2); }
+.adm-trades-thread { padding: 0 14px 12px; }
+.adm-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); margin: 0 14px; border: 1px solid var(--line-2); }
+.adm-step { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-right: 1px solid var(--line-2); color: var(--ink-3); font-size: 12.5px; }
+.adm-step:last-child { border-right: 0; }
+.adm-step-tick { font-family: var(--font-num); font-size: 10.5px; }
+.adm-step.is-done { color: var(--ink); background: var(--s2); }
+.adm-step.is-now { background: var(--signal); color: var(--bg); font-weight: 600; }
+.adm-steps.is-dead .adm-step { color: var(--ink-3); }
+.adm-step.is-end { background: var(--s3); color: var(--warn); }
+@media (max-width: 1100px) { .adm-trades { grid-template-columns: 1fr; } }

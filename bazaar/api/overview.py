@@ -6,6 +6,7 @@ the game. The page polls it every 3 s with ?since=<last decision id> so the acti
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -220,9 +221,11 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
     open_ = status.get("doors") == "open" and not status.get("paused")
     lab_st = _read_json(lab / "lab_status.json", {}) or {}
     rec_st = _read_json(live / "recorder_status.json", {}) or {}
+    str_st = _read_json(live / "strategist_status.json", {}) or {}
     out = []
     for name, upd, ticks in (("Bot", status.get("updated"), 3), ("Broker", broker.get("updated"), 2),
-                             ("Laboratorio", lab_st.get("updated"), None), ("Grabadora", rec_st.get("updated"), 3)):
+                             ("Laboratorio", lab_st.get("updated"), None), ("Grabadora", rec_st.get("updated"), 3),
+                             ("Cerebro", str_st.get("updated"), 3)):
         age = _age(upd, now)
         limit = max(ticks * tick_s, 0 if open_ else 60.0) if ticks else 600.0
         out.append({"name": name, "age_s": age, "ok": age is not None and age <= limit,
@@ -236,14 +239,62 @@ def processes(live: Path, lab: Path, status: dict, broker: dict, now: float, gat
     return out
 
 
+def strategy_view(live: Path, now: float) -> dict:
+    """The strategist's current plan, compact (full plan and history at GET /strategy)."""
+    cur = _read_json(live / "strategy.json", {}) or {}
+    st = _read_json(live / "strategist_status.json", {}) or {}
+    plan = cur.get("plan") or {}
+    return {"age_s": _age(cur.get("updated"), now), "tick": cur.get("tick"), "reason": cur.get("reason"),
+            "situation": plan.get("situation"), "priorities": plan.get("priorities") or [],
+            "goal_buys": plan.get("goal_buys") or {}, "cash_policy": plan.get("cash_policy") or {},
+            "guidance": plan.get("guidance") or {}, "risks": plan.get("risks") or [],
+            "council": cur.get("council"), "heartbeat_age_s": _age(st.get("updated"), now),
+            "spent_today": st.get("spent_today"), "errors": st.get("errors") or [],
+            "thinking_since": st.get("thinking_since"), "thinking_reason": st.get("thinking_reason"),
+            "findings": plan.get("findings") or [], "events": cur.get("events") or [],
+            "duel_claude_mode": plan.get("duel_claude_mode")}
+
+
+def news_view(live: Path) -> dict:
+    """Counts for the dashboard: game news captured, still open, worth acting on, and the last one."""
+    try:
+        from bazaar.intel import news as _news
+        v = _news.view(live)
+        last = v["items"][0] if v["items"] else None
+        return {"items": len(v["items"]), "open": v["open"], "actionable": v["actionable"],
+                "last": {k: last.get(k) for k in ("id", "ts", "source_name", "title", "status")} if last else None,
+                "sources": {k: s.get("reliability") for k, s in v["sources"].items()}}
+    except Exception:  # noqa: BLE001 - the overview never fails on an optional block
+        return {"items": 0, "open": 0, "actionable": 0, "last": None, "sources": {}}
+
+
 def recorder_view(live: Path, now: float) -> dict:
     """Is everything being recorded? Heartbeat, lane outages, feed gaps (for the sidebar)."""
     st = _read_json(live / "recorder_status.json", {}) or {}
     lanes = st.get("lanes") or {}
     down = [k for k, v in lanes.items() if (v or {}).get("down_since")]
+    # the game's own rate limit (60 requests/s per address): a squeeze, not an outage
+    limited = {k: int((v or {}).get("limited_90s") or 0) for k, v in lanes.items() if (v or {}).get("limited_90s")}
+    last = max((float(e.get("t") or 0) for v in lanes.values() for e in (v or {}).get("last_errors") or []
+                if e.get("code") == "rate_limited"), default=0.0)
     return {"state": st.get("state"), "age_s": _age(st.get("updated"), now), "feed_gaps": st.get("feed_gaps", 0),
             "last_event_id": st.get("last_event_id"), "down": down,
+            "rate_limited": limited, "rate_limited_last": last or None,
             "rps": {k: (v or {}).get("rps_60s") for k, v in lanes.items()}}
+
+
+_GAME_LIMIT_RX = re.compile(r"rate_limited|at most \d+ requests per second", re.I)
+_LLM_RX = re.compile(r"anthropic|overloaded|\b529\b|llmunavailable|llmtimeout|usage limits|api key|claude", re.I)
+
+
+def alert_source(where, text) -> str:
+    """Who an error comes from: "game" (the Bazaar API, e.g. its 60 requests/s limit), "llm" (Anthropic) or ""."""
+    blob = f"{where or ''} {text or ''}"
+    if _GAME_LIMIT_RX.search(blob):
+        return "game"
+    if _LLM_RX.search(blob):
+        return "llm"
+    return ""
 
 
 # --------------------------------------------------------------------------- alerts
@@ -265,6 +316,10 @@ def alerts(live: Path, status: dict, broker: dict, lab_v: dict) -> list[dict]:
         out.append({"ts": n.get("at") or n.get("ts"), "level": "warn", "kind": "novelty", "where": n.get("kind"),
                     "text": n.get("detail") if isinstance(n.get("detail"), str)
                     else json.dumps(n.get("detail"), ensure_ascii=False, default=str)[:200], "raw": n})
+    for a in out:
+        a["source"] = alert_source(a.get("where"), a.get("text"))
+        if a["source"] == "game" and a.get("level") != "bad":
+            a["kind"] = "game_limit"
     out.sort(key=lambda a: _num(a.get("ts")) or 0, reverse=True)
     return out[:12]
 
@@ -303,6 +358,8 @@ def build(live: Path, lab: Path, stop_file: Path, since: int | None = None, now:
         "alerts": alerts(live, status, broker, lab_v),
         "processes": processes(live, lab, status, broker, now, gw),
         "recorder": recorder_view(live, now),
+        "strategy": strategy_view(live, now),
+        "news": news_view(live),
         "threads": threads,
         "activity": rows,
         "last_id": last_id,

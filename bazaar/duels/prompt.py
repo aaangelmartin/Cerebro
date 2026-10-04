@@ -18,7 +18,7 @@ DUEL_MOVE_TOOL = {
         "properties": {
             "action": {"type": "string", "enum": ["accept", "offer", "wait"],
                        "description": "accept = take the rival's standing offer as it is; offer = send a new "
-                                      "priced offer; wait = send nothing this tick (our offer keeps standing)."},
+                                      "priced offer; wait = send nothing this tick (our offer keeps standing) - the right choice whenever the rival has not answered our last offer."},
             "price": {"type": "integer", "description": "Whole primas. For offer: our new price. "
                                                         "For accept/wait: repeat the price in question or 0."},
             "days": {"type": "integer", "description": "Delivery days 0-10 (Duels II). Price-only duels: 0."},
@@ -46,15 +46,17 @@ THE GAME
 WHAT WORKED (Friday, 25 duels)
 - Deals closed in 0-3 rounds averaged 26 points; deals that took 4+ rounds averaged 11. Long haggling destroys value.
 - Accepting the rival's first offer when it already leaves a solid margin was often the best play.
-- Rival archetypes: fixed (repeats one price, never moves: take it if the margin is decent), stepped (moves ~4 P per step), tough (opens far, moves little), mute (never offers; some still accept silently when our offer crosses their threshold - rounds stay 0 against them, so conceding step by step costs no decay, but the last offer before the deadline must be one they can take).
+- Rival archetypes: fixed (repeats one price, never moves: take it if the margin is decent), stepped (moves ~4 P per step), tough (opens far, moves little), mute (never offers: on Friday and Saturday every duel against a mute rival ended with no deal however far we lowered our price, so lowering it tick after tick is bidding against ourselves).
 - Our deal rate was 84% vs 44% for the field. Most points are lost to no-deals: closing reliably is our edge.
 
 HOW TO DECIDE
 - Compare the economics table: points if we accept now vs the realistic points after one more round (the rival's likely next offer, discounted). Accept when continuing is not clearly worth more than the decay. With few ticks left, any offer inside our limit beats zero.
 - Use the opponent model: archetype, step size, history with this alias, and - when available - the rival's limit inferred from the other leg of the same scenario (we played the item before in the other role). With a known limit you know the whole pie: ask for a large but acceptable share and close fast.
 - Against a rival who keeps stepping toward us each time we answer, answer with small concessions (1-2 P) and let them come; accept once their steps shrink below what a round of decay costs (q x (offer + next step) <= offer). If they move without waiting for our answer, waiting is free. Make offers that converge; do not resend the same price (code will drop it). Never offer worse for us than what the rival already offers - accept instead.
-- Duels II: find out what the rival cares about. If they keep asking for the same days, they care; if they move on days easily, they do not. Propose packages: give days they value when it costs us little, and take price in return; take the days we value when they do not mind. Offers are always structured (price and days fields); words only explain.
+- Duels II and III: the days rule is fixed by code. Read our_points_per_day in the state: positive (each day pays us) -> always offer 10 days; negative (each day costs us) -> always offer 0 days. Never give days that cost us to win the rival over: on Sunday two openings with 10 days closed at -15 and -28 points. Our margin is price margin + our_points_per_day x days and must be >= 1 for every offer and every accept; move only the price. Judge the rival's package by that same margin. Offers are always structured (price and days fields); words only explain.
 - Rounds only grow when we answer a FRESH rival offer with a counter (economics.rounds_if_we_send tells you). Waiting, accepting, or improving our offer while they still owe us an answer adds no round.
+- NEVER BID AGAINST OURSELVES. After our opening offer, while the rival has not answered (no offer since our last one, or nothing at all), choose "wait": send no message and do not lower the price. "wait" is the preferred action whenever the rival owes us an answer. Concede only in response to a rival move, then close fast (0-3 rounds). If the rival is still silent in the last 3 ticks, code plays a short finish by itself (one step per tick to 40 %, 28 % and 17 % of the pie - silent rivals accepted at 17-29 % on Saturday), never past our limit. Code enforces all this: an offer sent while the rival owes us an answer is turned into a wait. The moment the rival answers, normal haggling resumes and you decide.
+- Open with an offer the rival can sign: a clear, fair-looking share of the pie we would be happy to close at, because it may be the only message we send.
 - Big concessions cost margin and save no decay: a round costs the same whether we concede 1 P or 20 P. Concede in small steps unless time is running out.
 - If opponent model free_steps_here > 0 (they have moved without our answer), wait: their next step is free.
 - Tough rivals (opponent model tough_now: they move < 2 P per offer after 3+ offers): do not haggle in small steps. Either take their offer now or jump once to the midpoint between our ask and their offer.
@@ -121,6 +123,9 @@ def user_message(v: DuelView, opp: dict, econ: dict, baseline: Move) -> str:
         state["duels_ii"] = {"our_points_per_day": round(v.days_w, 3), "raw_your_days_weight": v.w,
                              "days_meaning": v.days_meaning, "sign_reading": v.days_label,
                              "our_margin_formula": "price margin + our_points_per_day x days"}
+        if not v.days_ambiguous and v.days_w:
+            state["duels_ii"]["days_rule"] = (
+                "each day costs us: offer 0 days" if v.days_w < 0 else "each day pays us: offer 10 days")
         if v.days_ambiguous:
             state["duels_ii"]["warning"] = ("the sign of the days weight is ambiguous: code only accepts a package "
                                             "worth >= 1 under BOTH signs; prefer days near 0")

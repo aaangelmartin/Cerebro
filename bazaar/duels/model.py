@@ -45,7 +45,7 @@ def _num(x) -> float | None:
 # Every number that involves days (model.utility, policy, guard, accept, prompt) goes through
 # signed_days_weight() so the sign can never disagree between them.
 _COST_WORDS = re.compile(r"\b(cost|costs|costing|lose|loses|lost|loss|penalt\w*|late|delay\w*|hurts?)\b", re.I)
-_VALUE_WORDS = re.compile(r"\b(value|values|worth|gain|gains|benefit\w*|reward\w*|points?|for you|to you)\b", re.I)
+_VALUE_WORDS = re.compile(r"\b(value|values|worth|gain|gains|benefit\w*|reward\w*|points?|for you|to you|adds?|added|to your side)\b", re.I)
 
 
 def days_interpretation(w: float, meaning: str | None) -> tuple[float, bool, str]:
@@ -129,6 +129,10 @@ class DuelView:
     n_ours_total: int | None = None
     n_rival_total: int | None = None
     days_sign_override: str | None = None    # operator control duel_days_sign: "value" | "cost"
+    # What one delivery day is worth to the RIVAL, as a size (always >= 0), learnt from our own duels on the
+    # same item in the other role (opponent.rival_day_prior). None = not enough duels yet.
+    rival_w_prior: float | None = None
+    total_ticks: int = TICKS_PER_DUEL        # this duel's own length (Duels III: 12), set by the domain
 
     # --- derived -------------------------------------------------------------------------------
     @property
@@ -142,7 +146,7 @@ class DuelView:
 
     @property
     def elapsed(self) -> int:
-        return max(0, TICKS_PER_DUEL - self.ticks_left)
+        return max(0, self.total_ticks - self.ticks_left)
 
     def rival_msgs(self) -> list[Msg]:
         return [m for m in self.messages if not m.ours and m.price is not None]

@@ -164,12 +164,15 @@ class ValueRail(unittest.TestCase):
         self.assertEqual(rails.check(sell(9), sit(), ctx()).rail, "value")
         self.assertTrue(rails.check(sell(10), sit(), ctx()).ok)
 
-    def test_dealer_pack_uses_hint(self):
+    def test_dealer_pack_ignores_the_proposers_hint(self):
+        # a pack's value comes from the catalog (dealers.values.pack_value), never from the action's own estimate
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"pack": "sobre_barrio"}}, "messages": []}
         a = Action("thread_message", {"thread": 4, "price": 22, "text": "22?"}, "dealers")
-        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "value")
+        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "no_packs")    # packs are never bought...
+        allowed = ctx(control={"armed": True, "no_packs": False})                      # ...unless the team says so
+        self.assertEqual(rails.check(a, sit(threads=[th]), allowed).rail, "value")
         a.expected["value_get"] = 30
-        self.assertTrue(rails.check(a, sit(threads=[th]), ctx()).ok)
+        self.assertEqual(rails.check(a, sit(threads=[th]), allowed).rail, "value")
 
     def test_dealer_item_from_its_offer(self):
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"rarity": "rare", "set": "LAV"}},
@@ -220,7 +223,7 @@ class PaceRail(unittest.TestCase):
 
     def test_thread_limits(self):
         threads = [{"id": i, "with": f"d{i}", "status": "open"} for i in range(6)]
-        a = Action("open_thread", {"with": "abuela", "topic": {"buy": {"pack": "x"}}}, "dealers")
+        a = Action("open_thread", {"with": "abuela", "topic": {"buy": {"card": "SAL-06"}}}, "dealers")
         self.assertEqual(rails.check(a, sit(threads=threads), ctx()).rail, "pace")
         self.assertEqual(rails.check(a, sit(threads=[{"id": 1, "with": "abuela", "status": "open"}]), ctx()).rail, "pace")
         self.assertTrue(rails.check(a, sit(), ctx()).ok)
@@ -299,11 +302,11 @@ class PackRail(unittest.TestCase):
 
 
 class VenueReserveEdges(unittest.TestCase):
-    def test_before_the_grant_only_the_uncovered_part_is_kept(self):
+    def test_whole_bond_is_kept_until_the_venue_opens(self):
         s = sit()
         s.t_hours, s.me = 2.7, {**s.me, "venue": None, "cash": 186}
         buy = Action("accept_offer", {"offer": 1, "expect": offer({"types": ["card:LAV-04"]}, {"cash": 20})}, "dealers")
-        self.assertTrue(rails.rail_cash(buy, s, ctx()).ok)        # 186 - 20 >= 40 + (270 - 150)
+        self.assertEqual(rails.rail_cash(buy, s, ctx()).rail, "cash")   # 186 - 20 < reserve + 270 (no grant today)
 
     def test_the_starter_stall_is_not_our_venue(self):
         s = sit()

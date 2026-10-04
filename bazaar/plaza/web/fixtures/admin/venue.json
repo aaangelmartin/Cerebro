@@ -1,0 +1,53 @@
+{
+ "tick": 1446,
+ "venue": {
+  "venue": "v07",
+  "name": "Team 10 · fair broker, 0 fee",
+  "owner": "t10",
+  "status": "open",
+  "fee_bps": 0,
+  "fee_per_card": 0,
+  "rules": {
+   "mechanism": "board"
+  },
+  "bond": 250,
+  "trades": 41,
+  "volume": 1870,
+  "fees": 0,
+  "traders": 11,
+  "pairs": 19,
+  "pending_fee": null,
+  "description": "0 % fee. Matched for you on v07 Market.",
+  "opened_tick": 100,
+  "owner_name": "Team 10",
+  "starter": false,
+  "value_created": 59.2,
+  "suspension_reason": "",
+  "house": false
+ },
+ "public_url": "https://example.invalid/plaza",
+ "read_only": "our bot changes the fee and the description with its game key",
+ "others": [
+  {
+   "venue": "v01",
+   "name": "Mercado Team 6",
+   "owner": "t06",
+   "fee_bps": 0,
+   "trades": 3,
+   "volume": 101,
+   "traders": 3,
+   "status": "open",
+   "fee_per_card": 1,
+   "pairs": 0
+  }
+ ],
+ "broker": {
+  "state": "on",
+  "updated": 1791074214.777378,
+  "tick": 1445,
+  "matches_total": 0,
+  "mode": "smart",
+  "detail": "last beat 1 s ago"
+ },
+ "note": "v07 is a board venue: public offers that cross are paired by our broker; addressed offers "
+}

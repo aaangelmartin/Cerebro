@@ -61,3 +61,17 @@ class TestDaysHelpUs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealDuelsIIWordingTest(unittest.TestCase):
+    """The server's own days_meaning texts, seen live in Duels II (session 3, tick 1239)."""
+
+    def test_buyer_text_is_a_cost(self):
+        from bazaar.duels.model import days_interpretation
+        w, ambiguous, _ = days_interpretation(2.14, "each delivery day costs you this much cash")
+        self.assertEqual((w, ambiguous), (-2.14, False))
+
+    def test_seller_text_is_a_gain_and_not_ambiguous(self):
+        from bazaar.duels.model import days_interpretation
+        w, ambiguous, _ = days_interpretation(6.86, "each delivery day adds this much cash to your side")
+        self.assertEqual((w, ambiguous), (6.86, False))

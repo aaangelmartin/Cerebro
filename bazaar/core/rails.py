@@ -20,8 +20,17 @@ MIN_SURPLUS = 1                  # duels: points of slack against our limit
 VALUE_MARGIN = 1                 # dealers/market: P of slack against our private value
 FAIR_MAX_PER_HOUR = 4            # deals with the same team per hour
 SCARCE_SETS = {"LAV", "MAL", "RET"}
+
+
+def kept_sets(control=None) -> set[str]:
+    """Sets whose last copy we never give away: the ones we collect. A set the brain or the operator decided
+    not to buy (control.avoid_buy_sets, strategy overlay included) is not collected, so its last copies may be
+    sold; the value rail still demands a gain on every sale. If the set stops being avoided, the rule returns."""
+    avoid = {str(x).upper()[:3] for x in (control or {}).get("avoid_buy_sets") or []}
+    return SCARCE_SETS - avoid
 WRITE_KINDS = {"open_thread", "thread_message", "close_thread", "accept_offer", "post_offer", "cancel_offer",
-               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack"}
+               "duel_message", "duel_accept", "venue_open", "venue_patch", "broker_match", "broker_announce", "open_pack",
+               "taller"}
 VENUE_COST = 270                 # bond 250 (refundable) + 20
 OK = Verdict(True)
 
@@ -114,10 +123,13 @@ def flows(action: Action, sit=None) -> tuple[dict, dict]:
             types = [f"card:{sell['card']}"] if sell.get("card") else []
             return _side({"assets": ids, "types": types}), _side({"cash": price or 0})
         if "buy" in topic:
-            item = _dealer_item(th)
+            buy = topic["buy"] or {}
+            # A thread opened for one named card: the game builds our priced message as an offer for THAT card
+            # (thread 1456, Saturday t1022: Los Pícaros offered RET-06, our 50 P went out as "want card:RET-09").
+            # Valuing the dealer's switched card vetoed every repeated bid ("surplus -43.1").
+            item = None if buy.get("card") else _dealer_item(th)
             if item is not None:                                 # what the dealer actually puts on the table
                 return _side({"cash": price or 0}), item
-            buy = topic["buy"] or {}
             types = []
             if buy.get("card"):
                 types.append(f"card:{buy['card']}")
@@ -180,7 +192,8 @@ def rail_accept_shape(action: Action, sit=None, ctx=None) -> Verdict:
 
 
 def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
-    """2. Only our cards; never the last copy of a LAV/MAL/RET card nor a protected one without a human."""
+    """2. Only our cards; never the last copy of a card of a set we collect (LAV/MAL/RET unless avoided) nor a
+    protected one without a human."""
     give, _ = flows(action, sit)
     if not give["assets"] and not give["types"]:
         return OK
@@ -209,10 +222,79 @@ def rail_cards(action: Action, sit=None, ctx=None) -> Verdict:
         out[ref] = out.get(ref, 0) + 1
     if not human:
         promised = _promised_refs(sit, held, exclude=set(give["assets"]))
+        kept = kept_sets(_control(ctx))
         for ref, n in out.items():
-            if str(ref)[:3] in SCARCE_SETS and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
+            if str(ref)[:3] in kept and counts.get(ref, 0) - promised.get(ref, 0) - n < 1:
+                if action.kind == "accept_offer" and _brain_exception(sit, ref, (action.params or {}).get("offer")):
+                    continue                     # the brain + council granted a one-off exception for this offer
                 return Verdict(False, "cards", f"last copy of {ref} (counting copies already promised)")
     return OK
+
+
+def rail_avoid_sets(action: Action, sit=None, ctx=None) -> Verdict:
+    """2b. Never bring in a card (or lot) from a set we decided not to buy (control.avoid_buy_sets)."""
+    avoid = {str(x).upper()[:3] for x in _control(ctx).get("avoid_buy_sets") or []}
+    if not avoid or action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread", "broker_match"):
+        return OK
+    _, get = flows(action, sit)
+    refs = set(get.get("asset_refs", {}).values())
+    for t in get.get("types") or []:
+        kind, _, rest = str(t).partition(":")
+        if kind == "card":
+            refs.add(rest)
+        elif kind == "lot":
+            refs.add(rest.split(":")[0] + "-")
+    p = action.params or {}
+    for a in ((p.get("expect") or {}).get("give") or {}).get("assets") or []:
+        if isinstance(a, dict):
+            refs.add(a.get("ref"))
+    bad = sorted(r for r in refs if r and str(r).upper()[:3] in avoid)
+    if bad:
+        why = _avoid_exception(action, sit, ctx, bad)
+        if why:
+            return Verdict(False, "avoid_sets", f"we do not buy {sorted(avoid)} cards: {bad} ({why})")
+    return OK
+
+
+def _avoid_exception(action: Action, sit, ctx, bad: list) -> str:
+    """control.avoid_buy_exceptions (approved by the team): a card of an avoided set may come in when its rarity is
+    at least the exception's and the whole trade leaves us that many P of value after fees. Returns "" when
+    every avoided card is covered, else the reason the veto stands. The value and cash rails still run after."""
+    from .goal import exception_gain
+    control = _control(ctx)
+    held = {a.get("ref"): a.get("rarity") for a in _held(sit).values()}
+    rarity_of = getattr(_get(ctx, "value"), "rarity", None)
+    need = 0.0
+    for ref in bad:
+        if str(ref).endswith("-"):
+            return "a lot has no exception"
+        rarity = None
+        try:
+            rarity = rarity_of(ref) if callable(rarity_of) else None
+        except Exception:  # noqa: BLE001
+            pass
+        g = exception_gain(ref, control, rarity or held.get(ref))
+        if g is None:
+            return "no exception for its rarity"
+        need = max(need, g)
+    if action.kind in ("thread_message", "open_thread") and (action.params or {}).get("price") is None \
+            and not isinstance((action.params or {}).get("offer"), dict):
+        return ""                                              # words only: the priced message is checked later
+    give, get = flows(action, sit)
+    surplus, err = _surplus(action, sit, ctx, give, get)
+    if surplus is None:
+        return err
+    if surplus < need:
+        return f"gain {surplus:.1f} < {need:g} P required by the exception"
+    return ""
+
+
+def _brain_exception(sit, ref, offer_id) -> bool:
+    try:
+        from bazaar.brain.strategy import keep_one_exception
+        return keep_one_exception(sit, ref, offer_id)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _promised_refs(sit, held: dict, exclude: set) -> dict:
@@ -264,6 +346,15 @@ def rail_duel(action: Action, sit=None, ctx=None) -> Verdict:
         return Verdict(False, "duel", "days required")
     if days is not None and not (0 <= _num(days, -1) <= 10):
         return Verdict(False, "duel", f"days {days} outside 0..10")
+    if days is not None and duel.get("your_days_weight") is not None:
+        # The score counts the days too: a price inside the limit can still lose (duel 11544: 75 P under a
+        # limit of 105 with 10 days at 5.83 a day = -28.3). Same reading of the sign as the duel policy.
+        from ..duels.model import parse_duel
+        v = parse_duel({**duel, "status": "live", "result": None}, 0)
+        if v is not None:
+            u = v.safe_utility(price, int(_num(days)))
+            if u < slack:
+                return Verdict(False, "duel", f"{price} P with {days} days is worth {u:.1f} to us (< {slack})")
     return OK
 
 
@@ -285,48 +376,232 @@ def _value_of(item: str, sit, ctx, action) -> float | None:
     return None
 
 
-def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
-    """4. Buy at most at our private value minus a margin; sell at least at our value plus a margin."""
-    if action.kind not in ("accept_offer", "post_offer", "thread_message"):
-        return OK
-    give, get = flows(action, sit)
-    if action.kind == "thread_message" and (action.params or {}).get("price") is None:
-        return OK                                              # words only, nothing on the table
-    if not (give["assets"] or give["types"] or get["assets"] or get["types"]):
-        return OK                                              # cash for cash: nothing to value
+def _wants(o: dict) -> set[str]:
+    w = (o or {}).get("want") or {}
+    return {str(t)[5:] for t in w.get("types") or [] if str(t).startswith("card:")} | {str(c) for c in w.get("cards") or []}
+
+
+def _buys_ahead(action: Action, sit, ref) -> int:
+    """Copies of `ref` another open purchase of ours may bring in before this action does. The value of one more
+    copy assumes what we hold now, so two buys of the same card would both be valued as the first copy (with its
+    page bonus) and the second one loses (Saturday t1032: RET-03 from Carmen and from El Rastro at once).
+    Counted: our other open dealer threads opened to buy that card (the bot's and a human's); among threads the
+    oldest goes first, so it keeps the first-copy value and never blocks itself. A new bid (post_offer) also
+    counts our other open offers that want the card. Open market bids are not counted against a dealer thread:
+    a low bid nobody takes would stall the dealer purchase of a goal card."""
+    if not ref:
+        return 0
+    p = action.params or {}
+    tid = p.get("thread") if action.kind == "thread_message" else (p.get("expect") or {}).get("thread") \
+        if action.kind == "accept_offer" else None
+    n = 0
+    for t in _get(sit, "threads") or []:
+        if not isinstance(t, dict) or (t.get("status") or "open") != "open":
+            continue
+        if str(((t.get("topic") or {}).get("buy") or {}).get("card") or "") != str(ref) or str(t.get("id")) == str(tid):
+            continue
+        if tid is None or _num(t.get("id"), 0) < _num(tid, 0):
+            n += 1
+    if action.kind == "post_offer":
+        me_id = (_get(sit, "me") or {}).get("id")
+        n += sum(1 for o in _get(sit, "my_offers") or []
+                 if isinstance(o, dict) and o.get("maker") in (None, me_id) and o.get("status", "open") == "open"
+                 and str(ref) in _wants(o))
+    return n
+
+
+def _spare_value(ref: str, sit, ahead: int) -> float:
+    """What `ref` is worth to us once `ahead` more copies are in hand: book x our set multiplier x the copy
+    marginal, no page bonus (dealers.values). With no catalog the book falls back to the rarity default."""
+    try:
+        from bazaar.dealers.values import Values
+        v = Values(_get(sit, "me") or {}, _catalog())
+        return float(v.book(ref) * v.affinity.get(v.set_of(ref), 1.0) * v.marginal(v.count(ref) + int(ahead)))
+    except Exception:  # noqa: BLE001 - unknown: worth nothing, the buy is refused
+        return 0.0
+
+
+def _catalog() -> dict:
+    try:
+        import json as _json
+        from bazaar import config as _cfg
+        return _json.loads((_cfg.DATA / "record" / "latest" / "catalog.json").read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _surplus(action: Action, sit, ctx, give: dict, get: dict):
+    """(value gained by the trade after fees, (v_get, v_give, fee)), or (None, reason) when a value is unknown."""
     held = _held(sit)
-    margin = _cap(ctx, "value_margin", VALUE_MARGIN)
     v_give = 0.0
     for aid in give["assets"]:
         a = held.get(aid)
         if a is None or a.get("your_value") is None:
-            return Verdict(False, "value", f"no value for our asset {aid}")
+            return None, f"no value for our asset {aid}"
         v_give += float(a["your_value"])
     for t in give["types"]:
         refs = [a for a in held.values() if f"card:{a.get('ref')}" == t and a.get("your_value") is not None]
         if not refs:
-            return Verdict(False, "value", f"no value for {t}")
+            return None, f"no value for {t}"
         v_give += max(float(a["your_value"]) for a in refs)    # worst case: they get our best copy
     v_get = 0.0
     hint = (action.expected or {}).get("value_get")
+    seen: dict[str, int] = {}                                  # copies of a card this same action brings in
+
+    def spare(ref, v):
+        n = _buys_ahead(action, sit, ref) + seen.get(ref, 0)
+        seen[ref] = seen.get(ref, 0) + 1
+        return v if v is None or not n else min(v, _spare_value(ref, sit, n))
+
     for aid in get["assets"]:
         ref = get["asset_refs"].get(aid)
-        v = _value_of(f"card:{ref}", sit, ctx, action) if ref else None
+        v = spare(ref, _value_of(f"card:{ref}", sit, ctx, action)) if ref else None
         if v is None:
-            return Verdict(False, "value", f"unknown value of asset {aid}")
+            return None, f"unknown value of asset {aid}"
         v_get += v
     for t in get["types"]:
         v = _value_of(t, sit, ctx, action)
-        if v is None and not str(t).startswith("card:") and hint is not None:
-            v = _num(hint, None)                               # pack/lot EV comes from the domain's estimate
+        if str(t).startswith("card:"):
+            v = spare(str(t)[5:], v)
+        if v is None and str(t).startswith("pack:"):
+            v = _pack_value(str(t)[5:], sit)                   # independent EV from the catalog, never the proposer's
+        elif v is None and not str(t).startswith("card:") and hint is not None:
+            v = _num(hint, None)                               # a lot's EV comes from the domain's estimate
         if v is None:
-            return Verdict(False, "value", f"unknown value of {t}")
+            return None, f"unknown value of {t}"
         v_get += v
-    surplus = v_get + get["cash"] - v_give - give["cash"]
+    fee = _taker_fee(action, sit, give, get)
+    return v_get + get["cash"] - v_give - give["cash"] - fee, (v_get, v_give, fee)
+
+
+def rail_value(action: Action, sit=None, ctx=None) -> Verdict:
+    """4. Buy at most at our private value minus a margin; sell at least at our value plus a margin."""
+    if action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread"):
+        return OK                  # broker_match pairs other teams' offers: we are never a party to it
+    give, get = flows(action, sit)
+    if action.kind in ("thread_message", "open_thread") and (action.params or {}).get("price") is None:
+        return OK                                              # words only, nothing on the table
+    if not (give["assets"] or give["types"] or get["assets"] or get["types"]):
+        return OK                                              # cash for cash: nothing to value
+    margin = max(1.0, float(_cap(ctx, "value_margin", VALUE_MARGIN)))   # never below +1 P, whoever proposes
+    surplus, err = _surplus(action, sit, ctx, give, get)
+    if surplus is None:
+        return Verdict(False, "value", err)
+    v_get, v_give, fee = err
     if surplus < margin:
+        arb = _arbitrage_buy(action, sit, ctx, give, get)      # the one approved exception: a secured resale
+        if arb is not None:
+            return arb
         return Verdict(False, "value", f"surplus {surplus:.1f} < margin {margin} "
-                                       f"(get {v_get:.1f}+{get['cash']}P, give {v_give:.1f}+{give['cash']}P)")
+                                       f"(get {v_get:.1f}+{get['cash']}P, give {v_give:.1f}+{give['cash']}P"
+                                       + (f", fee {fee:.1f}P" if fee else "") + ")")
     return OK
+
+
+def _arbitrage_buy(action: Action, sit, ctx, give: dict, get: dict) -> Verdict | None:
+    """Dealer -> team arbitrage (approved by the team): a dealer BUY of the card of the arbitrage job in force
+    (bazaar.market.arbitrage) may cost more than the extra copy is worth to us, because another team has an open
+    cash bid for it. None when the action is not that buy (the normal veto stands); otherwise OK or the reason.
+    Every condition must hold: the job is still buying, this dealer, only that card for cash, the bid was seen
+    open this tick or the last one (or is in El Rastro's book), it is not ours, it lives 3+ ticks more, the
+    price leaves the approved margin after the fee we pay to accept the bid, we hold no arbitrage card yet,
+    and the cash stays above the reserve."""
+    if action.kind not in ("thread_message", "open_thread", "accept_offer"):
+        return None
+    job = _get(ctx, "arbitrage")
+    if job is None:
+        try:
+            from bazaar.market import arbitrage as _arb
+            job = _arb.load(_get(ctx, "live"))
+        except Exception:  # noqa: BLE001
+            job = None
+    if not isinstance(job, dict) or not job.get("ref"):
+        return None
+    who = counterparty(action, sit)
+    if is_team(who) or who != job.get("dealer"):
+        return None
+    ref = str(job["ref"])
+    goods = [str(t) for t in get["types"]] + [f"card:{get['asset_refs'].get(a)}" for a in get["assets"]]
+    if goods != [f"card:{ref}"] or give["assets"] or give["types"] or get["cash"]:
+        return None
+
+    def no(why: str) -> Verdict:
+        return Verdict(False, "value", f"arbitrage {ref}: {why}")
+
+    try:
+        from bazaar.market.arbitrage import MIN_BID_LIFE_TICKS, MIN_MARGIN_P
+    except Exception:  # noqa: BLE001
+        MIN_BID_LIFE_TICKS, MIN_MARGIN_P = 3, 15
+    if job.get("stage") != "buying":
+        return no("the job is not buying any more")
+    bid = job.get("bid") or {}
+    tick = int(_num(_get(sit, "tick"), 0))
+    my_id = (_get(sit, "me") or {}).get("id")
+    mine = {o.get("id") for o in _get(sit, "my_offers") or [] if isinstance(o, dict)}
+    if bid.get("id") is None or bid.get("maker") == my_id or bid.get("id") in mine:
+        return no("the resale bid is ours or missing")
+    in_book = any(isinstance(o, dict) and o.get("id") == bid["id"] for o in _get(sit, "rastro_book") or [])
+    if not in_book and tick - int(_num(job.get("seen_tick"), -99)) > 1:
+        return no(f"bid #{bid['id']} was not seen open this tick")
+    if bid.get("expires_tick") is None or int(bid["expires_tick"]) - tick < MIN_BID_LIFE_TICKS:
+        return no(f"bid #{bid['id']} expires in under {MIN_BID_LIFE_TICKS} ticks")
+    try:
+        from bazaar.market.arbitrage import rastro_fee
+        net = int(_num(bid.get("cash"))) - int(rastro_fee(int(_num(bid.get("cash"))), 1))
+    except Exception:  # noqa: BLE001
+        return no("cannot price the resale")
+    cap = min(int(_num(job.get("cap"), 0)), net - MIN_MARGIN_P)
+    if give["cash"] > cap:
+        return no(f"price {give['cash']} > cap {cap} (bid {bid.get('cash')} nets {net}, margin {MIN_MARGIN_P})")
+    held = [a for a in ((_get(sit, "me") or {}).get("assets") or []) if a.get("ref") == ref]
+    if {a.get("id") for a in held} - set(job.get("held_before") or []):
+        return no("the card is already in transit")
+    cash = _num((_get(sit, "me") or {}).get("cash"))
+    reserve = _cap(ctx, "cash_reserve", config.CASH_RESERVE)
+    if cash - give["cash"] < reserve:
+        return no(f"cash {cash:.0f} - {give['cash']} < reserve {reserve}")
+    return OK
+
+
+def _taker_fee(action: Action, sit, give: dict, get: dict) -> float:
+    """The venue fee WE pay. The accepting side (taker) pays it, so only our accepts are charged: recomputed here
+    from the offer's venue (protocol.taker_fee), on top of the cash we give; a fee already folded into
+    params.give.cash by the domain is not counted twice (only the excess over what the offer itself asks)."""
+    if action.kind != "accept_offer":
+        return 0.0
+    p = action.params or {}
+    exp = p.get("expect") or {}
+    vid = exp.get("venue") or (p.get("venue")) or "rastro"
+    row = next((v for v in _get(sit, "venues") or [] if isinstance(v, dict) and (v.get("venue") or v.get("id")) == vid),
+               None)
+    if row is None and vid == "rastro":
+        row = {"fee_bps": 500, "fee_per_card": 1}
+    if row is None:
+        return 0.0
+    want = exp.get("want") or {}                          # what the maker wants from us (cash + cards)
+    cash = int(_num((exp.get("give") or {}).get("cash"), 0)) + int(_num(want.get("cash"), 0))
+    cards = len((exp.get("give") or {}).get("assets") or []) + len((exp.get("give") or {}).get("types") or []) \
+        + len(want.get("assets") or []) + len(want.get("types") or [])
+    try:
+        from bazaar.market.protocol import taker_fee
+        fee = float(taker_fee(row, cash, cards))
+    except Exception:  # noqa: BLE001
+        fee = cash * float(row.get("fee_bps") or 0) / 10000.0 + float(row.get("fee_per_card") or 0) * cards
+    folded = max(0, int(give.get("cash") or 0) - int(_num(want.get("cash"), 0)))   # fee the domain already added
+    return max(0.0, fee - folded)
+
+
+def _pack_value(pack_id: str, sit) -> float | None:
+    """Expected value of a sealed pack to us from the catalog (dealers.values.pack_value), None if unknown."""
+    try:
+        import json as _json
+        from bazaar import config as _cfg
+        from bazaar.dealers.values import Values, pack_value
+        me = _get(sit, "me") or {}
+        cat = _json.loads((_cfg.DATA / "record" / "latest" / "catalog.json").read_text())
+        return float(pack_value(pack_id, Values(me, cat), cat))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def own_venue(sit) -> str | None:
@@ -348,9 +623,8 @@ def _venue_pending(sit, ctx) -> bool:
 
 def _venue_reserve(sit) -> int:
     """Cash to keep for the bond: the Saturday grant will cover part of it if it has not arrived yet."""
-    t = _get(sit, "t_hours")
-    before_grant = t is not None and 0 < _num(t, 0) < GRANT_AT_HOURS
-    return max(0, VENUE_COST - (GRANT_CASH if before_grant else 0))
+    # Saturday's schedule dropped the 4.05 grant: keep the whole bond until our venue is open.
+    return VENUE_COST
 
 
 def rail_cash(action: Action, sit=None, ctx=None) -> Verdict:
@@ -405,12 +679,20 @@ def rail_pace(action: Action, sit=None, ctx=None) -> Verdict:
     b = _get(ctx, "budget") or {}
     lim = {**(b.get("limits") or {}), **(_get(sit, "limits") or {})}
     p = action.params or {}
-    if action.kind in ACCEPT_KINDS:
+    if action.kind == "duel_accept":                      # duels have their own limit: independent of trades
+        from .context import duel_accept_cap
+        left = b.get("duel_accepts_left")
+        if left is None:
+            left = duel_accept_cap(lim) - int(b.get("duel_accepts_used", 0))
+        if left <= 0:
+            return Verdict(False, "pace", f"no duel accept left this tick (cap {duel_accept_cap(lim)})")
+    elif action.kind in ACCEPT_KINDS:
         left = b.get("accepts_left")
         if left is None:
             left = int(lim.get("accepts_per_team_per_tick", 1)) - int(b.get("accepts_used", 0))
         if left <= 0:
-            return Verdict(False, "pace", "no accept left this tick")
+            return Verdict(False, "pace", "no accept left this tick "
+                                          f"(cap {int(lim.get('accepts_per_team_per_tick', 1))} offer accept per tick)")
     if action.kind in MESSAGE_KINDS:
         key = conv_key(action)
         if (b.get("messages") or {}).get(key, 0) >= int(lim.get("messages_per_side_per_tick", 1)):
@@ -458,7 +740,68 @@ def rail_pack(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
-RAILS = [rail_armed, rail_pack, rail_known, rail_accept_shape, rail_cards, rail_duel, rail_value, rail_cash, rail_pace,
+def _is_pack(item) -> bool:
+    return str(item or "").lower().startswith(("pack:", "sobre"))
+
+
+def rail_no_packs(action: Action, sit=None, ctx=None) -> Verdict:
+    """No sealed pack is ever bought (control.no_packs, on unless the team sets it to false): not from a
+    dealer's menu, not on a brain order, not by accepting an offer that hands us one. A pack given for
+    nothing (a gift, an easter egg) is still taken."""
+    if action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread") \
+            or _control(ctx).get("no_packs", True) is False:
+        return OK
+    p = action.params or {}
+    topic = p.get("topic")
+    if topic is None and action.kind == "thread_message":
+        topic = _get(_thread(sit, p.get("thread")), "topic")
+    if isinstance(topic, dict) and (topic.get("buy") or {}).get("pack") \
+            and (action.kind == "open_thread" or p.get("price") is not None or isinstance(p.get("offer"), dict)):
+        return Verdict(False, "no_packs", f"packs are never bought ({(topic['buy'] or {}).get('pack')})")
+    give, get = flows(action, sit)
+    packs = [t for t in get.get("types") or [] if _is_pack(t)] \
+        + [r for r in (get.get("asset_refs") or {}).values() if _is_pack(r)]
+    if packs and (give.get("cash") or give.get("assets") or give.get("types")):
+        return Verdict(False, "no_packs", f"packs are never bought ({', '.join(str(x) for x in packs)})")
+    return OK
+
+
+def rail_taller(action: Action, sit=None, ctx=None) -> Verdict:
+    """The Workshop: exactly three spare cards of ours, one rarity, none promised elsewhere, one unpromised copy of
+    each card kept, and an expected value (mean of a released card of the next rarity, recomputed here from the
+    catalog) above what the three copies are worth to us. Never trusts the proposer's numbers."""
+    if action.kind != "taller":
+        return OK
+    from bazaar.workshop import planner as W
+    ids = list((action.params or {}).get("assets") or [])
+    if len(ids) != 3 or len(set(ids)) != 3:
+        return Verdict(False, "taller", "needs exactly three different assets")
+    control = _control(ctx)
+    pool = W.spare_pool(sit, control)
+    by_id = {x["id"]: (r, x) for r, lst in pool.items() for x in lst}
+    held = _held(sit)
+    for i in ids:
+        if i not in by_id:
+            a = held.get(i)
+            why = "not ours" if a is None else "not a usable spare (last unpromised copy, promised, protected or no value)"
+            return Verdict(False, "taller", f"asset {i} ({(a or {}).get('ref')}) is {why}")
+    rar = {by_id[i][0] for i in ids}
+    if len(rar) != 1:
+        return Verdict(False, "taller", f"mixed rarities {sorted(rar)}")
+    rarity = rar.pop()
+    if not W.within_usable([by_id[i][1] for i in ids]):
+        return Verdict(False, "taller", "would leave no unpromised copy of one of the cards")
+    ev = W.expected_value(W.load_values(_get(sit, "me") or {}), W.NEXT_RARITY[rarity])
+    if ev is None:
+        return Verdict(False, "taller", f"unknown value of a {W.NEXT_RARITY[rarity]} pull")
+    give = W.triple_value([by_id[i][1] for i in ids])
+    margin = max(1.0, float(_cap(ctx, "value_margin", VALUE_MARGIN)))
+    if ev - give < margin:
+        return Verdict(False, "taller", f"expected {ev:.1f} P - given {give:.1f} P < margin {margin}")
+    return OK
+
+
+RAILS = [rail_armed, rail_pack, rail_no_packs, rail_taller, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
          rail_fair]
 
 

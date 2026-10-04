@@ -3,7 +3,11 @@
   if (window.T10D) return;
   const US = "t10";
   const TYPES = ["compra", "venta", "cambio", "puja", "duelo", "dealer", "anuncio"];
-  const TYPE_LABEL = { compra: "Compra", venta: "Venta", cambio: "Cambio", puja: "Puja", duelo: "Duelo", dealer: "Dealer", anuncio: "Anuncio" };
+  // interface texts: looked up on every read, so a language switch shows on the next paint
+  const T = (k, v) => (window.I18N ? window.I18N.t(k, v) : k);
+  const lang = () => (window.I18N && window.I18N.lang) || "es";
+  const TYPE_LABEL = {};
+  for (const k of TYPES) Object.defineProperty(TYPE_LABEL, k, { enumerable: true, get: () => T("home.type." + k) });
   const TYPE_COLOR = { compra: "var(--t-compra, #3fbf7f)", venta: "var(--t-venta, #e5534b)", cambio: "var(--t-cambio, #4c8dff)",
     puja: "var(--t-puja, #e8a33d)", duelo: "var(--t-duelo, #9b7bff)", dealer: "var(--t-dealer, #2bb3a3)", anuncio: "var(--t-anuncio, #8a8f98)" };
   const PERSONAS = { abuela: "Abuela", chato: "Chato" };
@@ -41,7 +45,7 @@
     if (PERSONAS[id]) return PERSONAS[id];
     if (names[id]) return names[id];
     const m = /^t(\d+)$/.exec(id); if (m) return "Team " + (+m[1]);
-    if (/^m[0-9a-f]{6,}$/.test(id)) return "Creador de mercado";
+    if (/^m[0-9a-f]{6,}$/.test(id)) return T("home.market_maker");
     return id;
   }
   const isTeam = (id) => /^t\d+$/.test(id || "");
@@ -50,7 +54,7 @@
   const cache = {};
   async function cached(key, ttlMs, fn) {
     const c = cache[key];
-    if (c && Date.now() - c.at < ttlMs) return c.val;
+    if (c && Date.now() - c.at < ttlMs && c.at > (window.__dashForceAt || 0)) return c.val;
     if (c && c.busy) return c.busy;
     const slot = cache[key] = c || {};
     slot.busy = (async () => {
@@ -67,7 +71,7 @@
     const s = { rows: [], last: null, at: 0, busy: null, err: null, loaded: false, maxSeq: -1 };
     s.pull = function () {
       if (s.busy) return s.busy;
-      if (s.loaded && Date.now() - s.at < 2500) return Promise.resolve();
+      if (s.loaded && Date.now() - s.at < 2500 && s.at > (window.__dashForceAt || 0)) return Promise.resolve();
       s.busy = (async () => {
         try {
           const r = s.last == null ? await api.recStream(name, { tail }) : await api.recStream(name, { since_seq: s.last, limit: 2000 });
@@ -88,24 +92,23 @@
     return s;
   }
 
-  // --------- clock: game hours -> wall time (days run back to back in game hours)
-  let anchors = [];
+  // --------- clock: game hours -> wall time. The game clock does not follow the calendar
+  // (it pauses and resumes), so a game hour is placed relative to the live clock, where one
+  // game hour takes one real hour. Past events use their recorded timestamps instead.
+  let anchors = [], calDays = [];
   function setClock(clock) {
-    const days = (clock && clock.days) || [];
-    let t = 0; anchors = [];
-    for (const d of days) {
-      const o = Date.parse(d.opens) / 1000, c = Date.parse(d.closes) / 1000;
-      if (!o || !c) continue;
-      anchors.push({ t0: t, o, c, day: d.day, name: d.name }); t += (c - o) / 3600;
-    }
+    const t = clock && num(clock.t_hours);
+    if (t === null || t === undefined) return;
+    const at = num(clock.recorded_at) || num(clock.ts) || Date.now() / 1000;
+    anchors = [{ t0: t, o: at, day: clock.today, name: clock.today_name }];
+    calDays = ((clock && clock.days) || []).map((d) => ({ day: d.day, name: d.name, o: Date.parse(d.opens) / 1000, c: Date.parse(d.closes) / 1000 })).filter((d) => d.o && d.c);
   }
   function tToWall(t) {
     t = num(t); if (t === null || !anchors.length) return null;
-    let a = anchors[0];
-    for (const x of anchors) if (t >= x.t0 - 1e-6) a = x;
+    const a = anchors[0];
     return a.o + (t - a.t0) * 3600;
   }
-  const evTs = (e) => tToWall(e.t) || num(e.seen_at) || num(e.ts) || 0;
+  const evTs = (e) => num(e.seen_at) || num(e.ts) || tToWall(e.t) || 0;
 
   // --------- feed events -> normalised rows {type, actor, teams[], text, value, ts, raw}
   function venueName(v) {
@@ -129,57 +132,57 @@
         const flows = new Set(items.map((i) => i.frm));
         const cards = items.filter((i) => i.kind === "card");
         const ref = assetsLabel(items);
-        const where = p.venue ? " en " + venueName(p.venue) : "";
+        const where = p.venue ? T("home.ev.where", { venue: venueName(p.venue) }) : "";
         if (persona) {
           const team = parties.find((x) => x !== persona);
           const buy = items.some((i) => i.to === team);
           return { ...base, type: "dealer", actor: team, teams: [team], venue: null,
-            text: (buy ? "Compra " : "Vende ") + ref + (buy ? " a " : " a ") + teamName(persona), value: price != null ? fmtP(price) : "", price, items, kind: "settle" };
+            text: T(buy ? "home.ev.buys_from" : "home.ev.sells_to", { cards: ref, who: teamName(persona), where: "" }), value: price != null ? fmtP(price) : "", price, items, kind: "settle" };
         }
         if (flows.size > 1 && !price) {
           const [a, b] = parties;
-          return { ...base, type: "cambio", actor: a, teams: parties, venue: p.venue, text: "Cambian " + ref + where, value: items.length + " cartas", items, kind: "settle" };
+          return { ...base, type: "cambio", actor: a, teams: parties, venue: p.venue, text: T("home.ev.swap", { cards: ref, where }), value: T("home.ev.n_cards", { n: items.length }), items, kind: "settle" };
         }
         const buyer = (items[0] || {}).to, seller = (items[0] || {}).frm;
         const usSell = seller === US;
         const actor = usSell ? seller : buyer;
         return { ...base, type: usSell ? "venta" : "compra", actor, teams: [buyer, seller].filter(Boolean), venue: p.venue,
-          text: usSell ? "Vende " + ref + " a " + teamName(buyer) + where : "Compra " + ref + " a " + teamName(seller) + where,
+          text: usSell ? T("home.ev.sells_to", { cards: ref, who: teamName(buyer), where }) : T("home.ev.buys_from", { cards: ref, who: teamName(seller), where }),
           value: price != null ? fmtP(price) : "", price, items, cards, buyer, seller, kind: "settle", fee: p.fee };
       }
       case "offer.listed": {
         const o = p.offer || {}; const g = o.give || {}, w = o.want || {};
         const gA = g.assets || [], wA = w.assets || [];
-        const where = " en " + venueName(p.venue || o.venue);
+        const where = T("home.ev.where", { venue: venueName(p.venue || o.venue) });
         const actor = o.maker || e.actor;
-        if (gA.length && wA.length) return { ...base, type: "cambio", actor, teams: [actor], venue: p.venue, text: "Ofrece " + assetsLabel(gA) + " por " + assetsLabel(wA) + where, value: gA.length + " × " + wA.length, offer: o, kind: "offer" };
-        if (gA.length) return { ...base, type: "venta", actor, teams: [actor], venue: p.venue, text: "Pone a la venta " + assetsLabel(gA) + where, value: fmtP(w.cash), price: num(w.cash), assets: gA, offer: o, kind: "offer" };
-        if (wA.length || (w.types || []).length) return { ...base, type: "puja", actor, teams: [actor], venue: p.venue, text: "Puja por " + (assetsLabel(wA) || (w.types || []).map((t) => (typeof t === "string" ? t.replace(/^card:/, "") : t.ref || t.set || t.rarity || JSON.stringify(t))).join(", ")) + where, value: "≤ " + fmtP(g.cash), price: num(g.cash), assets: wA, offer: o, kind: "offer" };
-        return { ...base, type: "anuncio", actor, teams: [actor], text: "Publica una oferta" + where, value: "", offer: o, kind: "offer" };
+        if (gA.length && wA.length) return { ...base, type: "cambio", actor, teams: [actor], venue: p.venue, text: T("home.ev.offers_swap", { give: assetsLabel(gA), want: assetsLabel(wA), where }), value: gA.length + " × " + wA.length, offer: o, kind: "offer" };
+        if (gA.length) return { ...base, type: "venta", actor, teams: [actor], venue: p.venue, text: T("home.ev.lists", { cards: assetsLabel(gA), where }), value: fmtP(w.cash), price: num(w.cash), assets: gA, offer: o, kind: "offer" };
+        if (wA.length || (w.types || []).length) return { ...base, type: "puja", actor, teams: [actor], venue: p.venue, text: T("home.ev.bids", { cards: assetsLabel(wA) || (w.types || []).map((t) => (typeof t === "string" ? t.replace(/^card:/, "") : t.ref || t.set || t.rarity || JSON.stringify(t))).join(", "), where }), value: "≤ " + fmtP(g.cash), price: num(g.cash), assets: wA, offer: o, kind: "offer" };
+        return { ...base, type: "anuncio", actor, teams: [actor], text: T("home.ev.posts", { where }), value: "", offer: o, kind: "offer" };
       }
       case "offer.cancelled": return null;
       case "thread.message": {
         const team = p.team; const who = p.sender === team ? teamName(team) : teamName(p.sender);
-        const off = p.offer && (p.offer.give || p.offer.want) ? " · con oferta" : "";
+        const off = p.offer && (p.offer.give || p.offer.want) ? T("home.ev.with_offer") : "";
         return { ...base, type: "dealer", actor: team, teams: [team], text: who + " → " + (p.sender === team ? teamName(p.with) : teamName(team)) + ": " + (p.text || "").slice(0, 120) + off, value: "", kind: "thread" };
       }
-      case "thread.opened": return { ...base, type: "dealer", actor: p.team, teams: [p.team], text: "Abre conversación con " + teamName(p.with), value: "nueva", kind: "thread" };
+      case "thread.opened": return { ...base, type: "dealer", actor: p.team, teams: [p.team], text: T("home.ev.opens_thread", { who: teamName(p.with) }), value: T("home.ev.new"), kind: "thread" };
       case "duel.closed": {
-        const st = p.status === "deal" ? "Duelo cerrado con acuerdo" : p.status === "no_deal" ? "Duelo cerrado sin acuerdo" : "Duelo cerrado (" + (p.status || "?") + ")";
+        const st = p.status === "deal" ? T("home.ev.duel_deal") : p.status === "no_deal" ? T("home.ev.duel_no_deal") : T("home.ev.duel_other", { status: p.status || "?" });
         const teams = [p.buyer, p.seller, p.a, p.b, ...(p.teams || []), ...(p.parties || [])].filter(isTeam);
         return { ...base, type: "duelo", actor: teams[0] || "", teams, text: st + (p.item ? " · " + p.item : "") + (p.duel ? " · #" + p.duel : ""), value: num(p.price) != null ? fmtP(p.price) : "", kind: "duel" };
       }
-      case "pack.opened": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Abre un sobre" + (p.best ? " · mejor: " + (p.best.ref || p.best.name || "") : ""), value: "", kind: "info" };
-      case "gift.given": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Regalo de " + teamName(e.actor) + ": " + [...(p.cards || []), ...(p.packs || [])].join(", ") + (p.cash ? " " + fmtP(p.cash) : ""), value: "", kind: "info" };
-      case "level.unlocked": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: "Nivel " + p.level + " desbloqueado con " + (p.persona_name || teamName(p.persona)), value: "nivel " + p.level, kind: "info" };
-      case "persona.open_to_all": return { ...base, type: "anuncio", actor: "org", teams: [], text: (p.name || teamName(p.persona)) + " abierto a todos (nivel " + p.level + ")", value: "", kind: "info" };
-      case "venue.fee_announced": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: "Comisión " + fmt((p.fee_bps || 0) / 100, 1) + " %" + (p.fee_per_card ? " + " + p.fee_per_card + " P/carta" : "") + " en " + venueName(p.venue) + " desde tick " + p.effective_tick, value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
-      case "venue.fee_changed": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: "Nueva comisión en " + venueName(p.venue), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
+      case "pack.opened": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.opens_pack") + (p.best ? T("home.ev.best", { card: p.best.ref || p.best.name || "" }) : ""), value: "", kind: "info" };
+      case "gift.given": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.gift", { who: teamName(e.actor), items: [...(p.cards || []), ...(p.packs || [])].join(", ") + (p.cash ? " " + fmtP(p.cash) : "") }), value: "", kind: "info" };
+      case "level.unlocked": return { ...base, type: "anuncio", actor: p.team, teams: [p.team], text: T("home.ev.level", { level: p.level, who: p.persona_name || teamName(p.persona) }), value: T("home.ev.level_short", { level: p.level }), kind: "info" };
+      case "persona.open_to_all": return { ...base, type: "anuncio", actor: "org", teams: [], text: T("home.ev.open_all", { who: p.name || teamName(p.persona), level: p.level }), value: "", kind: "info" };
+      case "venue.fee_announced": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: T("home.ev.fee", { pct: fmt((p.fee_bps || 0) / 100, 1), per_card: p.fee_per_card ? T("home.ev.fee_per_card", { n: p.fee_per_card }) : "", venue: venueName(p.venue), tick: p.effective_tick }), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
+      case "venue.fee_changed": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: T("home.ev.fee_new", { venue: venueName(p.venue) }), value: fmt((p.fee_bps || 0) / 100, 1) + " %", kind: "venue" };
       case "venue.announcement": return { ...base, type: "anuncio", actor: p.venue, teams: [], text: (p.name || venueName(p.venue)) + ": " + (p.text || ""), value: "", kind: "venue" };
-      case "announcement": return { ...base, type: "anuncio", actor: "org", teams: [], text: p.text || "Anuncio", value: "", kind: "info" };
+      case "announcement": return { ...base, type: "anuncio", actor: "org", teams: [], text: p.text || T("home.type.anuncio"), value: "", kind: "info" };
       default: {
         if (/^venue\./.test(e.type || "")) return { ...base, type: "anuncio", actor: p.venue || "", teams: [], text: (e.type || "") + " · " + venueName(p.venue), value: "", kind: "venue" };
-        return { ...base, type: "anuncio", actor: e.actor || "org", teams: isTeam(p.team) ? [p.team] : [], text: (e.type || "evento") + (p.text ? " · " + p.text : ""), value: "", kind: "info" };
+        return { ...base, type: "anuncio", actor: e.actor || "org", teams: isTeam(p.team) ? [p.team] : [], text: (e.type || T("home.ev.event")) + (p.text ? " · " + p.text : ""), value: "", kind: "info" };
       }
     }
   }
@@ -194,7 +197,14 @@
   });
 
   // feed rows (normalised, no skips), re-normalising venue names lazily is not needed
-  const events = () => feed.rows.filter((r) => !r.skip);
+  // the texts of a row are written when it is read: write them again when the language changes
+  let feedLang = lang();
+  function relang() {
+    if (feedLang === lang()) return;
+    feedLang = lang();
+    feed.rows = feed.rows.map((r) => normalize(r.raw) || { skip: true, raw: r.raw, ts: evTs(r.raw), evType: r.raw.type });
+  }
+  const events = () => { relang(); return feed.rows.filter((r) => !r.skip); };
   // events of the latest day that has data (today, or Friday when today has nothing yet)
   function dayEvents() {
     const ev = events(); if (!ev.length) return { rows: [], day: null, today: true };
@@ -265,46 +275,60 @@
   function teamTag(id) {
     if (!id) return el("span", { class: "t10-muted" }, "—");
     if (isTeam(id) && window.ui && ui.teamTag) return ui.teamTag(id, { us: id === US });
-    return el("span", { class: "t10-who" + (id === US ? " t10-us" : "") }, id === US ? "Team 10 · Nosotros" : (id === "org" ? "Organización" : teamName(id) || venueName(id)));
+    return el("span", { class: "t10-who" + (id === US ? " t10-us" : "") }, id === US ? T("home.us_full") : (id === "org" ? T("home.org") : teamName(id) || venueName(id)));
   }
   const state = (kind, text) => {
     if (window.ui) { if (kind === "loading" && ui.loading) return ui.loading(); if (kind === "error" && ui.error) return ui.error(text); if (kind === "empty" && ui.empty) return ui.empty(text); }
-    return el("div", { class: "t10-state" }, kind === "loading" ? "Cargando…" : kind === "error" ? "Error: " + ((text && text.message) || text) : text);
+    return el("div", { class: "t10-state" }, kind === "loading" ? T("home.loading") : kind === "error" ? T("home.error", { err: (text && text.message) || text }) : text);
   };
-  const errText = (e) => (e && e.status === 404 ? "Este dato aún no está disponible en la API." : "No se pudo leer: " + ((e && e.message) || e));
+  const errText = (e) => (e && e.status === 404 ? T("home.err_404") : T("home.err_read", { err: (e && e.message) || e }));
   function replace(node, ...kids) { if (!node) return; node.replaceChildren(...kids.flat().filter((k) => k != null)); }
 
   async function prime() {
-    const c = await rec("clock", 60000); if (c && !anchors.length) setClock(c);
+    const c = await rec("clock", 5000); if (c) setClock(c);
     await rec("venues", 15000);
   }
 
   window.T10D = { prime, US, TYPES, TYPE_LABEL, TYPE_COLOR, num, esc, fmt, fmtP, hhmm, hhmmss, dayKey, el, html, teamName, isTeam, venueName,
     cached, rec, recErr, stream, setClock, tToWall, evTs, normalize, feed, board, events, dayEvents, involves, leaderboard, series, rankMove,
-    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors };
+    svg, stackBars, spark, bucketize, chip, teamTag, state, errText, replace, names, anchors: () => anchors, calDays: () => calDays };
 })();
 /* ---- RIVALES ---- */
 (function () {
   const D = window.T10D;
-  const { el, fmt, fmtP, num, hhmm, hhmmss, TYPES, TYPE_LABEL, TYPE_COLOR, US } = D;
+  const { el, fmt, fmtP, num, hhmm, hhmmss, TYPES, TYPE_COLOR, US } = D;
+  const tr = (k, v) => window.I18N.t(k, v);
+  const typeLabel = (x) => (window.ui && ui.TYPE_LABEL && ui.TYPE_LABEL[x]) || D.TYPE_LABEL[x] || x;
+  const rarLabel = (r) => (window.I18N.has("common.rarity." + r, "es") ? tr("common.rarity." + r).toLowerCase() : r);
+  const usName = () => tr("common.team10us");
   const SET_COLORS = ["var(--t-dealer,#2bb3a3)", "#e0457b", "var(--t-venta,#e5534b)", "var(--t-puja,#e8a33d)", "#7b83eb", "#9acd32", "#c77dff"];
   let S = null;
+  const NEG_C = "var(--t-dealer,#2bb3a3)", MKT_C = "var(--t-cambio,#4c8dff)";
+  // points split per team over time (negotiation vs market-making), from the leaderboard stream
+  const split = D.stream("leaderboard", 400, 3000, (row) => {
+    const d = row.data || row; let teams = d.teams || [];
+    if (!Array.isArray(teams)) teams = Object.values(teams);
+    const neg = {}, mkt = {};
+    for (const t of teams) { if (!t || !t.team) continue; neg[t.team] = num(t.negotiating); mkt[t.team] = num(t.market); }
+    return { ts: num(row.ts) || 0, neg, mkt };
+  });
+  let W = { negotiating: 30, market: 30 };
 
   function mount(root) {
     S = { sel: null, types: new Set(), lastKey: null };
     root.innerHTML = "";
     root.append(el("div", { class: "scr-rivales" },
-      el("section", { class: "t10-panel r-list" }, el("div", { class: "t10-head" }, el("h2", {}, "Rivales"), el("span", { class: "t10-sub t10-right r-count" }, "")), el("div", { class: "r-list-body" }, D.state("loading"))),
+      el("section", { class: "t10-panel r-list" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.title")), el("span", { class: "t10-sub t10-right r-count" }, "")), el("div", { class: "r-list-body" }, D.state("loading"))),
       el("div", { class: "r-main" },
         el("section", { class: "t10-panel r-head" }, D.state("loading")),
         el("div", { class: "r-mid" },
-          el("section", { class: "t10-panel r-aff" }, el("div", { class: "t10-head" }, el("h2", {}, "Afinidades inferidas"), el("span", { class: "t10-sub t10-right r-aff-sub" }, "de sus pujas y compras")), el("div", { class: "r-aff-body" })),
-          el("section", { class: "t10-panel r-types" }, el("div", { class: "t10-head" }, el("h2", {}, "Actividad por tipo · hoy")), el("div", { class: "r-types-body" }))),
+          el("section", { class: "t10-panel r-aff" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.aff.title")), el("span", { class: "t10-sub t10-right r-aff-sub" }, tr("rivales.aff.sub"))), el("div", { class: "r-aff-body" })),
+          el("section", { class: "t10-panel r-types" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.types.title"))), el("div", { class: "r-types-body" }))),
         el("div", { class: "r-mid" },
-          el("section", { class: "t10-panel r-offers" }, el("div", { class: "t10-head" }, el("h2", {}, "Sus ofertas en los libros")), el("div", { class: "r-offers-body" })),
-          el("section", { class: "t10-panel r-cards" }, el("div", { class: "t10-head" }, el("h2", {}, "Cartas que ha movido")), el("div", { class: "r-cards-body" }))),
+          el("section", { class: "t10-panel r-offers" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.offers.title"))), el("div", { class: "r-offers-body" })),
+          el("section", { class: "t10-panel r-cards" }, el("div", { class: "t10-head" }, el("h2", {}, tr("rivales.cards.title"))), el("div", { class: "r-cards-body" }))),
         el("section", { class: "t10-panel r-acts" },
-          el("div", { class: "t10-head" }, el("h2", { class: "r-acts-title" }, "Lo que hace"), el("span", { class: "t10-right r-acts-filter" }, TYPES.map((t) => {
+          el("div", { class: "t10-head" }, el("h2", { class: "r-acts-title" }, tr("rivales.acts.title")), el("span", { class: "t10-right r-acts-filter" }, TYPES.map((t) => {
             const b = el("button", { class: "t10-chipbtn", "data-t": t }, D.chip(t));
             b.addEventListener("click", () => { S.types.has(t) ? S.types.delete(t) : S.types.add(t); b.classList.toggle("on", S.types.has(t)); S.lastKey = null; refresh(root, S.data, S.params); });
             return b;
@@ -330,28 +354,64 @@
   }
   function tags(t, p, avg) {
     const out = [];
-    if (p.aff[0] && p.signals >= 2) out.push("valora " + p.aff.slice(0, p.aff[1] && p.aff[1].v > 0.7 ? 2 : 1).map((a) => a.set).join(" · "));
-    if (p.dealerN >= 6 && p.dealerN >= 1.8 * (S.avgDealer || 0)) out.push("muy activo con dealers");
-    if (t.venue) out.push("mercado propio " + t.venue);
-    if (p.bidN >= 8) out.push("puja mucho · " + p.bidN + " pujas");
-    if (p.total && p.total < avg * 0.3) out.push("pocas operaciones");
-    if (!p.total) out.push("sin actividad grabada");
-    else if (S.today && p.last && Date.now() / 1000 - p.last > 3600) out.push("sin actividad 1 h");
+    if (p.aff[0] && p.signals >= 2) out.push(tr("rivales.tag.values", { sets: p.aff.slice(0, p.aff[1] && p.aff[1].v > 0.7 ? 2 : 1).map((a) => a.set).join(" · ") }));
+    if (p.dealerN >= 6 && p.dealerN >= 1.8 * (S.avgDealer || 0)) out.push(tr("rivales.tag.dealers"));
+    if (t.venue) out.push(tr("rivales.tag.ownVenue", { venue: t.venue }));
+    if (p.bidN >= 8) out.push(tr("rivales.tag.bids", { n: p.bidN }));
+    if (p.total && p.total < avg * 0.3) out.push(tr("rivales.tag.fewTrades"));
+    if (!p.total) out.push(tr("rivales.tag.noActivity"));
+    else if (S.today && p.last && Date.now() / 1000 - p.last > 3600) out.push(tr("rivales.tag.idleHour"));
     return out;
   }
 
   function renderList(root, teams, profs, avg) {
     const box = root.querySelector(".r-list-body");
     root.querySelector(".r-count").textContent = teams.length ? String(teams.length - 1) : "";
-    if (!teams.length) { const e = D.recErr("leaderboard"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : "Sin clasificación todavía.")); }
+    if (!teams.length) { const e = D.recErr("leaderboard"); return D.replace(box, D.state(e ? "error" : "empty", e ? D.errText(e) : tr("rivales.noStandings"))); }
     D.replace(box, teams.map((t) => {
-      const p = profs[t.team]; const tg = t.team === US ? ["tú"] : tags(t, p, avg).slice(0, 2);
+      const p = profs[t.team]; const tg = t.team === US ? [tr("rivales.you")] : tags(t, p, avg).slice(0, 2);
+      const stats = [t.deals != null ? tr("rivales.stat.deals", { n: t.deals }) : null, t.album_filled != null ? tr("rivales.stat.album", { a: t.album_filled, b: t.album_slots }) : null,
+        t.pages_complete != null ? tr("rivales.stat.pages", { n: t.pages_complete }) : null, num(t.luck) != null ? tr("rivales.stat.luck", { x: (t.luck > 0 ? "+" : "") + fmt(t.luck, 1) }) : null,
+        t.venue ? tr("rivales.stat.venue", { venue: t.venue }) : null].filter(Boolean).join(" · ");
       return el("a", { class: "r-item" + (t.team === S.sel ? " on" : "") + (t.team === US ? " t10-usrow" : ""), href: "#rivales/" + t.team },
-        el("span", { class: "num t10-muted" }, (t.rank || "") + ".º"),
-        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)), el("span", { class: "t10-small t10-muted" }, tg.join(" · "))),
-        el("span", { class: "r-item-acts t10-small t10-muted num", title: "eventos hoy" }, p.total ? String(p.total) : ""),
-        el("span", { class: "num" }, fmt(t.score, 1)));
+        el("span", { class: "num t10-muted" }, t.rank ? window.I18N.ordinal(t.rank) : ""),
+        el("span", { class: "r-item-name" }, el("b", {}, t.team === US ? usName() : D.teamName(t.team)),
+          el("span", { class: "t10-small t10-muted" }, tg.join(" · ")), el("span", { class: "t10-small t10-muted r-item-stats" }, stats)),
+        el("span", { class: "r-split" }, splitBar(tr("rivales.negShort"), t.negotiating, W.negotiating, NEG_C), splitBar(tr("rivales.mktShort"), t.market, W.market, MKT_C)),
+        el("span", { class: "num r-item-total" }, fmt(t.score, 1)));
     }));
+  }
+
+  function splitBar(label, v, max, col) {
+    v = num(v); const pct = v == null ? 0 : Math.max(0, Math.min(100, (v / (max || 30)) * 100));
+    return el("span", { class: "r-sb", title: label + " " + (v == null ? "—" : fmt(v, 2)) + " / " + (max || 30) },
+      el("span", { class: "r-sb-l t10-muted" }, label),
+      el("span", { class: "r-sb-t" }, el("span", { style: `width:${pct}%;background:${col}` })),
+      el("span", { class: "num r-sb-v" }, v == null ? "—" : fmt(v, 1)));
+  }
+  // two lines over time: negotiation and market points of one team
+  function splitChart(tid) {
+    const rows = split.rows.filter((r) => r.neg[tid] != null || r.mkt[tid] != null);
+    const w = 520, h = 120, L = 26, B = 14;
+    if (rows.length < 2) return D.state("empty", tr("rivales.noHistory"));
+    const t0 = rows[0].ts, t1 = rows[rows.length - 1].ts || t0 + 1;
+    const hi = Math.max(5, ...rows.map((r) => Math.max(r.neg[tid] || 0, r.mkt[tid] || 0)));
+    const x = (ts) => L + ((ts - t0) / Math.max(1, t1 - t0)) * (w - L - 4), y = (v) => h - B - (v / hi) * (h - B - 6);
+    const line = (k, col) => `<polyline fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke" points="${rows.filter((r) => r[k][tid] != null).map((r) => x(r.ts).toFixed(1) + "," + y(r[k][tid]).toFixed(1)).join(" ")}"/>`;
+    let g = "";
+    for (const v of [0, hi / 2, hi]) g += `<line x1="${L}" x2="${w - 4}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line,#262626)"/><text x="0" y="${y(v) + 3}" class="t10-svgtxt">${fmt(v, 0)}</text>`;
+    g += `<text x="${L}" y="${h - 2}" class="t10-svgtxt">${hhmm(t0)}</text><text x="${w - 4}" y="${h - 2}" class="t10-svgtxt" text-anchor="end">${hhmm(t1)}</text>`;
+    return D.svg(w, h, g + line("neg", NEG_C) + line("mkt", MKT_C), "r-split-chart", true);
+  }
+  function compRow(label, col, v, max, lead, leadName, us, isUs) {
+    v = num(v); lead = num(lead); us = num(us);
+    const gap = (a, b) => (a == null || b == null ? "—" : (a - b > 0 ? "+" : "") + fmt(a - b, 1));
+    return el("div", { class: "r-comp" },
+      el("span", { class: "r-comp-l" }, el("i", { class: "r-sq", style: "background:" + col }), label),
+      el("span", { class: "num r-comp-v" }, v == null ? "—" : fmt(v, 1), el("small", { class: "t10-muted" }, " / " + max)),
+      el("span", { class: "r-sb-t r-comp-t" }, el("span", { style: `width:${v == null ? 0 : Math.min(100, (v / max) * 100)}%;background:${col}` })),
+      el("span", { class: "num t10-small", title: tr("rivales.vsLeader.title", { name: leadName }) }, tr("rivales.vsLeader") + " " + gap(v, lead)),
+      isUs ? el("span", {}) : el("span", { class: "num t10-small " + (v != null && us != null && v > us ? "t10-down" : "t10-up"), title: tr("rivales.vsUs.title") }, tr("rivales.vsUsShort") + " " + gap(v, us)));
   }
 
   function renderProfile(root, t, teams, p, profs, avg, booksAll) {
@@ -360,33 +420,47 @@
     const tg = t.team === US ? [] : tags(t, p, avg);
     const vsUs = p.mine.filter((r) => r.type === "duelo" && D.involves(r, US)).length;
     D.replace(root.querySelector(".r-head"),
-      el("div", { class: "r-head-l" }, el("h1", {}, t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team)),
+      el("div", { class: "r-head-l" }, el("h1", {}, t.team === US ? usName() : D.teamName(t.team)),
         el("div", { class: "r-tags" }, tg.map((x) => el("span", { class: "r-tag" }, x)))),
       el("div", { class: "r-kpis" },
-        kpi("Puesto", (t.rank || "—") + ".º"), kpi("Puntos", fmt(t.score, 1)),
-        t.team === US ? null : kpi("vs Nosotros", diff == null ? "—" : (diff > 0 ? "+" : "") + fmt(diff, 1), diff > 0 ? "t10-down" : "t10-up"),
-        kpi("Tratos", t.deals != null ? String(t.deals) : "—"), kpi("Nivel", t.level != null ? String(t.level) : "—"),
-        kpi("Álbum", t.album_filled != null ? t.album_filled + "/" + t.album_slots : "—"),
-        kpi("Tienda", t.venue || "—"), vsUs ? kpi("Duelos con nos.", String(vsUs)) : null),
-      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, "Puntos en el tiempo"), D.spark(D.series(t.team), { w: 300, h: 34 })));
+        kpi(tr("rivales.kpi.rank"), t.rank ? window.I18N.ordinal(t.rank) : "—"), kpi(tr("rivales.kpi.points"), fmt(t.score, 1)),
+        t.team === US ? null : kpi(tr("rivales.kpi.vsUs"), diff == null ? "—" : (diff > 0 ? "+" : "") + fmt(diff, 1), diff > 0 ? "t10-down" : "t10-up"),
+        kpi(tr("rivales.kpi.deals"), t.deals != null ? String(t.deals) : "—"), kpi(tr("common.level"), t.level != null ? String(t.level) : "—"),
+        kpi(tr("common.album"), t.album_filled != null ? t.album_filled + "/" + t.album_slots : "—"),
+        kpi(tr("common.venue"), t.venue || "—"), vsUs ? kpi(tr("rivales.kpi.duelsWithUs"), String(vsUs)) : null),
+      el("div", { class: "r-series" }, el("span", { class: "t10-cap" }, tr("rivales.pointsOverTime")), D.spark(D.series(t.team), { w: 300, h: 34 })),
+      (() => {
+        const best = (k) => teams.reduce((b, x) => (num(x[k]) != null && (b == null || num(x[k]) > num(b[k])) ? x : b), null) || {};
+        const bn = best("negotiating"), bm = best("market");
+        const nm = (x) => (x.team === US ? "Team 10" : D.teamName(x.team) || "—");
+        return el("div", { class: "r-splitbox" },
+          el("div", { class: "r-split-h" }, el("span", { class: "t10-cap" }, tr("rivales.split.title")),
+            el("span", { class: "t10-small t10-muted" }, tr("rivales.split.leaders", { neg: nm(bn) + " " + fmt(bn.negotiating, 1), mkt: nm(bm) + " " + fmt(bm.market, 1) }))),
+          compRow(tr("rivales.negotiation"), NEG_C, t.negotiating, W.negotiating, bn.negotiating, nm(bn), me.negotiating, t.team === US),
+          compRow(tr("rivales.market"), MKT_C, t.market, W.market, bm.market, nm(bm), me.market, t.team === US),
+          t.team === US && window.ui.negParts && window.__meScore ? window.ui.negParts(window.__meScore) : null,
+          el("div", { class: "r-split-legend t10-small t10-muted" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + NEG_C }), tr("rivales.negotiation").toLowerCase()),
+            el("span", {}, el("i", { class: "r-sq", style: "background:" + MKT_C }), tr("rivales.market").toLowerCase()), el("span", {}, tr("rivales.pointsOverTime").toLowerCase())),
+          splitChart(t.team));
+      })());
     // affinities with our marker
     const ours = profs[US] ? Object.fromEntries(profs[US].aff.map((a) => [a.set, a.v])) : {};
-    root.querySelector(".r-aff-sub").textContent = "de sus pujas y compras · " + p.signals + " señales";
+    root.querySelector(".r-aff-sub").textContent = tr("rivales.aff.subN", { n: p.signals });
     D.replace(root.querySelector(".r-aff-body"), p.aff.length ? [
       ...p.aff.slice(0, 7).map((a, i) => el("div", { class: "r-aff-row" },
         el("span", { class: "r-aff-set", style: "border-left-color:" + SET_COLORS[i % SET_COLORS.length] }, a.set),
         el("span", { class: "r-aff-track" }, el("span", { style: `width:${a.v * 100}%;background:${SET_COLORS[i % SET_COLORS.length]}` }),
-          ours[a.set] != null && t.team !== US ? el("i", { class: "r-aff-us", style: `left:${ours[a.set] * 100}%`, title: "la nuestra" }) : null),
+          ours[a.set] != null && t.team !== US ? el("i", { class: "r-aff-us", style: `left:${ours[a.set] * 100}%`, title: tr("rivales.aff.ours") }) : null),
         el("span", { class: "num" }, fmt(a.v * 100, 0) + " %"),
-        ours[a.set] > 0.5 && a.v > 0.5 && t.team !== US ? el("span", { class: "t10-small t10-warn" }, "compite con nosotros") : el("span", {}))),
-      el("div", { class: "t10-small t10-muted" }, "barra: su afinidad · marca blanca: la nuestra")]
-      : D.state("empty", "Sin pujas ni compras grabadas."));
+        ours[a.set] > 0.5 && a.v > 0.5 && t.team !== US ? el("span", { class: "t10-small t10-warn" }, tr("rivales.aff.competes")) : el("span", {}))),
+      el("div", { class: "t10-small t10-muted" }, tr("rivales.aff.legend"))]
+      : D.state("empty", tr("rivales.aff.none")));
     // activity by type
     const tot = TYPES.reduce((s, x) => s + (p.counts[x] || 0), 0);
     D.replace(root.querySelector(".r-types-body"), tot ? [
-      el("div", { class: "r-stack" }, TYPES.filter((x) => p.counts[x]).map((x) => el("span", { style: `flex:${p.counts[x]};background:${TYPE_COLOR[x]}`, title: TYPE_LABEL[x] + ": " + p.counts[x] }))),
-      ...TYPES.map((x) => el("div", { class: "t10-kv" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + TYPE_COLOR[x] }), TYPE_LABEL[x]), el("span", { class: "num" }, String(p.counts[x] || 0))))]
-      : D.state("empty", "Sin actividad grabada hoy."));
+      el("div", { class: "r-stack" }, TYPES.filter((x) => p.counts[x]).map((x) => el("span", { style: `flex:${p.counts[x]};background:${TYPE_COLOR[x]}`, title: typeLabel(x) + ": " + p.counts[x] }))),
+      ...TYPES.map((x) => el("div", { class: "t10-kv" }, el("span", {}, el("i", { class: "r-sq", style: "background:" + TYPE_COLOR[x] }), typeLabel(x)), el("span", { class: "num" }, String(p.counts[x] || 0))))]
+      : D.state("empty", tr("rivales.types.none")));
     // offers in books
     const offers = [];
     for (const [venue, book] of Object.entries(booksAll)) for (const o of (book && book.offers) || []) if (o.maker === t.team) offers.push({ venue, o });
@@ -396,38 +470,40 @@
       const ref = sell ? (g.assets || []).map((a) => a.ref).join(", ") : ((w.assets || []).map((a) => a.ref).join(", ") || (g.assets || []).map((a) => a.ref).join(", "));
       const price = sell ? fmtP(w.cash) : typ === "puja" ? "≤ " + fmtP(g.cash) : "";
       return el("div", { class: "r-off t10-bar-" + typ }, D.chip(typ), el("span", {}, ref), el("span", { class: "t10-muted t10-small" }, D.venueName(venue)), el("span", { class: "num t10-right" }, price));
-    }) : D.state("empty", "No tiene ofertas abiertas en los libros grabados."));
+    }) : D.state("empty", tr("rivales.offers.none")));
     // cards moved
     const moved = [];
     for (const r of p.mine) if (r.kind === "settle") for (const i of r.items || []) if (i.kind === "card" && (i.to === t.team || i.frm === t.team)) moved.push({ r, i, inn: i.to === t.team });
     D.replace(root.querySelector(".r-cards-body"), moved.length ? moved.slice(-30).reverse().map(({ r, i, inn }) => el("div", { class: "r-off" },
-      el("span", { class: "num t10-muted" }, hhmm(r.ts)), el("span", {}, (inn ? "← " : "→ ") + (i.ref || i.name) + (i.rarity ? " · " + i.rarity : "")),
-      el("span", { class: "t10-small t10-muted" }, inn ? "de " + D.teamName(i.frm) : "a " + D.teamName(i.to)), el("span", { class: "num t10-right" }, r.value || "")))
-      : D.state("empty", "No ha movido cartas en el feed grabado."));
+      el("span", { class: "num t10-muted" }, hhmm(r.ts)), el("span", {}, (inn ? "← " : "→ ") + (i.ref || i.name) + (i.rarity ? " · " + rarLabel(i.rarity) : "")),
+      el("span", { class: "t10-small t10-muted" }, inn ? tr("rivales.cards.from", { team: D.teamName(i.frm) }) : tr("rivales.cards.to", { team: D.teamName(i.to) })), el("span", { class: "num t10-right" }, r.value || "")))
+      : D.state("empty", tr("rivales.cards.none")));
     // actions
-    root.querySelector(".r-acts-title").textContent = "Lo que hace " + (t.team === US ? "Team 10 · Nosotros" : D.teamName(t.team));
+    root.querySelector(".r-acts-title").textContent = tr("rivales.acts.titleOf", { team: t.team === US ? usName() : D.teamName(t.team) });
     const acts = p.mine.filter((r) => !S.types.size || S.types.has(r.type)).slice(-120).reverse();
     D.replace(root.querySelector(".r-acts-body"), acts.length ? acts.map((r) => {
       const cells = [el("span", { class: "num t10-muted" }, hhmmss(r.ts)), D.chip(r.type), el("span", {}, r.text), el("span", { class: "num t10-right" }, r.value || "")];
       return window.ui && ui.row ? ui.row({ type: r.type, cells, cols: "74px 104px minmax(0,1fr) 84px", onClick: () => openEvent(r) }) : el("div", { class: "t10-row" }, cells);
-    }) : D.state("empty", "Sin acciones con estos filtros."));
+    }) : D.state("empty", tr("rivales.acts.none")));
   }
   const kpi = (label, value, cls) => el("div", { class: "r-kpi" }, el("span", { class: "t10-cap" }, label), el("span", { class: "num r-kpi-v " + (cls || "") }, value));
   function openEvent(r) {
-    if (window.ui && ui.drawer) ui.drawer({ title: TYPE_LABEL[r.type] + " · " + hhmm(r.ts), body: el("div", { class: "scr-rivales" }, el("p", {}, r.text), el("pre", { class: "t10-pre" }, JSON.stringify(r.raw, null, 2))) });
+    if (window.ui && ui.drawer) ui.drawer({ title: typeLabel(r.type) + " · " + hhmm(r.ts), body: el("div", { class: "scr-rivales" }, el("p", {}, r.text), el("pre", { class: "t10-pre" }, JSON.stringify(r.raw, null, 2))) });
   }
 
   async function refresh(root, data, params) {
     if (!S) mount(root);
     S.data = data; S.params = params;
     await D.prime();
-    await Promise.all([D.feed.pull(), D.board.pull()]);
+    await Promise.all([D.feed.pull(), D.board.pull(), split.pull()]);
     const teams = await D.leaderboard();
+    const lbw = await D.rec("leaderboard", 5000);
+    if (lbw && lbw.weights) W = { negotiating: num(lbw.weights.negotiating) || 30, market: num(lbw.weights.market) || 30 };
     const ven = await D.rec("venues", 8000);
     const booksAll = (await D.rec("books", 8000)) || {};
     const want = params ? String(params).split("/")[0] : null;
     const sel = (want && teams.find((t) => t.team === want)) ? want : (teams.find((t) => t.team !== US) || {}).team;
-    const key = [D.feed.maxSeq, D.board.maxSeq, sel, teams.length, Object.values(booksAll).map((b) => b && b.tick).join(",")].join("|");
+    const key = [D.feed.maxSeq, D.board.maxSeq, split.maxSeq, sel, teams.length, Object.values(booksAll).map((b) => b && b.tick).join(",")].join("|");
     if (key === S.lastKey) return;
     S.lastKey = key; S.sel = sel;
     const day = D.dayEvents();
@@ -437,13 +513,13 @@
     const safe = (f) => { try { f(); } catch (e) { console.error("rivales", e); } };
     safe(() => renderList(root, teams, profs, avg));
     const t = teams.find((x) => x.team === sel);
-    if (!t) { D.replace(root.querySelector(".r-head"), D.state("empty", "Elige un equipo de la lista.")); return; }
+    if (!t) { D.replace(root.querySelector(".r-head"), D.state("empty", tr("rivales.pick"))); return; }
     safe(() => renderProfile(root, t, teams, profs[sel], profs, avg, booksAll));
   }
 
   window.Screens = window.Screens || {};
   window.Screens["rivales"] = {
-    title: "Rivales",
+    get title() { return tr("rivales.title"); },
     mount(root, params) { mount(root); S.params = params; },
     onParams(root, params) { if (S) S.params = params; },
     async refresh(root, data, params) { return refresh(root, data, params); },

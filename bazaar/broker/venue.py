@@ -167,7 +167,8 @@ def should_open(sit: Any, reserve: int | None = None) -> bool:
     me = getattr(sit, "me", None) or {}
     if own_venue_id(me, getattr(sit, "venues", None)) or (load().get("venue") and load_key()):
         return False
-    if (getattr(sit, "t_hours", 0) or 0) < OPEN_AT_HOURS or getattr(sit, "paused", False):
+    # Saturday's schedule changed (no 4.05 grant): open as soon as the doors are open and the cash allows.
+    if getattr(sit, "paused", False):
         return False
     if getattr(sit, "doors", "open") not in ("open", None, ""):
         return False

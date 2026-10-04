@@ -141,7 +141,10 @@ class BrokerLoop:
         self.out = out_dir
         self.out.mkdir(parents=True, exist_ok=True)
         self.policy = policy or load_policy()
+        self.base_policy = json.loads(json.dumps(self.policy))     # code defaults + the tuned file, no overlay
         self.engine = BenchEngine(self.policy)
+        self.overlay_file = (status_file or (out_dir.parent / "broker_status.json")).parent / "broker_policy.json"
+        self.overlay: dict = {"policy": {}, "version": None, "rejected": []}
         self.writes_allowed = writes_allowed
         self.control_file = control_file
         self.status_file = status_file or (self.out.parent / "broker_status.json")
@@ -167,6 +170,8 @@ class BrokerLoop:
         self.state_file = state_file or (self.out.parent / "broker_state.json")
         self.notices_file = notices_file or (self.out.parent / "notices.jsonl")
         self.watch: dict = {"below": 0, "history": [], "switched": None}
+        self.matchmaker = None                          # broker.matchmaker.MatchMaker, attached for the live venue
+        self.bench_hours: list[float] = []              # every scheduled Market Test, to stay quiet around it
         self._load_state()
 
     # ---- helpers
@@ -218,6 +223,8 @@ class BrokerLoop:
             self._err(tick, "schedule", e)
             return
         hard, ticks = [], None
+        self.bench_hours = [float(ev.get("at_hours", -1)) for ev in sch.get("upcoming") or []
+                            if ev.get("action") == "bench"]
         for ev in sch.get("upcoming") or []:
             if ev.get("action") != "bench":
                 continue
@@ -228,6 +235,22 @@ class BrokerLoop:
         self.hard_hours = sorted(set(self.hard_hours) | set(hard))
         if ticks:
             self.policy["session_ticks"] = int(ticks)
+
+    def _load_overlay(self) -> None:
+        """Read data/live/broker_policy.json (validated, bounded) on top of the base policy."""
+        from .policy_overlay import apply, load
+        try:
+            ov = load(self.overlay_file)
+        except Exception as e:  # noqa: BLE001 - a bad overlay must never stop the broker
+            self._err(None, "overlay", e)
+            return
+        ticks = self.policy.get("session_ticks")
+        pol = apply(self.base_policy, ov["policy"])
+        if ticks:
+            pol["session_ticks"] = ticks
+        self.policy = pol
+        self.engine.apply_policy(pol)
+        self.overlay = ov
 
     # ---- one poll
     def poll(self) -> None:
@@ -253,6 +276,7 @@ class BrokerLoop:
 
     def on_tick(self, tick: int, clock: dict) -> None:
         ctl = self.control()
+        self.heartbeat(tick)                           # alive before the slow reads: a late game is not a hung broker
         try:
             book = self.client.book()
         except Exception as e:  # noqa: BLE001
@@ -267,14 +291,21 @@ class BrokerLoop:
             ends[str(meta["run"])] = meta["ends_tick"]
         for run in runs:
             self.absent.pop(run, None)
+        if runs - self.active_runs and not self.active_runs:
+            self._load_overlay()                       # only between sessions: never mid-session
         for run in runs - self.active_runs:            # a session starts
             hard = any(abs(self.t_hours - h) < 0.25 for h in self.hard_hours)
             if hard:
                 self.engine.run_profile[run] = "hard"
             self.stats[run] = {"start_tick": tick, "matches": 0, "refused": 0, "fallback": 0, "probes": 0,
-                               "est_surplus": 0.0, "profile": "hard" if hard else "auto"}
+                               "est_surplus": 0.0, "profile": "hard" if hard else "auto",
+                               "policy_version": self.overlay.get("version")}
             self._append(self.session_name(run), {"type": "start", "tick": tick, "t_hours": self.t_hours,
-                                                  "profile": self.stats[run]["profile"], "policy": self.policy})
+                                                  "profile": self.stats[run]["profile"], "policy": self.policy,
+                                                  "policy_version": self.overlay.get("version"),
+                                                  "overlay": self.overlay.get("policy"),
+                                                  "overlay_by": self.overlay.get("by"),
+                                                  "overlay_rejected": self.overlay.get("rejected")})
         still = set()
         for run in self.active_runs - runs:            # missing: ended, or a blip in the book?
             self.absent[run] = self.absent.get(run, 0) + 1
@@ -336,7 +367,25 @@ class BrokerLoop:
                                                     "plan": [m.to_dict() for m in pplan], "results": presults})
         self._read_results(tick)
         self.engine.forget_before(tick - 40)
+        self.heartbeat(tick)                           # the Market Test work is done: the side job cannot age it
+        self._matchmake(tick, clock, send, bool(bench))
         self.heartbeat(tick)
+
+    def _matchmake(self, tick: int, clock: dict, send: bool, in_session: bool) -> None:
+        """Invite pairs of other teams to our venue. Never during a Market Test or the 12 ticks before one."""
+        from .matchmaker import EVERY_TICKS
+        mm = self.matchmaker
+        if mm is None or not send or in_session or self.active_runs or self.pending_results or tick % EVERY_TICKS:
+            return
+        per_hour = 3600.0 / float(clock.get("tick_seconds") or 30.0)       # ticks in one game hour
+        if any(0 <= (h - self.t_hours) * per_hour <= 12 for h in self.bench_hours):
+            return
+        try:
+            done = mm.step(tick, last_venue_announce=last_announce_tick(mm.venue))
+            if done.get("announced") or done.get("messages"):
+                self._append(f"matchmaker-{self.day}", {"tick": tick, **done})
+        except Exception as e:  # noqa: BLE001 - a side job: it must never hurt the Market Test loop
+            self._err(tick, "matchmaker", f"{type(e).__name__}: {e}")
 
     def _send(self, tick: int, plan: list[Match], send: bool, bench: bool) -> list[dict]:
         out = []
@@ -362,7 +411,7 @@ class BrokerLoop:
             except GameError as e:
                 rec.update(status="refused", error=e.code, message=e.message[:200])
                 if bench:
-                    self.engine.note_refused(m, e.code)
+                    self.engine.note_refused(m, e.code, getattr(e, "message", "") or "")
                     st = self.stats.get(run_of(m.sell))
                     if st:
                         st["refused"] += 1
@@ -485,10 +534,72 @@ class BrokerLoop:
                                                                   "stall_efficiency", "vs_stall")}
                             if self.last_result else None),
             "errors": self.errors[-10:],
+            "policy_version": self.overlay.get("version"), "overlay": self.overlay.get("policy"),
+            "overlay_rejected": self.overlay.get("rejected"),
         }
         tmp = self.status_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(st, default=str))
         tmp.replace(self.status_file)
+
+
+def last_announce_tick(venue_id: str, live: Path | None = None, tail_bytes: int = 400_000) -> int | None:
+    """The tick of the last announcement on a venue, from the recorded feed (ours or the bot's)."""
+    path = (live or config.LIVE) / "events.jsonl"
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - tail_bytes))
+            rows = f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return None
+    for line in reversed(rows):
+        if '"venue.announcement"' not in line or f'"{venue_id}"' not in line:
+            continue
+        try:
+            return int(json.loads(line).get("tick"))
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def team_message(gw: Gateway, venue_id: str) -> Callable[[str, str], Any]:
+    """Open a thread with a team on El Rastro, leave one message and close it (frees the thread slot)."""
+    def send(team: str, text: str) -> Any:
+        # the game refuses a thread on our own venue (self_venue): the note travels on the house market
+        t = gw.post("/api/threads", {"with": team, "venue": "rastro"})
+        tid = t.get("id") or (t.get("thread") or {}).get("id")
+        try:
+            return gw.post(f"/api/threads/{int(tid)}/messages", {"text": text[:600]})
+        finally:
+            try:
+                gw.post(f"/api/threads/{int(tid)}/close")
+            except Exception:  # noqa: BLE001
+                pass
+    return send
+
+
+def plaza_helpers(control_fn: Callable[[], dict] | None = None) -> tuple[Callable[[], Any] | None,
+                                                                         Callable[[], Any] | None]:
+    """The plaza's two helpers for the matchmaker (its public address, the pairs agents declared), or
+    (None, None) when the plaza package does not even import. The broker plays the Market Test: it must
+    start and run whatever state the market board's code is in.
+
+    The address goes into the venue's announcements, which every team reads, only once a human has switched
+    the market on by hand: control.json `plaza: "on"` (POST /control {"plaza": "on"}). With the key absent
+    the market still runs, but its address is not announced."""
+    try:
+        from ..plaza import server as plaza
+    except Exception as e:  # noqa: BLE001 - any failure of that package, a syntax error included
+        print(f"broker: plaza not available ({type(e).__name__}: {e}); announcements go without its page", flush=True)
+        return None, None
+    control = control_fn or (lambda: _read_json(config.LIVE / "control.json"))
+
+    def page() -> str | None:
+        if str((control() or {}).get("plaza") or "").lower() != "on":
+            return None
+        return plaza.public_url(config.LIVE, config.DATA)
+
+    return page, lambda: plaza.declared_pairs(config.LIVE, config.DATA / "record")
 
 
 def _num(x: Any) -> float | None:
@@ -588,6 +699,14 @@ def main(argv: list[str] | None = None) -> None:
                       status_file=out.parent / "broker_status.json",
                       state_file=(out.parent / "broker_state.json") if against_sim else (config.LAB / "broker" / "state.json"),
                       notices_file=(out.parent / "notices.jsonl") if against_sim else (config.LAB / "notices.jsonl"))
+    if not against_sim:
+        from ..intel.needs import needs_report
+        from .matchmaker import VENUE, MatchMaker
+        page_fn, declared_fn = plaza_helpers()
+        loop.matchmaker = MatchMaker(config.LIVE / "matchmaker.json", needs_report,
+                                     lambda: _read_json(config.LIVE / "control.json"),
+                                     announce=client.announce, message=team_message(gw, VENUE),
+                                     page_fn=page_fn, declared_fn=declared_fn)
     print(f"broker: {'fake bazaar' if against_sim else 'live'} | key {'present' if key else 'MISSING'} | "
           f"writes {'on' if writes()[0] else 'off (' + writes()[1] + ')'} | out {out}", flush=True)
     while True:

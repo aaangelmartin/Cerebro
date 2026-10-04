@@ -4,7 +4,7 @@
   class ApiError extends Error {
     constructor(status, message, body) { super(message || ("HTTP " + status)); this.name = "ApiError"; this.status = status; this.body = body; }
   }
-  const TTL = 2000;
+  const TTL = 1500;
   const cache = new Map();   // url -> {at, promise}
 
   function qs(params) {
@@ -24,7 +24,7 @@
     }
     let res;
     try { res = await fetch("api/" + path, opts); }
-    catch (e) { throw new ApiError(0, "Sin conexión con la API"); }
+    catch (e) { throw new ApiError(0, window.I18N ? window.I18N.t("common.noConnection").replace(/\.$/, "") : "Sin conexión con la API"); }
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
     if (!res.ok) throw new ApiError(res.status, (data && (data.message || data.error)) || ("HTTP " + res.status), data);
@@ -65,6 +65,17 @@
     setLesson: (id, status, why) => write("POST", "lessons/" + enc(id), { status, why }),
     novelty: (since, limit) => get("novelty", { since, limit }),
     spend: () => get("spend"),
+    llmHealth: () => get("llm/health", {}, 5000),
+    brainBudget: () => get("brain/budget", {}, 0),
+    strategy: (limit) => get("strategy", { limit }),
+    brainChat: (since) => get("brain/chat", { since }, 0),
+    brainSay: (text, by) => write("POST", "brain/chat", { text, by: by || "equipo" }),
+    outbox: (o) => get("outbox", { kind: o && o.kind, status: o && o.status, since: o && o.since }, 0),
+    outboxSet: (id, status, note) => write("POST", "outbox/" + enc(id), { status, note: note || "" }),
+    external: (since) => get("brain/external", { since }, 0),
+    externalAdd: (text, by, team_hint) => write("POST", "brain/external", team_hint ? { text, by, team_hint } : { text, by }),
+    dealerChat: (dealer) => get("dealer-chat", { dealer }, 0),
+    dealerChatDo: (what, body) => write("POST", "dealer-chat/" + what, body),
     broker: () => get("broker"),
     duelsLive: () => get("duels"),
     tickLatest: () => get("tick/latest"),

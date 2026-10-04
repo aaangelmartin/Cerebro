@@ -69,6 +69,15 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((saved["armed"], saved["protected"], saved["mode"]), (True, [12], "auto"))
         self.assertEqual(self.req("/control")[1]["paused_domains"], ["market"])
 
+    def test_control_allied_venues(self):
+        h = {"X-Dashboard": "1", "Content-Type": "application/json"}
+        self.assertEqual(self.req("/control", {"allied_venues": ["v10"]}, h)[0], 400)
+        self.assertEqual(self.req("/control", {"allied_venues": {"rastro": "t05"}}, h)[0], 400)
+        self.assertEqual(self.req("/control", {"allied_venues": {"v10": "t05"}}, h)[0], 200)
+        self.assertEqual(json.loads((self.live / "control.json").read_text())["allied_venues"], {"v10": "t05"})
+        self.assertEqual(self.req("/control", {"allied_venues": {}}, h)[0], 200)      # no allies again
+        self.assertEqual(json.loads((self.live / "control.json").read_text())["allied_venues"], {})
+
     def test_lessons_get_and_set(self):
         self.assertEqual(self.req("/lessons")[1]["lessons"][0]["id"], "L1")
         h = {"X-Dashboard": "1"}
@@ -96,3 +105,13 @@ class DuelSwitches(unittest.TestCase):
             self.assertEqual((c["duel_claude_mode"], c["duel_days_sign"]), ("full", "cost"))
             with self.assertRaises(ValueError):
                 apply_control(Path(d), {"duel_claude_mode": "yolo"})
+
+
+class MinAsks(unittest.TestCase):
+    def test_min_asks_are_stored_upper_case_and_validated(self):
+        from bazaar.api.server import apply_control
+        with tempfile.TemporaryDirectory() as d:
+            c = apply_control(Path(d), {"min_asks": {"ret-11": 228, "LAT-02": 58, "SAL-01": 0}})
+            self.assertEqual(c["min_asks"], {"RET-11": 228, "LAT-02": 58})
+            with self.assertRaises(ValueError):
+                apply_control(Path(d), {"min_asks": {"RET-11": "cheap"}})

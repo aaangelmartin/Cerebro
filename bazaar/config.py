@@ -63,15 +63,53 @@ PRICES = {OPUS: (4.0, 20.0), SONNET: (2.0, 10.0), HAIKU: (1.0, 5.0)}
 def anthropic_keys() -> list[tuple[str, str]]:
     """[(label, key)] for the router: ANTHROPIC_API_KEY_A/_B/_C, else ANTHROPIC_API_KEY."""
     keys = [(s, ENV[f"ANTHROPIC_API_KEY_{s}"]) for s in "ABC" if ENV.get(f"ANTHROPIC_API_KEY_{s}")]
-    if not keys and ENV.get("ANTHROPIC_API_KEY"):
-        keys = [("A", ENV["ANTHROPIC_API_KEY"])]
+    if ENV.get("ANTHROPIC_API_KEY") and ENV["ANTHROPIC_API_KEY"] not in {k for _, k in keys}:
+        if "A" not in {lbl for lbl, _ in keys}:
+            keys.insert(0, ("A", ENV["ANTHROPIC_API_KEY"]))   # the original key stays in the pool
+        else:
+            keys.append(("D", ENV["ANTHROPIC_API_KEY"]))
     return keys
 
 
 KEY_CAP_USD = float(ENV.get("BAZAAR_KEY_CAP_USD", "100"))     # hard cap per key, whole weekend
-DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "100"))     # all keys together, per Madrid day
-DEGRADE_AT = 0.8                                               # share of the day cap that steps Opus -> Sonnet
-DEGRADE_HAIKU_AT = 0.92                                        # share of the day cap that steps Sonnet -> Haiku
+DAY_CAP_USD = float(ENV.get("BAZAAR_DAY_CAP_USD", "130"))     # all keys together, per Madrid day (default)
+DAY_CAP_MIN_USD, DAY_CAP_MAX_USD = 20.0, 200.0                 # control.json "day_cap" is clamped to this range
+
+
+def madrid_day(now: float | None = None) -> str:
+    """'fri' | 'sat' | 'sun' | ... for the Madrid calendar day (the key the spend file uses)."""
+    import time as _time
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        d = datetime.fromtimestamp(now or _time.time(), ZoneInfo("Europe/Madrid"))
+    except Exception:  # noqa: BLE001
+        d = datetime.fromtimestamp(now or _time.time(), timezone(timedelta(hours=2)))
+    return d.strftime("%a").lower()
+
+
+def day_cap_usd() -> float:
+    """Today's total cap, clamped to the hard limits: control.json "day_cap" when the team set one; else today's
+    share of the event budget, which the brain's governor writes to brain_budget.json; else DAY_CAP_USD."""
+    import json as _json
+
+    def _load(name):
+        try:
+            return _json.loads((LIVE / name).read_text(encoding="utf-8")) or {}
+        except (OSError, ValueError):
+            return {}
+    ctl = _load("control.json")
+    v = ctl.get("day_cap") if ctl.get("caps_day") in (None, madrid_day()) else None   # a hand-set cap lasts one day
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        st = _load("brain_budget.json")
+        v = st.get("day_cap_today") if st.get("day") == madrid_day() else None
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return DAY_CAP_USD
+    return max(DAY_CAP_MIN_USD, min(DAY_CAP_MAX_USD, float(v)))
+
+
+DEGRADE_AT = 0.97                                              # share of the day cap that steps Opus -> Sonnet
+DEGRADE_HAIKU_AT = 0.99                                        # share of the day cap that steps Sonnet -> Haiku
 # Effective day cap = min(DAY_CAP_USD, budget left at the start of the day across live keys x share of the day).
 # Saturday may use 55 % of what is left, Sunday everything, Friday/other days 10 %. With one $100 key this keeps
 # about $45 for Sunday instead of letting Saturday burn it all. Past 100 % of the effective cap: code only.
@@ -85,7 +123,7 @@ RACE_DAYS = {"sun"}             # days when Opus races Sonnet (decision: only Su
 CASH_RESERVE = int(ENV.get("BAZAAR_CASH_RESERVE", "15"))   # round-4 strategy: after the venue only ~66 P remain
 MAX_SPEND_PER_DEAL = int(ENV.get("BAZAAR_MAX_SPEND_PER_DEAL", "120"))
 MAX_SPEND_PER_HOUR = int(ENV.get("BAZAAR_MAX_SPEND_PER_HOUR", "250"))
-BIG_DEAL_P = 60                 # buys above this go to the council
+BIG_DEAL_P = int(ENV.get("BAZAAR_BIG_DEAL_P", "25"))   # buys at or above this (and every goal buy) go to the council
 
 # --- ports --------------------------------------------------------------------
 API_PORT = int(ENV.get("BAZAAR_API_PORT", "8791"))   # control + telemetry for the new dashboard

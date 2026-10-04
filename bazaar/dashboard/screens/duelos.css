@@ -83,3 +83,17 @@
 .dl-drawer .dl-out b { font-size: 18px; }
 @media (max-width: 999px) { .scr-duelos .dl-layout { grid-template-columns: minmax(0, 1fr); height: auto; } .scr-duelos .dl-main, .scr-duelos .dl-side { overflow: visible; } }
 @media (max-width: 760px) { .scr-duelos .dl-grid { grid-template-columns: 1fr; } }
+/* scoreboard: every duel we played */
+.scr-duelos .dl-score { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); border: 1px solid var(--dl-line); background: var(--dl-s1); margin-bottom: 12px; }
+.scr-duelos .dl-sc { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px 10px; border-left: 3px solid var(--dl-line); border-right: 1px solid var(--dl-line); }
+.scr-duelos .dl-sc:last-child { border-right: 0; }
+.scr-duelos .dl-sc-l { font-family: var(--font-num, monospace); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dl-muted); }
+.scr-duelos .dl-sc-v { font-size: 20px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-variant-numeric: tabular-nums; }
+.scr-duelos .dl-sc-s { font-size: 11px; color: var(--dl-muted); min-height: 14px; }
+.scr-duelos .dl-sc.tone-ok { border-left-color: var(--dl-ok); } .scr-duelos .dl-sc.tone-ok .dl-sc-v { color: var(--dl-ok); }
+.scr-duelos .dl-sc.tone-bad { border-left-color: var(--dl-bad); } .scr-duelos .dl-sc.tone-bad .dl-sc-v { color: var(--dl-bad); }
+.scr-duelos .dl-sc.tone-warn { border-left-color: var(--pause, #F08A3E); } .scr-duelos .dl-sc.tone-warn .dl-sc-v { color: var(--pause, #F08A3E); }
+.scr-duelos .dl-sc.tone-live { border-left-color: var(--dl-violet); } .scr-duelos .dl-sc.tone-live .dl-sc-v { color: var(--dl-violet); }
+.scr-duelos .dl-livemark { color: var(--ok); border: 1px solid var(--ok); background: var(--ok-soft); font-size: 11px; padding: 0 6px; white-space: nowrap; }
+.scr-duelos .dl-pane.is-ended { opacity: .9; }
+.scr-duelos .dl-endwhen { margin-left: 8px; font-size: 11px; }

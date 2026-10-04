@@ -1,0 +1,11 @@
+/* admin suggestions: classes start with .adm-sug */
+.adm-sug-list { display: flex; flex-direction: column; }
+.adm-sug { border-bottom: 1px solid var(--line); }
+.adm-sug:last-child { border-bottom: 0; }
+.adm-sug.is-open { background: var(--s2); }
+.adm-sug-head { display: grid; grid-template-columns: 58px 34px 92px 1fr auto auto; align-items: center; gap: 12px; padding: 11px 14px; }
+.adm-sug-head .chip { justify-self: start; }
+.adm-sug-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.adm-sug-meta { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-3); }
+.adm-sug-form { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px 118px; }
+.adm-sug-reply { resize: vertical; font-family: inherit; font-size: 13px; }

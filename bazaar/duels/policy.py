@@ -8,10 +8,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .model import DAYS_MAX, MIN_SURPLUS, TICKS_PER_DUEL, DuelView, points, price_for
+from .model import DAYS_MAX, MIN_SURPLUS, DuelView, points, price_for
 
 PARAMS = {
     "OPEN": 0.9,           # opening ask, as a share of the estimated pie
+    "OPEN_BUYER": 0.8,     # as buyer open a little closer: 2.2 rounds per deal against 1.7 as seller in Duels II
     "END": 0.12,           # last-tick ask against a silent rival (rounds do not grow while they are mute)
     "BETA": 2.0,           # >1: hold early, concede late
     "ACCEPT_SHARE": 0.6,   # accept any rival offer that already gives us this share of the pie
@@ -20,6 +21,11 @@ PARAMS = {
     "PROBE_UNTIL": 9,      # leave one rival offer unanswered for a tick while more ticks than this remain
     "LAST_TICKS": 2,       # in the last ticks take any offer inside our limit
     "TOUGH_TAKE": 1.0,     # tough rival: take their offer when it is worth >= TOUGH_TAKE x q x the midpoint
+    # Rival silent since our offer: hold in silence, then a short finish in the last FINAL_TICKS ticks, one
+    # step per tick, down to these shares of the estimated pie (by ticks left). Saturday's silent rivals
+    # accepted at 26 %, 17 % and 29 % of the pie (duels 2328, 2329, 2354), so the steps end at 17 %.
+    "FINAL_TICKS": 3,
+    "FINAL_STEPS": {3: 0.40, 2: 0.28, 1: 0.17},
 }
 
 
@@ -90,7 +96,31 @@ def _days_when_they_cost(v: DuelView, w: float, pie: float | None) -> int:
     return 0
 
 
+DAY_PRIOR_RATIO = 1.25   # the rival must care this much more than we do: the prior is a median of other duels
+DAY_PRIOR_GAP = 0.5      # and by at least this many points a day
+
+
+def rival_cares_more(v: DuelView) -> bool:
+    """True when a delivery day is worth clearly more to the rival than to us (opponent.rival_day_prior).
+    The seller gains with every later day and the buyer loses, so the day belongs to whoever has the larger
+    weight: Duels II left about 7.6 points of pie per deal on the table by always asking for our own day."""
+    r, w = v.rival_w_prior, abs(days_weight(v))
+    return r is not None and not v.days_ambiguous and r >= DAY_PRIOR_RATIO * w and r - w >= DAY_PRIOR_GAP
+
+
+def joint_days_bonus(v: DuelView, days: int | None) -> float:
+    """Pie added by giving the rival `days` that cost us less than they are worth to it."""
+    if not days or not rival_cares_more(v) or days_weight(v) >= 0:
+        return 0.0
+    return (v.rival_w_prior - abs(days_weight(v))) * days
+
+
 def choose_days(v: DuelView, pie: float | None = None) -> int | None:
+    """The delivery days we ask for, from the sign the game gives THIS duel (days_meaning, never the role
+    alone): days pay us -> 10; days cost us -> 0 (at most the rival's own lowest days as cheap goodwill).
+    Sunday, Duels III: giving the rival "its" day and charging it in the price (the day prior) did not get
+    paid: as seller the 0-day deals averaged 15 points against 39 with 10 days, and as buyer two openings
+    with 10 days closed at -15.1 and -28.3 (duels 11231, 11544)."""
     if not v.uses_days:
         return None
     w = days_weight(v)
@@ -103,14 +133,44 @@ def choose_days(v: DuelView, pie: float | None = None) -> int | None:
         return 0
     if w < 0:
         return _days_when_they_cost(v, w, pie)
-    wr = rival_days_weight(v, w)
-    joint = w + wr
-    if abs(joint) < 1e-9:
-        last = next((o.days for o in reversed(v.rival_offers()) if o.days is not None), None)
-        if last is not None:
-            return last
-        return DAYS_MAX if w > 0 else 0 if w < 0 else DAYS_MAX // 2
-    return DAYS_MAX if joint > 0 else 0
+    if w > 0:
+        return DAYS_MAX
+    last = next((o.days for o in reversed(v.rival_offers()) if o.days is not None), None)
+    return last if last is not None else DAYS_MAX // 2
+
+
+def safe_days(v: DuelView, price: float, days: int | None) -> tuple[int | None, str | None]:
+    """The days an offer of ours may carry at `price`, whoever chose them (Claude or code): days that pay
+    us go out at 10; days that cost us only while they cost under COST_DAYS_GOODWILL of the price margin,
+    else 0. Returns (days, note or None)."""
+    if not v.uses_days or days is None or v.days_ambiguous:
+        return days, None
+    w = days_weight(v)
+    if w > 0 and days < DAYS_MAX:
+        return DAYS_MAX, f"each day pays us {w:g}: days {days} -> {DAYS_MAX}"
+    if w < 0 and days > 0 and abs(w) * days >= COST_DAYS_GOODWILL * max(0.0, v.surplus(price)):
+        return 0, f"each day costs us {abs(w):g}: days {days} -> 0"
+    return days, None
+
+
+def replace_losing_offer(v: DuelView, mv: Move) -> tuple[Move, list[str]]:
+    """Our standing offer is worth less than MIN_SURPLUS once days count and this tick's move would leave it
+    on the table (the rival can take it at any moment): send the same price with safe days instead."""
+    if mv.action != "wait" or not v.uses_days:
+        return mv, []
+    prev = v.our_offer or (v.our_offers()[-1] if v.our_offers() else None)
+    if prev is None or prev.days is None or v.surplus(prev.price) < MIN_SURPLUS \
+            or v.safe_utility(prev.price, prev.days) >= MIN_SURPLUS:
+        return mv, []
+    days = 0 if days_weight(v) < 0 or v.days_ambiguous else DAYS_MAX
+    if days == prev.days or v.safe_utility(prev.price, days) < MIN_SURPLUS:
+        return mv, []
+    return Move("offer", prev.price, days, text=template_text(v, prev.price, days),
+                reason=f"our standing offer {prev.price} P / {prev.days} days is worth "
+                       f"{v.utility(prev.price, prev.days):.1f} to us: replaced with {days} days",
+                expected_points=round(points(v.utility(prev.price, days), v.decay, v.rounds_if_we_send()), 2),
+                source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), \
+        ["standing offer loses once days count: replaced"]
 
 
 # --- economics ----------------------------------------------------------------------------------------
@@ -144,9 +204,10 @@ def economics(v: DuelView, opp: dict, ask: tuple[int, int | None] | None = None)
 
 # --- the fallback ---------------------------------------------------------------------------------------
 def _target_share(v: DuelView, p=PARAMS) -> float:
-    T = max(2, TICKS_PER_DUEL)
+    T = max(2, v.total_ticks)
     x = min(1.0, v.elapsed / (T - 1))
-    return p["OPEN"] - (p["OPEN"] - p["END"]) * (x ** p["BETA"])
+    top = p.get("OPEN_BUYER", p["OPEN"]) if v.role == "buyer" else p["OPEN"]
+    return top - (top - p["END"]) * (x ** p["BETA"])
 
 
 def _their_steps(v: DuelView) -> list[float]:
@@ -195,7 +256,7 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
     d_off = choose_days(v, pie)
     last_ticks = last_ticks_for(opp, p)
     days_bonus = (w * d_off) if (v.uses_days and d_off is not None and not v.days_ambiguous) else 0.0
-    pie_u = pie + max(0.0, days_bonus)
+    pie_u = pie + max(0.0, days_bonus) + joint_days_bonus(v, d_off)
     q = 1.0 - v.decay
     share = _target_share(v, p)
     u_target = max(MIN_SURPLUS, share * pie_u)
@@ -259,6 +320,117 @@ def plan(v: DuelView, opp: dict, p=PARAMS) -> Move:
                 reason=f"ask {v.utility(price, d_off):.0f} of pie ~{pie_u:.0f} ({share:.0%} schedule)")
 
 
+def final_u(v: DuelView, opp: dict, p=PARAMS) -> float:
+    """The margin this tick's finish step keeps: a share of the pie, never below MIN_SURPLUS (so never
+    past our limit)."""
+    pie = max(2.0, float(opp.get("pie_estimate") or 2.0))
+    steps = p["FINAL_STEPS"]
+    share = steps.get(int(v.ticks_left), steps[min(steps)] if v.ticks_left < min(steps) else steps[max(steps)])
+    return max(float(MIN_SURPLUS), share * pie)
+
+
+def hold_rule(v: DuelView, mv: Move, opp: dict, p=PARAMS) -> tuple[Move, list[str]]:
+    """Never bid against ourselves. While the rival owes us an answer (it has said nothing since our last
+    priced offer, or nothing at all), our standing offer stays and we send NOTHING: no repeated messages,
+    no lower prices tick after tick. We speak again when the rival moves (normal haggling), or in the last
+    FINAL_TICKS ticks with a short finish: one step per tick down the FINAL_STEPS shares of the pie, the
+    prices a silent rival has accepted before. Applies to Claude's moves and to the code fallback,
+    price-only duels and Duels II alike."""
+    if mv.action == "accept" or (v.our_offer is None and not v.our_offers()):
+        return mv, []                               # accept / our opening offer: nothing to hold
+    if v.unanswered_rival_offer():
+        return mv, []                               # the rival moved: answering is the normal game
+    prev = v.our_offer or v.our_offers()[-1]
+    u_prev = v.utility(prev.price, prev.days)
+    keep = dict(source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids))
+    if v.ticks_left > p["FINAL_TICKS"]:
+        if mv.action == "wait":
+            return mv, []
+        return Move("wait", reason="hold: the rival has not answered our offer; no message, no concession",
+                    **keep), ["hold: rival silent since our offer"]
+    floor = final_u(v, opp, p)
+    if u_prev <= floor + 0.5:
+        return Move("wait", reason="hold: this tick's finish step is already on the table", **keep), \
+            ["hold: finish step already sent"]
+    days = (mv.days if mv.action == "offer" else None)
+    if v.uses_days and days is None:
+        days = prev.days if prev.days is not None else 0
+    price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), floor - u_days(v, days)))
+    if v.surplus(price) < MIN_SURPLUS:
+        price = price_for(v.role, v.limit, MIN_SURPLUS)
+    if price == prev.price and days == prev.days:
+        return Move("wait", reason="hold: this tick's finish step is already on the table", **keep), []
+    d = f" with delivery in {days} days" if v.uses_days and days is not None else ""
+    last = v.ticks_left <= 1
+    text = (f"My final offer: {price} P{d}. Happy to close now." if last
+            else f"I can do {price} P{d} to close today.")
+    return Move("offer", price, days, text=text,
+                reason=f"finish vs a silent rival: {v.ticks_left} ticks left, keep {floor:.0f} of the pie",
+                expected_points=round(points(v.utility(price, days), v.decay, v.rounds_if_we_send()), 2),
+                **keep), [f"finish step to margin {floor:.0f}"]
+
+
+def rival_unchanged(v: DuelView) -> bool:
+    """The rival answered our last priced offer with the very terms it already had on the table."""
+    ro = v.rival_offers()
+    last_ours = max((m.tick for m in v.messages if m.ours and m.price is not None), default=None)
+    if len(ro) < 2 or last_ours is None:
+        return False
+    before = [o for o in ro if o.tick is not None and o.tick <= last_ours]
+    return bool(before) and (ro[-1].price, ro[-1].days) == (before[-1].price, before[-1].days)
+
+
+def hold_vs_unmoved_rival(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list[str]]:
+    """Claude's moves too: a rival that repeats its exact terms after our step has not paid for another
+    one. A new offer from us would only add a round of decay and bid against ourselves (duel 2420: the
+    rival sat on one price five times while we walked from 18 to 1). Wait instead; accepting stays free,
+    and the last FINAL_TICKS ticks are left to the normal finish."""
+    if mv.action != "offer" or v.ticks_left <= p["FINAL_TICKS"] or not v.our_offers():
+        return mv, []
+    if not rival_unchanged(v):
+        return mv, []
+    return Move("wait", reason="hold: the rival repeated its price since our last offer; no new step",
+                source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), ["hold: rival price unchanged"]
+
+
+def hold_if_rival_unchanged(v: DuelView, mv: Move, p=PARAMS) -> tuple[Move, list[str]]:
+    """Code fallback only: if the rival's price has not changed since our last offer (it repeated the same
+    terms), stepping again is bidding against ourselves. Hold until it moves or the last ticks."""
+    if mv.action != "offer" or v.ticks_left <= p["FINAL_TICKS"] or not v.our_offers():
+        return mv, []
+    ro = v.rival_offers()
+    last_ours = max((m.tick for m in v.messages if m.ours and m.price is not None), default=None)
+    if len(ro) < 2 or last_ours is None:
+        return mv, []
+    if rival_unchanged(v):
+        return Move("wait", reason="hold: the rival repeated its price since our last offer; no new step",
+                    source=mv.source), ["hold: rival price unchanged"]
+    # the rival moved: concede at most half of its last move (min 1 P), never the whole time schedule
+    steps = _their_steps(v)
+    prev = v.our_offer or v.our_offers()[-1]
+    u_prev = v.utility(prev.price, prev.days)
+    cap = max(1.0, 0.5 * max(0.0, steps[-1])) if steps else None
+    if cap is not None:
+        try:
+            u = v.utility(float(mv.price), mv.days)
+        except (TypeError, ValueError):
+            return mv, []
+        if u < u_prev - cap:
+            price = price_for(v.role, v.limit, max(float(MIN_SURPLUS), u_prev - cap - u_days(v, mv.days)))
+            d = f" with delivery in {mv.days} days" if v.uses_days and mv.days is not None else ""
+            return Move("offer", price, mv.days, text=f"Meeting you closer: {price} P{d}.",
+                        reason=f"{mv.reason} [step capped at half the rival's move: {cap:.0f} P]",
+                        source=mv.source), [f"step capped to {cap:.0f} P"]
+    return mv, []
+
+
+def u_days(v: DuelView, days) -> float:
+    """The part of our utility that comes from the delivery days (0 in price-only duels)."""
+    if not v.uses_days or days is None:
+        return 0.0
+    return v.utility(v.limit, days) - v.utility(v.limit, 0)
+
+
 def last_ticks_for(opp: dict, p=PARAMS) -> int:
     """Take-anything window: one accept per tick for the whole team, so with N duels waiting to accept the
     last one only gets its turn N ticks later (opp["accept_queue"], set by the domain each tick)."""
@@ -314,9 +486,16 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
         if days is None:
             days = 0
         days = max(0, min(DAYS_MAX, days))
+    days, dnote = safe_days(v, price, days)
+    if dnote:
+        notes.append(dnote)
     if v.days_ambiguous and days is not None and v.safe_utility(price, days) < MIN_SURPLUS:
         notes.append("days sign ambiguous: price raised so the offer is safe under both readings")
         price = price_for(v.role, v.limit, MIN_SURPLUS + abs(v.days_w) * days)
+    if v.safe_utility(price, days) < MIN_SURPLUS:
+        # The rival can take any offer we send: one worth less than MIN_SURPLUS with its days is never sent.
+        notes.append(f"offer {price} P / {days} days is worth {v.safe_utility(price, days):.1f} to us: not sent")
+        return (guard(v, fallback)[0] if fallback is not None and fallback is not mv else Move("wait")), notes
     mv.price, mv.days = price, days
 
     # If the rival already offers at least this, accepting is strictly better than asking for less.
@@ -336,7 +515,7 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
 
     text = (mv.text or "").replace("\n", " ").strip()
     if not text or not re.search(rf"(?<!\d){price}(?!\d)", text) or len(text) > 280 or \
-            re.findall(r"\d+", text).count(str(price)) == 0 or _other_prices(text, price, days):
+            re.findall(r"\d+", text).count(str(price)) == 0 or _other_prices(text, price, days) or dnote:
         if text:
             notes.append("text did not carry the exact price: template")
         text = template_text(v, price, days)

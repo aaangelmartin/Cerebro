@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import threading
@@ -61,13 +62,13 @@ class KeyRouter:
         self.keys = list(config.anthropic_keys() if keys is None else keys)
         self.path = Path(path or config.SPEND_FILE)
         self.key_cap = config.KEY_CAP_USD if key_cap is None else key_cap
-        self.day_cap = config.DAY_CAP_USD if day_cap is None else day_cap
+        self._day_cap = day_cap                  # None: config.day_cap_usd(), which follows control.json
         self.clock = clock
         self.shares = dict(config.DAY_SHARE if shares is None else shares)
         self.lock = threading.RLock()
         self.dead: dict[str, str] = {}          # label -> why
         self.cool: dict[str, float] = {}        # label -> epoch when usable again
-        self.state = {"keys": {}, "days": {}}
+        self.state = {"keys": {}, "days": {}, "dead": {}}
         self._reload()
 
     def _reload(self):
@@ -76,7 +77,22 @@ class KeyRouter:
         except (OSError, ValueError):
             return
         if isinstance(loaded, dict):
-            self.state = {"keys": loaded.get("keys") or {}, "days": loaded.get("days") or {}}
+            self.state = {"keys": loaded.get("keys") or {}, "days": loaded.get("days") or {},
+                          "dead": loaded.get("dead") or {}}
+            self._merge_dead()
+
+    def _fingerprint(self, label: str) -> str:
+        key = dict(self.keys).get(label) or ""
+        return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+    def _merge_dead(self):
+        """Dead keys other processes found today (same key value) count here too; a new day or a replaced
+        key clears the mark."""
+        today = self.day()
+        for label, d in (self.state.get("dead") or {}).items():
+            if (isinstance(d, dict) and d.get("day") == today and d.get("fp") == self._fingerprint(label)
+                    and label in dict(self.keys)):
+                self.dead.setdefault(label, str(d.get("why") or "dead"))
 
     # --- keys ---------------------------------------------------------------------
     def key_spent(self, label: str) -> float:
@@ -107,6 +123,14 @@ class KeyRouter:
     def mark_dead(self, label: str, why: str):
         with self.lock:
             self.dead[label] = why
+            try:                                # shared with the other processes for the rest of the day
+                with _FileLock(self.path.with_suffix(".lock")):
+                    self._reload()
+                    self.state.setdefault("dead", {})[label] = {"why": str(why)[:300], "day": self.day(),
+                                                                "fp": self._fingerprint(label), "at": self.clock()}
+                    self._save()
+            except OSError:
+                pass
         log.warning("llm key %s dead: %s", label, why)
 
     def cooldown(self, label: str, seconds: float):
@@ -129,6 +153,14 @@ class KeyRouter:
     def share(self, day: str | None = None) -> float:
         d = day or self.day()
         return float(self.shares.get(d, self.shares.get("*", 1.0)))
+
+    @property
+    def day_cap(self) -> float:
+        return config.day_cap_usd() if self._day_cap is None else self._day_cap
+
+    @day_cap.setter
+    def day_cap(self, value: float) -> None:
+        self._day_cap = value
 
     def effective_day_cap(self, reload: bool = True) -> float:
         """min(day_cap, (left on live keys + spent today) x share of today)."""

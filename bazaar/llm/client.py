@@ -25,6 +25,14 @@ EFFORT = {config.OPUS: "low", config.SONNET: "low"}    # output_config.effort pe
 # for the tool and callers must handle a text-only answer.
 NO_FORCED_TOOL = {config.OPUS, config.SONNET}
 DEFAULT_TIMEOUT_S = 60.0
+# slow, non-latency-critical purposes: el cerebro's plans take 50-60 s at medium effort
+PURPOSE_TIMEOUT_S = {"strategy": 150.0, "brain_eval": 150.0}
+
+
+def call_timeout(purpose: str) -> float:
+    """Per-attempt HTTP timeout for a purpose (the deadline still caps it)."""
+    return PURPOSE_TIMEOUT_S.get(purpose, DEFAULT_TIMEOUT_S)
+_MAC_PURPOSES = {"strategy", "brain_eval"}      # see cli_backend.MAC_PURPOSES
 MIN_CALL_S = 0.5                   # don't start an attempt with less time than this
 MAX_ATTEMPTS = 6
 COOLDOWN_S = {"rate": 15.0, "overloaded": 5.0, "server": 3.0, "network": 2.0, "timeout": 2.0}
@@ -107,6 +115,13 @@ def _classify(exc: Exception) -> tuple[str, float]:
         return "timeout", COOLDOWN_S["timeout"]
     if status in (401, 403) or "credit balance" in msg or "billing" in msg:
         return "dead", 0.0
+    # the key hit its own spend limit in the Console ("You have reached your specified API usage limits.
+    # You will regain access on ..."): it is out for the day, use the next key
+    if "usage limit" in msg or "regain access" in msg:
+        return "dead", 0.0
+    # a key the API rejects for what it is (e.g. an admin key with no workspace) can never work: drop it, try the next
+    if "workspace" in msg or "api key" in msg or "x-api-key" in msg or "invalid_api_key" in msg:
+        return "dead", 0.0
     if status == 429:
         retry = _retry_after(exc)
         return "cool", retry if retry is not None else COOLDOWN_S["rate"]
@@ -155,8 +170,17 @@ def _summary(messages: list) -> str:
 def ask(*, purpose: str, system: str | list, messages: list, tools: list | None = None,
         tool_choice: dict | None = None, model: str | None = None, max_tokens: int = 1200,
         deadline: float | None = None, temperature: float | None = None,
-        _abandoned: threading.Event | None = None) -> LLMResult:
+        _abandoned: threading.Event | None = None, effort: str | None = None, mac: bool = False) -> LLMResult:
+    # el cerebro's plans and its council votes go first to the Mac's Claude Code CLI (the subscription login)
+    # when control.brain_backend is "mac" or "auto"; per-tick decisions never do (cli_backend.route)
+    if mac or purpose in _MAC_PURPOSES:
+        from . import cli_backend
+        via_mac = cli_backend.route(purpose=purpose, system=system, messages=messages, tools=tools,
+                                    deadline=deadline, effort=effort, mac=mac)
+        if via_mac is not None:
+            return via_mac
     r = router()
+    _check_purpose_cap(r, purpose)
     used = r.resolve(model)
     if model and used != model:
         _log({"purpose": purpose, "event": "degraded", "asked": model, "model": used, "day_usd": r.day_spent()})
@@ -178,7 +202,8 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
             continue
         label, key = picked
         tried.add(label)
-        timeout = DEFAULT_TIMEOUT_S if remaining is None else max(MIN_CALL_S, min(remaining, DEFAULT_TIMEOUT_S))
+        per_call = call_timeout(purpose)
+        timeout = per_call if remaining is None else max(MIN_CALL_S, min(remaining, per_call))
         kwargs = {"model": used, "max_tokens": max_tokens, "system": system, "messages": messages, "timeout": timeout}
         if tools:
             kwargs["tools"] = tools
@@ -189,7 +214,7 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
         if temperature is not None:
             kwargs["temperature"] = temperature
         if used in EFFORT:
-            kwargs["output_config"] = {"effort": EFFORT[used]}
+            kwargs["output_config"] = {"effort": effort or EFFORT[used]}
         t0 = time.time()
         try:
             resp = _client(label, key).messages.create(**kwargs)
@@ -217,6 +242,21 @@ def ask(*, purpose: str, system: str | list, messages: list, tools: list | None 
               "late": bool(deadline and time.time() > deadline), "abandoned": bool(_abandoned and _abandoned.is_set())})
         return LLMResult(text, calls, used, label, usage, cost, latency, stop)
     raise LLMUnavailable(f"{purpose}: {MAX_ATTEMPTS} attempts failed ({last_err})")
+
+
+def _check_purpose_cap(r, purpose: str) -> None:
+    """The brain may cap one purpose's day spend (brain.strategy budgets.llm_usd_per_day); over it, the caller
+    falls back to code (LLMUnavailable). Never raises for any other reason."""
+    try:
+        from bazaar.brain.strategy import llm_cap
+        cap = llm_cap(purpose)
+        if cap is None:
+            return
+        spent = float((r.summary().get("by_purpose") or {}).get(purpose) or 0.0)
+    except Exception:  # noqa: BLE001
+        return
+    if spent >= cap:
+        raise LLMUnavailable(f"{purpose}: the brain's day cap {cap} $ is spent ({spent:.2f} $)")
 
 
 def race(*, models: list[str], valid: Callable[[LLMResult], bool] | None = None, **kw) -> LLMResult:

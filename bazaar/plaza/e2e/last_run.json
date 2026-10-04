@@ -1,0 +1,87 @@
+{
+ "when": "2026-10-04 11:42:33",
+ "seconds": 108.3,
+ "simulation": {
+  "ran": 43,
+  "failed": [],
+  "findings": [],
+  "hard": [],
+  "ok": true
+ },
+ "browser": {
+  "ok": true,
+  "skipped": true,
+  "hard": [],
+  "findings": []
+ },
+ "replay": {
+  "ok": true,
+  "team_trades": 155,
+  "on_v07": 11,
+  "elsewhere": 133,
+  "wrong": 0,
+  "false_strikes": 0,
+  "table": [
+   {
+    "venue": "another venue",
+    "offer": "addressed",
+    "state": "settled_elsewhere",
+    "strike": "struck: nobody",
+    "n": 3
+   },
+   {
+    "venue": "another venue",
+    "offer": "addressed",
+    "state": "settled_elsewhere",
+    "strike": "struck: yes",
+    "n": 18
+   },
+   {
+    "venue": "another venue",
+    "offer": "addressed",
+    "state": "skipped: the host is never in a match",
+    "strike": "struck: nobody",
+    "n": 4
+   },
+   {
+    "venue": "another venue",
+    "offer": "no offer in the feed",
+    "state": "settled_elsewhere",
+    "strike": "struck: nobody",
+    "n": 4
+   },
+   {
+    "venue": "another venue",
+    "offer": "public",
+    "state": "settled_elsewhere",
+    "strike": "struck: nobody",
+    "n": 108
+   },
+   {
+    "venue": "another venue",
+    "offer": "public",
+    "state": "skipped: the host is never in a match",
+    "strike": "struck: nobody",
+    "n": 7
+   },
+   {
+    "venue": "v07",
+    "offer": "addressed",
+    "state": "settled",
+    "strike": "struck: nobody",
+    "n": 1
+   },
+   {
+    "venue": "v07",
+    "offer": "public",
+    "state": "settled",
+    "strike": "struck: nobody",
+    "n": 10
+   }
+  ]
+ },
+ "public": {
+  "ok": true,
+  "skipped": true
+ }
+}

@@ -16,3 +16,17 @@ __pycache__/
 legacy/bot/sim/practice/
 legacy/bot/sim/STOP_PRACTICE
 bazaar/data/
+
+# Generated or local-only
+*.out
+*.log
+*.pen
+design/plaza/build/
+design/plaza/old/
+video/frames/
+video/audio/
+video/prev/
+video/shots/
+video/qc/
+video/node_modules/
+video/facts_raw.json

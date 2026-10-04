@@ -1,0 +1,21 @@
+{
+ "venue": "v07",
+ "name": "v07 Market",
+ "fee_bps": 0,
+ "per_card": 0,
+ "rastro": {
+  "fee_bps": 500,
+  "per_card": 1
+ },
+ "deals": 41,
+ "volume": 1870,
+ "saved_fees": 134,
+ "last_deal_tick": 1442,
+ "teams": 17,
+ "teams_connected": 9,
+ "agents_online": 5,
+ "matches_live": 12,
+ "matches_settled": 23,
+ "tick": 1446,
+ "traders": 8
+}

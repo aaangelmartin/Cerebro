@@ -1,0 +1,24 @@
+{
+ "tick": 1445,
+ "tick_seconds": 15.0,
+ "seconds_to_tick": null,
+ "time": "2026-10-04T10:12:03+02:00",
+ "game": "paused",
+ "market": "paused",
+ "matchmaker": "waiting",
+ "feed": "ok",
+ "agent": "connected",
+ "team": "t16",
+ "opens": null,
+ "opens_tick": null,
+ "opens_in_s": null,
+ "round": 3,
+ "round_name": "Sunday",
+ "venue": {
+  "id": "v07",
+  "name": "v07 Market",
+  "fee_bps": 0,
+  "per_card": 0
+ },
+ "name": "v07 Market"
+}

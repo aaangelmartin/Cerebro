@@ -4,12 +4,21 @@
 
 GET  /                (the supervisor dashboard for browsers; JSON health otherwise)  /static/<file>
 GET  /overview?since=  (everything the dashboard shows, in one read)
+GET  /broker/sessions  GET /broker/session/<run>?since_tick=&limit=  (Market Test sessions, per-tick rows)
+GET  /news?since=<epoch>   (game news with status confirmed/false/open and each source's reliability)
+GET  /strategy        (the strategist's current plan, its heartbeat and the last plans)
+GET  /brain/chat?since=<epoch>&limit=   POST /brain/chat {"text", "by"}   (team chat with el cerebro)
+GET  /brain/budget (intensity, cost table, event budget)  /brain/events?since=  /brain/memory  /brain/findings?since=  /brain/reviews?since=
+GET  /brain/external?since=   POST /brain/external {"text", "by", "team_hint"?}   (pasted WhatsApp messages)
+GET  /outbox?kind=code|promo|task&status=&since=   POST /outbox/<id> {"status", "note"}   (what the brain asks humans)
 GET  /health /status /control /tick/latest /spend /broker /duels /lessons
 GET  /decisions /outcomes /council /events /novelty /attribution /leaderboard   (?since=<id>&limit=)
 GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_seq=&limit=&tail=
+GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "paused_domains", "duel_claude_mode", "duel_days_sign"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "page_buys", "min_asks", "no_packs", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+GET  /dealer-chat?dealer=banco   our own thread with a dealer; POST /dealer-chat/{send,accept,close,release}  (api/dealerchat.py)
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
 Every path also answers under /api/... (the dashboard calls api/<path>, so it works behind the gateway's /v2/).
@@ -46,6 +55,94 @@ def _read_json(path: Path, default=None):
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return default
+
+
+RUN_RX = re.compile(r"^b\d+$")
+TRADERS_MAX = 60                      # per-tick rows: keep at most this many traders (they can be large)
+
+
+def _jsonl(path: Path) -> list[dict]:
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        continue
+    except OSError:
+        pass
+    return out
+
+
+def _run_files(bench: Path) -> dict[str, list[Path]]:
+    """run id -> its per-tick files (<day>-<run>.jsonl), across days."""
+    runs: dict[str, list[Path]] = {}
+    for p in sorted(bench.glob("*-b*.jsonl")):
+        run = p.stem.rsplit("-", 1)[-1]
+        if RUN_RX.match(run):
+            runs.setdefault(run, []).append(p)
+    return runs
+
+
+def broker_sessions(live: Path) -> list[dict]:
+    """One row per Market Test session: results.jsonl rows, plus result rows found only in the per-run files,
+    plus sessions still running (status "live"). Ordered by start, newest last."""
+    bench = Path(live) / "bench"
+    results: dict[str, dict] = {}
+    for r in _jsonl(bench / "results.jsonl"):
+        if r.get("run"):
+            results[r["run"]] = r
+    out = []
+    for run, files in _run_files(bench).items():
+        rows = [r for p in files for r in _jsonl(p)]
+        starts = [r for r in rows if r.get("type") == "start"]
+        ticks = [r for r in rows if r.get("type") == "tick"]
+        res = results.get(run) or next((r for r in reversed(rows) if r.get("type") == "result"), None)
+        first = starts[0] if starts else (ticks[0] if ticks else {})
+        last = ticks[-1] if ticks else {}
+        row = {"run": run, "session": (res or {}).get("session") or f"{files[0].stem}",
+               "status": "done" if res else "live",
+               "start_tick": ((res or {}).get("stats") or {}).get("start_tick") or first.get("tick"),
+               "start_ts": first.get("t") if isinstance(first.get("t"), (int, float)) else None,
+               "end_tick": (res or {}).get("tick") if res else last.get("tick"),
+               "end_ts": (res or {}).get("t") or (res or {}).get("ts") or last.get("t"),
+               "ticks": len(ticks)}
+        if res:
+            row.update({k: res.get(k) for k in ("score", "est_efficiency", "stall_efficiency", "stats", "vs_stall")})
+        out.append(row)
+    for run, res in results.items():                     # results whose per-run file is gone
+        if not any(r["run"] == run for r in out):
+            out.append({"run": run, "session": res.get("session"), "status": "done",
+                        "start_tick": (res.get("stats") or {}).get("start_tick"), "start_ts": None,
+                        "end_tick": res.get("tick"), "end_ts": res.get("t") or res.get("ts"), "ticks": None,
+                        **{k: res.get(k) for k in ("score", "est_efficiency", "stall_efficiency", "stats", "vs_stall")}})
+    out.sort(key=lambda r: (r.get("start_tick") or 0, r["run"]))
+    return out
+
+
+def broker_session_rows(live: Path, run: str, since_tick: int | None = None, limit: int = 200) -> list[dict] | None:
+    """Per-tick rows of one session (None if the run id is invalid or unknown)."""
+    if not RUN_RX.match(run or ""):
+        return None
+    files = _run_files(Path(live) / "bench").get(run)
+    if not files:
+        return None
+    rows = [r for p in files for r in _jsonl(p)]
+    if since_tick is not None:
+        rows = [r for r in rows if isinstance(r.get("tick"), int) and r["tick"] > since_tick]
+    rows = rows[-limit:]
+    for r in rows:
+        tr = r.get("traders")
+        if isinstance(tr, list) and len(tr) > TRADERS_MAX:
+            r["traders"] = tr[:TRADERS_MAX]
+            r["traders_trimmed"] = len(tr)
+        elif isinstance(tr, dict) and len(tr) > TRADERS_MAX:
+            r["traders"] = dict(list(tr.items())[:TRADERS_MAX])
+            r["traders_trimmed"] = len(tr)
+    return rows
 
 
 def _tail(path: Path, since: int | None, limit: int) -> list[dict]:
@@ -89,16 +186,92 @@ def apply_control(live: Path, body: dict) -> dict:
             if body[key] not in options:
                 raise ValueError(f"{key} must be one of {sorted(options)}")
             change[key] = body[key]
-    for key in ("protected", "paused_domains"):
+    if "avoid_buy_sets" in body:
+        a = body["avoid_buy_sets"]
+        if not isinstance(a, list) or not all(isinstance(x, str) and len(x.strip()) == 3 for x in a):
+            raise ValueError("avoid_buy_sets must be a list of set ids like \"RET\"")
+        change["avoid_buy_sets"] = sorted({x.strip().upper() for x in a})
+    if "avoid_buy_exceptions" in body:                 # {"RET": {"min_rarity": "rare", "min_gain": 15}}; {} = none
+        ex = body["avoid_buy_exceptions"]
+        rar = ("common", "uncommon", "rare", "epic", "legendary")
+        if not isinstance(ex, dict) or not all(
+                isinstance(k, str) and len(k.strip()) == 3 and isinstance(e, dict) and e.get("min_rarity") in rar
+                and isinstance(e.get("min_gain"), (int, float)) and not isinstance(e.get("min_gain"), bool)
+                and e["min_gain"] >= 1 for k, e in ex.items()):
+            raise ValueError('avoid_buy_exceptions must be like {"RET": {"min_rarity": "rare", "min_gain": 15}}')
+        change["avoid_buy_exceptions"] = {k.strip().upper(): {"min_rarity": e["min_rarity"], "min_gain": e["min_gain"]}
+                                          for k, e in ex.items()}
+    if "allied_venues" in body:                        # {venue: owner team}; {} = no allies (the default)
+        av = body["allied_venues"]
+        if not isinstance(av, dict) or not all(isinstance(k, str) and re.fullmatch(r"v\d{1,3}", k) and isinstance(v, str)
+                                               and re.fullmatch(r"t\d{1,3}", v) for k, v in av.items()):
+            raise ValueError('allied_venues must be an object like {"v10": "t05"}')
+        change["allied_venues"] = dict(av)
+    if "goal_buys" in body:
+        g = body["goal_buys"]
+        if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                                              for v in g.values()):
+            raise ValueError("goal_buys must be an object of card -> max price")
+        change["goal_buys"] = {str(k).upper(): int(v) for k, v in g.items()}
+    if "min_asks" in body:                       # per-card price floor: never post, quote or accept below it
+        g = body["min_asks"]
+        if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                                              for v in g.values()):
+            raise ValueError("min_asks must be an object of card -> minimum price")
+        change["min_asks"] = {str(k).upper(): int(v) for k, v in g.items() if v > 0}
+    if "page_buys" in body:                      # cards that finish a page: the human dealer chat may pay up to this
+        g = body["page_buys"]
+        if not isinstance(g, dict) or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 100
+                                              for v in g.values()):
+            raise ValueError("page_buys must be an object of card -> max price (at most 100)")
+        change["page_buys"] = {str(k).upper(): int(v) for k, v in g.items()}
+    for key in ("protected", "paused_domains", "protected_offers", "manual_threads"):
         if key in body:
             if not isinstance(body[key], list) or not all(isinstance(x, (str, int)) for x in body[key]):
                 raise ValueError(f"{key} must be a list")
             change[key] = body[key]
+    if "blocked_teams" in body:                         # core.arbiter: no accept, offer or thread with these teams
+        b = body["blocked_teams"]
+        if not isinstance(b, list) or not all(isinstance(x, str) and re.fullmatch(r"t\d{1,2}", x.strip().lower()) for x in b):
+            raise ValueError('blocked_teams must be a list of team ids like "t06"')
+        change["blocked_teams"] = sorted({x.strip().lower() for x in b})
+    if "no_packs" in body:                              # core.rails.rail_no_packs: sealed packs are never bought
+        if not isinstance(body["no_packs"], bool):
+            raise ValueError("no_packs must be true or false")
+        change["no_packs"] = body["no_packs"]
+    if "matchmaker" in body:                            # broker.matchmaker: invite pairs of other teams to our venue
+        if body["matchmaker"] not in ("on", "off"):
+            raise ValueError("matchmaker must be \"on\" or \"off\"")
+        change["matchmaker"] = body["matchmaker"]
+    if "plaza" in body:                                 # bazaar.plaza: the public market board
+        if body["plaza"] not in ("on", "off"):
+            raise ValueError("plaza must be \"on\" or \"off\"")
+        change["plaza"] = body["plaza"]
+    if "plaza_url" in body:                             # where other teams reach it (the tunnel address + /plaza)
+        u = body["plaza_url"]
+        if u is not None and not (isinstance(u, str) and u.startswith("https://") and len(u) < 200):
+            raise ValueError("plaza_url must be an https URL or null")
+        change["plaza_url"] = u
+    if "matchmaker_threads" in body:
+        if not isinstance(body["matchmaker_threads"], bool):
+            raise ValueError("matchmaker_threads must be true or false")
+        change["matchmaker_threads"] = body["matchmaker_threads"]
+    if "matchmaker_exclude" in body:
+        x = body["matchmaker_exclude"]
+        if not isinstance(x, list) or not all(isinstance(t, str) for t in x):
+            raise ValueError("matchmaker_exclude must be a list of team ids")
+        change["matchmaker_exclude"] = x
+    from ..strategist import budget as _budget          # brain intensity, caps and the event budget
+    change.update(_budget.validate_control(body))
+    from ..llm import cli_backend as _mac
+    change.update(_mac.validate_control(body))
     if not change:
         raise ValueError("nothing to change")
     with _control_lock:
         cur = load_control(live, DEFAULT_CONTROL)
         cur.update(change)
+        for k in [k for k, v in change.items() if v is None]:
+            cur.pop(k, None)                              # null clears a team override: back to automatic
         cur["updated"] = time.time()
         tmp = live / "control.tmp"
         tmp.write_text(json.dumps(cur, indent=1))
@@ -118,6 +291,7 @@ class Handler(BaseHTTPRequestHandler):
     record: Path = config.DATA / "record"
     stop_file: Path = config.STOP_FILE
     dashboard: Path = DASHBOARD_DIR
+    dealer_gw = None                       # tests set a fake game here; None = the real gateway
 
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -182,6 +356,48 @@ class Handler(BaseHTTPRequestHandler):
         m = SCREEN_RX.fullmatch(path)
         if m:
             return self._send_file(self.dashboard / "screens" / m.group(1), STATIC_TYPES[m.group(2)])
+        if path.startswith("/brain/"):
+            return self._get_brain(path, q)
+        if path == "/news":                                      # Radio Rastro listener (bazaar.intel.news)
+            from ..intel import news as _news
+            try:
+                since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else 0.0
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "bad_request", "message": "since must be a number"})
+            return self._send(200, _news.view(self.live, since=since))
+        if path == "/dealer-chat":                               # a human's own thread with a dealer (talks to the game)
+            from . import dealerchat
+            from ..gateway import GameError
+            try:
+                return self._send(200, dealerchat.state(self.live, str(q.get("dealer") or dealerchat.DEFAULT_DEALER),
+                                                        gw=self.dealer_gw))
+            except GameError as e:
+                return self._send(502, {"error": e.code, "message": e.message or e.code})
+        if path == "/outbox":
+            from ..outbox import Outbox
+            try:
+                since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else None
+            except ValueError:
+                return self._send(400, {"error": "bad_query", "message": "since must be a number"})
+            return self._send(200, {"items": Outbox().list(q.get("kind") or None, q.get("status") or None, since)})
+        if path == "/values":                                    # what each card is worth to us (no game calls)
+            from .values import card_values
+            return self._send(200, card_values(self.record, self.live))
+        if path == "/broker/sessions":
+            return self._send(200, {"items": broker_sessions(self.live)})
+        if path.startswith("/broker/session/"):
+            try:
+                st = int(q["since_tick"]) if q.get("since_tick") not in (None, "") else None
+                lim = max(1, min(2000, int(q.get("limit") or 200)))
+            except ValueError:
+                return self._send(400, {"error": "bad_query", "message": "since_tick and limit must be integers"})
+            run = path[len("/broker/session/"):]
+            if not RUN_RX.match(run):
+                return self._send(400, {"error": "bad_run", "message": "run must look like b25"})
+            rows = broker_session_rows(self.live, run, st, lim)
+            if rows is None:
+                return self._send(404, {"error": "not_found", "message": f"no session {run}"})
+            return self._send(200, {"run": run, "rows": rows})
         if path.startswith("/rec/") or path == "/notifications":
             try:
                 return self._get_rec(path, q)
@@ -220,10 +436,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"tick": t.get("tick"), "duels": t.get("duels", [])})
         if path == "/broker":
             return self._send(200, _read_json(live / "broker_status.json", {}) or {})
+        if path == "/strategy":
+            return self._send(200, {"current": _read_json(live / "strategy.json", {}) or None,
+                                    "status": _read_json(live / "strategist_status.json", {}) or {},
+                                    "history": _tail(live / "strategy.jsonl", None, min(limit, 30)),
+                                    "findings": _tail(live / "strategist_findings.jsonl", None, limit)})
         if path == "/spend":
             try:
                 from ..llm import client
-                return self._send(200, client.spend_today())
+                sp = dict(client.spend_today())
+                try:                               # API dollars and Mac (subscription) usage, kept apart
+                    from ..strategist import budget as _bg
+                    sp["mac"] = _bg.mac_usage(live)
+                    sp["brain_api_usd_today"] = round(float((sp.get("by_purpose") or {}).get("strategy") or 0.0), 2)
+                except Exception:  # noqa: BLE001
+                    pass
+                return self._send(200, sp)
             except Exception as e:  # noqa: BLE001
                 st = _read_json(live / "status.json", {}) or {}
                 return self._send(200, {**(st.get("spend") or {}), "note": f"from status.json ({type(e).__name__})"})
@@ -237,6 +465,55 @@ class Handler(BaseHTTPRequestHandler):
             name = "control"
         if name in JOURNALS:
             return self._send(200, {"items": _tail(live / f"{name}.jsonl", since, limit)})
+        return self._send(404, {"error": "not_found", "message": path})
+
+    def _get_brain(self, path: str, q: dict):
+        """El cerebro: chat, events, memory. since = epoch seconds (float)."""
+        from ..strategist import brainio as B
+        try:
+            since = float(q["since"]) if q.get("since") not in (None, "", "null", "undefined") else None
+            limit = max(1, min(1000, int(q.get("limit") or 200)))
+        except ValueError:
+            return self._send(400, {"error": "bad_query", "message": "since must be a number (epoch), limit an integer"})
+        live = self.live
+        if path == "/brain/chat":
+            return self._send(200, {"items": B.chat_since(live, since, limit)})
+        if path == "/brain/events":
+            return self._send(200, {"items": B.read_rows(live / "brain_events.jsonl", since, limit)})
+        if path == "/brain/external":
+            from ..intel import external
+            handled = _read_json(live / "external_handled.json", {}) or {}
+            items = [{**r, **({k: handled[r.get("id")].get(k) for k in ("brain_conclusion", "reply_outbox_id")}
+                              if r.get("id") in handled else {"brain_conclusion": None, "reply_outbox_id": None})}
+                     for r in external.load(live, since=since)]
+            return self._send(200, {"items": items})
+        if path == "/brain/budget":
+            from ..strategist import budget as BG
+            try:
+                from ..llm import client as _llm
+                spend = _llm.spend_today()
+            except Exception:  # noqa: BLE001
+                spend = {}
+            clock = {}
+            try:
+                clock = json.loads((config.DATA / "record" / "latest" / "clock.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            rep = BG.report(live, clock=clock, spend=spend)
+            try:                                   # the Mac backend (Claude Code CLI on the subscription)
+                from ..llm import cli_backend as _mac
+                ms = _mac.status(live)
+                rep.update(mac_backend=ms, mac_backend_state=ms["state"], mac_calls_last_hour=ms["calls_last_hour"],
+                           mac_calls_per_hour=ms["calls_per_hour"], brain_backend=ms["mode"])
+            except Exception:  # noqa: BLE001
+                pass
+            return self._send(200, rep)
+        if path == "/brain/memory":
+            return self._send(200, B.memory(live))
+        if path == "/brain/findings":
+            return self._send(200, {"items": B.read_rows(live / "strategist_findings.jsonl", since, limit)})
+        if path == "/brain/reviews":
+            return self._send(200, {"items": B.read_rows(live / "strategist_reviews.jsonl", since, limit)})
         return self._send(404, {"error": "not_found", "message": path})
 
     def _get_rec(self, path: str, q: dict):
@@ -331,6 +608,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._stop(body)
             if path == "/control":
                 return self._send(200, apply_control(self.live, body))
+            m = re.fullmatch(r"/outbox/([A-Za-z0-9_.:\-]+)", path)
+            if m:
+                from ..outbox import Outbox
+                try:
+                    return self._send(200, {"item": Outbox().update(m.group(1), body.get("status"), body.get("note"))})
+                except KeyError:
+                    return self._send(404, {"error": "not_found", "message": m.group(1)})
+            m = re.fullmatch(r"/dealer-chat/(send|accept|close|release)", path)
+            if m:
+                from . import dealerchat
+                from ..gateway import GameError
+                try:
+                    if m.group(1) == "release":
+                        return self._send(200, dealerchat.release(self.live, body))
+                    return self._send(200, getattr(dealerchat, m.group(1))(self.live, body, gw=self.dealer_gw))
+                except GameError as e:
+                    return self._send(502, {"error": e.code, "message": e.message or e.code})
+            if path == "/brain/external":
+                from ..intel import external
+                if not str(body.get("text") or "").strip():
+                    raise ValueError("text is empty")
+                return self._send(200, external.ingest(body["text"], by=str(body.get("by") or ""), live_dir=self.live,
+                                                       team_hint=body.get("team_hint"), use_llm=True))
+            if path == "/brain/chat":
+                from ..strategist import brainio as B
+                return self._send(200, B.chat_post(self.live, body.get("text"), by=str(body.get("by") or "equipo")))
             m = re.fullmatch(r"/lessons/([A-Za-z0-9_.:\-]+)", path)
             if m:
                 status = body.get("status")
@@ -357,7 +660,9 @@ def make_server(port: int = config.API_PORT, live: Path | None = None, lab: Path
     record = Path(record) if record else (config.DATA / "record" if live == config.LIVE else live.parent / "record")
     handler = type("BoundHandler", (Handler,), {"live": live, "lab": Path(lab or config.LAB), "record": record,
                                                 "stop_file": Path(stop_file or config.STOP_FILE)})
+    ThreadingHTTPServer.request_queue_size = 128     # a page load asks for ~25 files at once
     srv = ThreadingHTTPServer((host, port), handler)
+    srv.daemon_threads = True
     srv.daemon_threads = True
     return srv
 

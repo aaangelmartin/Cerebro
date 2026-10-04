@@ -19,12 +19,27 @@ def budget(**kw):
 
 
 class ArbiterTest(unittest.TestCase):
-    def test_duel_accept_wins_the_accept(self):
+    def test_duel_accept_does_not_take_the_trade_accept(self):
+        # the game limits offer accepts (1 per tick) and duel accepts separately: both go out in the same tick
         acc = Action("accept_offer", {"offer": 1, "expect": {}}, "market", priority=50)
         duel = Action("duel_accept", {"duel": 9, "expect": {}}, "duels", priority=1)
         chosen, dropped = select([acc, duel], sit(), budget())
+        self.assertEqual(sorted(a.kind for a in chosen), ["accept_offer", "duel_accept"])
+        self.assertEqual(dropped, [])
+
+    def test_each_accept_budget_is_enforced_on_its_own(self):
+        accs = [Action("accept_offer", {"offer": i, "expect": {}}, "market", priority=10 + i) for i in (1, 2)]
+        duels = [Action("duel_accept", {"duel": i, "expect": {}}, "duels", priority=1) for i in (7, 8)]
+        chosen, dropped = select(accs + duels, sit(), budget(duel_accepts_left=1))
+        self.assertEqual(sorted(a.kind for a in chosen), ["accept_offer", "duel_accept"])
+        whys = sorted(w for _, w in dropped)
+        self.assertTrue(whys[0].startswith("accept already used this tick (cap 1 "))      # the number that blocked
+        self.assertTrue(whys[1].startswith("duel accepts already used this tick (cap "))
+
+    def test_spent_trade_accept_leaves_duel_accepts_alone(self):
+        duel = Action("duel_accept", {"duel": 9, "expect": {}}, "duels", priority=1)
+        chosen, _ = select([duel], sit(), budget(accepts_left=0))
         self.assertEqual([a.kind for a in chosen], ["duel_accept"])
-        self.assertEqual(dropped[0][0].kind, "accept_offer")
 
     def test_highest_priority_accept(self):
         lo = Action("accept_offer", {"offer": 1, "expect": {}}, "market", priority=2)
@@ -97,7 +112,7 @@ class AcceptFallbackMessage(unittest.TestCase):
 
     def test_loser_sends_its_alternative(self):
         a, b = self.acc(1, 160), self.acc(2, 120, price=90)
-        chosen, dropped = select([b, a], sit(), budget())
+        chosen, dropped = select([b, a], sit(), budget(duel_accepts_left=1))
         self.assertEqual([(x.kind, x.params["duel"]) for x in chosen], [("duel_accept", 1), ("duel_message", 2)])
         alt = chosen[1]
         self.assertEqual(alt.params["price"], 90)
@@ -106,13 +121,14 @@ class AcceptFallbackMessage(unittest.TestCase):
 
     def test_alternative_respects_one_message_per_conversation(self):
         a, b = self.acc(1, 160), self.acc(2, 120)
-        chosen, _ = select([a, b], sit(), budget(messages={"duel:2": 1}))
+        chosen, _ = select([a, b], sit(), budget(duel_accepts_left=1, messages={"duel:2": 1}))
         self.assertEqual([x.kind for x in chosen], ["duel_accept"])
         other = Action("duel_message", {"duel": 2, "price": 95}, "duels", priority=500)
-        chosen, dropped = select([a, b, other], sit(), budget())
+        chosen, dropped = select([a, b, other], sit(), budget(duel_accepts_left=1))
         self.assertEqual(sum(1 for x in chosen if x.params.get("duel") == 2), 1)
 
     def test_no_alternative_when_accepts_are_exhausted_without_one(self):
         x = Action("accept_offer", {"offer": 1, "expect": {}}, "market", priority=2)
-        chosen, _ = select([self.acc(1, 160), x], sit(), budget())
+        chosen, dropped = select([self.acc(1, 160), x], sit(), budget(accepts_left=0))
         self.assertEqual([c.kind for c in chosen], ["duel_accept"])
+        self.assertEqual([d.kind for d, _ in dropped], ["accept_offer"])

@@ -57,3 +57,119 @@ div.scr-competicion { display: flex; flex-direction: column; gap: 16px; }
 @media (max-width: 640px) { .scr-competicion .c-stats4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .scr-competicion .c-meter { grid-template-columns: 1fr 44px; } .scr-competicion .c-meter .t10-cap { display: none; } }
 .scr-competicion .c-meter-track { display: block; }
 .scr-competicion .c-svg, .scr-competicion .c-mt-svg { width: 100%; height: auto; }
+
+/* ---- Todos los mercados ---- */
+.scr-competicion .c-markets { margin-top: 0; }
+.scr-mercados { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.scr-mercados .ms-muted { color: var(--ink-3); }
+.scr-mercados .ms-bad { color: var(--bad); font-size: 11px; }
+.scr-mercados .ms-mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
+.scr-mercados .ms-r { text-align: right; }
+.scr-mercados .ms-grow { flex: 1; }
+.scr-mercados .ms-cap, .scr-mercados .ms-sec { font-family: var(--font-num); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 10px 0 6px; }
+.scr-mercados .ms-list { display: flex; flex-direction: column; gap: 4px; max-height: 900px; overflow: auto; }
+.scr-mercados .ms-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--line-2); background: var(--s1); }
+.scr-mercados .ms-item:hover { border-color: var(--line-2); }
+.scr-mercados .ms-item.on { background: var(--s2); border-color: var(--ink-3); }
+.scr-mercados .ms-item.is-us { border-left-color: var(--ink); }
+.scr-mercados .ms-item.is-rastro { border-left-color: var(--t-anuncio, #8a8f98); }
+.scr-mercados .ms-item.is-conv { border-left-color: var(--t-dealer, #2bb3a3); }
+.scr-mercados .ms-item-h { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.scr-mercados .ms-item-s { color: var(--ink-3); }
+.scr-mercados .ms-item-t { display: flex; gap: 6px; align-items: center; }
+.scr-mercados .ms-detail { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.scr-mercados .ms-head { border: 1px solid var(--line); border-left: 3px solid var(--line-2); background: var(--s1); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.scr-mercados .ms-head.is-us { border-left-color: var(--ink); }
+.scr-mercados .ms-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scr-mercados .ms-title h1 { font-size: 18px; margin: 0; }
+.scr-mercados .ms-desc { color: var(--ink-2); font-size: 12.5px; }
+.scr-mercados .ms-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); border-top: 1px solid var(--line); }
+.scr-mercados .ms-kpi { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 0 0; }
+.scr-mercados .ms-kpi-l { font-family: var(--font-num); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.scr-mercados .ms-kpi b { font-size: 16px; }
+.scr-mercados .ms-kpi-s { font-size: 11px; color: var(--ink-3); }
+.scr-mercados .ms-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.scr-mercados .ms-input { background: var(--s2); border: 1px solid var(--line-2); color: var(--ink); padding: 6px 8px; font: inherit; font-size: 12.5px; border-radius: 0; min-width: 200px; }
+.scr-mercados .ms-seg { display: flex; border: 1px solid var(--line-2); }
+.scr-mercados .ms-seg button { all: unset; cursor: pointer; padding: 6px 10px; font-size: 12px; color: var(--ink-2); border-left: 1px solid var(--line-2); }
+.scr-mercados .ms-seg button:first-child { border-left: 0; }
+.scr-mercados .ms-seg button.on { background: var(--s2); color: var(--ink); }
+.scr-mercados .ms-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.scr-mercados .ms-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.scr-mercados .ms-table th { text-align: left; font-family: var(--font-num); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.scr-mercados .ms-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.scr-mercados .ms-table tr.is-us td { background: var(--s2); }
+.scr-mercados .ms-table tr td:first-child { border-left: 3px solid var(--line-2); }
+.scr-mercados .ms-table tr.ms-t-venta td:first-child { border-left-color: var(--t-venta, #e5534b); }
+.scr-mercados .ms-table tr.ms-t-puja td:first-child { border-left-color: var(--t-puja, #e8a33d); }
+.scr-mercados .ms-table tr.ms-t-cambio td:first-child { border-left-color: var(--t-cambio, #4c8dff); }
+.scr-mercados .ms-act { display: flex; flex-direction: column; max-height: 640px; overflow: auto; }
+.scr-mercados .ms-txt { font-size: 12.5px; }
+.scr-mercados .ms-dealer { color: var(--t-dealer, #2bb3a3); font-size: 12.5px; }
+.scr-mercados .ms-chats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.scr-mercados .ms-chat { border: 1px solid var(--line); border-top: 2px solid var(--t-dealer, #2bb3a3); background: var(--s1); display: flex; flex-direction: column; min-width: 0; }
+.scr-mercados .ms-chat.is-us { border-top-color: var(--ink); }
+.scr-mercados .ms-chat-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.scr-mercados .ms-chat-s { padding: 6px 10px 0; color: var(--ink-2); }
+.scr-mercados .ms-msgs { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; max-height: 360px; overflow: auto; }
+.scr-mercados .ms-msg { padding: 6px 8px; background: var(--s2); border-left: 2px solid var(--t-dealer, #2bb3a3); max-width: 92%; }
+.scr-mercados .ms-msg.is-team { align-self: flex-end; border-left-color: var(--ink-3); }
+.scr-mercados .ms-msg.is-us { border-left-color: var(--ink); }
+.scr-mercados .ms-msg-h { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; color: var(--ink-2); }
+.scr-mercados .ms-msg-h b { margin-left: auto; }
+.scr-mercados .ms-msg-t { font-size: 12.5px; margin-top: 2px; }
+.scr-mercados .ms-more { all: unset; cursor: pointer; padding: 8px 12px; border: 1px solid var(--line-2); align-self: flex-start; font-size: 12.5px; }
+@media (max-width: 1300px) { .scr-mercados .ms-cols, .scr-mercados .ms-chats { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) { .scr-mercados { grid-template-columns: minmax(0, 1fr); } .scr-mercados .ms-list { position: static; } }
+.scr-competicion .ms-sum td, .scr-competicion .ms-sum th { white-space: nowrap; }
+.scr-competicion .ms-click { cursor: pointer; }
+.scr-competicion .ms-click:hover td { background: var(--s2, #1b1b1b); }
+.scr-competicion .ms-sum tr.is-us td { background: var(--s2, #1b1b1b); }
+.scr-competicion .ms-sum tr.is-us td:first-child { box-shadow: inset 2px 0 0 var(--ink, #eee); }
+.scr-competicion .c-tabs { display: flex; gap: 0; }
+.scr-competicion .c-tabs .t10-seg { font-size: 12.5px; padding: 7px 14px; }
+.scr-competicion.c-tab-precios .c-markets { display: none; }
+.scr-competicion.c-tab-mercados .c-top, .scr-competicion.c-tab-mercados .c-bottom { display: none; }
+.ms-volchart { border: 1px solid var(--line-2); background: var(--s1); margin-bottom: 12px; }
+.ms-volchart > .ms-cap { padding: 10px 16px 0; }
+.ms-tablewrap { overflow-x: auto; }
+.ms-sum th.ms-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.ms-sum th.ms-sortable:hover, .ms-sum th.is-sorted { color: var(--ink); }
+
+/* the three days: one row per team, figures in mono */
+.scr-competicion .c-global { margin-bottom: 16px; }
+.scr-competicion.c-tab-mercados .c-global { display: none; }
+.scr-competicion .c-g-table { overflow-x: auto; }
+.scr-competicion .c-g-row { display: grid; grid-template-columns: 28px minmax(120px, 1.4fr) repeat(2, minmax(74px, 1fr)) minmax(150px, 1.6fr) minmax(74px, 1fr) minmax(96px, 1.1fr); gap: 10px; align-items: baseline; padding: 6px 2px; border-bottom: 1px solid var(--line); min-width: 720px; }
+.scr-competicion .c-g-row:last-child { border-bottom: 0; }
+.scr-competicion .c-g-head { border-bottom: 1px solid var(--line-2); padding-bottom: 7px; }
+.scr-competicion .c-g-us { background: var(--s2); outline: 1px solid var(--line-2); }
+.scr-competicion .c-g-us .c-g-name { color: var(--signal); font-weight: 600; }
+.scr-competicion .c-g-cell { white-space: nowrap; }
+.scr-competicion .c-g-strong { color: var(--ink); font-weight: 600; }
+.scr-competicion .c-g-rank, .scr-competicion .c-g-split { font-style: normal; color: var(--ink-3); font-size: 11px; margin-left: 6px; }
+.scr-competicion .c-g-today { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.scr-competicion .c-g-chart { width: 100%; max-width: 760px; height: auto; display: block; margin-top: 6px; }
+.scr-competicion .c-g-line { stroke: var(--ink-3); stroke-width: 1.3; }
+.scr-competicion .c-g-line-us { stroke: var(--signal); stroke-width: 2; }
+.scr-competicion .c-g-lbl { fill: var(--ink-3); font: 10px "Geist Mono", monospace; }
+.scr-competicion .c-g-lbl-us { fill: var(--signal); }
+.scr-competicion .c-g-note { margin-top: 10px; }
+.scr-competicion .c-global-sub { display: flex; gap: 12px; align-items: baseline; }
+.scr-competicion .c-g-clock { border: 1px solid var(--line-2); padding: 3px 8px; color: var(--ink); font-size: 12px; }
+.scr-competicion .c-g-due { color: var(--warn); border-color: var(--warn); }
+.scr-competicion .c-g-move { font-style: normal; font-size: 10.5px; margin-left: 8px; font-family: "Geist Mono", monospace; }
+.scr-competicion .c-g-up { color: var(--ok); }
+.scr-competicion .c-g-down { color: var(--bad); }
+.scr-competicion .c-g-tabs { display: flex; margin-bottom: 10px; }
+.scr-competicion .c-g-tabs .t10-seg { font-size: 12px; padding: 6px 12px; }
+.scr-competicion .c-g-row.c-g-day { grid-template-columns: 28px minmax(130px, 1.5fr) repeat(3, minmax(96px, 1fr)) minmax(96px, 1fr); }
+.scr-competicion .c-g-row.c-g-day-sun { grid-template-columns: 28px minmax(130px, 1.5fr) repeat(3, minmax(96px, 1fr)) minmax(96px, 0.9fr) minmax(60px, 0.6fr) minmax(96px, 1fr); }
+.scr-competicion .c-g-src { font-style: normal; margin-left: 5px; color: var(--ink-3); }
+.scr-competicion .c-g-src-srv { color: var(--ok); }
+.scr-competicion .c-g-ours { border: 1px solid var(--line-2); background: var(--s2); padding: 10px 12px; margin-bottom: 12px; }
+.scr-competicion .c-g-ours-h { margin-bottom: 8px; }
+.scr-competicion .c-g-kvs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.scr-competicion .c-g-kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.scr-competicion .c-g-kv b { font-size: 20px; color: var(--ink); font-weight: 600; }
+@media (max-width: 900px) { .scr-competicion .c-g-kvs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

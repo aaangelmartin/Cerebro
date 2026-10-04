@@ -1,0 +1,30 @@
+/* cards: styles of this screen only, classes start with .cards- */
+.cards-privacy { display: flex; align-items: center; gap: 8px; color: var(--ink-2); margin-top: 10px; }
+.cards-mode { margin-left: 10px; vertical-align: middle; font-weight: 400; }
+.cards-body { display: flex; flex-direction: column; gap: 16px; }
+.cards-zones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.cards-tile { display: flex; align-items: flex-start; gap: 12px; padding: 10px; background: var(--s1); border: 1px solid var(--line-2); min-width: 0; }
+.cards-tile.is-removed { opacity: .45; }
+.cards-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; font-size: 12.5px; }
+.cards-tags { display: flex; flex-wrap: wrap; gap: 5px; min-height: 18px; }
+.cards-big { font-family: var(--font-num); font-size: 22px; line-height: 1.15; color: var(--ink); }
+.cards-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.cards-line b { font-weight: 500; color: var(--ink); }
+.cards-private { color: var(--ink-2); }
+.cards-private .ic-wrap { color: var(--ink-3); align-self: center; }
+.cards-none { padding: 6px 2px; }
+.cards-more { width: 100%; margin-top: 10px; background: var(--s1); }
+.cards-adder { display: flex; gap: 8px; margin-bottom: 10px; }
+.cards-adder .input { text-transform: uppercase; font-family: var(--font-num); }
+.cards-adder .input::placeholder { text-transform: none; font-family: var(--font-ui); color: var(--ink-3); }
+.cards-field { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 6px; }
+.cards-num { padding: 4px 8px; font-size: 14px; }
+.cards-num.is-bad { border-color: var(--bad); }
+.cards-p { font-family: var(--font-num); font-size: 11px; color: var(--ink-3); }
+.cards-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+@media (max-width: 1100px) { .cards-zones { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .cards-grid { grid-template-columns: 1fr; }
+  .cards-tile .card { --card-w: 92px; }
+}

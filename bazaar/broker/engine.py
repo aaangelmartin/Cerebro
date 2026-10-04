@@ -32,7 +32,11 @@ DEFAULT_POLICY: dict[str, Any] = {
     "max_bench_matches_per_tick": 10,
     "max_public_matches_per_tick": 10,
     "hard_traders": 12,           # a session with at least this many traders uses the hard profile
-    "cross_rule": "probe",        # quotes | limits | probe (learn it: try a few non-crossing pairs per session)
+    "matcher": "engine",          # engine | stall. "stall" pairs exactly as the free stall does (highest bid against
+                                  # lowest ask); it can never score below it. See broker/headroom.py for why the
+                                  # estimate-driven engine has no edge on one-by-one arrivals.
+    "cross_rule": "quotes",       # quotes | limits | probe. The server said it on Saturday ("price must sit between
+                                  # the ask and the bid"): quotes. Probing cost a little in every sim profile.
     "max_probes": 2,              # non-crossing tries per session while the rule is unknown
     "probe_after": 2,             # ticks into a session before the first probe (estimates need a few quotes)
     "probe_refusals": 3,          # refused probes that settle the rule as "quotes" ...
@@ -401,10 +405,14 @@ class BenchEngine:
         if kind in ("limit", "probe") and (self.rule == "probe" or (self.learn_rule and self.rule == "quotes")):
             self.rule = "limits"                       # a non-crossing pair went through: limits rule
 
-    def note_refused(self, m: "Match", code: str = "") -> None:
+    def note_refused(self, m: "Match", code: str = "", message: str = "") -> None:
         """A planned match was refused. Gone offers are dropped; a refused non-crossing pair is blocked, both
-        traders' limit estimates are pulled toward their quotes, and enough probe refusals settle the rule."""
+        traders' limit estimates are pulled toward their quotes, and enough probe refusals settle the rule.
+        When the server states the rule outright ("price must sit between the ask and the bid"), it is settled
+        at once as "quotes" and no more probes are sent."""
         c = (code or "").lower()
+        if m.kind in ("limit", "probe") and "between the ask" in (message or "").lower():
+            self.rule, self.learn_rule = "quotes", False
         gone = any(w in c for w in GONE_CODES)
         if gone:
             for oid in (m.sell, m.buy):
@@ -424,6 +432,17 @@ class BenchEngine:
                 if self.rule == "probe" and self.probe_refusals >= int(self.policy.get("probe_refusals", 3)) \
                         and len(self.refusal_runs) >= int(self.policy.get("probe_refusal_runs", 2)):
                     self.rule = "quotes"               # one odd session (bad estimates) cannot settle it alone
+
+    def apply_policy(self, policy: dict) -> None:
+        """Swap in a new policy between sessions (never call it while a session runs). A changed cross_rule
+        restarts what the engine learned about the rule."""
+        old_rule = self.policy.get("cross_rule")
+        self.policy = policy
+        if policy.get("cross_rule") != old_rule:
+            self.rule = policy.get("cross_rule", "quotes")
+            self.learn_rule = self.rule == "probe"
+            self.probe_refusals = 0
+            self.refusal_runs = set()
 
     def probe_budget(self) -> int:
         if self.rule == "probe":
@@ -533,10 +552,30 @@ class BenchEngine:
     # ---- planning
     def plan(self, tick: int, fee_bps: int = 0, fee_per_card: int = 0) -> list[Match]:
         out: list[Match] = []
+        plan_run = self._plan_run_stall if self.policy.get("matcher") == "stall" else self._plan_run
         for run in sorted({t.run for t in self.traders.values() if t.active}):
-            out.extend(self._plan_run(run, tick, fee_bps, fee_per_card))
+            out.extend(plan_run(run, tick, fee_bps, fee_per_card))
         out.sort(key=lambda m: -m.weight)
         return out[: int(self.policy.get("max_bench_matches_per_tick", 10))]
+
+    def _plan_run_stall(self, run: str, tick: int, fee_bps: int, fee_per_card: int) -> list[Match]:
+        """The free stall's pairing on the traders in this tick's book: highest bid against lowest ask while the
+        bid covers it. Estimates are still refreshed, so the session report compares like with like."""
+        self.estimates(run)
+        act = [t for t in self.traders.values() if t.run == run and t.active and t.last_tick == tick]
+        asks = sorted((t for t in act if t.side == "sell"), key=lambda t: t.quote)
+        bids = sorted((t for t in act if t.side == "buy"), key=lambda t: -t.quote)
+        out = []
+        for s, b in zip(asks, bids):
+            if b.quote < s.quote:
+                break
+            price = midpoint_price(s.quote, b.quote, fee_bps, fee_per_card)
+            if price is None:
+                continue
+            surplus = max(b.est, b.quote) - min(s.est, s.quote)
+            out.append(Match(s.offer_id, b.offer_id, price, run, surplus + 1.0, surplus,
+                             f"stall pairing: bid {b.quote} >= ask {s.quote}", "cross"))
+        return out
 
     def _plan_run(self, run: str, tick: int, fee_bps: int, fee_per_card: int) -> list[Match]:
         prof = self.profile_for(run)
@@ -699,7 +738,8 @@ def public_plan(book: dict, limit: int = 10, tick: int | None = None) -> list[Ma
     """Card by card: each single-card ask against the highest bid that wants that card (any copy via want.types, or
     that exact asset via want.assets), from another maker, covering ask + fee. Price at the midpoint, lowered until the
     buyer can also pay our fee. Asks are taken cheapest first; a bid is used once. Offers that expire at or before
-    `tick` (default book["tick"]) are skipped: the server would refuse them."""
+    `tick` (default book["tick"]) are skipped: the server would refuse them. An offer addressed to one team (`to`)
+    only meets that team's offer."""
     fee_bps, fee_card = int(book.get("fee_bps") or 0), int(book.get("fee_per_card") or 0)
     if tick is None and isinstance(book.get("tick"), int):
         tick = book["tick"]
@@ -731,6 +771,8 @@ def public_plan(book: dict, limit: int = 10, tick: int | None = None) -> list[Ma
         for b, types, assets in bids:
             if b["id"] in used or b.get("maker") == s.get("maker"):
                 continue
+            if (s.get("to") and s["to"] != b.get("maker")) or (b.get("to") and b["to"] != s.get("maker")):
+                continue                # an addressed offer is for that team alone: never cross it with a third one
             if not ((ref and types == [ref]) or (aid is not None and assets == [aid])):
                 continue
             bid = int(b["give"]["cash"])

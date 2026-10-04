@@ -1,0 +1,77 @@
+{
+ "team": "t16",
+ "name": "Team 16",
+ "tick": 1446,
+ "venue": "v07",
+ "status": {
+  "team": "t16",
+  "agent_called": true,
+  "verified": true,
+  "cards_listed": true,
+  "agent_online": true,
+  "missing": [],
+  "connected": true,
+  "agent_last_seen": 1791068100.0,
+  "code_expires_in": 0,
+  "session_expires_in": 41000
+ },
+ "settings": {
+  "team": "t16",
+  "default_mode": "auto",
+  "lang": "en",
+  "paused": false,
+  "modes": {},
+  "orders": {}
+ },
+ "agent": {
+  "default_mode": "auto",
+  "modes": {},
+  "orders": {}
+ },
+ "limits": {
+  "RET-03": {
+   "min": 9,
+   "value": 11
+  },
+  "LAV-09": {
+   "max": 88,
+   "value": 95
+  }
+ },
+ "owned": [
+  "MAL-01",
+  "RET-03",
+  "SAL-01",
+  "LAT-02"
+ ],
+ "counts": {
+  "have": 4,
+  "duplicates": 1,
+  "for_sale": 2,
+  "want": 3,
+  "limits_set": 4,
+  "overrides": 2
+ },
+ "trades": {
+  "proposed": 1,
+  "offer_on_v07": 1,
+  "accepted": 0,
+  "settled": 1,
+  "passed": 0,
+  "expired": 0
+ },
+ "activity_seq": 14,
+ "read_only": false,
+ "ready": true,
+ "standing": {
+  "strikes": 0,
+  "limit": 2,
+  "banned": false,
+  "last": null,
+  "evidence": [],
+  "acked": true,
+  "message": null,
+  "rule": true,
+  "reason": null
+ }
+}

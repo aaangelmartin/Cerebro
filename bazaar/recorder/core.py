@@ -29,9 +29,13 @@ FEED_BUSY_NEW = 120
 CLOSED_EVERY_S = 30.0         # doors closed or paused: clock and feed
 CLOSED_SLOW_S = 300.0         # doors closed: leaderboard, books and our private state
 META_EVERY_S = 120.0          # dealers, levels, schedule
-CATALOG_EVERY_S = 900.0
+CATALOG_EVERY_S = 900.0        # doors closed
+CATALOG_OPEN_S = 180.0         # doors open: `minted` moves with every pack and a set can be released mid-game
 DEALER_DETAIL_EVERY_S = 1800.0
 BOOK_SNAPSHOT_EVERY = 20      # ticks between full snapshots of each venue's book
+BOOK_ALWAYS = ("v07",)  # our venue: read every tick even when rate-limited (El Rastro always is)
+SHORT_TICK_S = 20.0           # Sunday's 15 s ticks: books are read on the squeezed rota (see plan_books)
+BOOK_SQUEEZED_EVERY = 3       # while rate-limited, every other venue's book is read once in this many ticks
 THREADS_ALL_EVERY = 20        # ticks between reads of every thread (not only the open ones)
 DUELS_DONE_EVERY = 10         # ticks between reads of finished duels
 KEYED_AT = 0.3                # share of the tick at which our private reads start (after the bot's own reads)
@@ -39,6 +43,7 @@ CARD_SWEEP_EVERY_S = 3600.0
 CARD_PROBE_BEYOND = 15        # ids probed past the highest asset id we have seen
 SEEN_KEEP = 4000              # feed dedupe window
 REFRESH_TYPES = ("level.", "persona.", "venue.", "clock.", "announcement", "day.", "dealer.", "schedule.")
+CATALOG_TYPES = ("set.", "round.", "catalog.", "day.")     # a release or a new round: read the catalog now
 CLOCK_VOLATILE = ("next_tick_in",)
 
 
@@ -235,7 +240,7 @@ class Recorder:
             self._enqueue_keyed_tick()
         if self._due("meta", META_EVERY_S if self.open else CLOSED_SLOW_S * 2):
             self._enqueue_meta()
-        if self._due("catalog", CATALOG_EVERY_S):
+        if self._due("catalog", CATALOG_OPEN_S if self.open else CATALOG_EVERY_S):
             self.enqueue("public", "catalog", "/api/catalog", lambda d: self.on_meta("catalog", d), prio=6)
         if self.keyed_due is not None and now >= self.keyed_due:
             self.keyed_due = None
@@ -397,6 +402,8 @@ class Recorder:
         if not isinstance(d, dict) or "tick" not in d:
             return
         was_open = self.open if self.clock else None
+        if self.clock and d.get("round") != self.clock.get("round"):
+            self.timers["catalog"] = 0.0             # a new round releases its set (Chamberí on Sunday)
         self.clock = d
         stable = {k: v for k, v in d.items() if k not in CLOCK_VOLATILE}
         try:
@@ -411,6 +418,7 @@ class Recorder:
                                "tick": tick})
             self.timers.pop("feed", None)
             self.timers.pop("closed_slow", None)
+            self.timers.pop("catalog", None)         # doors opened or closed: the set of the day may be out
         if tick != self.tick:
             self.on_new_tick(tick)
         nti = d.get("next_tick_in")
@@ -444,6 +452,8 @@ class Recorder:
             last = max(last, int(e.get("id") or 0))
             if str(e.get("type", "")).startswith(REFRESH_TYPES):
                 refresh = True
+            if str(e.get("type", "")).startswith(CATALOG_TYPES):
+                self.timers["catalog"] = 0.0
         self.counts["feed"] = self.counts.get("feed", 0) + len(fresh)
         if fresh:
             self.state["last_event_id"] = last
@@ -473,9 +483,17 @@ class Recorder:
             self._rec("books", {"venue": gone, "added": [], "removed": list(prev), "changed": [],
                                 "venue_gone": True})
             self._dirty = True
+        # While the game is rate-limiting our address, the essential reads (feed, clock, leaderboard, our own
+        # state) go first: only El Rastro, our venue and a rotating third of the other books are read per tick.
+        # A short tick squeezes the same way: every book every 15 s asks for more than the public lane's budget
+        # and would starve the slower reads queued behind the books.
+        squeezed = self.lanes["public"].limited_recently() > 0 or (self.open and self.tick_seconds() < SHORT_TICK_S)
+        core = {"rastro", str(self.state.get("own_venue") or ""), *BOOK_ALWAYS}
         for i, vid in enumerate(ids):
+            if squeezed and vid not in core and (i + int(self.tick or 0)) % BOOK_SQUEEZED_EVERY:
+                continue
             self.enqueue("public", f"book:{vid}", f"/api/venues/{vid}/offers",
-                         lambda data, v=vid: self.on_book(v, data), prio=3,
+                         lambda data, v=vid: self.on_book(v, data), prio=3 if vid in core else 4,
                          on_error=lambda e, v=vid: self._book_error(v, e))
 
     def _book_error(self, vid: str, e: GameError) -> None:
@@ -659,8 +677,9 @@ class Recorder:
         public_down = self.lanes["public"].down_since is not None
         state = ("public_down" if public_down else "gateway_down" if keyed_down
                  else "running" if self.open else "closed" if self.clock else "starting")
+        limited = {k: v.limited_recently() for k, v in self.lanes.items() if v.limited_recently()}
         c = self.state["cards"]
-        return {"updated": round(self.now(), 3), "state": state, "tick": self.tick,
+        return {"updated": round(self.now(), 3), "state": state, "rate_limited": limited, "tick": self.tick,
                 "doors": self.clock.get("doors"), "paused": self.clock.get("paused"),
                 "tick_seconds": self.clock.get("tick_seconds"), "last_event_id": self.state["last_event_id"],
                 "feed_gaps": self.state["gaps"], "feed_busy": self.feed_busy, "lanes": lanes,

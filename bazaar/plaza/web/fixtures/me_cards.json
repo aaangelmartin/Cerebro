@@ -1,0 +1,115 @@
+{
+ "team": "t16",
+ "tick": 1446,
+ "have": [
+  {
+   "ref": "MAL-01",
+   "name": "Vinilo de la Movida",
+   "rarity": "common",
+   "set": "MAL",
+   "color": "#7B2CBF",
+   "art": "/plaza/art/MAL-01.svg",
+   "owned": true,
+   "as": "duplicate",
+   "by": "agent",
+   "limits": {
+    "min": 8
+   }
+  },
+  {
+   "ref": "RET-03",
+   "name": "El Titiritero",
+   "rarity": "common",
+   "set": "RET",
+   "color": "#3BB273",
+   "art": "/plaza/art/RET-03.svg",
+   "owned": true,
+   "as": "for_sale",
+   "price": 12,
+   "by": "agent",
+   "limits": {
+    "min": 9,
+    "value": 11
+   }
+  },
+  {
+   "ref": "SAL-01",
+   "name": "Escaparate de Serrano",
+   "rarity": "common",
+   "set": "SAL",
+   "color": "#2E86AB",
+   "art": "/plaza/art/SAL-01.svg",
+   "owned": true,
+   "as": "keep",
+   "by": "agent",
+   "limits": {}
+  },
+  {
+   "ref": "LAT-02",
+   "name": "Puesto del Rastro",
+   "rarity": "common",
+   "set": "LAT",
+   "color": "#F4A259",
+   "art": "/plaza/art/LAT-02.svg",
+   "owned": true,
+   "as": "for_sale",
+   "price": 10,
+   "by": "human",
+   "limits": {}
+  }
+ ],
+ "want": [
+  {
+   "ref": "LAV-09",
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "set": "LAV",
+   "color": "#E4572E",
+   "art": "/plaza/art/LAV-09.svg",
+   "owned": false,
+   "bid": 80,
+   "finishes_page": true,
+   "by": "agent",
+   "limits": {
+    "max": 88,
+    "value": 95
+   }
+  },
+  {
+   "ref": "SAL-10",
+   "name": "Museo Lázaro Galdiano",
+   "rarity": "rare",
+   "set": "SAL",
+   "color": "#2E86AB",
+   "art": "/plaza/art/SAL-10.svg",
+   "owned": false,
+   "finishes_page": false,
+   "by": "agent",
+   "limits": {
+    "max": 70
+   }
+  },
+  {
+   "ref": "LAV-11",
+   "name": "La Casa Encendida",
+   "rarity": "epic",
+   "set": "LAV",
+   "color": "#E4572E",
+   "art": "/plaza/art/LAV-11.svg",
+   "owned": false,
+   "finishes_page": false,
+   "by": "human",
+   "limits": {}
+  }
+ ],
+ "counts": {
+  "have": 4,
+  "duplicates": 1,
+  "for_sale": 2,
+  "want": 3,
+  "limits_set": 4,
+  "overrides": 2
+ },
+ "declared_at": 1791068090.0,
+ "private": "only your team sees your limits"
+}

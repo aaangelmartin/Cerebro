@@ -37,7 +37,7 @@ class TestFallbackMessage(unittest.TestCase):
             self.assertEqual(fm["price"], a.params["expect"]["price"])
             self.assertIn(str(fm["price"]), fm["text"])
         chosen, _ = select(acts, SimpleNamespace(tick=100, limits={}, threads=[], my_offers=[], duels=[]),
-                           {"accepts_left": 1, "messages": {}})
+                           {"accepts_left": 1, "duel_accepts_left": 1, "messages": {}})
         self.assertEqual([(c.kind, c.params["duel"]) for c in chosen], [("duel_accept", 1), ("duel_message", 2)])
         self.assertEqual(chosen[1].params["price"], 61)
 

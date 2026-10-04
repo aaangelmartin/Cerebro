@@ -1,0 +1,59 @@
+{
+ "tick": 1445,
+ "venue": "v07",
+ "unreleased_sets": [
+  {
+   "id": "CHA",
+   "name": "Chamberí",
+   "color": "#C1666B"
+  }
+ ],
+ "cards": {
+  "LAT-01": {
+   "name": "Caña en la Cava Baja",
+   "rarity": "common",
+   "set": "LAT",
+   "stats": {
+    "n": 4,
+    "last": 8,
+    "last_tick": 904,
+    "low": 6,
+    "median": 6,
+    "high": 7,
+    "min": 5,
+    "max": 8,
+    "trend": "up"
+   },
+   "deals": [
+    {
+     "tick": 159,
+     "price": 5,
+     "venue": "rastro",
+     "seller": "t06",
+     "buyer": "t04"
+    },
+    {
+     "tick": 433,
+     "price": 7,
+     "venue": "v17",
+     "seller": "t15",
+     "buyer": "t12"
+    },
+    {
+     "tick": 903,
+     "price": 6,
+     "venue": "v02",
+     "seller": "t07",
+     "buyer": "t08"
+    },
+    {
+     "tick": 904,
+     "price": 8,
+     "venue": "rastro",
+     "seller": "t18",
+     "buyer": "t07"
+    }
+   ]
+  }
+ }
+}

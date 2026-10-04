@@ -48,7 +48,14 @@ def load_env(path):
     return env
 
 
-ENV = {**load_env(Path(os.environ.get("DASHBOARD_ENV_FILE") or ROOT.parent / ".env")), **os.environ}
+def env_file():
+    """DASHBOARD_ENV_FILE, else legacy/.env, else the repository's own .env (where the keys really live)."""
+    if os.environ.get("DASHBOARD_ENV_FILE"):
+        return Path(os.environ["DASHBOARD_ENV_FILE"])
+    return next((p for p in (ROOT.parent / ".env", ROOT.parent.parent / ".env") if p.exists()), ROOT.parent / ".env")
+
+
+ENV = {**load_env(env_file()), **os.environ}
 BASE = ENV.get("BAZAAR_BASE_URL", "https://bazaar.causaprima.ai").rstrip("/")
 TEAM_KEY = ENV.get("BAZAAR_TEAM_KEY", "")
 # Personal gateway tokens, "name:token,name:token"; GATEWAY_TOKEN is the owner's.
@@ -58,6 +65,15 @@ GATEWAY_TOKENS = dict(
 if ENV.get("GATEWAY_TOKEN"):
     GATEWAY_TOKENS[ENV["GATEWAY_TOKEN"]] = "owner"
 DASHBOARD_AUTH = f"{ENV.get('DASHBOARD_USER', '')}:{ENV.get('DASHBOARD_PASSWORD', '')}"
+
+
+def require_login(env):
+    """The gateway never starts without the dashboard login: an empty one locks everybody out of the panel."""
+    missing = [k for k in ("DASHBOARD_USER", "DASHBOARD_PASSWORD") if not (env.get(k) or "").strip()]
+    if missing:
+        raise SystemExit(
+            f"gateway NOT started: {' and '.join(missing)} empty. The env file was not read. Start it from the "
+            "repository root with: DASHBOARD_ENV_FILE=.env .venv/bin/python -u legacy/dashboard/server.py")
 
 # Public reads are fetched without the key; the rest of the dashboard's reads need it.
 PUBLIC = {
@@ -198,14 +214,97 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
         headers["X-Dashboard"] = "1"
     if body is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(V2_URL + rest, data=body, method=method, headers=headers)
+    last = None
+    for attempt in range(3):                     # a page load fires ~25 requests at once: retry a refused one
+        req = urllib.request.Request(V2_URL + rest, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.headers.get("Content-Type", "application/json"), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", "application/json"), e.read()
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            last = e
+            if method != "GET":
+                break
+            time.sleep(0.15 * (attempt + 1))
+    reason = getattr(last, "reason", last)
+    return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(reason)}).encode()
+
+
+# The public market board (bazaar/plaza/server.py, its own process): the ONLY routes served without the dashboard
+# login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
+PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
+PLAZA_RX = re.compile(
+    r"/plaza(?:/(?:agents\.md|AGENTS\.md|AGENTS-AUCTIONS\.md|cards\.json|i18n\.json|board|board\.json|board/history\.json|board/live\.json|collections|collections\.json|auctions|lots\.json|live\.json|history\.json"
+    r"|static/(?:(?:screens|i18n|fixtures|fixtures/admin)/)?[a-z0-9_]{1,40}\.(?:js|css|json)"
+    r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents|connect|me"
+    r"|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|_kit|view"
+    r"|art/[A-Z]{3}-\d{2}\.svg"
+    r"|api/(?:health|openapi\.json|status|stats|market|board|board/history|board/live|collections|lots|lot/l-[0-9a-f]{8}|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}"
+    r"|card/[A-Z]{3}-\d{2}|connect/status|match/m-[0-9a-f]{10}|agent/next|agent/cards"
+    r"|me|me/cards|me/settings|me/activity|me/suggestions|me/trades|me/signals))?)?")
+PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent|agent/ack|suggestions"
+                                   r"|lots|lot/l-[0-9a-f]{8}/(?:bid|accept|cancel)"
+                                   r"|match/m-[0-9a-f]{10}/message"
+                                   r"|me/(?:settings|cards|viewer-link|card/[A-Z]{3}-\d{2}|trade/m-[0-9a-f]{10}))"),
+                "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
+PLAZA_COOKIE = re.compile(r"(?:^|;\s*)(plaza_session=[A-Za-z0-9_-]{20,64})(?:;|$)")   # the only cookie forwarded
+PLAZA_STREAM = "/plaza/api/floor/stream"
+# Our own panel over the plaza: dashboard login only. The plaza process trusts the token it wrote for this run.
+PLAZA_ADMIN_RX = re.compile(
+    r"/plaza/admin(?:/(?:static/admin\.js|static/screens/[a-z0-9_]{1,40}\.(?:js|css)"
+    r"|overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs"
+    r"|api/(?:overview|activity|matchmaker|status|performance|trades|teams|suggestions|venue|openapi))?)?")
+PLAZA_ADMIN_WRITE = "/plaza/admin/api/action"
+PLAZA_TOKEN_FILE = Path(ENV.get("PLAZA_TOKEN_FILE") or ROOT.parent.parent / "bazaar" / "data" / "live" / "plaza_admin.token")
+PLAZA_MAX_BODY = 16 * 1024
+PLAZA_PASS = ("Content-Type", "Cache-Control", "Location", "Access-Control-Allow-Origin", "X-Content-Type-Options",
+              "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Set-Cookie")
+
+
+def is_plaza(path, method="GET"):
+    """True for a public plaza route with that method."""
+    if method in ("GET", "HEAD"):
+        return bool(PLAZA_RX.fullmatch(path))
+    rx = PLAZA_WRITES.get(method)
+    return bool(rx and rx.fullmatch(path))
+
+
+def is_plaza_admin(path, method="GET"):
+    if method in ("GET", "HEAD"):
+        return bool(PLAZA_ADMIN_RX.fullmatch(path))
+    return method == "POST" and path == PLAZA_ADMIN_WRITE
+
+
+def plaza_token():
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status, r.headers.get("Content-Type", "application/json"), r.read()
+        return PLAZA_TOKEN_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def plaza_url(path, query):
+    return PLAZA_URL + path + ("?" + query if query and PLAZA_QUERY.fullmatch(query) else "")
+
+
+def plaza_proxy(path, query, method="GET", body=None, headers=None):
+    """Forwards one whitelisted plaza request; returns (status, headers, body)."""
+    url = plaza_url(path, query)
+    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(req, timeout=10) as r:
+            return r.status, {k: r.headers[k] for k in PLAZA_PASS if r.headers.get(k)}, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("Content-Type", "application/json"), e.read()
-    except urllib.error.URLError as e:
-        return 502, "application/json", json.dumps({"error": "bazaar_api_offline", "message": str(e.reason)}).encode()
+        return e.code, {k: e.headers[k] for k in PLAZA_PASS if e.headers.get(k)}, e.read()
+    except (urllib.error.URLError, ConnectionError, TimeoutError):
+        return 502, {"Content-Type": "application/json"}, b'{"error":"plaza_offline","message":"the plaza is starting"}'
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
 
 
 SECRET_FIELDS = {"broker_key", "key", "x-broker-key"}
@@ -357,11 +456,84 @@ def feed_poller():
         time.sleep(3)
 
 
+LOCAL_PEERS = ("127.0.0.1", "::1")
+LOCAL_HOSTS = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?", re.I)
+ADDRESS_RX = re.compile(r"[0-9a-fA-F:.]{3,45}")
+LOGIN_TRIES, LOGIN_WINDOW_S = 20, 300.0          # wrong dashboard passwords from one address before it waits
+PLAZA_ADMIN_PUBLIC = ENV.get("PLAZA_ADMIN_PUBLIC", "") == "1"   # the market's panel through the tunnel: off unless asked
+
+
+class Logins:
+    """Wrong passwords per address. Our own machine is never made to wait."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.fails, self.lock = clock, {}, threading.Lock()
+
+    def blocked(self, who):
+        if who in LOCAL_PEERS:
+            return False
+        now = self.clock()
+        with self.lock:
+            q = [t for t in self.fails.get(who, []) if now - t < LOGIN_WINDOW_S]
+            if q:
+                self.fails[who] = q
+            else:
+                self.fails.pop(who, None)
+            return len(q) >= LOGIN_TRIES
+
+    def failed(self, who):
+        with self.lock:
+            if len(self.fails) > 5000:
+                now = self.clock()
+                self.fails = {k: v for k, v in self.fails.items() if v and now - v[-1] < LOGIN_WINDOW_S}
+            self.fails.setdefault(who, []).append(self.clock())
+
+
+LOGINS = Logins()
+
+
 class Handler(SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    timeout = 60                                  # a peer that stops sending is dropped, never parked
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        raw = self.headers.get("Content-Length")
+        if raw is not None and not re.fullmatch(r"\d{1,9}", raw.strip()):
+            self.close_connection = True
+            self.send_error(400)
+            return False
+        if self.command in ("GET", "HEAD") and (self.headers.get("Transfer-Encoding") or (raw or "0").strip() != "0"):
+            self.close_connection = True              # a body nobody reads would be taken for the next request
+        return True
+
+    def send_error(self, code, message=None, explain=None):
+        self.close_connection = True                  # the request's body may still be on the wire
+        return super().send_error(code, message, explain)
+
+    def via_public(self):
+        """True when the request came through a tunnel (cloudflared, ngrok) or any name that is not this machine."""
+        if self.client_address[0] not in LOCAL_PEERS:
+            return True
+        if any(self.headers.get(h) for h in ("CF-Connecting-IP", "CF-Ray", "X-Forwarded-For", "X-Forwarded-Host",
+                                             "Ngrok-Trace-Id", "X-Original-Host")):
+            return True
+        return not LOCAL_HOSTS.fullmatch((self.headers.get("Host") or "").strip())
+
+    def caller(self):
+        """The address a request counts against. A forwarded address is believed only from a tunnel on this
+        machine: anybody else could write that header."""
+        peer = self.client_address[0] or ""
+        if peer in LOCAL_PEERS:
+            for name in ("CF-Connecting-IP", "X-Forwarded-For"):
+                given = (self.headers.get(name) or "").split(",")[0].strip()[:45]
+                if given and ADDRESS_RX.fullmatch(given):
+                    return given
+        return peer[:45] if ADDRESS_RX.fullmatch(peer[:45]) else "0.0.0.0"
 
     def client(self):
         """'bot:<name>' for a gateway token, 'dashboard' for basic auth, else None."""
@@ -371,12 +543,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return f"bot:{name}"
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Basic ") and DASHBOARD_AUTH != ":":
+            who = self.caller()
+            if LOGINS.blocked(who):                       # too many wrong passwords from there: not even looked at
+                return None
             try:
                 given = base64.b64decode(auth[6:]).decode()
             except ValueError:
+                LOGINS.failed(who)
                 return None
             if hmac.compare_digest(given, DASHBOARD_AUTH):
                 return "dashboard"
+            LOGINS.failed(who)
         return None
 
     def deny(self):
@@ -385,14 +562,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("WWW-Authenticate", 'Basic realm="Bazaar Team 10"')
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")           # the refused request's body may still be on the wire
+        self.close_connection = True
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if is_plaza(path):                                # the public market board: no login, whitelisted routes
+            return self.plaza_stream() if path == PLAZA_STREAM else self.plaza("GET")
+        if is_plaza_admin(path) and self.via_public() and not PLAZA_ADMIN_PUBLIC:
+            return self.send_error(404)                   # the market's panel never leaves this machine
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
+        if is_plaza_admin(path):                          # our panel over the plaza: dashboard login only
+            if client != "dashboard":
+                return self.send_error(403)
+            return self.plaza("GET", admin=True)
         if path == V2_PREFIX or path.startswith(V2_PREFIX + "/"):
             return self.v2(client, "GET")
         if path == "/bot/status":
@@ -457,9 +644,17 @@ class Handler(SimpleHTTPRequestHandler):
 
     def write(self, method):
         path = self.path.split("?")[0]
+        if is_plaza(path, method):                        # a team's agent declaring its sheet behind its PIN
+            return self.plaza(method)
+        if is_plaza_admin(path, method) and self.via_public() and not PLAZA_ADMIN_PUBLIC:
+            return self.send_error(404)
         client = self.client()
         if client is None:
             return self.deny()
+        if is_plaza_admin(path, method):                  # hide a message, block a team, refresh, on/off
+            if client != "dashboard" or self.headers.get("X-Dashboard") != "1":
+                return self.send_error(403)
+            return self.plaza(method, admin=True)
         if path.startswith(V2_PREFIX + "/"):
             return self.v2(client, method)
         if path.startswith(BOT_CONTROL_PREFIXES):
@@ -482,6 +677,87 @@ class Handler(SimpleHTTPRequestHandler):
         _cache.clear()
         log_action(client, method, path, body, status, resp)
         self.send_json(status, resp)
+
+    def plaza_stream(self):
+        """The live floor (server-sent events): relays the plaza's stream line by line until either side closes."""
+        parts = self.path.split("?", 1)
+        headers = {"X-Plaza-Client": self.caller(), "Accept": "text/event-stream"}
+        cookie = PLAZA_COOKIE.search(self.headers.get("Cookie") or "")
+        if cookie:                                            # a connected team has its own share of streams
+            headers["Cookie"] = cookie.group(1)
+        if self.via_public():
+            headers["X-Plaza-Public"] = "1"
+        last = self.headers.get("Last-Event-ID") or ""
+        if re.fullmatch(r"\d{1,9}", last):
+            headers["Last-Event-ID"] = last
+        req = urllib.request.Request(plaza_url(parts[0], parts[1] if len(parts) > 1 else ""), headers=headers)
+        try:
+            upstream = urllib.request.urlopen(req, timeout=40)
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            self.send_response(e.code)
+            self.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            return self.send_error(502)
+        self.send_response(200)
+        for k in ("Content-Type", "Cache-Control", "X-Accel-Buffering", "Access-Control-Allow-Origin",
+                  "X-Content-Type-Options", "Content-Security-Policy"):
+            if upstream.headers.get(k):
+                self.send_header(k, upstream.headers[k])
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        try:
+            with upstream:
+                while True:
+                    line = upstream.readline()
+                    if not line:
+                        break
+                    self.wfile.write(line)
+                    if line == b"\n":
+                        self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            pass
+
+    def plaza(self, method, admin=False):
+        """The public board: forwards the request with the caller's address so the plaza can budget per client."""
+        parts = self.path.split("?", 1)
+        body = None
+        if method in ("POST", "PUT"):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self.send_error(400)
+            if length > PLAZA_MAX_BODY:
+                return self.send_error(413)
+            body = self.rfile.read(length) if length else b"{}"
+        headers = {"X-Plaza-Client": self.caller()}
+        for name in ("Content-Type", "X-Plaza-Pin", "X-Plaza-Token", "Origin", "Sec-Fetch-Site"):
+            if self.headers.get(name):
+                headers[name] = self.headers[name][:120]
+        if self.headers.get("Host"):
+            headers["X-Plaza-Host"] = self.headers["Host"][:120]
+        if self.via_public() and not admin:
+            headers["X-Plaza-Public"] = "1"
+        cookie = PLAZA_COOKIE.search(self.headers.get("Cookie") or "")
+        if cookie and not admin:                              # the browser's connection session, nothing else
+            headers["Cookie"] = cookie.group(1)
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            headers["X-Plaza-Proto"] = "https"
+        if admin:
+            headers["X-Plaza-Admin"] = plaza_token()
+        status, out, payload = plaza_proxy(parts[0], parts[1] if len(parts) > 1 else "", method, body, headers)
+        self.send_response(status)
+        for k, v in out.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
 
     def bot_write(self, client, path):
         """Arming, mode and approvals for the bot: dashboard users only, never bot tokens."""
@@ -616,10 +892,12 @@ def _query(path):
 
 
 class Server(ThreadingHTTPServer):
+    request_queue_size = 128
     daemon_threads = True
 
 
 if __name__ == "__main__":
+    require_login(ENV)
     if not TEAM_KEY:
         print("warning: BAZAAR_TEAM_KEY is empty in .env")
     if not GATEWAY_TOKENS:

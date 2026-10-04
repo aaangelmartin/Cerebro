@@ -55,6 +55,30 @@ class PerceiveTest(unittest.TestCase):
         ids = [json.loads(r)["id"] for r in (self.live / "events.jsonl").read_text().splitlines()]
         self.assertEqual(ids, [1, 2, 3])
 
+    def test_a_live_duel_puts_off_the_slow_reads_a_feed_event_asks_for(self):
+        feed = {"events": [ev(1)]}
+        gw = FakeGateway({"/api/feed": lambda p, q: feed})
+        s1 = state.perceive(gw, None, live=self.live)
+        feed["events"] = [ev(1), ev(2, "dealer.closed")]
+        gw.routes["/api/clock"] = clock(tick=11)
+        gw.routes["/api/duels"] = {"duels": [{"duel": 7, "status": "live"}]}
+        gw.calls.clear()
+        s2 = state.perceive(gw, s1, live=self.live)
+        self.assertEqual(len(gw.calls), 6)             # the six fast reads only: the model keeps its seconds
+        self.assertEqual(s2.dealers, s1.dealers)
+        gw.routes["/api/duels"] = {"duels": []}        # no duel: the same event refreshes at once
+        feed["events"] = [ev(2, "dealer.closed"), ev(3, "dealer.closed")]
+        gw.routes["/api/clock"] = clock(tick=12)
+        gw.calls.clear()
+        state.perceive(gw, s2, live=self.live)
+        self.assertEqual(len(gw.calls), 12)
+        gw.routes["/api/duels"] = {"duels": [{"duel": 7, "status": "live"}]}
+        gw.routes["/api/clock"] = clock(tick=12 + state.SLOW_EVERY)
+        gw.calls.clear()
+        s4 = state.perceive(gw, s2, live=self.live)    # the rota still runs during a duel
+        self.assertEqual(len(gw.calls), 12)
+        self.assertEqual(s4.slow_tick, 12 + state.SLOW_EVERY)
+
     def test_feed_gap_and_new_event_type_are_novelty(self):
         feed = {"events": [ev(1)]}
         gw = FakeGateway({"/api/feed": lambda p, q: feed})

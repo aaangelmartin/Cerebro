@@ -41,7 +41,7 @@ from typing import Any, Callable
 
 from . import config
 from .core.context import Budget, TickContext, ValueCache, _cash_out
-from .core.state import Situation, perceive
+from .core.state import Situation, domain_share, perceive
 from .core.types import ACCEPT_KINDS, Action, Outcome, Verdict
 
 log = logging.getLogger("bazaar.run")
@@ -67,6 +67,8 @@ INJECTION_FLOOD = 4              # flagged texts from others in one tick -> code
 FLOOD_TICKS = 5
 ATTRIBUTE_TICKS = 3              # score deltas go to actions sent in the last N ticks
 STUCK_TICKS = 3                  # a domain's decide() still busy after this many ticks -> exit, supervisor restarts
+STUCK_S = 90.0                   # ...and after this many real seconds (3 ticks at 30 s; 6 ticks on Sunday's 15 s)
+REAL_TICK_MIN_S = 5.0            # the game's shortest tick; faster clocks are the simulator and the tests
 STUCK_EXIT_CODE = 3
 GATEWAY_RETRY_S = 3.0            # clock read failed: write a gateway_down heartbeat and retry this often
 
@@ -155,7 +157,7 @@ def _own_venue(sit: Situation) -> str | None:
         return None
 
 
-ANNOUNCE_EVERY_H = 2.0           # broker_announce for our venue: once on opening, then every 2 game hours
+ANNOUNCE_EVERY_H = 1.0           # broker_announce for our venue: once on opening, then every game hour
 
 
 def _urgent_duel_accept(a: Action, sit: Situation) -> bool:
@@ -186,8 +188,8 @@ def _is_team(who) -> bool:
 
 
 def _texts_from_others(sit: Situation) -> list[str]:
-    """Texts that reach our prompts this tick, one per counterparty. Team threads are closed unread (no prompt
-    sees them), so a rival flooding them cannot push us into code-only mode."""
+    """Texts that reach our prompts this tick, one per counterparty. Team threads are answered by bazaar.teamtalk
+    (at most two open, one model call per tick), so a rival flooding them cannot push us into code-only mode."""
     me = (sit.me or {}).get("id")
     out, seen = [], set()
     for t in sit.threads:
@@ -209,7 +211,7 @@ def _fallback_select(actions: list[Action]) -> list[Action]:
     rank = {"duels": 0, "market": 1, "broker": 1, "dealers": 2, "lab": 3}
     out, accepted = [], False
     for a in sorted(actions, key=lambda a: (rank.get(a.domain, 9), -a.priority)):
-        if a.kind in ACCEPT_KINDS:
+        if a.kind in ACCEPT_KINDS and a.kind != "duel_accept":   # duel accepts have their own limit
             if accepted:
                 continue
             accepted = True
@@ -218,6 +220,18 @@ def _fallback_select(actions: list[Action]) -> list[Action]:
 
 
 # --------------------------------------------------------------------------- the runner
+
+def stuck_ticks(tick_seconds: float | None) -> int:
+    """Ticks a decide() may stay busy before the process gives up. The patience is real time (STUCK_S), so a
+    shorter tick needs more ticks: a slow model call is not a hang just because the clock runs faster."""
+    try:
+        ts = float(tick_seconds or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    if ts < REAL_TICK_MIN_S:
+        return STUCK_TICKS
+    return max(STUCK_TICKS, math.ceil(STUCK_S / ts))
+
 
 class Runner:
     def __init__(self, gw, *, domains: list, mode: str = "live", live: Path | None = None,
@@ -279,7 +293,12 @@ class Runner:
             self._err("ledger", e)
 
     def control(self) -> dict:
-        return load_control(self.live, self.control_defaults)
+        ctl = load_control(self.live, self.control_defaults)
+        try:                                    # the strategist's cash policy/pauses sit under the operator's
+            from bazaar.brain.strategy import overlay
+            return overlay(ctl, self.live)
+        except Exception:  # noqa: BLE001
+            return ctl
 
     def can_write(self, control: dict) -> bool:
         if config.STOP_FILE.exists() or not control.get("armed") or self.executor is None:
@@ -298,7 +317,8 @@ class Runner:
         self.values.refresh(sit.me)
         sit.values = self.values.values
         return TickContext(value=self.values, tick=sit.tick, day=sit.day, deadline=sit.deadline, lessons=self.lessons, llm=self.llm,
-                           ledger=self.ledger, budget=self.budget.for_tick(sit.tick, sit.limits, self.now()),
+                           ledger=self.ledger, budget=self.budget.for_tick(sit.tick, sit.limits, self.now(),
+                                                                       hour_cap=control.get("max_spend_per_hour")),
                            control=control, tick_seconds=sit.tick_seconds, tick_start=sit.tick_start,
                            cautious=sit.tick <= self.cautious_until, llm_ok=sit.tick > self.flood_until)
 
@@ -316,21 +336,31 @@ class Runner:
         return out
 
     def collect(self, sit: Situation, ctx: TickContext, domains: list) -> list[Action]:
-        futs = {}
+        futs, deadlines = {}, {}
         for d in domains:
             st = self.dom_status.setdefault(d.name, {})
             busy = self.running.get(d.name)
             if busy is not None and not busy.done():
                 since = self.submitted_tick.get(d.name, sit.tick)
-                if sit.tick - since >= STUCK_TICKS:
+                if sit.tick - since >= stuck_ticks(sit.tick_seconds):
                     self.stuck(d.name, since, sit, ctx)
                 continue                                      # still thinking since an earlier tick
             if not ctx.llm_ok:
                 continue                                      # code only
-            futs[d.name] = self.running[d.name] = self.pools[d.name].submit(d.decide, sit, ctx)
+            dctx, dl = ctx, ctx.deadline
+            if sit.tick_start and sit.tick_seconds:              # a slow domain may think a little longer (short ticks)
+                dl = max(dl, sit.tick_start + domain_share(d.name, sit.tick_seconds, bool(sit.duels))
+                         * sit.tick_seconds)
+                if dl > ctx.deadline:
+                    dctx = ctx.with_deadline(dl)
+            deadlines[d.name] = dl
+            futs[d.name] = self.running[d.name] = self.pools[d.name].submit(d.decide, sit, dctx)
             self.submitted_tick[d.name] = sit.tick
         if futs:
             cf.wait(list(futs.values()), timeout=max(0.0, ctx.deadline - self.now()))
+            late = [f for n, f in futs.items() if not f.done() and deadlines[n] > ctx.deadline]
+            if late:                                             # only the slow ones are waited for, a little longer
+                cf.wait(late, timeout=max(0.0, max(deadlines.values()) - self.now()))
         actions: list[Action] = []
         for d in domains:
             st = self.dom_status[d.name]
@@ -382,6 +412,8 @@ class Runner:
                 if a not in keep:
                     self._ledger("decision", a, Verdict(False, "council", "LLM off: big action held"),
                                  tick=sit.tick, dry_run=not self.can_write(ctx.control or {}))
+                    self._observe(a, Outcome(a.id, sit.tick, "vetoed",
+                                             {"rail": "council", "detail": "LLM off: big action held, no council"}))
             return keep
         if council is None:
             return actions
@@ -397,9 +429,13 @@ class Runner:
                 self._err("council", e)
                 r = a
             if r is None:
-                self._ledger("decision", a, Verdict(False, "council", "vetoed by the council"),
+                why = (getattr(sys.modules.get("bazaar.brain.council"), "LAST_WHY", {}) or {}).get(a.id, "")
+                self._ledger("decision", a, Verdict(False, "council", ("vetoed by the council: " + why)[:400]
+                                                    if why else "vetoed by the council"),
                              tick=sit.tick, dry_run=False)
-                self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"by": "council"}))
+                self._observe(a, Outcome(a.id, sit.tick, "vetoed",
+                                         {"by": "council", "why": why, "rail": "council",
+                                          "detail": why or "vetoed by the council (no reason recorded)"}))
                 alt = None
                 if self.arbiter is not None and hasattr(self.arbiter, "alternative"):
                     try:
@@ -451,6 +487,8 @@ class Runner:
                 if a.kind != "noop":
                     self._ledger("decision", a, Verdict(False, "arbiter", str(why)), tick=sit.tick,
                                  dry_run=False)
+                    if a.kind == "accept_offer":         # the domain (and the brain) learn why it did not go
+                        self._observe(a, Outcome(a.id, sit.tick, "vetoed", {"rail": "arbiter", "detail": str(why)}))
             return list(chosen or [])
         return list(got or [])
 
@@ -511,14 +549,25 @@ class Runner:
                     self._ledger("outcome", outcome, a)
                 self._observe(a, outcome)
                 self.budget.record(a, outcome.status, self.now())
-                ctx.budget = self.budget.for_tick(sit.tick, sit.limits, self.now())   # rails see it at once
+                ctx.budget = self.budget.for_tick(sit.tick, sit.limits, self.now(),   # rails see it at once
+                                                  hour_cap=(ctx.control or {}).get("max_spend_per_hour"))
                 self._count_refusal(a.domain, outcome.status, sit.tick, (outcome.response or {}).get("error"))
                 if outcome.status in ("sent", "deal"):
                     self.recent.append((sit.tick, a, outcome.status))
                     if a.kind == "broker_announce":
                         self.last_announce = sit.t_hours or 0
+                elif a.kind == "broker_announce":               # the game allows one per venue every 20 ticks
+                    self.announce_retry_tick = sit.tick + 20
                 elif a.kind == "open_pack":
                     self.pack_backoff[(a.params or {}).get("asset")] = sit.tick + 20
+                if a.kind == "taller":                          # the Workshop: log what came out; back off on refusal
+                    try:
+                        from bazaar.workshop import planner as _ws
+                        _ws.record_result(a, outcome, sit.tick, self.live)
+                        if outcome.status not in ("sent", "deal"):
+                            self.workshop_retry_tick = sit.tick + _ws.BACKOFF_TICKS
+                    except Exception as e:  # noqa: BLE001
+                        self._err("workshop.record", e)
             report.append({"id": a.id, "domain": a.domain, "kind": a.kind, "params": a.params, "source": a.source,
                            "reason": a.reason, "verdict": {"ok": verdict.ok, "rail": verdict.rail,
                                                            "detail": verdict.detail}, "status": status})
@@ -594,18 +643,22 @@ class Runner:
                 out.append(venue.open_action(sit))
         except Exception as e:  # noqa: BLE001
             self._err("venue.should_open", e)
-        for t in sit.threads or []:
-            tid = t.get("id") or t.get("thread")
-            if (tid is not None and _is_team(t.get("with")) and (t.get("status") or "open") == "open"
-                    and tid not in self.closed_team_threads):
-                if self.can_write(ctx.control if ctx is not None else self.control()):
-                    self.closed_team_threads.add(tid)
-                who = t.get("team") if t.get("team") not in (None, (sit.me or {}).get("id")) else t.get("with")
-                out.append(Action(kind="close_thread", params={"thread": tid}, domain="market", source="code",
-                                  reason=f"Close the thread {who} opened with us: it holds one of our 6 "
-                                         "thread slots and the bot trades with teams through offers."))
+        try:                                                    # threads with other teams' agents: read, answer,
+            from bazaar.brain import strategy as _st            # offer; close after a decline or 6 quiet ticks
+            if getattr(self, "teamtalk", None) is None:
+                from bazaar.teamtalk import TeamTalk
+                self.teamtalk = TeamTalk(live=getattr(self, "live", None))
+            control = ctx.control if ctx is not None else self.control()
+            rails = getattr(self, "rails", None)
+            out.extend(self.teamtalk.actions(
+                sit, ctx, team_messages=_st.team_messages(getattr(self, "live", None)),
+                can_write=self.can_write(control),
+                check=(lambda a: rails.check(a, sit, ctx)) if rails is not None and ctx is not None else None))
+        except Exception as e:  # noqa: BLE001
+            self._err("teamtalk", e)
         vid = _own_venue(sit)
-        if vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H:
+        if (vid and (sit.t_hours or 0) - self.last_announce >= ANNOUNCE_EVERY_H
+                and sit.tick >= getattr(self, "announce_retry_tick", -1)):
             try:
                 from bazaar.market.protocol import broker_pitch
                 text = broker_pitch(vid)
@@ -619,6 +672,23 @@ class Runner:
         if packs:                                               # cards in the album and tradeable; one pack per tick
             out.append(Action(kind="open_pack", params={"asset": packs[0]["id"]}, domain="packs", source="code",
                               reason=f"Open {packs[0].get('ref', 'pack')}: its cards count in the album and can be traded."))
+        if sit.tick >= getattr(self, "workshop_retry_tick", -1):   # the Workshop: 3 spares -> 1 card of the next rarity
+            try:
+                from bazaar.brain import strategy as _st
+                from bazaar.workshop import planner as _ws
+                control = ctx.control if ctx is not None else self.control()
+                out.extend(_ws.plan_actions(sit, control, _st.workshop_orders(self.live)))
+            except Exception as e:  # noqa: BLE001
+                self._err("workshop.plan", e)
+        try:                        # dealer -> team arbitrage: one card at a time, only with an open team bid
+            from bazaar.brain import strategy as _st
+            from bazaar.market import arbitrage as _arbm
+            if getattr(self, "_arbitrage", None) is None:
+                self._arbitrage = _arbm.Arbitrage()
+            control = ctx.control if ctx is not None else self.control()
+            out.extend(self._arbitrage.step(sit, control, self.live, _st.arbitrage_mode(self.live)))
+        except Exception as e:  # noqa: BLE001
+            self._err("arbitrage", e)
         if sit.tick % 5 == 0:
             duels = next((d for d in self.domains if getattr(d, "name", "") == "duels"), None)
             if duels is not None and hasattr(duels, "observe_closed"):
@@ -639,6 +709,17 @@ class Runner:
         domains = self.active_domains(sit, control)
         actions = self.collect(sit, ctx, domains)
         actions.extend(self.scheduled_actions(sit, ctx))
+        crafting = {i for a in actions if a.kind == "taller" for i in (a.params or {}).get("assets") or []}
+        if crafting:                # a card going into the Workshop is not listed or given in the same tick (any copy:
+            ref_of = {x.get("id"): x.get("ref") for x in (sit.me or {}).get("assets") or []}   # counts change at once)
+            refs = {ref_of.get(i) for i in crafting}
+
+            def _gives(a) -> set:
+                give = (a.params or {}).get("give") or {}
+                out = {ref_of.get(x.get("id") if isinstance(x, dict) else x) for x in give.get("assets") or []}
+                return out | {str(t).partition(":")[2] for t in give.get("types") or []} | set(give.get("cards") or [])
+            actions = [a for a in actions if not (a.kind in ("post_offer", "accept_offer", "open_thread")
+                                                  and a.domain != "workshop" and refs & _gives(a))]
         if ctx.cautious:
             dropped = [a for a in actions if _is_buy(a)]
             actions = [a for a in actions if not _is_buy(a)]
@@ -697,10 +778,25 @@ class Runner:
             if sit is not None and state == "running":
                 _write_json(self.live / "tick_latest.json", {
                     **self.last_report, "deadline": sit.deadline, "tick_start": sit.tick_start,
+                    "perceived_at": sit.perceived_at, "requests": sit.requests,
                     "cash": sit.cash, "score": sit.score, "novelty": sit.novelty,
                     "duels": sit.duels, "threads": [{k: t.get(k) for k in ("id", "with", "status", "topic")}
                                                     for t in sit.threads],
                     "my_offers": len(sit.my_offers), "feed_new": len(sit.feed_new)})
+                exact: dict = {}                    # /api/me/value answers the domains hold, for the dashboard
+                for d in self.domains:
+                    for ref, ex in (getattr(d, "_exact", None) or {}).items():
+                        if isinstance(ex, dict) and ex.get("at", 0) >= (exact.get(ref) or {}).get("at", 0):
+                            exact[ref] = ex
+                if exact:
+                    try:                            # keep what earlier runs learned (a restart empties the caches)
+                        old = json.loads((self.live / "exact_values.json").read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        old = {}
+                    for ref, ex in (old or {}).items():
+                        if isinstance(ex, dict) and ex.get("at", 0) > (exact.get(ref) or {}).get("at", 0):
+                            exact[ref] = ex
+                    _write_json(self.live / "exact_values.json", exact)
         except OSError as e:
             self._err("status", e)
 

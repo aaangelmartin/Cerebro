@@ -17,7 +17,7 @@ import json
 import threading
 import time
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 
 from .model import DuelView, surplus
 
@@ -177,6 +177,28 @@ class OpponentMemory:
             "no_deals": sum(1 for r in closed if r.get("status") == "no_deal"),
             "silent_accepts": len(silent_acc),
         }
+
+    def duel_length(self, v: DuelView) -> int:
+        """Ticks this duel lasts: from the tick we first saw it to its deadline (the payload has no start)."""
+        with self._lock:
+            rec = self.data["duels"].get(str(v.id)) or {}
+        first = rec.get("first_seen")
+        n = (v.deadline_tick - int(first)) if isinstance(first, (int, float)) else v.ticks_left
+        return int(n) if 2 <= n <= 60 else v.total_ticks
+
+    def rival_day_prior(self, v: DuelView, min_legs: int = 2) -> float | None:
+        """Size of the rival's weight per delivery day, from our own duels on this item in the other role.
+
+        Every item is played in both roles within a session and its day weights come from one distribution
+        per role (Duels II: La Sala Pentagrama gave sellers 3.9-6.9 a day and buyers 1.3-2.4), so the
+        weights we saw as the other role are a sample of what this rival has now. None until `min_legs`."""
+        if not v.uses_days:
+            return None
+        with self._lock:
+            ws = [abs(float(r.get("w") or 0.0)) for k, r in self.data["duels"].items()
+                  if int(k) != v.id and r.get("item") == v.item and r.get("role") == other(v.role)
+                  and r.get("session") == v.session and r.get("uses_days") and r.get("w")]
+        return round(median(ws), 3) if len(ws) >= min_legs else None
 
     def leg_candidates(self, v: DuelView, same_alias: bool | None = None) -> list[int]:
         """Rival limits suggested by the other leg of the same item (our limit there, other role).

@@ -338,3 +338,66 @@ class RaceTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# These tests check the ladder logic with the original thresholds; live config keeps Opus until 97 %.
+_PINS = []
+
+
+def setUpModule():
+    from unittest import mock as _m
+    from bazaar import config as _c
+    _PINS.extend([_m.patch.object(_c, "DEGRADE_AT", 0.8), _m.patch.object(_c, "DEGRADE_HAIKU_AT", 0.92)])
+    for p in _PINS:
+        p.start()
+
+
+def tearDownModule():
+    for p in _PINS:
+        p.stop()
+    _PINS.clear()
+
+
+class WorkspaceKeyIsDead(unittest.TestCase):
+    def test_key_without_workspace_is_dropped(self):
+        from bazaar.llm.client import _classify
+
+        class E(Exception):
+            status_code = 400
+        e = E("Error code: 400 - This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header")
+        self.assertEqual(_classify(e)[0], "dead")
+
+    def test_bad_request_stays_fatal(self):
+        from bazaar.llm.client import _classify
+
+        class E(Exception):
+            status_code = 400
+        self.assertEqual(_classify(E('tool_choice: type "tool" and "any" are not supported for this model.'))[0], "fatal")
+
+
+class UsageLimitKeyIsDead(unittest.TestCase):
+    def test_usage_limit_is_dead(self):
+        from bazaar.llm.client import _classify
+
+        class E(Exception):
+            status_code = 400
+        e = E("Error code: 400 - You have reached your specified API usage limits. You will regain access on "
+              "2026-11-01 at 00:00 UTC.")
+        self.assertEqual(_classify(e)[0], "dead")
+
+    def test_dead_key_is_shared_across_routers_and_cleared_on_new_key(self):
+        import tempfile
+        from pathlib import Path
+        from bazaar.llm.router import KeyRouter
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "spend.json"
+            keys = [("A", "key-a"), ("B", "key-b")]
+            r1 = KeyRouter(keys=keys, path=p)
+            r1.mark_dead("A", "usage limits")
+            r2 = KeyRouter(keys=keys, path=p)                   # another process, same day
+            self.assertEqual(r2.available(), ["B"])
+            self.assertEqual(r2.summary()["by_key"]["A"]["dead"], "usage limits")
+            r3 = KeyRouter(keys=[("A", "key-a-new"), ("B", "key-b")], path=p)   # key replaced in .env
+            self.assertEqual(sorted(r3.available()), ["A", "B"])
+            r4 = KeyRouter(keys=keys, path=p, clock=lambda: __import__("time").time() + 2 * 86400)  # next days
+            self.assertEqual(sorted(r4.available()), ["A", "B"])

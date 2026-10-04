@@ -110,7 +110,7 @@ class ClaudeIsGuarded(unittest.TestCase):
         for a in acts:
             if a.kind in ("thread_message", "accept_offer"):
                 price = a.params.get("price") or a.expected.get("price")
-                self.assertEqual(a.big, price > config.BIG_DEAL_P)
+                self.assertEqual(a.big, price >= config.BIG_DEAL_P)
 
     def test_llm_failure_falls_back(self):
         scen = SCENARIOS[0]

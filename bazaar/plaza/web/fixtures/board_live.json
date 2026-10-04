@@ -1,0 +1,38 @@
+{
+ "tick": 1446,
+ "venue": "v07",
+ "since_tick": 1445,
+ "stream": "/plaza/api/floor/stream",
+ "events": [
+  {
+   "tick": 1445,
+   "what": "listed",
+   "side": "ask",
+   "ref": "LAT-01",
+   "price": 8,
+   "fee": 1,
+   "venue": "rastro",
+   "team": "t09",
+   "offer": 20253
+  },
+  {
+   "tick": 1446,
+   "what": "gone",
+   "side": "bid",
+   "ref": "SAL-10",
+   "price": 60,
+   "venue": "v21",
+   "team": "t04",
+   "offer": 20211
+  },
+  {
+   "tick": 1446,
+   "what": "sold",
+   "ref": "RET-06",
+   "price": 28,
+   "venue": "v07",
+   "seller": "t04",
+   "buyer": "t09"
+  }
+ ]
+}

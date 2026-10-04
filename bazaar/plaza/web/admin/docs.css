@@ -1,0 +1,3 @@
+/* admin docs: classes start with .adm-docs- and .adm-call */
+.adm-call { font-family: var(--font-num); font-size: 11.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.adm-call b { color: var(--ink); font-weight: 600; }

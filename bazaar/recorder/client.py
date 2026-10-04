@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
+import random
 
 from ..gateway import GameError, _from_http
 
@@ -78,6 +79,11 @@ def http_get(base: str, path: str, params: dict | None, headers: dict, timeout: 
 
 # Errors that mean "the lane is down" (back off and mark an outage) rather than "this one read failed".
 DOWN_CODES = {"network", "timeout", "upstream", "server_error", "rate_limited", "bad_json"}
+# The game allows 60 requests per second per ADDRESS, and the venue's network can share one address among
+# many teams: a "rate_limited" answer is usually other people's traffic. It is a short squeeze, not an outage:
+# back off with jitter, keep the lane up, and call it an outage only when it persists.
+RATE_LIMIT_OUTAGE_AFTER = 6       # consecutive rate_limited answers before the lane counts as down
+RATE_LIMIT_WINDOW_S = 90.0        # "limited recently" window (bulk reads slow down meanwhile)
 
 
 class Lane:
@@ -92,6 +98,10 @@ class Lane:
         self.fails = 0                        # consecutive lane-down failures
         self.paused_until = 0.0               # monotonic
         self.down_since: float | None = None  # wall time of the first failure of the current outage
+        self.limited: deque = deque(maxlen=50)   # monotonic times of recent rate_limited answers
+        self.limited_run = 0                     # consecutive rate_limited answers
+        self.limited_total = 0
+        self.rand = random.random
 
     def available(self) -> bool:
         return self.now() >= self.paused_until and self.bucket.ready()
@@ -106,15 +116,35 @@ class Lane:
             out = self.fetch(self.base, path, params, self.headers, self.timeout)
         except GameError as e:
             self.errors.append({"t": round(self.wall(), 1), "path": path, "code": e.code, "msg": str(e)[:160]})
-            if e.code in DOWN_CODES:
+            if e.code == "rate_limited":
+                self.limited.append(t)
+                self.limited_run += 1
+                self.limited_total += 1
+                # 1.5-3 s, then longer while it keeps happening (capped), always with jitter so every
+                # process and every team on the shared address does not come back in the same instant
+                wait = min(20.0, 1.5 * 1.6 ** (self.limited_run - 1)) * (1.0 + self.rand())
+                self.paused_until = self.now() + wait
+                if self.limited_run >= RATE_LIMIT_OUTAGE_AFTER:
+                    self.fails += 1
+                    if self.down_since is None:
+                        self.down_since = self.wall()
+            elif e.code in DOWN_CODES:
                 self.fails += 1
                 if self.down_since is None:
                     self.down_since = self.wall()
-                wait = 5.0 if e.code == "rate_limited" else min(MAX_BACKOFF_S, 1.0 * 2 ** min(self.fails, 6))
+                wait = min(MAX_BACKOFF_S, 1.0 * 2 ** min(self.fails, 6))
                 self.paused_until = self.now() + wait
             raise
         self.fails = 0
+        self.limited_run = 0
         return out
+
+    def limited_recently(self) -> int:
+        """How many rate_limited answers in the last RATE_LIMIT_WINDOW_S (0 = not squeezed)."""
+        cut = self.now() - RATE_LIMIT_WINDOW_S
+        while self.limited and self.limited[0] < cut:
+            self.limited.popleft()
+        return len(self.limited)
 
     def recovered(self) -> float | None:
         """If an outage just ended, return when it started (and forget it)."""
@@ -133,4 +163,5 @@ class Lane:
         return {"base": self.base, "rps_60s": self.rps(), "limit_rps": self.bucket.rate, "total": self.total,
                 "down_since": self.down_since, "fails": self.fails,
                 "paused_for_s": round(max(0.0, self.paused_until - self.now()), 1),
+                "limited_90s": self.limited_recently(), "limited_total": self.limited_total,
                 "last_errors": list(self.errors)[-5:]}

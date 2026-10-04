@@ -4,19 +4,17 @@
   const US = "t10";
   const SET_COLORS = { LAV: "#E4572E", MAL: "#E83F8C", LAT: "#F2A541", SAL: "#2EC4B6", RET: "#7B8CDE", CHA: "#9BC53D" };
   const RAR_COLORS = { common: "#9AA4B8", uncommon: "#3DDC97", rare: "#4C8DFF", epic: "#B061FF", legendary: "#FFC44D" };
-  const RAR_LABEL = { common: "común", uncommon: "infrecuente", rare: "rara", epic: "épica", legendary: "legendaria" };
-  const TARGET_SETS = ["LAV", "MAL", "RET"];
-  const STATES = [
-    { id: "dup", label: "Duplicado" },
-    { id: "venta", label: "En venta" },
-    { id: "compra", label: "Comprando" },
-    { id: "puja", label: "Puja" },
-    { id: "cambio", label: "Cambio" },
-    { id: "dealer", label: "Conversación" },
-    { id: "objetivo", label: "Objetivo" },
-    { id: "protegida", label: "Protegida" },
-  ];
+  // interface texts: looked up on every read, so a language switch shows on the next paint
+  const T = (k, v) => (window.I18N ? window.I18N.t(k, v) : k);
+  const lang = () => (window.I18N && window.I18N.lang) || "es";
+  const LOC = () => (lang() === "en" ? "en-GB" : "es-ES");
+  const labelled = (ids, prefix) => ids.map((id) => ({ id, get label() { return T(prefix + id); } }));
+  const RAR_LABEL = {};
+  for (const r of ["common", "uncommon", "rare", "epic", "legendary"]) Object.defineProperty(RAR_LABEL, r, { enumerable: true, get: () => T("coleccion.rar." + r) });
+  const TARGET_SETS = ["LAV", "MAL"];        // RET dropped: buying El Retiro does not add to our score
   const ICONS = {
+    tenemos: '<path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+    faltan: '<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/>',
     dup: '<path d="M4 4h7v7H4z M6 2h7v7" fill="none" stroke="currentColor" stroke-width="1.4"/>',
     venta: '<path d="M4 12L12 4M6 4h6v6" fill="none" stroke="currentColor" stroke-width="1.6"/>',
     compra: '<path d="M12 4L4 12M4 6v6h6" fill="none" stroke="currentColor" stroke-width="1.6"/>',
@@ -49,11 +47,11 @@
   function fmtP(n) {
     if (n == null || !isFinite(n)) return "—";
     if (U().fmtP) return U().fmtP(n);
-    return (Math.round(n * 10) / 10).toLocaleString("es-ES") + " P";
+    return (Math.round(n * 10) / 10).toLocaleString(LOC()) + " P";
   }
   function fmtN(n, d) {
     if (n == null || !isFinite(n)) return "—";
-    return Number(n).toLocaleString("es-ES", { maximumFractionDigits: d == null ? 1 : d });
+    return Number(n).toLocaleString(LOC(), { maximumFractionDigits: d == null ? 1 : d });
   }
   function icon(id) {
     return h("span", { class: "cc-ico", html: `<svg viewBox="0 0 16 16" width="11" height="11">${ICONS[id] || ""}</svg>` });
@@ -74,7 +72,8 @@
     if (kind === "loading" && u.loading) return u.loading();
     if (kind === "error" && u.error) return u.error(text);
     if (kind === "empty" && u.empty) return u.empty(text);
-    return h("div", { class: "cc-state cc-" + kind }, kind === "error" ? "Error: " + ((text && text.message) || text) : (text || "Cargando…"));
+    if (kind === "loading" && u.loading) return u.loading(text);
+    return h("div", { class: "cc-state cc-" + kind }, kind === "error" ? T("coleccion.error", { err: (text && text.message) || text }) : (text || T("coleccion.loading")));
   }
   const refsOf = (side) => {
     const out = [];
@@ -193,17 +192,37 @@
         if (x.puja != null) states.puja = x.puja;
         if (x.cambio) states.cambio = true;
         if (x.threads.length || x.dealerOffer) states.dealer = x.dealer || (x.dealerOffer && x.dealerOffer.to) || true;
-        if (!own.length && c.page && TARGET_SETS.includes(s.id) && s.released) states.objetivo = true;
+        if (!own.length && (d.goals ? !!d.goals[c.id] : (c.page && TARGET_SETS.includes(s.id) && s.released))) states.objetivo = true;
         if (prot.has(c.id)) states.protegida = true;
+        // value to us: held -> the game's your_value; else GET values; else book × affinity × marginal of the next copy (≈)
+        const marg = values.copy_marginals || [1, 0.25, 0.1];
+        const aff = (me.affinity && me.affinity[s.id]) != null ? me.affinity[s.id] : 1;
+        const est = (n) => (c.book || 0) * aff * (marg[Math.min(n, marg.length - 1)] ?? 0);
+        const av = d.apiValues && d.apiValues[c.id];
+        const heldVal = own.length ? Math.max(...own.map((a) => a.your_value || 0)) : null;
+        const val = heldVal != null ? { v: heldVal, exact: true }
+          : av && av.value != null ? { v: +av.value, exact: av.exact !== false }
+          : { v: Math.round(est(0) * 10) / 10, exact: false };
+        const nextVal = av && av.next_copy_value != null ? { v: +av.next_copy_value, exact: av.exact !== false } : { v: Math.round(est(own.length) * 10) / 10, exact: false };
+        // market: best ask (someone sells it for cash), best bid (someone pays cash for it), across every venue's book
+        let bestAsk = null, bestBid = null;
+        for (const o of x.offers || []) {
+          if (o.maker === US || (o.status && o.status !== "open")) continue;
+          const g = refsOf(o.give), w = refsOf(o.want);
+          const ga = ((o.give && o.give.assets) || []).length + ((o.give && o.give.types) || []).length;
+          const wa = ((o.want && o.want.assets) || []).length + ((o.want && o.want.types) || []).length;
+          if (g.includes(c.id) && ga === 1 && !wa && o.want && o.want.cash > 0 && (!bestAsk || o.want.cash < bestAsk.price)) bestAsk = { price: o.want.cash, venue: o.venue || "rastro", to: o.to };
+          if (w.includes(c.id) && wa === 1 && !ga && o.give && o.give.cash > 0 && (!bestBid || o.give.cash > bestBid.price)) bestBid = { price: o.give.cash, venue: o.venue || "rastro", to: o.to };
+        }
         cards[c.id] = {
           info: { ...c, set: s.id, setName: s.name },
-          own, ourValue: own.length ? Math.max(...own.map((a) => a.your_value || 0)) : null,
+          own, ourValue: val.v, valueExact: val.exact, nextValue: nextVal, bestAsk, bestBid,
           market: mk.length ? mk[mk.length - 1].price : null, marketHist: mk,
           book: c.book, states, offers: x.offers, threads: x.threads, rivalBids: x.rivalBids || 0,
         };
       }
     }
-    return { cat, me, sets, values, cards, album, decisions: d.decisions || [], cardsRec: d.cards || {}, feed: d.feed || [], prot };
+    return { cat, me, sets, values, cards, album, decisions: d.decisions || [], cardsRec: d.cards || {}, feed: d.feed || [], prot, goals: d.goals || null };
   }
 
   // ---------- rendering ----------
@@ -212,13 +231,13 @@
   }
   function cardChips(c) {
     const s = c.states, out = [];
-    if (s.protegida) out.push(chip("protegida", "PROTEGIDA"));
-    if (s.venta != null) out.push(chip("venta", "EN VENTA " + fmtN(s.venta, 0)));
-    if (s.dealer) out.push(chip("dealer", "DEALER" + (typeof s.dealer === "string" ? " · " + s.dealer : "")));
-    if (s.cambio) out.push(chip("cambio", "CAMBIO ofrecido"));
-    if (s.compra != null) out.push(chip("compra", "COMPRANDO " + fmtN(s.compra, 0)));
-    if (s.puja != null) out.push(chip("puja", "PUJA ≤" + fmtN(s.puja, 0)));
-    if (s.objetivo) out.push(chip("objetivo", "OBJETIVO"));
+    if (s.protegida) out.push(chip("protegida", T("coleccion.chip.protegida")));
+    if (s.venta != null) out.push(chip("venta", T("coleccion.chip.venta", { p: fmtN(s.venta, 0) })));
+    if (s.dealer) out.push(chip("dealer", typeof s.dealer === "string" ? T("coleccion.chip.dealer_who", { who: s.dealer }) : T("coleccion.chip.dealer")));
+    if (s.cambio) out.push(chip("cambio", T("coleccion.chip.cambio")));
+    if (s.compra != null) out.push(chip("compra", T("coleccion.chip.compra", { p: fmtN(s.compra, 0) })));
+    if (s.puja != null) out.push(chip("puja", T("coleccion.chip.puja", { p: fmtN(s.puja, 0) })));
+    if (s.objetivo) out.push(chip("objetivo", T("coleccion.chip.objetivo")));
     if (s.dup) out.push(chip("dup", "×" + s.dup));
     return out;
   }
@@ -257,14 +276,14 @@
   const BADGE_COLORS = { venta: "#FF6B6B", compra: "#3DDC97", puja: "#F2A541", cambio: "#4C8DFF", dealer: "#2EC4B6", objetivo: "#E8EBF0", dup: "#9AA4B8", protegida: "#B9C0CC" };
   function cardBadges(c) {
     const s = c.states, out = [];
-    if (s.venta != null) out.push(["venta", "VENTA " + fmtN(s.venta, 0)]);
-    if (s.compra != null) out.push(["compra", "COMPRA " + fmtN(s.compra, 0)]);
-    if (s.puja != null) out.push(["puja", "PUJA ≤" + fmtN(s.puja, 0)]);
-    if (s.cambio) out.push(["cambio", "CAMBIO"]);
-    if (s.dealer) out.push(["dealer", "CONV" + (typeof s.dealer === "string" ? " " + s.dealer : "")]);
-    if (s.objetivo) out.push(["objetivo", "OBJETIVO"]);
+    if (s.venta != null) out.push(["venta", T("coleccion.badge.venta", { p: fmtN(s.venta, 0) })]);
+    if (s.compra != null) out.push(["compra", T("coleccion.badge.compra", { p: fmtN(s.compra, 0) })]);
+    if (s.puja != null) out.push(["puja", T("coleccion.badge.puja", { p: fmtN(s.puja, 0) })]);
+    if (s.cambio) out.push(["cambio", T("coleccion.badge.cambio")]);
+    if (s.dealer) out.push(["dealer", typeof s.dealer === "string" ? T("coleccion.badge.dealer_who", { who: s.dealer }) : T("coleccion.badge.dealer")]);
+    if (s.objetivo) out.push(["objetivo", T("coleccion.badge.objetivo")]);
     if (s.dup) out.push(["dup", "×" + s.dup]);
-    if (s.protegida) out.push(["protegida", "PROT"]);
+    if (s.protegida) out.push(["protegida", T("coleccion.badge.protegida")]);
     return out;
   }
   function renderArtCard(c, onOpen, svg) {
@@ -280,14 +299,25 @@
     return h("button", {
       class: "cc-card cc-art" + (have ? " is-owned" : " is-missing") + (c.states.objetivo ? " is-target" : "") + (frame ? " has-state" : ""),
       style: `--set:${SET_COLORS[i.set] || "#888"};--rar:${RAR_COLORS[i.rarity] || "#888"}` + (frame ? `;--frame:${frame}` : ""),
-      title: `${i.id} · ${i.name}` + (have ? ` · ${serials}/${i.print_run}` : " · falta") +
-        ` · nuestro ${have ? fmtP(c.ourValue) : "—"} · mercado ${c.market != null ? fmtN(c.market, 0) : "—"} · libro ${fmtN(c.book, 0)}`,
+      title: T("coleccion.card.tip", { head: `${i.id} · ${i.name} · ` + (have ? `${serials}/${i.print_run}` : T("coleccion.card.missing")),
+        ours: valTxt(c), market: c.market != null ? fmtN(c.market, 0) : "—", book: fmtN(c.book, 0) }),
       onclick: () => onOpen(i.id),
     },
       face,
-      h("div", { class: "cc-vline" }, h("span", null, i.id), have ? h("b", null, fmtN(c.ourValue, 0) + " P") : null),
+      h("div", { class: "cc-vline" }, h("span", null, i.id), h("b", { class: have ? "" : "cc-vest", title: T(have ? "coleccion.card.val_held" : "coleccion.card.val_missing") }, (c.valueExact ? "" : "≈ ") + fmtN(c.ourValue, 0) + " P")),
       h("div", { class: "cc-cname" }, i.name),
     );
+  }
+  const valTxt = (c) => (c.ourValue == null ? "—" : (c.valueExact ? "" : "≈ ") + fmtP(c.ourValue));
+  const venueTxt = (v) => (v === "rastro" || !v ? "El Rastro" : v);
+  // what the market says about a card: best ask, best bid, last trade (venue and time); "sin ver" only if truly nothing
+  function marketKpi(c) {
+    const last = c.marketHist.length ? c.marketHist[c.marketHist.length - 1] : null;
+    const parts = [];
+    if (c.bestAsk) parts.push([T("coleccion.mk.ask"), fmtP(c.bestAsk.price), venueTxt(c.bestAsk.venue) + (c.bestAsk.to === US ? T("coleccion.mk.to_us") : "")]);
+    if (c.bestBid) parts.push([T("coleccion.mk.bid"), fmtP(c.bestBid.price), venueTxt(c.bestBid.venue)]);
+    if (last) parts.push([T("coleccion.mk.last"), fmtP(last.price), (last.persona ? T("coleccion.mk.dealer", { who: last.persona }) : venueTxt(last.venue)) + " · " + (U().fmtTime ? U().fmtTime(last.ts, false) : "")]);
+    return parts;
   }
   function renderCard(c, small, onOpen) {
     const i = c.info;
@@ -302,25 +332,35 @@
       title: `${i.id} · ${i.name}`,
       onclick: () => onOpen(i.id),
     },
-      h("div", { class: "cc-card-head" }, h("span", { class: "cc-ref" }, small ? (i.rarity === "epic" ? "ÉPICA" : "LEYEND.") : i.id), h("span", { class: "cc-rdot" })),
+      h("div", { class: "cc-card-head" }, h("span", { class: "cc-ref" }, small ? T(i.rarity === "epic" ? "coleccion.rar.epic_tag" : "coleccion.rar.legendary_tag") : i.id), h("span", { class: "cc-rdot" })),
       small
-        ? h("div", { class: "cc-card-body" }, h("div", { class: "cc-ref-s" }, i.id), h("div", { class: "cc-sub" }, have ? (serials + " · " + fmtP(c.ourValue)) : (c.own.length + "/" + (i.print_run || "?"))))
+        ? h("div", { class: "cc-card-body" }, h("div", { class: "cc-ref-s" }, i.id), h("div", { class: "cc-sub" }, have ? (serials + " · " + fmtP(c.ourValue)) : valTxt(c)))
         : h("div", { class: "cc-card-body" },
           h("div", { class: "cc-name" }, i.name),
-          h("div", { class: "cc-sub" }, have ? `${serials}/${i.print_run}` : "falta"),
+          h("div", { class: "cc-sub" }, have ? `${serials}/${i.print_run}` : T("coleccion.card.missing")),
           h("div", { class: "cc-spacer" }),
-          h("div", { class: "cc-val" }, have ? fmtP(c.ourValue) : "—"),
-          h("div", { class: "cc-mini" }, "m " + (c.market != null ? fmtN(c.market, 0) : "—") + " · l " + fmtN(c.book, 0))),
+          h("div", { class: "cc-val" }, valTxt(c)),
+          h("div", { class: "cc-mini" }, T("coleccion.card.mini", { market: c.market != null ? fmtN(c.market, 0) : "—", book: fmtN(c.book, 0) }))),
       small ? null : h("div", { class: "cc-chips" }, cardChips(c)),
     );
     return el;
   }
 
+  // derived states used only by the filter bar (not drawn on the cards)
+  function hasState(c, id) {
+    if (id === "tenemos") return c.own.length > 0;
+    if (id === "faltan") return !c.own.length && !!c.info.page;
+    return c.states[id] != null && c.states[id] !== false;
+  }
   function matchFilter(c, f) {
-    if (f.set !== "todos" && c.info.set !== f.set) return false;
-    if (f.rarity !== "todas" && c.info.rarity !== f.rarity) return false;
+    if (f.sets.size && !f.sets.has(c.info.set)) return false;
+    if (f.rar.size && !f.rar.has(c.info.rarity)) return false;
+    if (f.q) {
+      const q = f.q.toLowerCase();
+      if (!String(c.info.id || "").toLowerCase().includes(q) && !String(c.info.name || "").toLowerCase().includes(q)) return false;
+    }
     if (f.states.size) {
-      for (const s of f.states) if (c.states[s] != null && c.states[s] !== false) return true;
+      for (const s of f.states) if (hasState(c, s)) return true;
       return false;
     }
     return true;
@@ -329,7 +369,7 @@
   function renderAlbum(m, f, onOpen) {
     const wrap = h("div", { class: "cc-album" });
     for (const s of m.sets) {
-      if (f.set !== "todos" && s.id !== f.set) continue;
+      if (f.sets.size && !f.sets.has(s.id)) continue;
       const color = SET_COLORS[s.id] || s.color;
       const page = m.album[s.id] || {};
       const pageCards = (s.cards || []).filter((c) => c.page);
@@ -338,7 +378,7 @@
       const of = page.of || pageCards.length || 10;
       if (!s.released) {
         wrap.appendChild(h("div", { class: "cc-set cc-set-closed", style: `--set:${color}` },
-          h("b", null, s.id), h("span", null, s.name), h("span", { class: "cc-muted" }, `sin lanzar · se abre en ${s.release || "?"} · ${have}/${of}`)));
+          h("b", null, s.id), h("span", null, s.name), h("span", { class: "cc-muted" }, T("coleccion.album.closed", { when: s.release || "?", have, of }))));
         continue;
       }
       const setVal = (s.cards || []).reduce((a, c) => a + m.cards[c.id].own.reduce((x, y) => x + (y.your_value || 0), 0), 0);
@@ -347,11 +387,11 @@
       const segs = h("div", { class: "cc-segs" }, pageCards.map((c) => h("i", { class: m.cards[c.id].own.length ? "on" : "" })));
       const side = h("div", { class: "cc-set-side" },
         h("div", { class: "cc-set-title" }, h("b", null, s.id), " ", s.name),
-        h("div", { class: "cc-set-page" }, h("span", null, `página ${have}/${of}`), h("span", { class: page.complete ? "cc-bonus on" : "cc-bonus" }, page.complete ? `bono +${Math.round((bonus || 0) * 100)} %` : "bono —")),
+        h("div", { class: "cc-set-page" }, h("span", null, T("coleccion.album.page", { have, of })), h("span", { class: page.complete ? "cc-bonus on" : "cc-bonus" }, page.complete ? T("coleccion.album.bonus", { pct: Math.round((bonus || 0) * 100) }) : T("coleccion.album.no_bonus"))),
         segs,
-        h("div", { class: "cc-kv" }, h("span", null, "Valor del set"), h("b", null, fmtP(setVal))),
-        h("div", { class: "cc-kv" }, h("span", null, "Afinidad"), h("b", null, aff != null ? "×" + fmtN(aff, 1) : "—")),
-        page.master ? h("div", { class: "cc-kv" }, h("span", null, "Maestro"), h("b", null, "sí")) : null);
+        h("div", { class: "cc-kv" }, h("span", null, T("coleccion.album.set_value")), h("b", null, fmtP(setVal))),
+        h("div", { class: "cc-kv" }, h("span", null, T("coleccion.album.affinity")), h("b", null, aff != null ? "×" + fmtN(aff, 1) : "—")),
+        page.master ? h("div", { class: "cc-kv" }, h("span", null, T("coleccion.album.master")), h("b", null, T("coleccion.album.yes"))) : null);
       const grid = h("div", { class: "cc-grid" + ((CROMO.mod || pageCards.some((c) => artOf(c.id))) ? " has-art" : "") });
       let shown = 0;
       for (const c of pageCards) {
@@ -362,17 +402,17 @@
         else shown++;
         grid.appendChild(n);
       }
-      const ex = h("div", { class: "cc-extra" }, h("div", { class: "cc-extra-t" }, "FUERA DE PÁGINA"),
+      const ex = h("div", { class: "cc-extra" }, h("div", { class: "cc-extra-t" }, T("coleccion.album.off_page")),
         h("div", { class: "cc-extra-g" }, extra.map((c) => {
           const n = renderCard(m.cards[c.id], true, onOpen);
           if (!matchFilter(m.cards[c.id], f)) n.classList.add("is-dim"); else shown++;
           return n;
         })));
       const row = h("section", { class: "cc-set" + (grid.classList.contains("has-art") ? " has-art" : ""), style: `--set:${color}` }, side, grid, ex);
-      if (f.states.size && !shown) row.classList.add("is-hidden");
+      if ((f.states.size || f.rar.size || f.q) && !shown) row.classList.add("is-hidden");
       wrap.appendChild(row);
     }
-    if (!wrap.children.length) wrap.appendChild(stateBox("empty", "Ningún set coincide con los filtros."));
+    if (!wrap.children.length) wrap.appendChild(stateBox("empty", T("coleccion.album.no_match")));
     return wrap;
   }
 
@@ -393,32 +433,62 @@
     const filled = sc.album_filled != null ? sc.album_filled : pages.reduce((a, p) => a + (p.have || 0), 0);
     const slots = sc.album_slots != null ? sc.album_slots : pages.reduce((a, p) => a + (p.of || 0), 0);
     return h("div", { class: "cc-kpis" },
-      kpi("ÁLBUM", `${filled}/${slots}`, "de página"),
-      kpi("PÁGINAS", `${complete.length} de ${pages.length || m.sets.length}`, complete.map((p) => p.set).join(" · ")),
-      kpi("VALOR NUESTRO", fmtP(me.collection_value), "con bonos"),
-      kpi("MERCADO", fmtP(mkt), "último precio"),
-      kpi("LIBRO", fmtP(book), "valor de catálogo"),
-      kpi("DUPLICADAS", String(dups), `${dupSale} en venta`));
+      kpi(T("coleccion.kpi.album"), `${filled}/${slots}`, T("coleccion.kpi.album_sub")),
+      kpi(T("coleccion.kpi.pages"), T("coleccion.kpi.pages_v", { n: complete.length, of: pages.length || m.sets.length }), complete.map((p) => p.set).join(" · ")),
+      kpi(T("coleccion.kpi.ours"), fmtP(me.collection_value), T("coleccion.kpi.ours_sub")),
+      kpi(T("coleccion.kpi.market"), fmtP(mkt), T("coleccion.kpi.market_sub")),
+      kpi(T("coleccion.kpi.book"), fmtP(book), T("coleccion.kpi.book_sub")),
+      kpi(T("coleccion.kpi.dups"), String(dups), T("coleccion.kpi.dups_sub", { n: dupSale })));
   }
 
-  function renderFilters(f, counts, onChange) {
-    const bar = h("div", { class: "cc-filters" });
-    for (const s of STATES) {
-      const on = f.states.has(s.id);
-      bar.appendChild(h("button", {
-        class: "cc-fbtn cc-chip-" + s.id + (on ? " on" : ""),
-        onclick: () => { on ? f.states.delete(s.id) : f.states.add(s.id); onChange(); },
-      }, icon(s.id), s.label, h("span", { class: "cc-fcount" }, String(counts[s.id] || 0))));
+  // Filters: the shared Home filter bar (ui.filterBar), built once and kept across refreshes.
+  const ESTADOS = labelled(["tenemos", "faltan", "dup", "objetivo", "venta", "compra", "puja", "cambio", "dealer", "protegida"], "coleccion.state.");
+  function filterCounts(m) {
+    const out = {};
+    for (const s of m.sets) {
+      const page = (s.cards || []).filter((c) => c.page);
+      out["set/" + s.id] = `${page.filter((c) => m.cards[c.id].own.length).length}/${page.length}`;
     }
-    const sel = (val, opts, onSel) => {
-      const n = h("select", { class: "cc-select", onchange: (e) => onSel(e.target.value) },
-        opts.map(([v, l]) => h("option", { value: v, selected: v === val ? "selected" : null }, l)));
-      return n;
+    for (const id in m.cards) {
+      const c = m.cards[id];
+      for (const e of ESTADOS) if (hasState(c, e.id)) out["estado/" + e.id] = (out["estado/" + e.id] || 0) + 1;
+      out["rareza/" + c.info.rarity] = (out["rareza/" + c.info.rarity] || 0) + 1;
+    }
+    for (const e of ESTADOS) out["estado/" + e.id] = out["estado/" + e.id] || 0;
+    return out;
+  }
+  function filterBar(m, onChange) {
+    const u = window.ui;
+    const counts = filterCounts(m);
+    if (!u || !u.filterBar) return h("div", { class: "cc-muted" }, T("coleccion.filter.none"));
+    const bar = u.filterBar({
+      types: [], search: true, placeholder: T("coleccion.filter.search"),
+      extraRows: [
+        { key: "set", label: T("coleccion.filter.set"), options: m.sets.map((s) => ({ id: s.id, label: s.id + " · " + (s.name || ""), count: counts["set/" + s.id] })) },
+        { key: "estado", label: T("coleccion.filter.state"), options: ESTADOS.map((e) => ({ id: e.id, label: e.id === "objetivo" && m.goals ? T("coleccion.state.objetivo_brain") : e.label, count: counts["estado/" + e.id] })) },
+        { key: "rareza", label: T("coleccion.filter.rarity"), options: Object.keys(RAR_LABEL).map((r) => ({ id: r, label: RAR_LABEL[r], count: counts["rareza/" + r] || 0 })) },
+      ],
+      onChange,
+    });
+    bar.classList.add("cc-fb");
+    // tint each option like the chips elsewhere: set colour / state badge colour / rarity colour
+    const tint = (row, colors) => bar.querySelectorAll(".fb-extra")[row].querySelectorAll(".fb-opt")
+      .forEach((b, i) => b.style.setProperty("--tint", colors[i] || "var(--line-2)"));
+    tint(0, m.sets.map((s) => SET_COLORS[s.id] || s.color));
+    tint(1, ESTADOS.map((e) => BADGE_COLORS[e.id] || (e.id === "tenemos" ? "#3DDC97" : e.id === "faltan" ? "#6A727B" : "#9AA4B8")));
+    tint(2, Object.keys(RAR_LABEL).map((r) => RAR_COLORS[r]));
+    bar.querySelectorAll(".fb-extra")[1].querySelectorAll(".fb-opt").forEach((b, i) => b.prepend(icon(ESTADOS[i].id)));
+    bar.refreshCounts = (mm) => {
+      const c = filterCounts(mm), extra = {};
+      for (const k in c) extra[k] = c[k];
+      bar.setCounts({}, extra);
     };
-    bar.appendChild(h("span", { class: "cc-grow" }));
-    bar.appendChild(sel(f.set, [["todos", "Set: todos"]].concat(Object.keys(SET_COLORS).map((k) => [k, "Set: " + k])), (v) => { f.set = v; onChange(); }));
-    bar.appendChild(sel(f.rarity, [["todas", "Rareza: todas"]].concat(Object.keys(RAR_LABEL).map((k) => [k, "Rareza: " + RAR_LABEL[k]])), (v) => { f.rarity = v; onChange(); }));
     return bar;
+  }
+  function filterState(bar) {
+    const st = (bar && bar.state) || { extra: {}, q: "" };
+    const ex = st.extra || {};
+    return { sets: ex.set || new Set(), states: ex.estado || new Set(), rar: ex.rareza || new Set(), q: st.q || "" };
   }
 
   // ---------- drawer ----------
@@ -426,26 +496,26 @@
     const parts = [];
     if (d.action) parts.push(d.action);
     for (const k of ["why", "reason", "reasoning", "rationale"]) if (d[k]) parts.push(String(d[k]));
-    if (d.ask != null) parts.push("pide " + d.ask + " P");
-    if (d.floor != null) parts.push("suelo " + d.floor);
-    if (d.limit != null) parts.push("límite " + d.limit);
-    if (d.price != null) parts.push("precio " + d.price);
-    if (d.gain != null) parts.push("ganancia " + d.gain);
-    if (d.gain_if_sold != null) parts.push("ganancia si se vende " + d.gain_if_sold);
-    if (d.kwargs && d.kwargs.price != null) parts.push("precio " + d.kwargs.price);
+    if (d.ask != null) parts.push(T("coleccion.dec.ask", { n: d.ask }));
+    if (d.floor != null) parts.push(T("coleccion.dec.floor", { n: d.floor }));
+    if (d.limit != null) parts.push(T("coleccion.dec.limit", { n: d.limit }));
+    if (d.price != null) parts.push(T("coleccion.dec.price", { n: d.price }));
+    if (d.gain != null) parts.push(T("coleccion.dec.gain", { n: d.gain }));
+    if (d.gain_if_sold != null) parts.push(T("coleccion.dec.gain_if_sold", { n: d.gain_if_sold }));
+    if (d.kwargs && d.kwargs.price != null) parts.push(T("coleccion.dec.price", { n: d.kwargs.price }));
     if (Array.isArray(d.args) && typeof d.args[1] === "string") parts.push("«" + d.args[1] + "»");
     return parts.join(" · ");
   }
   function offerLine(o) {
     const giveR = refsOf(o.give), wantR = refsOf(o.want);
-    let type = "anuncio", label = "Oferta", price = "";
-    if (giveR.length && wantR.length) { type = "cambio"; label = "Cambio"; price = giveR.join("+") + " ↔ " + wantR.join("+"); }
-    else if (giveR.length) { type = "venta"; label = "Venta"; price = fmtP(o.want && o.want.cash); }
-    else if (wantR.length) { type = "puja"; label = "Puja"; price = "≤ " + fmtP(o.give && o.give.cash); }
-    const who = o.maker === US ? "Nosotros" : o.maker;
-    const where = o.venue || (o.thread ? "conversación " + o.thread : (o.to ? "a " + o.to : ""));
+    let type = "anuncio", label = T("coleccion.offer.offer"), price = "";
+    if (giveR.length && wantR.length) { type = "cambio"; label = T("coleccion.offer.swap"); price = giveR.join("+") + " ↔ " + wantR.join("+"); }
+    else if (giveR.length) { type = "venta"; label = T("coleccion.offer.sale"); price = fmtP(o.want && o.want.cash); }
+    else if (wantR.length) { type = "puja"; label = T("coleccion.offer.bid"); price = "≤ " + fmtP(o.give && o.give.cash); }
+    const who = o.maker === US ? T("coleccion.us") : o.maker;
+    const where = o.venue || (o.thread ? T("coleccion.offer.thread", { id: o.thread }) : (o.to ? T("coleccion.offer.to", { team: o.to }) : ""));
     return h("div", { class: "cc-line cc-t-" + type + (o.maker === US ? " is-us" : "") },
-      h("span", { class: "cc-line-t" }, label), h("span", { class: "cc-line-m" }, `${who} · ${where}` + (o.expires_tick ? ` · vence t${o.expires_tick}` : "")), h("b", null, price));
+      h("span", { class: "cc-line-t" }, label), h("span", { class: "cc-line-m" }, `${who} · ${where}` + (o.expires_tick ? T("coleccion.offer.expires", { tick: o.expires_tick }) : "")), h("b", null, price));
   }
   function openDrawer(m, ref) {
     const c = m.cards[ref];
@@ -454,49 +524,51 @@
     const body = h("div", { class: "scr-coleccion cc-drawer" });
     // header chips
     const tags = h("div", { class: "cc-dtags" });
-    if (c.own.length) tags.appendChild(h("span", { class: "cc-tag" }, "En mano ×" + c.own.length));
-    else tags.appendChild(h("span", { class: "cc-tag" }, "Falta"));
+    if (c.own.length) tags.appendChild(h("span", { class: "cc-tag" }, T("coleccion.dr.in_hand", { n: c.own.length })));
+    else tags.appendChild(h("span", { class: "cc-tag" }, T("coleccion.dr.missing")));
     for (const x of cardChips(c)) tags.appendChild(x);
-    if (c.rivalBids) tags.appendChild(chip("puja", c.rivalBids + " pujas rivales"));
+    if (c.rivalBids) tags.appendChild(chip("puja", T("coleccion.dr.rival_bids", { n: c.rivalBids })));
     body.appendChild(tags);
     const page = m.album[i.set] || {};
     body.appendChild(h("div", { class: "cc-dkpis" },
-      kpi("VALOR NUESTRO", c.own.length ? fmtP(c.ourValue) : "—"),
-      kpi("MERCADO", c.marketHist.length ? (Math.min(...c.marketHist.map((x) => x.price)) + "–" + Math.max(...c.marketHist.map((x) => x.price)) + " P") : "sin ventas"),
-      kpi("LIBRO", fmtP(c.book)),
-      kpi("AFINIDAD " + i.set, m.me.affinity && m.me.affinity[i.set] != null ? "×" + fmtN(m.me.affinity[i.set], 1) : "—"),
-      kpi("PÁGINA", page.of ? `${page.have}/${page.of}` : "—")));
+      kpi(T("coleccion.kpi.ours"), valTxt(c), c.own.length ? T(c.own.length > 1 ? "coleccion.dr.copies_more" : "coleccion.dr.copy_more", { n: c.own.length, v: (c.nextValue.exact ? "" : "≈ ") + fmtP(c.nextValue.v) })
+        : T(c.valueExact ? "coleccion.dr.if_get" : "coleccion.dr.estimate")),
+      (() => { const mk = marketKpi(c); const best = c.bestAsk || (c.marketHist.length ? c.marketHist[c.marketHist.length - 1] : null) || c.bestBid;
+        return kpi(T("coleccion.kpi.market"), best ? fmtP(best.price) : T("coleccion.dr.not_seen"), mk.length ? mk.map((p) => `${p[0]} ${p[1]} (${p[2]})`).join(" · ") : T("coleccion.dr.no_market")); })(),
+      kpi(T("coleccion.kpi.book"), fmtP(c.book)),
+      kpi(T("coleccion.kpi.affinity", { set: i.set }), m.me.affinity && m.me.affinity[i.set] != null ? "×" + fmtN(m.me.affinity[i.set], 1) : "—"),
+      kpi(T("coleccion.kpi.page"), page.of ? `${page.have}/${page.of}` : "—")));
     // big card + facts
     body.appendChild(h("div", { class: "cc-dhero" },
       h("div", { class: "cc-dcard" }, renderCard(c, false, () => {})),
       h("div", { class: "cc-dfacts" },
         h("div", null, `${i.set} · ${i.setName} · ${RAR_LABEL[i.rarity] || i.rarity}`),
         i.flavour ? h("div", { class: "cc-flav" }, i.flavour) : null,
-        h("div", { class: "cc-muted" }, `tirada ${i.print_run} · acuñadas ${i.minted != null ? i.minted : "?"} · ${i.page ? "de página" : "fuera de página"}`),
-        c.own.length ? h("div", null, "Nuestras copias: " + c.own.map((a) => `#${a.serial} (id ${a.id}, ${fmtP(a.your_value)})`).join(", ")) : null)));
+        h("div", { class: "cc-muted" }, T("coleccion.dr.facts", { run: i.print_run, minted: i.minted != null ? i.minted : "?", page: T(i.page ? "coleccion.dr.on_page" : "coleccion.dr.off_page") })),
+        c.own.length ? h("div", null, T("coleccion.dr.our_copies", { list: c.own.map((a) => `#${a.serial} (id ${a.id}, ${fmtP(a.your_value)})`).join(", ") })) : null)));
     // price history
-    body.appendChild(h("div", { class: "cc-dsec" }, "PRECIO DE " + ref + " · VENTAS REGISTRADAS"));
+    body.appendChild(h("div", { class: "cc-dsec" }, T("coleccion.dr.price_sec", { ref })));
     if (c.marketHist.length) {
       const vals = c.marketHist.map((x) => x.price);
       if (U().sparkline) body.appendChild(U().sparkline(vals, { w: 440, h: 70 }));
       body.appendChild(h("div", { class: "cc-list" }, c.marketHist.slice(-8).reverse().map((x) =>
         h("div", { class: "cc-line" }, h("span", { class: "cc-line-t" }, "t" + x.tick), h("span", { class: "cc-line-m" }, (x.parties || []).join(" → ") + (x.venue ? " · " + x.venue : x.persona ? " · " + x.persona : "")), h("b", null, fmtP(x.price))))));
-    } else body.appendChild(stateBox("empty", "Sin ventas registradas de esta carta en el feed."));
+    } else body.appendChild(stateBox("empty", T("coleccion.dr.no_sales")));
     // card history
-    body.appendChild(h("div", { class: "cc-dsec" }, "HISTORIA DE LA CARTA"));
+    body.appendChild(h("div", { class: "cc-dsec" }, T("coleccion.dr.history_sec")));
     const copies = Object.values(m.cardsRec || {}).filter((x) => x && x.ref === ref);
     const hist = [];
     for (const cp of copies) for (const ev of cp.history || []) hist.push({ ...ev, serial: cp.serial, owner: cp.owner });
     hist.sort((a, b) => (b.tick || 0) - (a.tick || 0));
     if (hist.length) body.appendChild(h("div", { class: "cc-list" }, hist.slice(0, 25).map((e) =>
       h("div", { class: "cc-line" + (e.to === US || e.from === US ? " is-us" : "") }, h("span", { class: "cc-line-t" }, "t" + e.tick), h("span", { class: "cc-line-m" }, `#${e.serial}: ${e.from} → ${e.to}` + (e.why ? " · " + e.why : "")), h("b", null, e.price != null ? fmtP(e.price) : "")))));
-    else body.appendChild(stateBox("empty", "La grabadora aún no tiene el historial de esta carta."));
+    else body.appendChild(stateBox("empty", T("coleccion.dr.no_history")));
     // offers
-    body.appendChild(h("div", { class: "cc-dsec" }, "OFERTAS ABIERTAS SOBRE " + ref));
+    body.appendChild(h("div", { class: "cc-dsec" }, T("coleccion.dr.offers_sec", { ref })));
     const seen = new Set();
     const offs = c.offers.filter((o) => (seen.has(o.id) ? false : seen.add(o.id)));
     if (offs.length) body.appendChild(h("div", { class: "cc-list" }, offs.map(offerLine)));
-    else body.appendChild(stateBox("empty", "No hay ofertas abiertas."));
+    else body.appendChild(stateBox("empty", T("coleccion.dr.no_offers")));
     // reasoning
     const ids = new Set(c.own.map((a) => a.id));
     const decs = m.decisions.filter((d) => {
@@ -504,10 +576,10 @@
       if (ids.has(d.asset) || (d.out_ids || []).some((x) => ids.has(x))) return true;
       try { return JSON.stringify(d).includes('"' + ref + '"'); } catch (e) { return false; }
     }).slice(-6).reverse();
-    body.appendChild(h("div", { class: "cc-dsec" }, "QUÉ HA DECIDIDO EL BOT"));
+    body.appendChild(h("div", { class: "cc-dsec" }, T("coleccion.dr.bot_sec")));
     if (decs.length) body.appendChild(h("div", { class: "cc-reason" }, decs.map((d) =>
       h("div", { class: "cc-line" }, h("span", { class: "cc-line-t" }, d.strategy || ""), h("span", { class: "cc-line-m" }, decisionText(d)), h("b", null, typeof d.at === "string" ? d.at.slice(11, 16) : "")))));
-    else body.appendChild(stateBox("empty", "Ninguna decisión del bot menciona esta carta."));
+    else body.appendChild(stateBox("empty", T("coleccion.dr.no_bot")));
 
     const title = `${i.id} · ${i.name}`;
     if (U().drawer) U().drawer({ title, body });
@@ -515,22 +587,42 @@
   }
 
   // ---------- data ----------
-  const S = { filters: { states: new Set(), set: "todos", rarity: "todas" }, model: null, slow: {}, slowAt: 0, opened: null };
+  const S = { fb: null, model: null, slow: {}, slowAt: 0, opened: null };
 
+  // the API caps `tail` at 500 rows: page through the last 12000 events so prices are not "sin ver" by accident
+  const now0 = () => Date.now();
+  async function feedWindow(api) {
+    const t = await api.recStream("feed", { tail: 1 });
+    const last = t && t.last_seq != null ? t.last_seq : 0;
+    let seq = Math.max(0, last - 12000), rows = [];
+    for (let g = 0; g < 6; g++) {
+      const r = await api.recStream("feed", { since_seq: seq, limit: 5000 });
+      const got = (r && r.rows) || [];
+      rows = rows.concat(got.filter((x) => x.type === "settlement"));
+      if (got.length) seq = got[got.length - 1].seq;
+      if (got.length < 5000) break;
+    }
+    return { rows };
+  }
   async function load(data) {
     const api = window.api;
-    if (!api) throw new Error("api.js no cargado");
+    if (!api) throw new Error(T("coleccion.no_api"));
     const [catalog, me, myOffers, status, decisions] = await Promise.all([
       safe(() => api.rec("catalog")), safe(() => api.rec("me")), safe(() => api.rec("my_offers")),
       safe(() => api.status()), safe(() => api.decisions()), loadArt(), loadCromo(),
     ]);
+    // our value of every card, held or not: GET values when the API serves it ({items:{REF:{value, exact, held, next_copy_value, spare_value}}})
+    if (now0() - (S.valuesAt || 0) > 15000) { S.valuesAt = now0(); const v = await safe(() => api.get("values", {}, 10000)); S.values = v.ok && v.v ? (v.v.items || v.v) : (S.values || null); }
+    const strat = api.strategy ? await safe(() => api.strategy(1)) : { ok: false };
+    const plan = strat.ok && strat.v && strat.v.current ? strat.v.current.plan || {} : {};
+    const goals = plan.goal_buys && Object.keys(plan.goal_buys).length ? plan.goal_buys : null;
     if (!catalog.ok) throw catalog.err;
     const now = Date.now();
     if (now - S.slowAt > 15000) {
       S.slowAt = now;
       const [venues, threads, cards, feed] = await Promise.all([
         safe(() => api.rec("venues")), safe(() => api.recThreads()), safe(() => api.rec("cards")),
-        safe(() => api.recStream("feed", { tail: 3000 })),
+        safe(() => feedWindow(api)),
       ]);
       const vids = ["rastro"].concat(arr(venues.ok ? venues.v.venues || venues.v : []).map((v) => v.venue || v.id).filter(Boolean));
       const books = await Promise.all([...new Set(vids)].map((v) => safe(() => api.rec("books/" + v))));
@@ -542,9 +634,11 @@
       };
     }
     return {
+      apiValues: S.values || null,
       catalog: catalog.v, me: me.ok ? me.v : {}, myOffers: myOffers.ok ? myOffers.v : [],
       status: status.ok ? status.v : (data && data.status) || {},
       decisions: decisions.ok ? arr(decisions.v) : [],
+      goals,
       ...S.slow,
     };
   }
@@ -554,28 +648,59 @@
     const host = root.querySelector(".cc-body");
     if (!m || !host) return;
     const scroll = root.scrollTop;
-    const counts = {};
-    for (const id in m.cards) for (const s in m.cards[id].states) counts[s] = (counts[s] || 0) + 1;
-    const frag = document.createDocumentFragment();
-    frag.appendChild(renderTotals(m));
-    frag.appendChild(renderFilters(S.filters, counts, () => paint(root)));
-    if (!(m.me.assets || []).length) frag.appendChild(stateBox("empty", "Aún no tenemos cartas grabadas (o la grabadora no ha leído /api/me)."));
-    frag.appendChild(renderAlbum(m, S.filters, (ref) => { S.opened = ref; openDrawer(m, ref); }));
-    host.replaceChildren(frag);
+    if (!host.querySelector(".cc-fbwrap")) {
+      host.replaceChildren(h("div", { class: "cc-totals-wrap" }), h("div", { class: "cc-fbwrap" }), h("div", { class: "cc-album-wrap" }));
+    }
+    const goalsKey = m.goals ? Object.keys(m.goals).sort().join(",") : "";
+    if (!S.fb || S.fbLang !== lang() || S.fbSets !== m.sets.map((x) => x.id).join(",") || S.fbGoals !== goalsKey) {
+      const prev = S.fb && S.fb.state;
+      S.fb = filterBar(m, () => paintAlbum(root));
+      S.fbSets = m.sets.map((x) => x.id).join(","); S.fbGoals = goalsKey; S.fbLang = lang();
+      if (prev) {           // keep what the user had picked when the bar is rebuilt
+        S.fb.querySelectorAll(".fb-extra").forEach((row, i) => {
+          const key = ["set", "estado", "rareza"][i]; const was = prev.extra[key] || new Set();
+          row.querySelectorAll(".fb-opt").forEach((b, j) => {
+            const ids = key === "set" ? m.sets.map((x) => x.id) : key === "estado" ? ESTADOS.map((e) => e.id) : Object.keys(RAR_LABEL);
+            if (was.has(ids[j])) b.click();
+          });
+        });
+      }
+      host.querySelector(".cc-fbwrap").replaceChildren(S.fb);
+    } else if (S.fb.refreshCounts) S.fb.refreshCounts(m);
+    host.querySelector(".cc-totals-wrap").replaceChildren(renderTotals(m));
+    paintAlbum(root);
     root.scrollTop = scroll;
+  }
+  function paintAlbum(root) {
+    const m = S.model;
+    const host = root.querySelector(".cc-album-wrap");
+    if (!m || !host) return;
+    const f = filterState(S.fb);
+    const kids = [];
+    if (!(m.me.assets || []).length) kids.push(stateBox("empty", T("coleccion.no_cards")));
+    kids.push(renderAlbum(m, f, (ref) => { S.opened = ref; openDrawer(m, ref); }));
+    host.replaceChildren(...kids);
   }
 
   window.Screens = window.Screens || {};
   window.Screens["coleccion"] = {
-    title: "Colección",
+    get title() { return T("coleccion.title"); },
     mount(root, params) {
+      S.lang = lang();
       root.replaceChildren(h("div", { class: "scr-coleccion" },
-        h("div", { class: "cc-title" }, h("h1", null, "Colección"), h("span", { class: "cc-muted" }, "álbum por set · estados de cada carta")),
+        h("div", { class: "cc-title" }, h("h1", null, T("coleccion.title")), h("span", { class: "cc-muted cc-title-sub" }, T("coleccion.sub"))),
         h("div", { class: "cc-body" }, stateBox("loading"))));
-      S.slowAt = 0;
+      S.slowAt = 0; S.fb = null;
       S.pendingOpen = params || null;
     },
     async refresh(root, data, params) {
+      if (S.lang !== lang()) {      // language switched while the screen is open: repaint the fixed texts now
+        S.lang = lang();
+        const h1 = root.querySelector(".cc-title h1"), sub = root.querySelector(".cc-title-sub");
+        if (h1) h1.textContent = T("coleccion.title");
+        if (sub) sub.textContent = T("coleccion.sub");
+        if (S.model) paint(root);
+      }
       const host = root.querySelector(".cc-body");
       try {
         const d = await load(data);

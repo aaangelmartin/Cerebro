@@ -1,0 +1,47 @@
+{
+ "id": "l-3fa9c21d",
+ "seller": "t04",
+ "ref": "SAL-10",
+ "name": "Museo Lázaro Galdiano",
+ "rarity": "rare",
+ "start": 40,
+ "state": "open",
+ "state_tick": 1502,
+ "opened_tick": 1502,
+ "ends_tick": 1542,
+ "extensions": 0,
+ "winner": null,
+ "price": null,
+ "match": null,
+ "history": [
+  {
+   "state": "open",
+   "tick": 1502
+  }
+ ],
+ "best_bid": 65,
+ "best_bidder": "t16",
+ "next_bid": 70,
+ "ticks_left": 28,
+ "bids": [
+  {
+   "n": 1,
+   "team": "t09",
+   "price": 45,
+   "tick": 1505,
+   "state": "outbid"
+  },
+  {
+   "n": 2,
+   "team": "t16",
+   "price": 65,
+   "tick": 1511,
+   "state": "live"
+  }
+ ],
+ "bid_count": 2,
+ "venue": "v07",
+ "note": "bids are public: every team sees who bid and how much",
+ "wanted_by": 3,
+ "tick": 1514
+}

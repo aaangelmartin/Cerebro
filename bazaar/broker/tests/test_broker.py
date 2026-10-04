@@ -232,7 +232,8 @@ class TestVenue(unittest.TestCase):
         me = {"cash": 400, "level": 2, "venue": None}
         sit = SimpleNamespace(t_hours=4.06, doors="open", paused=False, me=me)
         self.assertTrue(venue.should_open(sit, reserve=40))
-        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "t_hours": 4.0}), reserve=40))
+        self.assertTrue(venue.should_open(SimpleNamespace(**{**sit.__dict__, "t_hours": 2.7}), reserve=40))   # no hour gate now
+        self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "paused": True}), reserve=40))
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "cash": 300}}), reserve=40))
         board = [{"venue": "v1", "rules": {"mechanism": "board"}, "bond": 250}]
         self.assertFalse(venue.should_open(SimpleNamespace(**{**sit.__dict__, "me": {**me, "venue": "v1"}, "venues": board}),
@@ -297,6 +298,19 @@ class TestAuditFixes(unittest.TestCase):
             eng.observe(0, [sell(1, 20), buy(2, 80)])
             eng.note_refused(engine.Match("b1-1", "b1-2", 50, "b1"), code)
             self.assertTrue(all(t.gone for t in eng.traders.values()), code)
+
+    def test_public_plan_leaves_an_addressed_offer_to_its_addressee(self):
+        ask = {"id": 1, "maker": "a", "to": "c", "give": {"assets": [{"id": 5, "kind": "card", "ref": "X-1"}]},
+               "want": {"cash": 10}}
+        book = {"tick": 10, "offers": [ask, {"id": 2, "maker": "b", "to": None, "give": {"cash": 20},
+                                             "want": {"types": ["card:X-1"]}}]}
+        self.assertEqual(public_plan(book), [])                     # b is not the team it was posted for
+        book["offers"].append({"id": 3, "maker": "c", "give": {"cash": 15}, "want": {"types": ["card:X-1"]}})
+        self.assertEqual([(m.sell, m.buy) for m in public_plan(book)], [(1, 3)])
+        ask["to"] = None                                            # a public ask meets the best bid
+        self.assertEqual([(m.sell, m.buy) for m in public_plan(book)], [(1, 2)])
+        book["offers"][1]["to"] = "z"                               # a bid posted for someone else stays out
+        self.assertEqual([(m.sell, m.buy) for m in public_plan(book)], [(1, 3)])
 
     def test_public_plan_drops_expired(self):
         book = {"tick": 10, "offers": [

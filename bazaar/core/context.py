@@ -176,12 +176,29 @@ class ValueCache:
         return v
 
 
+
+# Duel accepts have their own limit (organiser's Duels brief): one per live duel. Sunday's sessions run four
+# duels at once (schedule: max_concurrent 4) and the four of a wave share one deadline, so a cap of three would
+# drop the fourth accept of a last tick. Two accepts in one tick both went through on Saturday (ticks 1250,
+# 1259, 1265, 1337).
+DUEL_ACCEPTS_PER_TICK = 4
+
+
+def duel_accept_cap(limits: dict | None) -> int:
+    """Duel accepts per tick. The game's `accepts_per_team_per_tick` counts offer accepts only."""
+    lim = limits or {}
+    for key in ("duel_accepts_per_team_per_tick", "duel_accepts_per_tick"):
+        if lim.get(key) is not None:
+            return int(lim[key])
+    return DUEL_ACCEPTS_PER_TICK
+
+
 class Budget:
     """Per-tick counters plus rolling per-hour windows, persisted between ticks."""
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path or config.LIVE / "budget.json")
-        self.state: dict = {"tick": None, "accepts": 0, "messages": {}, "offers": 0,
+        self.state: dict = {"tick": None, "accepts": 0, "duel_accepts": 0, "messages": {}, "offers": 0,
                             "spend": [], "deals": [], "llm_usd": 0.0}
         try:
             self.state.update(json.loads(self.path.read_text()))
@@ -192,27 +209,36 @@ class Budget:
         for k in ("spend", "deals"):
             self.state[k] = [r for r in self.state.get(k, []) if now - r[0] < HOUR]
 
-    def for_tick(self, tick: int, limits: dict | None = None, now: float | None = None) -> dict:
-        """Reset per-tick counters on a new tick and return the dict that goes into ctx.budget."""
+    def for_tick(self, tick: int, limits: dict | None = None, now: float | None = None,
+                 hour_cap: int | None = None) -> dict:
+        """Reset per-tick counters on a new tick and return the dict that goes into ctx.budget. `hour_cap` is
+        the operator's max_spend_per_hour (control); without it the config default sizes the hour, and a cap
+        raised in control would still leave the domains planning against the old one."""
         now = time.time() if now is None else now
         if self.state.get("tick") != tick:
-            self.state.update(tick=tick, accepts=0, messages={}, offers=0)
+            self.state.update(tick=tick, accepts=0, duel_accepts=0, messages={}, offers=0)
         self._prune(now)
         limits = limits or {}
         spent_hour = sum(r[1] for r in self.state["spend"])
+        hour_cap = int(hour_cap) if hour_cap is not None else config.MAX_SPEND_PER_HOUR
         deals_by_team: dict[str, int] = {}
         for _, team in self.state["deals"]:
             deals_by_team[team] = deals_by_team.get(team, 0) + 1
         acc_cap = int(limits.get("accepts_per_team_per_tick", 1))
+        duel_cap = duel_accept_cap(limits)
+        duel_used = int(self.state.get("duel_accepts") or 0)
         return {
             "tick": tick,
             "accepts_used": self.state["accepts"],
             "accepts_left": max(0, acc_cap - self.state["accepts"]),
+            "duel_accepts_used": duel_used,                    # duels have their own limit: never block a trade
+            "duel_accepts_left": max(0, duel_cap - duel_used),
             "messages": dict(self.state["messages"]),          # "thread:5"/"duel:5" -> messages sent this tick
             "offers_posted": self.state["offers"],
             "offers_left": max(0, int(limits.get("offers_per_team_per_tick", 12)) - self.state["offers"]),
             "spend_hour": spent_hour,
-            "spend_hour_left": max(0, config.MAX_SPEND_PER_HOUR - spent_hour),
+            "spend_hour_cap": hour_cap,
+            "spend_hour_left": max(0, hour_cap - spent_hour),
             "_spend_log": self.state["spend"],                 # live list: context.record_spend appends fills
             "deals_by_team_hour": deals_by_team,
             "llm_usd": self.state.get("llm_usd", 0.0),
@@ -225,7 +251,9 @@ class Budget:
             return
         now = time.time() if now is None else now
         p = action.params or {}
-        if action.kind in ACCEPT_KINDS:
+        if action.kind == "duel_accept":
+            self.state["duel_accepts"] = int(self.state.get("duel_accepts") or 0) + 1
+        elif action.kind in ACCEPT_KINDS:
             self.state["accepts"] += 1
         if action.kind in MESSAGE_KINDS:
             key = conv_key(action)

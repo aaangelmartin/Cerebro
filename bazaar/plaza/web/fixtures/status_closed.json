@@ -1,0 +1,24 @@
+{
+ "tick": 1445,
+ "tick_seconds": 15.0,
+ "seconds_to_tick": null,
+ "time": "2026-10-04T01:46:36+02:00",
+ "game": "closed",
+ "market": "closed",
+ "matchmaker": "waiting",
+ "feed": "ok",
+ "agent": "connected",
+ "team": "t16",
+ "opens": "2026-10-04T09:00:00+02:00",
+ "opens_tick": 1446,
+ "opens_in_s": 26004,
+ "round": 2,
+ "round_name": "Saturday",
+ "venue": {
+  "id": "v07",
+  "name": "v07 Market",
+  "fee_bps": 0,
+  "per_card": 0
+ },
+ "name": "v07 Market"
+}
