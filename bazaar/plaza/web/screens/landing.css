@@ -13,6 +13,62 @@
 .landing-card .label.give { color: var(--zone-give); } .landing-card .label.get { color: var(--zone-get); }
 .landing-swap { color: var(--ink-3); margin-bottom: 20px; }
 
+/* the animated demo: stage, page and ticker. Only transform and opacity move. */
+.landing-right { display: flex; flex-direction: column; gap: 12px; flex: none; width: 472px; }
+.landing-stage { border: 1px solid var(--line); background: var(--s1); padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+.landing-stage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.landing-pair { display: flex; align-items: center; justify-content: space-between; gap: 18px; transition: opacity .35s ease; }
+.landing-stage.is-out .landing-pair, .landing-stage.is-out .landing-talk { opacity: 0; }
+.landing-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.landing-side .label.give { color: var(--zone-give); } .landing-side .label.get { color: var(--zone-get); }
+.landing-seat { width: 176px; aspect-ratio: 5 / 7; position: relative; }
+.landing-seat .card { position: absolute; inset: 0; width: 100%; transition: transform .75s cubic-bezier(.6, 0, .2, 1), opacity .2s linear; transform-origin: 0 0; will-change: transform; }
+.landing-seat .card.is-flying { z-index: 40; transition-duration: .8s, .2s; }
+.landing-talk { height: 22px; display: flex; align-items: center; justify-content: center; transition: opacity .35s ease; }
+.landing-say { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); animation: landing-in .3s ease both; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.landing-say b { font-family: var(--font-num); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; }
+.landing-say.is-a .ic-wrap { color: var(--zone-give); } .landing-say.is-b .ic-wrap { color: var(--zone-get); }
+.landing-states { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line-2); }
+.landing-state { padding: 6px 4px; text-align: center; font-family: var(--font-num); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3);
+  border-left: 1px solid var(--line-2); transition: color .25s, background-color .25s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.landing-state:first-child { border-left: 0; }
+.landing-state.is-on { color: var(--ink-2); }
+.landing-state.is-now { color: var(--bg); background: var(--signal); }
+.landing-state.is-now:last-child { background: var(--ok); }
+@keyframes landing-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.landing-ticker { border: 1px solid var(--line); background: var(--s1); padding: 10px 14px; }
+.landing-ticker-head { margin-bottom: 6px; }
+.landing-ticker-list { height: 72px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.landing-tick-row { display: flex; align-items: center; gap: 10px; height: 24px; flex: none; font-family: var(--font-num); font-size: 11.5px; color: var(--ink-2); white-space: nowrap;
+  animation: landing-row .4s ease both; }
+.landing-tick-teams { color: var(--ink); }
+.landing-tick-ok { color: var(--ok); }
+.landing-tick-t { margin-left: auto; color: var(--ink-3); }
+@keyframes landing-row { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+
+.landing-page { border: 1px solid var(--line); background: var(--s1); padding: 14px 16px 16px; transition: border-color .5s, box-shadow .5s; }
+.landing-page.is-complete { border-color: var(--set); box-shadow: 0 0 0 1px var(--set), 0 0 28px -8px var(--set); }
+.landing-page-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; min-height: 20px; }
+.landing-page-name { font-weight: 500; }
+.landing-page-count { font-size: 12px; color: var(--ink-2); }
+.landing-page-news { font-size: 12px; color: var(--ink-2); margin-left: auto; }
+.landing-page-done { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-num); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ok);
+  border: 1px solid var(--ok); padding: 2px 8px; opacity: 0; transition: opacity .4s; }
+.landing-page.is-complete .landing-page-done { opacity: 1; }
+.landing-page-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 10px; }
+.landing-slot { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.landing-slot-ref { font-family: var(--font-num); font-size: 10px; color: var(--ink-3); text-align: center; }
+.landing-pop { animation: landing-pop .45s ease both; }
+@keyframes landing-pop { from { opacity: .2; transform: scale(.94); } to { opacity: 1; transform: none; } }
+
+.landing-reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+.landing-reveal.is-in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .landing-seat .card, .landing-pair, .landing-talk, .landing-page, .landing-state { transition: none; }
+  .landing-say, .landing-tick-row, .landing-pop { animation: none; }
+}
+
 .landing-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .landing-step { display: flex; gap: 14px; align-items: baseline; padding: 18px 20px; border: 1px solid var(--line); background: var(--s1); }
 .landing-step-n { font-family: var(--font-num); font-size: 18px; color: var(--ink-3); }
@@ -47,7 +103,8 @@
   .landing-why, .landing-foot { padding-left: 32px; padding-right: 32px; }
   .landing-end { padding: 0 32px 24px; }
   .landing-title { font-size: 48px; }
-  .landing-card .card { --card-w: 150px; }
+  .landing-right { width: 400px; }
+  .landing-seat { width: 144px; }
   .landing-why-grid { grid-template-columns: repeat(2, 1fr); gap: 32px; }
 }
 @media (max-width: 760px) {
@@ -56,8 +113,15 @@
   .landing-hero-text { gap: 20px; }
   .landing-title { font-size: 38px; }
   .landing-cta.btn { width: 100%; justify-content: center; }
-  .landing-cards { align-self: center; gap: 12px; }
-  .landing-card .card { --card-w: 132px; }
+  .landing-right { width: 100%; }
+  .landing-stage { padding: 12px; }
+  .landing-pair { justify-content: center; gap: 12px; }
+  .landing-seat { width: 124px; }
+  .landing-state { font-size: 8.5px; letter-spacing: 0; padding: 6px 2px; }
+  .landing-say { font-size: 12px; }
+  .landing-page { padding: 12px; }
+  .landing-page-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .landing-page-news { margin-left: 0; flex-basis: 100%; order: 5; }
   .landing-steps { grid-template-columns: 1fr; gap: 8px; }
   .landing-why { padding: 32px 16px; }
   .landing-why-grid { grid-template-columns: 1fr 1fr; gap: 24px 16px; }
