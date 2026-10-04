@@ -13,6 +13,7 @@ Scenarios:
   jump_cash   the same three minutes later: +150 P
   no_jump     09:00, the clock did not jump: round 2 at h13.37
   plan        `jump_cash` with the brain's last plan taken as fresh (it is ignored when older than 30 minutes)
+  gift        tick 1604, when Abuela's gift window opens again: the code opens one thread with her to name a price
 """
 from __future__ import annotations
 
@@ -135,6 +136,7 @@ SCENARIOS = {
     "jump_cash": dict(t=16.70, rnd=3, name="Sunday · Chamberí", cash=490, release=("CHA",), plan=False),
     "no_jump": dict(t=13.37, rnd=2, name="Saturday · Gran Vía", cash=340, release=(), plan=False),
     "plan": dict(t=16.70, rnd=3, name="Sunday · Chamberí", cash=490, release=("CHA",), plan=True),
+    "gift": dict(t=17.31, rnd=3, name="Sunday · Chamberí", cash=490, release=("CHA",), plan=False, tick=1604),
 }
 
 
@@ -186,7 +188,8 @@ def play(name: str, ticks: int = 3) -> tuple[list[dict], list[str]]:
     if doc:                                                 # at 09:00 the night's plan is hours old: stale, ignored
         doc["updated"] = time.time() - (0 if sc["plan"] else 5 * 3600)
         (live / "strategy.json").write_text(json.dumps(doc))
-    gw = SnapGW(clock(1446, sc["t"], sc["rnd"], sc["name"]), sc["cash"], sc["release"])
+    t0 = int(sc.get("tick") or 1446)
+    gw = SnapGW(clock(t0, sc["t"], sc["rnd"], sc["name"]), sc["cash"], sc["release"])
     domains = R.load_domains(gw=gw)
     for d in domains:
         d.use_llm = False
@@ -197,7 +200,7 @@ def play(name: str, ticks: int = 3) -> tuple[list[dict], list[str]]:
     control = runner.control()
     rows, broken, prev = [], [], None
     for i in range(ticks):
-        gw.clock_doc["tick"] = 1446 + i
+        gw.clock_doc["tick"] = t0 + i
         gw.clock_doc["t_hours"] = round(sc["t"] + i / 240.0, 4)
         sit = perceive(gw, prev, live=live, clock=gw.clock())
         report = runner.step(sit)
