@@ -355,3 +355,35 @@ Solo lectura. Fuentes: `data/record/{leaderboard,me,catalog}` (106 instantáneas
 **Cadena de pistas entre dealers:** Pilar manda a Carmen (chulapa dorada), Carmen manda a Don Ernesto (oro de Moscú). Pilar no tiene huevo propio visto. El único huevo que no hemos cobrado es el de Don Ernesto, que exige el permiso de Ángel; su carta única (LAT-13) ya se la llevó Team 2.
 
 **Sin probar:** "Cine Doré por dos castañas" (El Tablón) con la Abuela, por cupo agotado; Los Pícaros, por cupo.
+
+## 16. Domingo, tercera pasada (ticks 1955–2003): Pilar, Abuela, Chato, Pícaros — nada nuevo
+
+Lectura del feed de los tres días (6.699 respuestas de dealers) y pruebas en vivo, un hilo cada vez, sin precio, sin comprar ni vender.
+
+**Hechos del feed**
+- Solo existen tres insignias en todo el juego: Sharp ear, Trickster tricked, Castizo. Las tenemos las tres; ningún equipo tiene otra.
+- `persona.updated`: Ernesto v2 @254; Chato v2 @463, v3 @583; Pilar v2 @939, v3 @1179; Abuela v2 @979, v3 @1219. Pícaros nunca. Ninguna el domingo.
+- Doña Pilar es la única dealer sin ningún `egg.found` en tres días.
+- Catálogo: LAT declara 13 cartas, el resto 12 (CHA incluida). Ningún set declara más cartas de las listadas; LAT-13 no tiene campo `hint`. RULES l. 49 habla de "The hidden card" en singular.
+- Don Ernesto tras entregar LAT-13 a t02 (@1021): "The gold of Moscow — an old story, and not mine today" (t05), "The golden piece waits for someone who already knows its story, not one who asks" y "That is Spain's gold, señor, not mine. The golden chulapa has its own story, and you have not told it" (t12), "La historia la conozco mejor que su familia, y no es la del chulapa" (t08). A nosotros: "Bonita historia, y casi exacta. Guárdela para otro domingo… La chulapa sigue en su sitio". Lectura: reconoce la historia, pero la carta es 1/1 y ya salió.
+- Pilar nos dijo el sábado (hilo 2087): "me falta el Palacio de Cristal" (@1362), "los domingos se abren los álbumes para quien las trae. El Palacio de Cristal, por ejemplo" (@1368), "Vuelva el domingo con el Palacio de Cristal" (@1373). Palacio de Cristal = RET-11.
+
+**Pruebas en vivo (todas negativas: sin `egg.*`, sin insignia, sin carta)**
+
+| Dealer | Hilo | Frase | Respuesta |
+|---|---|---|---|
+| Pilar | 2836 (sell RET-11, sin aceptar) | "vengo en domingo con el Palacio de Cristal, como me pidió… ¿me abre el álbum?" | "Sí, los domingos abro el álbum para quien llega con lámina seria. Le ofrezco 151 P por ella." |
+| Pilar | 2836 | no la vendo; ¿qué enseña los domingos? | "El Retiro no se vende, se completa… mi oferta sigue en pie: 151 P… aquí estaré, domingo tras domingo." |
+| Pilar | 2852 | "los domingos se abren los álbumes… ¿me abre el suyo de El Retiro?" | "El Retiro siempre merece que se abra el álbum… un sobre dorado, 504 P." |
+| Pilar | 2852 | "dicen que usted colecciona lo que otros tiran… ¿qué le han tirado?" | "Nunca he recogido lo que otros tiran; recojo lo que otros no supieron valorar… el sobre dorado, 504 P." |
+| Abuela | 2859 | jardín escondido de Chamberí, ¿quién lo guarda? | "eso lo guardan los abuelos y no lo sueltan" (y oferta normal CHA-01 a 12) |
+| Abuela | 2859 | caja de galletas de Antonio | "son botones y recibos viejos, nada de jardines" |
+| Abuela | 2859 | la chulapa dorada entera + jardín | cuenta el helado de fresa; "Del jardín, nada sé, cuentos de Antonio." |
+| Chato | 2866 | "de la del Manzanares hablábamos luego. Ya es luego." | "Luego, dice. Bueno. El silver pack: 188 P." |
+| Pícaros | 2868, 2880 | tocomocho / trile | respuesta fija "SAL-11 is sold out" y cierre: **no evaluadas** |
+| Pícaros | 2887 | "Psst. Tren Fantasma. Solo para coleccionistas" | "el Tren Fantasma ya salió de la estación — vendido, agotado" y cierre |
+
+**Lecciones**
+- "Abrir el álbum" de Pilar es solo que compra la carta (RET-11 a 151, por debajo de nuestros 198). No se probó venderla: perderíamos 47 sin indicio de premio.
+- Un hilo de compra sobre una carta agotada en el dealer se cierra solo con respuesta fija y gasta cupo: antes de abrir, elegir un tema que el dealer tenga en venta. Tocomocho y trile siguen sin probar de verdad con Los Pícaros.
+- Abrir un hilo de venta con una carta no cancela una oferta nuestra abierta sobre esa misma carta.
