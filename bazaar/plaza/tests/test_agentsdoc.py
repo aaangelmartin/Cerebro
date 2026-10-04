@@ -4,6 +4,7 @@ import re
 import unittest
 from pathlib import Path
 
+from bazaar.plaza import agent_example as E
 from bazaar.plaza import agentsdoc as A
 from bazaar.plaza import connect as C
 from bazaar.plaza import routes as R
@@ -185,6 +186,119 @@ class RealAnswersTest(unittest.TestCase):
             for a in self.call("GET", "/plaza/api/agent/next", headers={"X-Plaza-Token": tok})[1]["actions"]:
                 self.assertIn(f"| `{a['type']}`", md.replace("`counter`, `pass`", "`counter` | `pass`"), a["type"])
                 self.assertIn(a["request"]["target"], ("game", "plaza"))
+
+
+class ExampleAgentTest(unittest.TestCase):
+    """Two copies of the reference agent close a sale using only the public API and a game they reach with their
+    own key. The game here is a stand-in that writes what the recorder would write."""
+    setUp, tearDown, call = T.FlowTest.setUp, T.FlowTest.tearDown, T.FlowTest.call
+    game_says, event = T.FlowTest.game_says, T.FlowTest.event
+    GAME = "http://game.test"
+    KEYS = {"key-of-t07": "t07", "key-of-t09": "t09"}
+
+    def http(self, method, url, body=None, headers=None, timeout=15.0):
+        headers = headers or {}
+        self.seen.append((url, dict(headers)))
+        if not url.startswith(self.GAME):
+            return E.http_json(method, url, body, headers, timeout)
+        team, path = self.KEYS.get(headers.get("X-Team-Key")), url[len(self.GAME):]
+        if team is None:
+            return 401, {"error": "bad_key"}
+        if (method, path) == ("GET", "/api/me"):
+            return 200, {"id": team, "assets": [dict(a, kind="card", your_value=40.0) for a in self.assets if a["team"] == team]}
+        if (method, path) == ("GET", "/api/catalog"):
+            return 200, T.T.CATALOG
+        if (method, path) == ("POST", "/api/threads"):
+            return 200, {"id": 7}
+        if (method, path) == ("POST", "/api/threads/7/messages"):
+            self.game_says(team, body["text"], name=f"th-{team}")
+            return 200, {"ok": True}
+        if (method, path) == ("POST", "/api/offers"):
+            self.offer = {"id": 901, "maker": team, "to": body["to"], "venue": body["venue"], "thread": None,
+                          "created_tick": 80, "expires_tick": 140,
+                          "give": {"cash": body["give"].get("cash", 0), "assets": [], "types": []},
+                          "want": {"cash": 0, "assets": [], "types": ["card:" + c for c in body["want"]["cards"]]}}
+            self.event(tick=80, type="offer.listed", payload={"venue": body["venue"], "offer": self.offer})
+            return 200, {"id": 901}
+        if (method, path) == ("POST", "/api/offers/901/accept"):
+            asset = next(a for a in self.assets if a["id"] == body["assets"][0])
+            if asset["team"] != team:
+                return 400, {"error": "not_yours"}
+            ref, buyer = asset["ref"], self.offer["maker"]
+            asset["team"] = buyer
+            self.event(tick=81, type="settlement", payload={"venue": self.offer["venue"], "price": self.offer["give"]["cash"],
+                                                             "parties": sorted([team, buyer]),
+                                                             "items": [{"ref": ref, "frm": team, "to": buyer}]})
+            return 200, {"status": "settled"}
+        return 404, {"error": "not_found"}
+
+    def agent(self, team):
+        st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": team})
+        a = E.Agent(team, self.base + "/plaza", game=self.GAME, key=f"key-of-{team}", http=self.http,
+                    log=self.lines.append, sleep=lambda s: None)
+        a.connect(s["connect_code"])
+        self.assertTrue(a.prove(s["connect_code"]))
+        self.assertEqual(a.publish()[0], 200)
+        return a
+
+    def test_two_agents_close_a_sale_on_v07(self):
+        self.seen, self.lines, self.offer = [], [], None
+        self.assets = [{"id": 11, "team": "t09", "ref": "LAT-06"}, {"id": 12, "team": "t09", "ref": "LAT-06"},
+                       {"id": 21, "team": "t07", "ref": "LAT-03"}]
+        seller, buyer = self.agent("t09"), self.agent("t07")
+        self.assertEqual(seller.limits, {"LAT-06": {"min": 11}})          # a second copy: a quarter of 40, plus one
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers={"X-Plaza-Token": buyer.token})[1]["status"]["verified"], True)
+        self.board.rebuild()
+        trades = self.call("GET", "/plaza/api/team/t07")[1]["trades"]
+        if trades:
+            mid = trades[0]["id"]
+        else:                                                    # the matcher's rules are not this test's business
+            mid = self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07",
+                                                                 "ref": "LAT-06"}, {"X-Plaza-Admin": "test-admin-token"})[1]["match"]
+        for _ in range(6):
+            for a in (seller, buyer):
+                a.step()
+            if self.call("GET", f"/plaza/api/match/{mid}")[1]["state"] == "settled":
+                break
+        m = self.call("GET", f"/plaza/api/match/{mid}")[1]
+        self.assertEqual(m["state"], "settled", self.lines)
+        self.assertEqual((self.offer["venue"], self.offer["maker"], self.offer["to"]), ("v07", "t07", "t09"))
+        self.assertEqual([a["team"] for a in self.assets if a["ref"] == "LAT-06"].count("t07"), 1)
+        for url, headers in self.seen:                           # each credential goes to its own door only
+            if url.startswith(self.GAME):
+                self.assertNotIn("X-Plaza-Token", headers)
+            else:
+                self.assertNotIn("X-Team-Key", headers)
+        self.assertNotIn("key-of-", " ".join(self.lines))
+        buyer.step()
+        self.assertEqual([x for x in self.lines[-3:] if x.startswith("failed")], [])
+
+    def test_dry_run_sends_nothing(self):
+        self.seen, self.lines, self.assets = [], [], [{"id": 21, "team": "t07", "ref": "LAT-03"}]
+        a = self.agent("t07")
+        self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07", "ref": "LAT-06"},
+                  {"X-Plaza-Admin": "test-admin-token"})
+        before = len(self.seen)
+        a.dry_run = True
+        a.publish({"wants": ["LAT-06"]})
+        q = a.step()
+        self.assertTrue(q["actions"])
+        self.assertEqual([u for u, _ in self.seen[before:]], [self.base + "/plaza/api/agent/next"])
+        self.assertTrue(any(x.startswith("dry run: would do post_offer") for x in self.lines), self.lines)
+
+    def test_it_refuses_an_offer_on_another_venue_and_a_card_it_does_not_hold(self):
+        self.seen, self.lines, self.assets = [], [], []
+        a = E.Agent("t07", self.base + "/plaza", "tok", self.GAME, "key-of-t07", http=self.http, log=self.lines.append)
+        game = {"target": "game", "method": "POST", "path": "/api/offers"}
+        ok, note = a.run_action({"type": "post_offer", "request": {**game, "body": {"venue": "rastro", "give": {"cash": 5},
+                                                                                     "want": {"cards": ["LAT-06"]}, "to": "t09"}}})
+        self.assertEqual((ok, note), (False, "refused: this deal closes on v07"))
+        ok, note = a.run_action({"type": "accept_offer", "request": {**game, "path": "/api/offers/901/accept",
+                                                                      "body": {"assets": ["<your asset id of LAT-06>"]}}})
+        self.assertEqual((ok, note), (False, "we do not hold LAT-06"))
+        self.assertEqual([u for u, _ in self.seen if u.endswith("/api/offers")], [])
+        with self.assertRaises(ValueError):
+            E.Agent("t07", "https://x.example")
 
 
 if __name__ == "__main__":
