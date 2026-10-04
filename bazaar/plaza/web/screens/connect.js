@@ -44,6 +44,13 @@
       function drawPrompt() {
         K.clear(colPrompt).appendChild(stepHead(2, t("connect.paste"), Boolean(st.status && st.status.agent_called)));
         if (!st.team) { colPrompt.appendChild(el("p", { class: "connect-wait" }, t("connect.pickFirst"))); return; }
+        if (st.already) {
+          colPrompt.appendChild(el("div", { class: "connect-result is-ok", role: "status" }, K.icon("check", 18),
+            el("div", null, el("div", { class: "connect-result-title" }, t("connect.alreadyTitle", { name: K.teamName(st.team) })), el("div", null, t("connect.alreadyText")))));
+          colPrompt.appendChild(K.btn(t("connect.enter"), { kind: "primary", iconAfter: "arrow", onclick: () => ctx.go("/plaza/home") })).classList.add("connect-copy");
+          colPrompt.appendChild(K.btn(t("connect.again"), { small: true, onclick: () => pick(st.team, true) }));
+          return;
+        }
         if (st.error) {
           colPrompt.appendChild(K.state("error", null, st.error, K.btn(t("common.retry"), { small: true, onclick: () => pick(st.team) })));
           return;
@@ -71,6 +78,11 @@
             el("div", null, el("div", { class: "connect-result-title" }, t("connect.connected")), el("div", null, t("connect.connectedText", { name: K.teamName(st.team) })))));
           colReady.appendChild(K.btn(t("connect.seeHow"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");
           return;
+        }
+        if (s && s.verified) {                                      // the team is proved: the human may go in and watch
+          colReady.appendChild(el("div", { class: "connect-result is-ok", role: "status" }, K.icon("check", 18),
+            el("div", null, el("div", { class: "connect-result-title" }, t("connect.verifiedTitle")), el("div", null, t("connect.verifiedText", { name: K.teamName(st.team) })))));
+          colReady.appendChild(K.btn(t("connect.enter"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");
         }
         const box = colReady.appendChild(el("div", { class: "connect-result", role: "status" }));
         box.appendChild(el("div", { class: "connect-result-title" }, s && s.agent_called ? t("connect.notYet") : t("connect.waiting")));
@@ -111,7 +123,10 @@
         });
       }
 
-      function pick(team) {
+      function pick(team, again) {
+        const inAs = Plaza.hasTeam() && Plaza.state.me.team;       // this browser already holds a proved session
+        if (inAs && inAs === team && !again && !st.start) { st.team = team; st.already = true; draw(); return; }
+        st.already = false;
         if (st.stop) st.stop();
         Object.assign(st, { team, start: null, status: null, error: null, stop: null });
         draw();
