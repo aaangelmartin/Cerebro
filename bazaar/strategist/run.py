@@ -246,7 +246,8 @@ STRATEGY_TOOL = {
                                              "exception needs gain >= 5 P and the page at most half held; council vote"},
             "post_offers": {"type": "array", "description": "targeted offers to post now; this is how we talk to "
                             "other teams' agents (they read offers addressed to them every tick). card_needs: rivals "
-                            "that want our spares, mutual swaps: {give: ref, want_card: ref | want_cash: P, to: team?, "
+                            "that want our spares, mutual swaps: {give: ref, want_card: ref and/or want_cash: P (a swap may ask cash "
+                            "on top of the card: both fields), to: team?, "
                             "venue, why}; never below value + margin (rails check it); at most 5",
                             "items": {"type": "object"}},
             "arbitrage": {"type": "string", "enum": ["on", "off"],
