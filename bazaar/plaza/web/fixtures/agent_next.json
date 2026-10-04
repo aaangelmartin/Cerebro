@@ -1,5 +1,6 @@
 {
  "team": "t16",
+ "verified": true,
  "tick": 1446,
  "poll_after_s": 5,
  "default_mode": "auto",
@@ -40,5 +41,14 @@
    "why": "waiting for the other side to post the offer"
   }
  ],
- "failed": []
+ "failed": [],
+ "standing": {
+  "strikes": 0,
+  "limit": 2,
+  "banned": false,
+  "last": null,
+  "acked": true,
+  "message": null,
+  "rule": true
+ }
 }

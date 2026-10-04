@@ -7,10 +7,7 @@
  "rarity": "rare",
  "price": 80,
  "saves": 5,
- "last_of_page": true,
- "priority": 1,
  "confidence": "probable",
- "score": 6.5,
  "why": "t16 can part with LAV-09; t05 looks for it (probably the last card of its page)",
  "id": "m-ba346d6c75",
  "alternatives": [
@@ -160,5 +157,6 @@
    "pays": 80
   }
  ],
- "tick": 1445
+ "tick": 1445,
+ "pair_traded": false
 }

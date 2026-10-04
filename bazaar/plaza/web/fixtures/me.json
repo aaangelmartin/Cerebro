@@ -61,5 +61,15 @@
   "expired": 0
  },
  "activity_seq": 14,
- "read_only": false
+ "read_only": false,
+ "ready": true,
+ "standing": {
+  "strikes": 0,
+  "limit": 2,
+  "banned": false,
+  "last": null,
+  "acked": true,
+  "message": null,
+  "rule": true
+ }
 }

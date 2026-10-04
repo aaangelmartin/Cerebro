@@ -181,7 +181,6 @@
    "source": "public",
    "hint": "bids 28 P on rastro",
    "bid": 28,
-   "finishes_page": true,
    "name": "Fiesta de San Cayetano",
    "rarity": "rare",
    "set": "LAV",
@@ -192,7 +191,6 @@
    "ref": "SAL-08",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Guantería Antigua",
    "rarity": "uncommon",
    "set": "SAL",
@@ -203,7 +201,6 @@
    "ref": "SAL-10",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Museo Lázaro Galdiano",
    "rarity": "rare",
    "set": "SAL",
@@ -214,7 +211,6 @@
    "ref": "LAT-06",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "La Chulapa",
    "rarity": "uncommon",
    "set": "LAT",
@@ -225,7 +221,6 @@
    "ref": "SAL-02",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "El Portero",
    "rarity": "common",
    "set": "SAL",
@@ -236,7 +231,6 @@
    "ref": "LAT-01",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Caña en la Cava Baja",
    "rarity": "common",
    "set": "LAT",
@@ -250,7 +244,6 @@
    "source": "public",
    "hint": "bids 28 P on rastro",
    "bid": 28,
-   "finishes_page": true,
    "name": "Fiesta de San Cayetano",
    "rarity": "rare",
    "set": "LAV",
@@ -261,7 +254,6 @@
    "ref": "SAL-08",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Guantería Antigua",
    "rarity": "uncommon",
    "set": "SAL",
@@ -272,7 +264,6 @@
    "ref": "SAL-10",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Museo Lázaro Galdiano",
    "rarity": "rare",
    "set": "SAL",
@@ -283,7 +274,6 @@
    "ref": "LAT-06",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "La Chulapa",
    "rarity": "uncommon",
    "set": "LAT",
@@ -294,7 +284,6 @@
    "ref": "SAL-02",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "El Portero",
    "rarity": "common",
    "set": "SAL",
@@ -305,7 +294,6 @@
    "ref": "LAT-01",
    "source": "public",
    "hint": "asked dealers for it",
-   "finishes_page": false,
    "name": "Caña en la Cava Baja",
    "rarity": "common",
    "set": "LAT",
@@ -1113,483 +1101,278 @@
  ],
  "matches": [
   {
+   "id": "m-ba346d6c75",
    "kind": "sale",
    "seller": "t16",
    "buyer": "t05",
-   "ref": "LAV-09",
-   "name": "Cine Doré",
-   "rarity": "rare",
-   "price": 80,
-   "saves": 5,
-   "last_of_page": true,
-   "priority": 1,
-   "confidence": "probable",
-   "score": 6.5,
-   "why": "t16 can part with LAV-09; t05 looks for it (probably the last card of its page)",
-   "id": "m-ba346d6c75",
-   "alternatives": [
-    {
-     "id": "m-c7b5408144",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t06",
-     "ref": "LAV-09",
-     "price": 80
-    },
-    {
-     "id": "m-4ca425b46a",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t04",
-     "ref": "LAV-09",
-     "price": 80
-    },
-    {
-     "id": "m-df941b0f14",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t09",
-     "ref": "LAV-09",
-     "price": 80
-    },
-    {
-     "id": "m-68fbfa4bde",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t12",
-     "ref": "LAV-09",
-     "price": 80
-    }
-   ],
-   "state": "proposed",
-   "proposed_tick": 1445,
-   "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 80,
-   "agreed": [],
-   "offer": null,
-   "venue": "v07",
-   "recipe": {
-    "buyer": {
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "cash": 80
-      },
-      "want": {
-       "cards": [
-        "LAV-09"
-       ]
-      },
-      "to": "t16"
-     }
-    },
-    "seller": {
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of LAV-09>"
-      ]
-     }
-    },
-    "note": "0 fee on v07; on El Rastro the taker pays 5 P"
-   },
-   "rastro_fee": 5,
-   "messages": 0,
-   "last_message": null,
    "teams": [
     "t16",
     "t05"
+   ],
+   "ref": "LAV-09",
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "state": "proposed",
+   "state_tick": 1445,
+   "proposed_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
+    {
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
+    }
+   ],
+   "sides": [
+    {
+     "team": "t16",
+     "gives": [
+      {
+       "ref": "LAV-09",
+       "name": "Cine Doré",
+       "rarity": "rare",
+       "set": "LAV",
+       "art": "/plaza/art/LAV-09.svg"
+      }
+     ],
+     "receives_cash": null
+    },
+    {
+     "team": "t05",
+     "gives": [],
+     "pays": null
+    }
    ]
   },
   {
+   "id": "m-93da14f4ff",
    "kind": "sale",
    "seller": "t16",
    "buyer": "t17",
-   "ref": "LAV-06",
-   "name": "La Tabacalera",
-   "rarity": "uncommon",
-   "price": 45,
-   "saves": 3,
-   "last_of_page": true,
-   "priority": 1,
-   "confidence": "probable",
-   "score": 5.1,
-   "why": "t16 can part with LAV-06; t17 looks for it (probably the last card of its page)",
-   "id": "m-93da14f4ff",
-   "alternatives": [
-    {
-     "id": "m-0de5f8368e",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t09",
-     "ref": "LAV-06",
-     "price": 45
-    },
-    {
-     "id": "m-b91cba5405",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t12",
-     "ref": "LAV-06",
-     "price": 45
-    }
-   ],
-   "state": "proposed",
-   "proposed_tick": 1445,
-   "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 45,
-   "agreed": [],
-   "offer": null,
-   "venue": "v07",
-   "recipe": {
-    "buyer": {
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "cash": 45
-      },
-      "want": {
-       "cards": [
-        "LAV-06"
-       ]
-      },
-      "to": "t16"
-     }
-    },
-    "seller": {
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of LAV-06>"
-      ]
-     }
-    },
-    "note": "0 fee on v07; on El Rastro the taker pays 3 P"
-   },
-   "rastro_fee": 3,
-   "messages": 0,
-   "last_message": null,
    "teams": [
     "t16",
     "t17"
+   ],
+   "ref": "LAV-06",
+   "name": "La Tabacalera",
+   "rarity": "uncommon",
+   "state": "proposed",
+   "state_tick": 1445,
+   "proposed_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
+    {
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
+    }
+   ],
+   "sides": [
+    {
+     "team": "t16",
+     "gives": [
+      {
+       "ref": "LAV-06",
+       "name": "La Tabacalera",
+       "rarity": "uncommon",
+       "set": "LAV",
+       "art": "/plaza/art/LAV-06.svg"
+      }
+     ],
+     "receives_cash": null
+    },
+    {
+     "team": "t17",
+     "gives": [],
+     "pays": null
+    }
    ]
   },
   {
+   "id": "m-ef12a8b4dd",
    "kind": "swap",
+   "seller": "t06",
+   "buyer": "t16",
    "teams": [
     "t06",
     "t16"
    ],
-   "seller": "t06",
-   "buyer": "t16",
    "ref": "LAT-06",
    "ref_back": "RET-07",
    "name": "La Chulapa",
    "rarity": "uncommon",
-   "price": 0,
-   "saves": 4,
-   "last_of_page": false,
-   "priority": 2,
-   "confidence": "probable",
-   "score": 5.5,
-   "why": "t06 has LAT-06 and wants RET-07; t16 has RET-07 and wants LAT-06",
-   "id": "m-ef12a8b4dd",
-   "alternatives": [
-    {
-     "id": "m-de434aa23c",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t04",
-     "ref": "RET-07",
-     "price": 45
-    },
-    {
-     "id": "m-17d5fafb9c",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t06",
-     "ref": "RET-07",
-     "price": 45
-    },
-    {
-     "id": "m-03f58deb00",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t07",
-     "ref": "RET-07",
-     "price": 45
-    },
-    {
-     "id": "m-37668ac036",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t12",
-     "ref": "RET-07",
-     "price": 45
-    }
-   ],
    "state": "proposed",
-   "proposed_tick": 1445,
    "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 0,
-   "agreed": [],
-   "offer": null,
+   "proposed_tick": 1445,
    "venue": "v07",
-   "recipe": {
-    "first": {
-     "team": "t06",
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "assets": [
-        "<your asset id of LAT-06>"
-       ]
-      },
-      "want": {
-       "cards": [
-        "RET-07"
-       ]
-      },
-      "to": "t16"
-     }
-    },
-    "second": {
-     "team": "t16",
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of RET-07>"
-      ]
-     }
-    },
-    "note": "card for card on v07: no cash, no fee"
-   },
-   "messages": 0,
-   "last_message": null
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
+    {
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
+    }
+   ]
   },
   {
+   "id": "m-3013b38c37",
    "kind": "sale",
    "seller": "t16",
    "buyer": "t08",
-   "ref": "LAT-11",
-   "name": "San Francisco el Grande",
-   "rarity": "epic",
-   "price": 247,
-   "saves": 13,
-   "last_of_page": false,
-   "priority": 3,
-   "confidence": "probable",
-   "score": 5.5,
-   "why": "t16 can part with LAT-11; t08 looks for it",
-   "id": "m-3013b38c37",
-   "alternatives": [
-    {
-     "id": "m-8e6d52e2f9",
-     "kind": "sale",
-     "seller": "t16",
-     "buyer": "t14",
-     "ref": "LAT-11",
-     "price": 247
-    }
-   ],
-   "state": "proposed",
-   "proposed_tick": 1445,
-   "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 247,
-   "agreed": [],
-   "offer": null,
-   "venue": "v07",
-   "recipe": {
-    "buyer": {
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "cash": 247
-      },
-      "want": {
-       "cards": [
-        "LAT-11"
-       ]
-      },
-      "to": "t16"
-     }
-    },
-    "seller": {
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of LAT-11>"
-      ]
-     }
-    },
-    "note": "0 fee on v07; on El Rastro the taker pays 13 P"
-   },
-   "rastro_fee": 13,
-   "messages": 0,
-   "last_message": null,
    "teams": [
     "t16",
     "t08"
+   ],
+   "ref": "LAT-11",
+   "name": "San Francisco el Grande",
+   "rarity": "epic",
+   "state": "proposed",
+   "state_tick": 1445,
+   "proposed_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
+    {
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
+    }
+   ],
+   "sides": [
+    {
+     "team": "t16",
+     "gives": [
+      {
+       "ref": "LAT-11",
+       "name": "San Francisco el Grande",
+       "rarity": "epic",
+       "set": "LAT",
+       "art": "/plaza/art/LAT-11.svg"
+      }
+     ],
+     "receives_cash": null
+    },
+    {
+     "team": "t08",
+     "gives": [],
+     "pays": null
+    }
    ]
   },
   {
+   "id": "m-a40bf76fb3",
    "kind": "sale",
    "seller": "t06",
    "buyer": "t16",
+   "teams": [
+    "t06",
+    "t16"
+   ],
    "ref": "LAT-01",
    "name": "Caña en la Cava Baja",
    "rarity": "common",
-   "price": 9,
-   "saves": 1,
-   "last_of_page": false,
-   "priority": 4,
-   "confidence": "probable",
-   "score": 1.2,
-   "why": "t06 can part with LAT-01; t16 looks for it",
-   "id": "m-a40bf76fb3",
-   "alternatives": [
+   "state": "proposed",
+   "state_tick": 1445,
+   "proposed_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
     {
-     "id": "m-ea7797242f",
-     "kind": "sale",
-     "seller": "t09",
-     "buyer": "t16",
-     "ref": "LAT-01",
-     "price": 8
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
     }
    ],
-   "state": "proposed",
-   "proposed_tick": 1445,
-   "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 9,
-   "agreed": [],
-   "offer": null,
-   "venue": "v07",
-   "recipe": {
-    "buyer": {
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "cash": 9
-      },
-      "want": {
-       "cards": [
-        "LAT-01"
-       ]
-      },
-      "to": "t06"
-     }
+   "sides": [
+    {
+     "team": "t06",
+     "gives": [
+      {
+       "ref": "LAT-01",
+       "name": "Caña en la Cava Baja",
+       "rarity": "common",
+       "set": "LAT",
+       "art": "/plaza/art/LAT-01.svg"
+      }
+     ],
+     "receives_cash": null
     },
-    "seller": {
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of LAT-01>"
-      ]
-     }
-    },
-    "note": "0 fee on v07; on El Rastro the taker pays 1 P"
-   },
-   "rastro_fee": 1,
-   "messages": 0,
-   "last_message": null,
-   "teams": [
-    "t06",
-    "t16"
+    {
+     "team": "t16",
+     "gives": [],
+     "pays": null
+    }
    ]
   },
   {
+   "id": "m-18fa73dc6d",
    "kind": "sale",
    "seller": "t06",
    "buyer": "t16",
-   "ref": "LAT-04",
-   "name": "Mercado de la Cebada",
-   "rarity": "common",
-   "price": 9,
-   "saves": 1,
-   "last_of_page": false,
-   "priority": 4,
-   "confidence": "probable",
-   "score": 1.2,
-   "why": "t06 can part with LAT-04; t16 looks for it",
-   "id": "m-18fa73dc6d",
-   "alternatives": [
-    {
-     "id": "m-0c0b7d830d",
-     "kind": "sale",
-     "seller": "t09",
-     "buyer": "t16",
-     "ref": "LAT-04",
-     "price": 8
-    }
-   ],
-   "state": "proposed",
-   "proposed_tick": 1445,
-   "state_tick": 1445,
-   "proposed": 1791067756.5323808,
-   "updated": 1791067756.5323808,
-   "suggested": 9,
-   "agreed": [],
-   "offer": null,
-   "venue": "v07",
-   "recipe": {
-    "buyer": {
-     "method": "POST",
-     "path": "/api/offers",
-     "body": {
-      "venue": "v07",
-      "give": {
-       "cash": 9
-      },
-      "want": {
-       "cards": [
-        "LAT-04"
-       ]
-      },
-      "to": "t06"
-     }
-    },
-    "seller": {
-     "method": "POST",
-     "path": "/api/offers/<id of that offer>/accept",
-     "body": {
-      "assets": [
-       "<your asset id of LAT-04>"
-      ]
-     }
-    },
-    "note": "0 fee on v07; on El Rastro the taker pays 1 P"
-   },
-   "rastro_fee": 1,
-   "messages": 0,
-   "last_message": null,
    "teams": [
     "t06",
     "t16"
+   ],
+   "ref": "LAT-04",
+   "name": "Mercado de la Cebada",
+   "rarity": "common",
+   "state": "proposed",
+   "state_tick": 1445,
+   "proposed_tick": 1445,
+   "venue": "v07",
+   "offer": null,
+   "settlement": null,
+   "settled_venue": null,
+   "price": null,
+   "veiled": true,
+   "history": [
+    {
+     "state": "proposed",
+     "tick": 1445,
+     "ts": 1791068000.0
+    }
+   ],
+   "sides": [
+    {
+     "team": "t06",
+     "gives": [
+      {
+       "ref": "LAT-04",
+       "name": "Mercado de la Cebada",
+       "rarity": "common",
+       "set": "LAT",
+       "art": "/plaza/art/LAT-04.svg"
+      }
+     ],
+     "receives_cash": null
+    },
+    {
+     "team": "t16",
+     "gives": [],
+     "pays": null
+    }
    ]
   }
  ],

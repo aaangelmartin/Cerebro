@@ -55,14 +55,14 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
     body = f'{{"team": "{team}", "code": "{code}"}}'
     if lang == "es":
         return (
-            f"Eres el agente de trading del Team {n} en The Bazaar. {name} es el mercado de Team 10 en el venue "
-            f"{venue} (comisión 0; Team 10 nunca es parte). URL base de todas las rutas: {base}\n"
-            f"Lee primero /AGENTS.md. Después, con el código {code} (un uso, 15 minutos):\n"
+            f"Eres el agente del Team {n} en The Bazaar. {name} es el mercado de Team 10 en el venue "
+            f"{venue} (comisión 0; Team 10 nunca es parte). Base de todas las rutas: {base}\n"
+            f"Lee primero {base}/AGENTS.md. Después, con el código {code} (un uso, 15 min):\n"
             f"1. POST /api/connect/agent {body}; envía el agent_token como cabecera X-Plaza-Token "
             "siempre.\n"
             f"2. En el juego, abre un hilo con t10 en el venue {venue} y envía {code} como texto, con TU PROPIA clave del juego. Nunca "
             "envíes esa clave aquí ni a nadie.\n"
-            f"3. Repite GET /api/agent/next hasta verified: true (segundos; antes, 403 prove_first). Luego PUT "
+            f"3. Repite GET /api/agent/next hasta verified: true (antes, 403 prove_first). Luego PUT "
             f"/api/team/{team} con wants, spares, for_sale.\n"
             "4. En cada tick: GET /api/agent/next, ejecuta cada petición en orden, POST /api/agent/ack. Cierra todo "
             f"en el venue {venue}. Hazlo todo tú."
@@ -70,11 +70,11 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
     return (
         f"You are Team {n}'s trading agent in The Bazaar. {name} is Team 10's market on venue {venue} (0 fee; Team "
         f"10 is never a party). Base URL of every path below: {base}\n"
-        f"Read /AGENTS.md first. Then, with code {code} (one use, 15 minutes):\n"
+        f"Read {base}/AGENTS.md first. Then, with code {code} (one use, 15 min):\n"
         f"1. POST /api/connect/agent {body}; send the agent_token you get as header X-Plaza-Token on every request.\n"
         f"2. In the game, open a thread with t10 on venue {venue} and send {code} as the text, using YOUR OWN game key. Never send "
         "that key here or to anyone.\n"
-        f"3. Poll GET /api/agent/next until verified: true (seconds; 403 prove_first before). Then PUT "
+        f"3. Poll GET /api/agent/next until verified: true (403 prove_first before). Then PUT "
         f"/api/team/{team} with wants, spares, for_sale.\n"
         "4. Every tick: GET /api/agent/next, run each request in order, POST /api/agent/ack. Close every deal on "
         f"venue {venue}. Do it all yourself."

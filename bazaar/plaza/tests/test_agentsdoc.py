@@ -121,7 +121,7 @@ class DocumentTest(unittest.TestCase):
                        f"{server.WRITES_PER_MIN} writes per client", f"{suggest.PER_MINUTE} suggestions per team",
                        f"({deals.OFFER_LIFE} ticks)", '"repeated": true', "`move_offer`", "`settled_elsewhere`",
                        '{"offer_id": N}', "`bad_token`", "`conflict`", "not shown and not matched",
-                       "strictly inside both limits", "403 `prove_first`", "silent for 10 minutes",
+                       "strictly inside both limits", "403 `prove_first`", "the newest proof wins", "stands for 60 ticks", "only a template", "ONE MORE copy", '"veiled": true',
                        "8 to 32 letters", f"after {deals.PROPOSAL_TICKS} ticks", f"after {deals.PROPOSAL_HARD}", "current tick", "the last card of a page first",
                        "Only when both declared sides gain"):
             self.assertIn(needle, self.md)
