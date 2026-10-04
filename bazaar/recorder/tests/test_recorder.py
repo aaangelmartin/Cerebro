@@ -134,6 +134,41 @@ class FeedTest(unittest.TestCase):
         self.assertEqual(rec.timers["meta"], 0.0)
         self.assertTrue(rec.feed_busy)
 
+    def test_the_catalog_is_read_again_when_a_round_starts_or_a_set_is_released(self):
+        rec = make(self.root, self.api)
+        rec.on_clock({"tick": 1445, "doors": "open", "paused": True, "round": 2, "tick_seconds": 15})
+        rec.timers["catalog"] = time.time() + 999
+        rec.on_clock({"tick": 1445, "doors": "open", "paused": True, "round": 2, "tick_seconds": 15})
+        self.assertGreater(rec.timers["catalog"], time.time())            # nothing changed: no extra read
+        rec.on_clock({"tick": 1466, "doors": "open", "paused": False, "round": 3, "tick_seconds": 15})
+        self.assertLessEqual(rec.timers.get("catalog", 0.0), time.time())  # round 3 and the doors: read it now
+        rec.timers["catalog"] = time.time() + 999
+        rec.on_feed({"events": [ev(1, type_="set.released", set="CHA")]})
+        self.assertEqual(rec.timers["catalog"], 0.0)
+        rec.timers["catalog"] = time.time() + 999
+        rec.on_feed({"events": [ev(2, type_="offer.listed")]})
+        self.assertGreater(rec.timers["catalog"], time.time())            # ordinary events do not
+
+    def test_an_open_game_reads_the_catalog_every_few_minutes(self):
+        now = [1000.0]
+        pub = Lane("public", "http://pub", 1000, burst=1000, fetch=self.api)
+        rec = Recorder(Store(self.root), pub, None, now=lambda: now[0], cards=False)
+        cha = {"sets": [{"id": "CHA", "released": False, "cards": []}]}
+        self.api.routes.update({"/api/clock": {"tick": 1470, "doors": "open", "paused": False, "round": 3,
+                                               "tick_seconds": 15, "next_tick_in": 5},
+                                "/api/feed": {"events": []}, "/api/catalog": lambda: cha,
+                                "/api/leaderboard": {}, "/api/venues": {"venues": []}, "/api/dealers": {},
+                                "/api/levels": {}, "/api/schedule": {}})
+        for _ in range(30):
+            rec.step()
+        self.assertFalse(json.loads((self.root / "latest" / "catalog.json").read_text())["sets"][0]["released"])
+        cha = {"sets": [{"id": "CHA", "released": True, "cards": [{"id": "CHA-01"}]}]}
+        self.api.routes["/api/catalog"] = lambda: cha
+        now[0] += 181
+        for _ in range(30):
+            rec.step()
+        self.assertTrue(json.loads((self.root / "latest" / "catalog.json").read_text())["sets"][0]["released"])
+
 
 class BooksTest(unittest.TestCase):
     def setUp(self):

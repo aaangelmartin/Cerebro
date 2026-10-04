@@ -29,7 +29,8 @@ FEED_BUSY_NEW = 120
 CLOSED_EVERY_S = 30.0         # doors closed or paused: clock and feed
 CLOSED_SLOW_S = 300.0         # doors closed: leaderboard, books and our private state
 META_EVERY_S = 120.0          # dealers, levels, schedule
-CATALOG_EVERY_S = 900.0
+CATALOG_EVERY_S = 900.0        # doors closed
+CATALOG_OPEN_S = 180.0         # doors open: `minted` moves with every pack and a set can be released mid-game
 DEALER_DETAIL_EVERY_S = 1800.0
 BOOK_SNAPSHOT_EVERY = 20      # ticks between full snapshots of each venue's book
 BOOK_ALWAYS = ("v07",)  # our venue: read every tick even when rate-limited (El Rastro always is)
@@ -42,6 +43,7 @@ CARD_SWEEP_EVERY_S = 3600.0
 CARD_PROBE_BEYOND = 15        # ids probed past the highest asset id we have seen
 SEEN_KEEP = 4000              # feed dedupe window
 REFRESH_TYPES = ("level.", "persona.", "venue.", "clock.", "announcement", "day.", "dealer.", "schedule.")
+CATALOG_TYPES = ("set.", "round.", "catalog.", "day.")     # a release or a new round: read the catalog now
 CLOCK_VOLATILE = ("next_tick_in",)
 
 
@@ -238,7 +240,7 @@ class Recorder:
             self._enqueue_keyed_tick()
         if self._due("meta", META_EVERY_S if self.open else CLOSED_SLOW_S * 2):
             self._enqueue_meta()
-        if self._due("catalog", CATALOG_EVERY_S):
+        if self._due("catalog", CATALOG_OPEN_S if self.open else CATALOG_EVERY_S):
             self.enqueue("public", "catalog", "/api/catalog", lambda d: self.on_meta("catalog", d), prio=6)
         if self.keyed_due is not None and now >= self.keyed_due:
             self.keyed_due = None
@@ -400,6 +402,8 @@ class Recorder:
         if not isinstance(d, dict) or "tick" not in d:
             return
         was_open = self.open if self.clock else None
+        if self.clock and d.get("round") != self.clock.get("round"):
+            self.timers["catalog"] = 0.0             # a new round releases its set (Chamberí on Sunday)
         self.clock = d
         stable = {k: v for k, v in d.items() if k not in CLOCK_VOLATILE}
         try:
@@ -414,6 +418,7 @@ class Recorder:
                                "tick": tick})
             self.timers.pop("feed", None)
             self.timers.pop("closed_slow", None)
+            self.timers.pop("catalog", None)         # doors opened or closed: the set of the day may be out
         if tick != self.tick:
             self.on_new_tick(tick)
         nti = d.get("next_tick_in")
@@ -447,6 +452,8 @@ class Recorder:
             last = max(last, int(e.get("id") or 0))
             if str(e.get("type", "")).startswith(REFRESH_TYPES):
                 refresh = True
+            if str(e.get("type", "")).startswith(CATALOG_TYPES):
+                self.timers["catalog"] = 0.0
         self.counts["feed"] = self.counts.get("feed", 0) + len(fresh)
         if fresh:
             self.state["last_event_id"] = last
