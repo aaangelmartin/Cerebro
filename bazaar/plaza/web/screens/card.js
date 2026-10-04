@@ -43,7 +43,8 @@ Plaza.screen("card", {
 
       body.appendChild(el("div", { class: "card-layout" },
         el("div", { class: "card-side" }, K.card(c, { owned, size: "fluid" }),
-          ctx.me ? el("span", { class: "chip" + (owned ? " tone-signal" : "") }, t(owned ? "card.youHave" : "card.youDont")) : null),
+          ctx.me ? el("span", { class: "chip" + (owned ? " tone-signal" : "") }, t(owned ? "card.youHave" : "card.youDont")) : null,
+          ctx.me && owned ? K.link("/plaza/auctions?card=" + c.ref, { class: "btn sm" }, K.icon("offers", 13), t("card.auction")) : null),
         el("div", { class: "card-main" },
           el("h1", { class: "page-title" }, c.name || c.ref),
           el("div", { class: "card-facts id" }, [parts.set + " · " + parts.no, t("rarity." + (c.rarity || "common")), typeof c.minted === "number" ? (c.minted ? t("board.copies", { minted: K.num(c.minted), run: K.num(c.print_run) }) : t("board.notPulled")) : null, typeof c.tick === "number" ? K.tick(c.tick) : null].filter(Boolean).join("  ·  ")),

@@ -129,7 +129,9 @@ Plaza.screen("board", {
       K.clear(feeds);
       K.add(feeds, [el("span", { class: "label" }, t("board.json")), feed("/plaza/board.json"), feed("/plaza/board/live.json", "board.jsonLive"),
         feed("/plaza/board/history.json", "board.jsonHistory"), feed("/plaza/collections.json"), feed("/plaza/AGENTS.md"),
-        K.link("/plaza/collections", { class: "btn sm board-json" }, K.icon("cards", 13), t("board.collections"))]);
+        feed("/plaza/lots.json"),
+        K.link("/plaza/collections", { class: "btn sm board-json" }, K.icon("cards", 13), t("board.collections")),
+        K.link("/plaza/auctions", { class: "btn sm" }, K.icon("offers", 13), t("board.auctions"))]);
     }
 
     function drawBody() {

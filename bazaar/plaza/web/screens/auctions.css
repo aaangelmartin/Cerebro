@@ -1,0 +1,23 @@
+/* auctions: one row per lot: the card, the price and what to do, the bids. */
+.auc-list { display: flex; flex-direction: column; gap: 10px; }
+.auc-lot { display: grid; grid-template-columns: auto minmax(0, 1.6fr) minmax(180px, 1fr); gap: 16px; padding: 14px; border: 1px solid var(--line); background: var(--s2); }
+.auc-lot.is-done { background: transparent; }
+.auc-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.auc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.auc-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-top: 4px; }
+.auc-best { font-size: 28px; color: var(--ink); }
+.auc-main .id { font-size: 12px; color: var(--ink-3); line-height: 1.5; overflow-wrap: anywhere; }
+.auc-main .id.get { color: var(--t-compra, #3FB97A); }
+.auc-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.auc-bids { display: flex; flex-direction: column; gap: 5px; padding-left: 14px; border-left: 1px solid var(--line); min-width: 0; }
+.auc-bid { display: grid; grid-template-columns: 64px 1fr; gap: 0 10px; font-size: 12px; color: var(--ink-2); }
+.auc-bid .muted { grid-column: 2; font-size: 11px; }
+.auc-bid.live .num { color: var(--ok); }
+.auc-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.auc-field { display: flex; flex-direction: column; gap: 5px; }
+.auc-field .input { width: 190px; }
+@media (max-width: 820px) {
+  .auc-lot { grid-template-columns: auto minmax(0, 1fr); }
+  .auc-bids { grid-column: 1 / -1; padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .auc-field, .auc-field .input { width: 100%; }
+}
