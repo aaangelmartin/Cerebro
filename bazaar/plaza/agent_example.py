@@ -88,6 +88,18 @@ class Agent:
         self.log("code sent in the game" if st in (200, 201) else f"the game refused the code: {out.get('message')}")
         return st in (200, 201)
 
+    def wait_verified(self, tries: int = 40, pause: float = 3.0) -> bool:
+        """Until the market has seen the code in the game the token is nobody: everything else answers 403
+        `prove_first`. The queue says when (`verified: true`), within seconds."""
+        for _ in range(tries):
+            st, q = self.market("GET", "/api/agent/next")
+            if st == 200 and q.get("verified", True):
+                self.log("verified: the market saw the code")
+                return True
+            self.sleep(pause)
+        self.log("not verified yet: the market has not seen the code in the game")
+        return False
+
     # ---- your cards
     def assets(self) -> list[dict]:
         st, me = self.to_game("GET", "/api/me")
@@ -160,20 +172,42 @@ class Agent:
             return False, "could not read the match"
         if m.get("kind") != "sale":
             return True, ""
-        if limit is None:
-            return False, f"no limit of ours for {m.get('ref')}: not traded blind"
+        if limit is None:                                      # no limit of ours: the game's own value decides
+            worth = self.worth(m["ref"], role == "seller")
+            if worth is None:
+                return False, f"no limit of ours for {m.get('ref')} and no value from the game: not traded blind"
+            gain = price - worth if role == "seller" else worth - price
+            return (True, "") if gain > 0 else (False, f"{price} P is no gain for us on {m.get('ref')}")
         if (role == "seller" and price < limit) or (role == "buyer" and price > limit):
             return False, f"{price} P is outside our limit for {m.get('ref')}"
         return True, ""
 
+    def worth(self, ref: str, selling: bool) -> float | None:
+        """What the card is worth to us, from the game: the copy we would sell, or the one we would gain."""
+        if selling:
+            mine = [a for a in self.assets() if a["ref"] == ref]
+            if not mine or mine[0].get("your_value") is None:
+                return None
+            return mine[0]["your_value"] / (4 if len(mine) > 1 else 1)      # a second copy is worth a quarter
+        st, out = self.to_game("GET", f"/api/me/value?card={ref}")
+        return out.get("value") if st == 200 else None
+
     def decide(self, action: dict):
-        """The queue hands us the decision: the other team set the price, it is outside our limit, or we set no
-        limit. Inside our limit: accept. Outside: counter at our limit. No limit of ours: nothing (None); set a
-        `min` or a `max` for the card and the queue goes on. Yours to improve."""
-        m, role, limit, price = self.stand(action["match"])
-        if not m or limit is None:
-            return None
-        if (role == "seller" and price >= limit) or (role == "buyer" and price <= limit):
+        """Nothing we set says yes to the price on the table (`action["price"]`): accept it only when we gain,
+        else counter at our own limit, else pass. Yours to improve."""
+        st, m = self.market("GET", f"/api/match/{action['match']}")
+        if st != 200 or m.get("kind") != "sale":
+            return {"action": "pass"}
+        selling, price = m.get("seller") == self.team, action.get("price") or m.get("price") or 0
+        ours = self.limits.get(m.get("ref") or "", {})
+        limit = ours.get("min") if selling else ours.get("max")
+        if limit is None:
+            worth = self.worth(m["ref"], selling)
+            if worth is None:
+                return {"action": "pass"}
+            gain = price - worth if selling else worth - price
+            return {"action": "accept"} if gain > 0 else {"action": "pass"}
+        if (price >= limit) if selling else (price <= limit):
             return {"action": "accept"}
         return {"action": "counter", "price": limit}
 
@@ -184,8 +218,6 @@ class Agent:
             st, out = self.publish()
         elif a["type"] == "decide":
             word = self.decide(a)
-            if word is None:
-                return False, "no limit of ours for this card: set one, or decide by hand"
             st, out = self.market(r["method"], r["path"], word)
         elif r["target"] == "game":
             if a["type"] in ("post_offer", "accept_offer") and a.get("match"):
@@ -233,7 +265,7 @@ class Agent:
             q = self.step()
             if once:
                 return
-            self.sleep(max(3, min(120, q.get("poll_after_s") or 20)))
+            self.sleep(max(3, min(120, q.get("retry_after_s") or q.get("poll_after_s") or 20)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -257,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
         with os.fdopen(fd, "w") as f:
             f.write(agent.connect(a.code))
         agent.prove(a.code)
+        if not agent.wait_verified():
+            return 3
     if not agent.token:
         print("no token: run once with --code <the code from Connect>", file=sys.stderr)
         return 2

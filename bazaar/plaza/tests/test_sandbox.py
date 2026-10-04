@@ -39,9 +39,10 @@ class SandboxTest(unittest.TestCase):
         self.assertIsInstance(out["id"], int)
 
         a = E.Agent("t01", info["plaza"], game=info["game"], key=guest["game_key"], log=lambda *_: None,
-                    sleep=lambda *_: None)
+                    sleep=__import__("time").sleep)
         a.connect(guest["code"])
         self.assertTrue(a.prove(guest["code"]))
+        self.assertTrue(a.wait_verified(tries=80, pause=0.1))   # nothing is written before the market saw the code
         import time
         deadline = time.time() + 20
         while time.time() < deadline and not S.status(rig)["passed"]:

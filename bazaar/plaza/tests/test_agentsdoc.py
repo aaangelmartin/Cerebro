@@ -121,7 +121,8 @@ class DocumentTest(unittest.TestCase):
                        f"{server.WRITES_PER_MIN} writes per client", f"{suggest.PER_MINUTE} suggestions per team",
                        f"({deals.OFFER_LIFE} ticks)", '"repeated": true', "`move_offer`", "`settled_elsewhere`",
                        '{"offer_id": N}', "`bad_token`", "`conflict`", "not shown and not matched",
-                       "never the middle of the two limits", "the last card of a page first",
+                       "strictly inside both limits", "403 `prove_first`", "silent for 10 minutes",
+                       "8 to 32 letters", f"after {deals.PROPOSAL_TICKS} ticks", f"after {deals.PROPOSAL_HARD}", "current tick", "the last card of a page first",
                        "Only when both declared sides gain"):
             self.assertIn(needle, self.md)
         from bazaar.plaza import connect
@@ -305,13 +306,13 @@ class ExampleAgentTest(unittest.TestCase):
         a = self.agent("t07")
         self.call("POST", "/plaza/admin/api/action", {"action": "force", "seller": "t09", "buyer": "t07", "ref": "LAT-06"},
                   {"X-Plaza-Admin": "test-admin-token"})
-        self.assertEqual(a.publish({"wants": [{"ref": "LAT-06", "max": 2000}]})[0], 200)   # its own limit: it may go ahead
+        self.assertEqual(a.publish({"wants": [{"ref": "LAT-06", "max": 2000}]})[0], 200)   # forced by the host: its call, limit or not
         before = len(self.seen)
         a.dry_run = True
         q = a.step()
         self.assertTrue(q["actions"])
         self.assertEqual([u for u, _ in self.seen[before:]], [self.base + "/plaza/api/agent/next"])
-        self.assertTrue(any(x.startswith("dry run: would do post_offer") for x in self.lines), self.lines)
+        self.assertTrue(any(x.startswith("dry run: would do decide") for x in self.lines), self.lines)
 
     def test_it_refuses_an_offer_on_another_venue_and_a_card_it_does_not_hold(self):
         self.seen, self.lines, self.assets = [], [], []

@@ -245,6 +245,7 @@ def start(port: int = 8893, game_port: int = 8894, tick: float = 5.0, log=lambda
         a.plan = SHEETS[team]
         a.connect(got["connect_code"])
         a.prove(got["connect_code"])
+        a.wait_verified(pause=min(1.0, tick))
         while not stop.is_set():
             try:
                 a.publish()
