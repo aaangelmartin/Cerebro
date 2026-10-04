@@ -1,6 +1,8 @@
 """The practice market: the reference agent, given only what a cold agent is given, closes on v07 over HTTP."""
+import json
 import os
 import unittest
+from pathlib import Path
 
 from bazaar.plaza import agent_example as E
 from bazaar.plaza import sandbox as S
@@ -58,6 +60,44 @@ class SandboxTest(unittest.TestCase):
         mine = after["teams"]["t01"]
         self.assertTrue(mine["connected"] and mine["verified"] and mine["sheet_published"])
         self.assertTrue(all(m["settled_venue"] == "v07" for m in after["matches"] if m["state"] == "settled"))
+
+    def test_the_one_file_agent_does_it_all_from_five_variables(self):
+        """`agent.py` as a team runs it: served by the market, started with five variables, nothing else said."""
+        import subprocess
+        import sys
+        import tempfile
+        import time
+        import urllib.request
+        rig, info = self.info["rig"], self.info
+        guest = info["game_obj"].guest()
+        with tempfile.TemporaryDirectory() as tmp:
+            src = urllib.request.urlopen(info["plaza"] + "/agent.py", timeout=10).read()
+            self.assertEqual(src, (Path(S.__file__).parent / "runner.py").read_bytes())
+            (Path(tmp) / "v07.py").write_bytes(src)
+            env = {"PATH": os.environ.get("PATH", ""), "PLAZA": info["plaza"], "PLAZA_CODE": guest["code"],
+                   "TEAM": "t01", "GAME": info["game"], "GAME_KEY": guest["game_key"], "POLL_MAX": "1"}
+            log = open(Path(tmp) / "v07.log", "w")
+            proc = subprocess.Popen([sys.executable, "v07.py"], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT)
+            try:
+                deadline = time.time() + 60
+                done = lambda: len(S.status(rig)["guest_settled_on_v07"]) >= 2      # noqa: E731
+                while time.time() < deadline and not done() and proc.poll() is None:
+                    time.sleep(0.3)
+                out = (Path(tmp) / "v07.log").read_text()
+                after = S.status(rig)
+                self.assertIsNone(proc.poll(), out)                    # still running: it never stops by itself
+                self.assertEqual(len(after["guest_settled_on_v07"]), 2, out + str(after["matches"]))
+                self.assertTrue(all(m["settled_venue"] == "v07" for m in after["matches"]))
+                self.assertNotIn(guest["game_key"], out)               # the key is never printed
+                self.assertIn("running", out)
+                self.assertEqual(oct((Path(tmp) / ".v07_token_t01").stat().st_mode & 0o777), "0o600")
+                self.assertFalse(any(guest["game_key"] in json.dumps(r) for r in rig.board.metrics.items()))
+            finally:
+                proc.kill()
+                proc.wait()
+                log.close()
+        hand = rig.game.hand("t01")
+        self.assertEqual((hand.count("SAL-10"), "LAV-08" in hand), (1, True))    # sold the duplicate, bought the page card
 
 
 if __name__ == "__main__":

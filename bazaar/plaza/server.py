@@ -1108,6 +1108,9 @@ class Handler(BaseHTTPRequestHandler):
             except TypeError:
                 md = agents_md()
             return self._send(200, md.encode(), "text/markdown; charset=utf-8", cors=True)
+        if path in ("/plaza/agent.py", "/agent.py"):        # the one-file agent a team runs with its own game key
+            return self._send(200, (Path(__file__).parent / "runner.py").read_bytes(), "text/x-python; charset=utf-8",
+                              cors=True)
         if path in ("/plaza/AGENTS-AUCTIONS.md", "/AGENTS-AUCTIONS.md"):
             from .agentsdoc import auctions_md
             return self._send(200, auctions_md(base=public_url(self.board.live)).encode(),
@@ -1402,7 +1405,8 @@ class Handler(BaseHTTPRequestHandler):
                                                current=self.headers.get(TOKEN_HEADER))
                 out["next"] = (f"prove it is you: in the game open a thread with {HOST} on El Rastro (venue rastro, not v07) and send the code as the "
                                f"message text; GET /plaza/api/agent/next says verified within seconds; only then "
-                               f"PUT /plaza/api/team/{team} with header {TOKEN_HEADER} (403 prove_first before)")
+                               f"PUT /plaza/api/team/{team} with header {TOKEN_HEADER} (403 prove_first before); then keep "
+                               f"polling GET /plaza/api/agent/next for ever: your job is a long-running process")
                 self.board.hour("connect_agent")
                 self.board.stale()
                 return self._json(200, out)

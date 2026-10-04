@@ -140,12 +140,15 @@ class DocumentTest(unittest.TestCase):
             self.assertNotIn(wrong, self.md)
         self.assertNotIn("listed as unverified", self.md)       # an unproved sheet is not listed at all
 
-    def test_the_loop_in_the_document_is_real_python(self):
-        compile(A.LOOP, "AGENTS.md loop", "exec")
-        self.assertIn(A.LOOP, self.md)
-        for secret in ("X-Team-Key", "GAME_KEY"):
-            self.assertIn(secret, A.LOOP)
-        self.assertNotRegex(A.LOOP, r"PLAZA[^\n]*X-Team-Key")     # the game key is never a header of a market call
+    def test_the_one_file_agent_is_real_python_and_keeps_the_key_for_the_game(self):
+        src = (Path(A.__file__).parent / "runner.py").read_text(encoding="utf-8")
+        compile(src, "runner.py", "exec")
+        self.assertLessEqual(len(src.splitlines()), 300)
+        self.assertEqual(src.count('os.environ["GAME_KEY"]'), 1)           # read in one place: the call to the game
+        self.assertRegex(src, r'call\(method, GAME \+ path, body, \{"X-Team-Key": os\.environ\["GAME_KEY"\]\}\)')
+        self.assertNotIn("import subprocess", src)
+        for needle in ("/agent.py", "nohup python3 v07.py", "never ends", "shown OFFLINE"):
+            self.assertIn(needle, self.md)
 
 
 class PromptTest(unittest.TestCase):
@@ -155,7 +158,8 @@ class PromptTest(unittest.TestCase):
             p = C.prompt("t16", "PLAZA-7K2Q9M", base, "v07", "v07 Market", lang=lang)
             self.assertLessEqual(len(p), 900, lang)
             for piece in ("Team 16", "PLAZA-7K2Q9M", "/AGENTS.md", "/api/connect/agent", own, "t10", "v07",
-                          "/api/team/t16", "/api/agent/next", "/api/agent/ack", "X-Plaza-Token", base + "\n"):
+                          "/api/team/t16", "/api/agent/next", "/agent.py", "nohup",
+                          f"PLAZA={base} PLAZA_CODE=PLAZA-7K2Q9M TEAM=t16", "rastro"):
                 self.assertIn(piece, p, lang)
         self.assertEqual(C.prompt("t16", "PLAZA-7K2Q9M", base), C.prompt("t16", "PLAZA-7K2Q9M", base, lang="xx"))
 

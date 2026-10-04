@@ -28,13 +28,13 @@ from .e2e.rig import Rig
 GUEST = "t01"
 # ref -> copies. The guest holds a duplicate one counterparty misses, and misses a duplicate the other holds.
 HANDS = {
-    "t01": ["SAL-10", "SAL-10", "RET-03", "MAL-01", "LAV-04", "LAV-05"],
+    "t01": ["SAL-10", "SAL-10", "RET-03", "LAV-03", "LAV-04", "LAV-05", "LAV-06", "LAV-07"],
     "t02": ["LAT-06", "LAV-01", "LAV-02"],
-    "t03": ["LAV-11", "LAV-11", "MAL-02", "RET-07"],
+    "t03": ["LAV-08", "LAV-08", "MAL-02", "RET-07"],
 }
 SHEETS = {
     "t02": {"wants": [{"ref": "SAL-10", "max": 90}], "spares": [], "for_sale": []},
-    "t03": {"wants": ["RET-03"], "spares": [{"ref": "LAV-11", "min": 150}], "for_sale": []},
+    "t03": {"wants": ["RET-03"], "spares": [{"ref": "LAV-08", "min": 12}], "for_sale": []},
 }
 
 

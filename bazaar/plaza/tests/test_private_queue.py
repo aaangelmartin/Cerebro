@@ -277,15 +277,17 @@ class PrivateFlowTest(FlowTest):
         self.assertEqual(nxt["actions"][1]["request"]["body"]["to"], "t09")
         st, ack, _ = self.call("POST", "/plaza/api/agent/ack", {"id": nxt["actions"][0]["id"], "status": "done"}, tok7)
         self.assertEqual((st, ack["status"]), (200, "done"))
+        again = self.call("GET", "/plaza/api/agent/next", headers=tok7)[1]      # no sheet yet: asked again whatever was acked
+        self.assertEqual((again["actions"][0]["type"], "NOT DONE" in again["next"]), ("sync_cards", True))
         self.assertEqual(self.call("POST", "/plaza/api/agent/ack", {"id": "a-000000000000", "status": "done"})[0], 401)
         self.assertEqual(self.call("POST", "/plaza/api/agent/ack", {"id": 5, "status": "done"}, tok7)[0], 400)
         url = f"/plaza/api/me/trade/{mid}?session=" + s7
         self.assertEqual(self.call("POST", url, {"mode": "ask_me"})[1]["agent"]["modes"], {mid: "ask_me"})
-        self.assertEqual([a["type"] for a in self.call("GET", "/plaza/api/agent/next", headers=tok7)[1]["actions"]], [])
+        self.assertEqual([a["type"] for a in self.call("GET", "/plaza/api/agent/next", headers=tok7)[1]["actions"] if a["type"] != "sync_cards"], [])
         self.assertEqual(self.call("POST", url, {"order": "counter", "price": 2})[1]["error"], "below_floor")
         self.assertEqual(self.call("POST", url, {"order": "counter", "price": 15})[0], 200)
         act = self.call("GET", "/plaza/api/agent/next", headers=tok7)[1]["actions"]
-        self.assertEqual([(a["type"], a["request"]["body"]) for a in act], [("counter", {"action": "counter", "price": 15})])
+        self.assertEqual([(a["type"], a["request"]["body"]) for a in act if a["type"] != "sync_cards"], [("counter", {"action": "counter", "price": 15})])
         _, s8tok = self.verified("t08")
         s8 = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})[1]["session"]
         self.assertIn(self.call("POST", f"/plaza/api/me/trade/{mid}?session=" + s8, {"order": "pass"})[0], (403,))
@@ -326,7 +328,7 @@ class HostingTest(unittest.TestCase):
             os.environ["PLAZA_PUBLIC_URL"] = "https://market.example.org"
             self.assertEqual(S.public_url(self.live), "https://market.example.org/plaza")
             st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t07"})
-            self.assertIn("below: https://market.example.org/plaza\n", s["prompt"])
+            self.assertIn("PLAZA=https://market.example.org/plaza PLAZA_CODE=", s["prompt"])
             self.assertLessEqual(len(s["prompt"]), 900)
             os.environ["PLAZA_PUBLIC_URL"] = "javascript:alert(1)"
             self.assertIsNone(S.public_url(self.live))

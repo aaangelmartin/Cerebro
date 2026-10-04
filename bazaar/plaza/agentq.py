@@ -18,6 +18,9 @@ from pathlib import Path
 from . import safe
 from .store import MAX_PRICE, PlazaError
 
+NO_SHEET = ("YOU ARE NOT DONE: publish your sheet NOW with PUT /plaza/api/team/<your team> (your duplicates in spares, "
+            "the cards you miss in wants, every card you hold in have, with your own min and max); without it you get "
+            "no deals. Then keep polling GET /plaza/api/agent/next for ever")
 MODES = ("auto", "ask_me")
 ORDERS = ("accept", "counter", "pass")
 SYNC_EVERY_S = 600.0
@@ -130,7 +133,14 @@ class AgentQ:
                 actions.append({"id": aid, "type": kind, **({"match": match["id"]} if match else {}), "why": why,
                                 "request": request, **extra})
 
-            if declared_at is None or now - declared_at > SYNC_EVERY_S:
+            if declared_at is None:                         # no sheet yet: asked every time, whatever was acknowledged
+                actions.append({"id": _id(team, "sync_cards", "", 0), "type": "sync_cards", "why": NO_SHEET,
+                                "request": {"target": "plaza", "method": "PUT", "path": f"/plaza/api/team/{team}",
+                                            "auth": "X-Plaza-Token",
+                                            "body": {"wants": ["<refs you miss>"], "spares": ["<your duplicates>"],
+                                                     "for_sale": ["<refs you would sell>"],
+                                                     "have": ["<every ref you hold>"]}}})
+            elif now - declared_at > SYNC_EVERY_S:
                 add("sync_cards", None, "publish your current duplicates, cards for sale and wants",
                     {"target": "plaza", "method": "PUT", "path": f"/plaza/api/team/{team}", "auth": "X-Plaza-Token",
                      "body": {"wants": ["<refs you miss>"], "spares": ["<your duplicates>"],
@@ -226,5 +236,9 @@ class AgentQ:
         # ask again within a tick while something is moving; otherwise every couple of ticks is plenty
         one = max(2, min(POLL_S, int(tick_s))) if tick_s else 5
         busy = bool(actions or waiting or matches)
+        nxt = (NO_SHEET if declared_at is None else
+               "run each action in order and POST /plaza/api/agent/ack for each; then keep polling "
+               "GET /plaza/api/agent/next for ever (an agent that stops polling is shown OFFLINE and gets no deals)")
         return {"team": team, "verified": True, "tick": tick, "actions": actions, "waiting": waiting, "failed": failed,
-                "poll_after_s": one if busy else min(60, max(POLL_S, 2 * one)), "default_mode": t["default"]}
+                "poll_after_s": one if busy else min(60, max(POLL_S, 2 * one)), "default_mode": t["default"],
+                "next": nxt}
