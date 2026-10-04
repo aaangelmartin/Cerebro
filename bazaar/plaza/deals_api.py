@@ -75,12 +75,36 @@ def candidates(board, sheets: dict, cat: dict) -> list[dict]:
                         traded=board.feed.traded_pairs(), paused=_paused(board))
 
 
+def _done(board, e: dict) -> None:
+    """A trade settled: the card left the seller and reached the buyer. What each said about that card (the
+    spare, the want, its private limits and value) described a card it no longer has or no longer misses, so it
+    goes: a `min` set for a duplicate must not stay on the last copy, nor a `max` on a card already bought."""
+    moves = [(e["team"], ("spares", "for_sale"), e["ref"]), (e["to"], ("wants",), e["ref"])]
+    if e.get("ref_back"):
+        moves += [(e["to"], ("spares", "for_sale"), e["ref_back"]), (e["team"], ("wants",), e["ref_back"])]
+    for team, lists, ref in moves:
+        if not team:
+            continue
+        try:
+            for lst in lists:
+                board.store.edit(team, "release", lst, ref, human=True)
+                board.store.edit(team, "remove", lst, ref, human=False)
+            board.store.lock_limits(team, ref, None)
+            board.vault.forget(team, ref)
+            note(board, team, "sync", f"{ref}: settled, so it left your lists and its private limits were forgotten",
+                 ref=ref, match=e.get("match"), tick=e.get("tick"))
+        except PlazaError:
+            pass                                               # a team the store does not know: nothing to clear
+
+
 def sync(board, cands: list[dict], tick, admin: dict) -> list[dict]:
     events = board.deals.sync(cands, tick, board.feed.venue_log, paused=admin["mm_paused"],
                               excluded_matches=frozenset(admin["excluded_matches"]), paused_teams=_paused(board))
     for e in events:
         if e.get("kind") != "match":
             continue
+        if e["state"] in ("settled", "settled_elsewhere") and e.get("match_kind") != "triangle":
+            _done(board, e)
         words = STATE_WORDS.get(e["state"], e["state"])
         kind = "settle" if e["state"] in ("settled", "settled_elsewhere") else \
             "offer" if e["state"] == "offer_on_v07" else "match"

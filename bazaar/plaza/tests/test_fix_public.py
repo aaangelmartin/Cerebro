@@ -57,6 +57,24 @@ class WhoReadsWhatTest(unittest.TestCase):
             self.assertNotIn("last card of its page", json.dumps([team, card, m]))
         self.assertTrue(self.call("GET", "/plaza/api/me", headers=t7)[1]["home"]["looking_for"][0]["finishes_page"])
 
+    def test_a_settled_card_takes_its_limits_and_its_place_on_the_sheet_with_it(self):
+        """The second cold test: after the duplicate was sold, `min 20, value 18` stayed on the last copy."""
+        t7, t9 = self.token("t07"), self.token("t09")
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t09", {"spares": [{"ref": "LAT-06", "min": 15, "value": 18}],
+                                                                  "wants": [{"ref": "LAT-03", "max": 9}]}, t9)[0], 200)
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": [{"ref": "LAT-06", "max": 25}]}, t7)[0], 200)
+        self.board.vault.put("t09", "LAT-06", {"min": 16}, tick=79)                # moved a moment ago: cooling
+        self.event(id=3, tick=82, type="settlement", payload={
+            "settlement": 1054, "kind": "trade", "venue": "v07", "price": 20, "parties": ["t09", "t07"], "fee": 0,
+            "items": [{"ref": "LAT-06", "frm": "t09", "to": "t07"}]})
+        self.call("GET", "/plaza/api/matches")
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=t9)[1]["limits"], {"LAT-03": {"max": 9}})
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=t7)[1]["limits"], {})
+        self.assertEqual(self.board.store.sheet("t09")["effective"]["spares"], [])
+        self.assertEqual(self.board.store.sheet("t07")["effective"]["wants"], [])
+        self.board.vault.put("t09", "LAT-06", {"min": 60}, tick=83)                # the last copy: a new card, no cooldown
+        self.assertEqual(self.board.vault.get("t09")["LAT-06"], {"min": 60})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -229,6 +229,15 @@ class Vault:
                 cards.pop(ref, None)
             self._save()
 
+    def forget(self, team: str, ref: str) -> None:
+        """The card changed hands: its limits and value go, and so does the memory of when they last moved (the
+        next card of that name is another card). Not a move: no cooldown is asked or started."""
+        with self.lock:
+            had = (self.data.get(team) or {}).pop(ref, None)
+            stamp = ((self.data.get(CHANGED) or {}).get(team) or {}).pop(ref, None)
+            if had is not None or stamp is not None:
+                self._save()
+
     def drop(self, team: str, ref: str, fields: tuple = FIELDS) -> None:
         self.put(team, ref, {k: None for k in fields})
 
