@@ -88,6 +88,9 @@
         mid.appendChild(K.panel({ title: t("admin.perf.valueTick"), note: lastOf("value_created"), icon: "trend" }, chart("value_created")));
         mid.appendChild(K.panel({ title: t("admin.perf.mmTick"), note: lastOf("mm_points"), icon: "performance" }, chart("mm_points")));
         mid.appendChild(K.panel({ title: t("admin.perf.dealsTick"), note: lastOf("trades"), icon: "offers" }, chart("trades")));
+        const mk = sample(((d.series || {}).market || []).filter((r) => typeof r.tick === "number"), 30);
+        if (mk.length) body.appendChild(K.panel({ title: t("admin.perf.marketTick"), note: t("admin.perf.marketTickNote"), icon: "target" },
+          A.bars(mk.map((r, i) => ({ label: i === 0 || i === mk.length - 1 ? K.tick(r.tick) : "", value: Math.round(((r.ours || 0) - (r.best_other || 0)) * 100) / 100, hi: i === mk.length - 1 })))));
         const perTick = d.per_tick || [];
         const mid2 = body.appendChild(el("div", { class: "adm-grid adm-performance-low" }));
         mid2.appendChild(K.panel({ title: t("admin.perf.closedTick"), note: t("admin.perf.closedTickNote"), icon: "check" },

@@ -33,6 +33,8 @@
           [t("admin.venue.description"), v.description || null],
           [t("admin.venue.opened"), K.tick(v.opened_tick)],
           [t("admin.venue.fees"), K.price(v.fees)],
+          [t("admin.perf.value"), typeof v.value_created === "number" ? K.num(v.value_created) : null],
+          d.broker ? [t("admin.perf.broker"), t("status." + (d.broker.state === "on" ? "on" : "down")) + (d.broker.detail ? " · " + d.broker.detail : ""), d.broker.state === "on" ? "ok" : "bad"] : null,
           [t("admin.venue.pendingFee"), v.pending_fee === null || v.pending_fee === undefined ? t("admin.none") : JSON.stringify(v.pending_fee), v.pending_fee ? "warn" : null],
         ])));
         const url = d.public_url || "";
@@ -42,7 +44,7 @@
         ]), el("div", { class: "adm-actions adm-pad" },
           url ? K.btn(t("admin.venue.copyUrl"), { small: true, icon: "copy", onclick: () => K.copy(url) }) : null,
           url ? K.btn(t("admin.venue.copyAgents"), { small: true, icon: "copy", onclick: () => K.copy(url + "/AGENTS.md") }) : null),
-          el("p", { class: "adm-note adm-pad" }, d.read_only ? t("admin.venue.readOnly") : "")));
+          el("p", { class: "adm-note adm-pad" }, d.read_only ? t("admin.venue.readOnly") : ""), d.note ? el("p", { class: "adm-note adm-pad" }, d.note) : null));
         const others = d.others || [];
         body.appendChild(K.panel({ title: t("admin.venue.others"), note: t("admin.perf.venuesNote"), flush: true },
           others.length ? K.table([
