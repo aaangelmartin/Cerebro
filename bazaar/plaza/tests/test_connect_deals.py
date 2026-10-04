@@ -118,7 +118,7 @@ class ConnectTest(unittest.TestCase):
     def test_prompt_is_ready_to_paste(self):
         p = C.prompt("t16", "PLAZA-7K2Q9M", "https://overhead-silicon-cork-citation.example.com/plaza")
         self.assertLessEqual(len(p), 900)
-        for piece in ("Team 16", "PLAZA-7K2Q9M", "/agents.md", "/api/connect/agent", "YOUR OWN game key", "t10", "v07",
+        for piece in ("Team 16", "PLAZA-7K2Q9M", "/AGENTS.md", "/api/connect/agent", "YOUR OWN game key", "t10", "v07",
                       "/api/team/t16"):
             self.assertIn(piece, p)
 
