@@ -177,7 +177,11 @@ class ValueCache:
 
 
 
-DUEL_ACCEPTS_PER_TICK = 3        # duel accepts have their own limit (organiser's Duels brief); one per live duel
+# Duel accepts have their own limit (organiser's Duels brief): one per live duel. Sunday's sessions run four
+# duels at once (schedule: max_concurrent 4) and the four of a wave share one deadline, so a cap of three would
+# drop the fourth accept of a last tick. Two accepts in one tick both went through on Saturday (ticks 1250,
+# 1259, 1265, 1337).
+DUEL_ACCEPTS_PER_TICK = 4
 
 
 def duel_accept_cap(limits: dict | None) -> int:

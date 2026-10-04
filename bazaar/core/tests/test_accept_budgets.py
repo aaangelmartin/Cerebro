@@ -41,6 +41,23 @@ class AcceptBudgetsTest(unittest.TestCase):
         self.assertFalse(rails.rail_pace(Action("duel_accept", {"duel": 8}, "duels"), {"limits": lim}, {"budget": d}).ok)
         self.assertEqual(b.for_tick(6, lim, now=0)["duel_accepts_left"], 1)
 
+    def test_four_live_duels_can_all_accept_in_one_tick(self):
+        """Sunday runs four duels at once with one shared deadline: the last tick must not drop the fourth."""
+        from bazaar.core.arbiter import select
+        from types import SimpleNamespace as NS
+        b = self.budget()
+        d = b.for_tick(5, LIMITS, now=0)
+        self.assertEqual(d["duel_accepts_left"], 4)
+        duels = [Action("duel_accept", {"duel": i, "expect": {}}, "duels", priority=150 + i) for i in (1, 2, 3, 4)]
+        sit = NS(tick=5, limits=dict(LIMITS), threads=[], my_offers=[], duels=[], me={"cash": 300, "assets": []})
+        chosen, dropped = select(duels, sit, {"accepts_left": 1, "messages": {}, "offers_left": 12})
+        self.assertEqual((len(chosen), dropped), (4, []))
+        for a in duels:
+            self.assertTrue(rails.rail_pace(a, {"limits": LIMITS}, {"budget": d}).ok)
+            b.record(a, "sent", now=0)
+            d = b.for_tick(5, LIMITS, now=0)
+        self.assertFalse(rails.rail_pace(Action("duel_accept", {"duel": 5}, "duels"), {"limits": LIMITS}, {"budget": d}).ok)
+
 
 if __name__ == "__main__":
     unittest.main()
