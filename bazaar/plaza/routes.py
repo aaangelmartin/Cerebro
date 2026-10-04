@@ -109,7 +109,7 @@ ROUTES: list[Route] = [
       "admin suggestions", "B2", False),
     R("GET", "/admin/api/venue", "admin", "The venue as the game shows it.", None, "admin/venue.json",
       "admin venue", "B2", False),
-    R("POST", "/admin/api/action", "admin", "on, off, refresh, pause, resume, hide, unhide, block, unblock, "
+    R("POST", "/admin/api/action", "admin", "One of our switches: on, off, refresh, pause, resume, hide, unhide, block, unblock, "
       "exclude, include, force, expire, suggestion.", {"action": "pause"}, None, "admin", "B2", True),
 ]
 

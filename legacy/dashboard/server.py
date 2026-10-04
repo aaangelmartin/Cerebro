@@ -235,20 +235,26 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
 # login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
 PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
 PLAZA_RX = re.compile(
-    r"/plaza(?:/(?:agents\.md|cards\.json|i18n\.json|static/(?:plaza\.css|plaza\.js|components\.js)"
+    r"/plaza(?:/(?:agents\.md|AGENTS\.md|cards\.json|i18n\.json"
+    r"|static/(?:(?:screens|i18n|fixtures|fixtures/admin)/)?[a-z0-9_]{1,40}\.(?:js|css|json)"
     r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents|connect|me"
+    r"|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|_kit"
     r"|art/[A-Z]{3}-\d{2}\.svg"
-    r"|api/(?:health|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}|card/[A-Z]{3}-\d{2}"
-    r"|connect/status|me|match/m-[0-9a-f]{10}|agent/next|agent/cards))?)?")
+    r"|api/(?:health|openapi\.json|status|stats|market|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}"
+    r"|card/[A-Z]{3}-\d{2}|connect/status|match/m-[0-9a-f]{10}|agent/next|agent/cards"
+    r"|me|me/cards|me/settings|me/activity|me/suggestions|me/trades))?)?")
 PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")
-PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent|agent/ack"
+PLAZA_WRITES = {"POST": re.compile(r"/plaza/api/(?:claim|floor|connect/start|connect/agent|agent/ack|suggestions"
                                    r"|match/m-[0-9a-f]{10}/message"
-                                   r"|me/(?:settings|card/[A-Z]{3}-\d{2}|trade/m-[0-9a-f]{10}))"),
+                                   r"|me/(?:settings|cards|card/[A-Z]{3}-\d{2}|trade/m-[0-9a-f]{10}))"),
                 "PUT": re.compile(r"/plaza/api/team/t\d{2}")}
 PLAZA_COOKIE = re.compile(r"(?:^|;\s*)(plaza_session=[A-Za-z0-9_-]{20,64})(?:;|$)")   # the only cookie forwarded
 PLAZA_STREAM = "/plaza/api/floor/stream"
 # Our own panel over the plaza: dashboard login only. The plaza process trusts the token it wrote for this run.
-PLAZA_ADMIN_RX = re.compile(r"/plaza/admin(?:/(?:static/admin\.js|api/(?:overview|activity|matchmaker))?)?")
+PLAZA_ADMIN_RX = re.compile(
+    r"/plaza/admin(?:/(?:static/admin\.js|static/screens/[a-z0-9_]{1,40}\.(?:js|css)"
+    r"|overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs"
+    r"|api/(?:overview|activity|matchmaker|status|performance|trades|teams|suggestions|venue))?)?")
 PLAZA_ADMIN_WRITE = "/plaza/admin/api/action"
 PLAZA_TOKEN_FILE = Path(ENV.get("PLAZA_TOKEN_FILE") or ROOT.parent.parent / "bazaar" / "data" / "live" / "plaza_admin.token")
 PLAZA_MAX_BODY = 16 * 1024

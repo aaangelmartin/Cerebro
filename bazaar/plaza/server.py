@@ -285,10 +285,10 @@ class Board:
             cands = matcher.find(sheets, cat, self.host, VENUE, gate=self.vault.gate)
             events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
                                      excluded_matches=frozenset(admin["excluded_matches"]))
-        proposed = [e for e in events if e["state"] == "proposed"]
+        proposed = [e for e in events if e.get("state") == "proposed"]
         for e in events:
-            self.hour("match_" + e["state"])
-        self.floor.add_game([e for e in events if e["state"] != "proposed"]
+            self.hour("match_" + str(e.get("state") or e.get("kind") or "event"))
+        self.floor.add_game([e for e in events if e.get("state") != "proposed"]
                             + (proposed if len(proposed) <= PROPOSED_ON_FLOOR else []))
         hidden = set(admin["hidden_msgs"]), set(admin["blocked"])
         snap = {"built": time.time(), "tick": tick, "cat": cat, "sheets": sheets, "candidates": len(cands),
@@ -1113,7 +1113,15 @@ class Handler(BaseHTTPRequestHandler):
         self.route = "other"
         self._error(405, "not_allowed", "cross-site writes are not allowed")
 
-    do_DELETE = do_PATCH = do_OPTIONS
+    do_DELETE = do_PATCH = do_TRACE = do_CONNECT = do_PROPFIND = do_OPTIONS
+
+    def send_error(self, code, message=None, explain=None):
+        """The standard library's own refusals (an unknown method, a broken request line): ours, as JSON, 4xx."""
+        self.route = "other"
+        try:
+            self._error(405 if code == 501 else code if 400 <= code < 500 else 400, "bad_request", "this request is not understood")
+        except OSError:
+            pass
 
 
 class Server(ThreadingHTTPServer):

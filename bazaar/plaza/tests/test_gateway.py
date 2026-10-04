@@ -69,7 +69,7 @@ class GatewayTest(unittest.TestCase):
         self.assertFalse(g.is_plaza_admin("/plaza/admin/api/../../x"))
         self.assertTrue(g.PLAZA_QUERY.fullmatch("set=SAL&rarity=rare&side=ask"))
         for path in ("/plaza/static/../../.env", "/plaza/api/team/t4", "/plaza/api/control", "/plaza/x", "/plazax",
-                     "/plaza/static/app.js", "/v2/plaza/", "/plaza/api/team/t04/x", "/plaza//", "/plaza/api/claim/"):
+                     "/plaza/static/App.js", "/plaza/static/x/app.js", "/plaza/static/screens/../plaza.js", "/v2/plaza/", "/plaza/api/team/t04/x", "/plaza//", "/plaza/api/claim/"):
             self.assertFalse(g.is_plaza(path), path)
         self.assertTrue(g.is_plaza("/plaza/api/claim", "POST"))
         self.assertTrue(g.is_plaza("/plaza/api/team/t04", "PUT"))
@@ -89,9 +89,17 @@ class GatewayTest(unittest.TestCase):
         self.assertTrue(g.PLAZA_QUERY.fullmatch("session=" + "aB3_-" * 6))
         for path in ("/plaza/api/agent/next", "/plaza/api/agent/cards", "/plaza/i18n.json"):
             self.assertTrue(g.is_plaza(path), path)
-        for path in ("/plaza/api/agent/ack", "/plaza/api/me/settings", "/plaza/api/me/card/LAT-06",
-                     "/plaza/api/me/trade/m-0123456789"):
+        for path in ("/plaza/api/agent/ack", "/plaza/api/me/card/LAT-06", "/plaza/api/me/trade/m-0123456789",
+                     "/plaza/api/suggestions"):
             self.assertTrue(g.is_plaza(path, "POST"), path)
+            self.assertFalse(g.is_plaza(path), path)
+        for path in ("/plaza/api/me/settings", "/plaza/api/me/cards"):
+            self.assertTrue(g.is_plaza(path, "POST") and g.is_plaza(path), path)
+        for path in ("/plaza/home", "/plaza/offers/m-0123456789", "/plaza/_kit", "/plaza/AGENTS.md", "/plaza/api/status",
+                     "/plaza/api/openapi.json", "/plaza/static/screens/home.js", "/plaza/static/fixtures/admin/overview.json"):
+            self.assertTrue(g.is_plaza(path), path)
+        for path in ("/plaza/admin/performance", "/plaza/admin/api/performance", "/plaza/admin/static/screens/overview.css"):
+            self.assertTrue(g.is_plaza_admin(path), path)
             self.assertFalse(g.is_plaza(path), path)
         for path in ("/plaza/api/me/card/lat-06", "/plaza/api/me/trade/x", "/plaza/api/me/limits", "/plaza/api/agent/x"):
             self.assertFalse(g.is_plaza(path, "POST"), path)

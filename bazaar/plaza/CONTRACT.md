@@ -336,3 +336,13 @@ process may be restarted (`BAZAAR_SUPERVISE_ONLY=plaza`, see `README.md`).
 | **R1** security and robustness | reads the code cold, without our conclusions; checks 6.2 line by line; fixes what it finds | any file, after the building forks have finished |
 | **R2** visual polish | goes screen by screen against the PNG of `design/plaza/`, in EN, ES and 390 px, mock and real | `web/**` after F1 to F4 have finished |
 | **E** | runs the whole end-to-end suite on the final code | `e2e/` |
+
+## 7. Notes from the shell
+
+- A client's address for the limits of use is, in order: `CF-Connecting-IP` (the tunnel straight to the process),
+  `X-Plaza-Client` (set by our gateway; trusted only from `127.0.0.1`), else the socket's address.
+- Unknown methods and broken request lines answer 405 or 400 as JSON, never the standard library's page.
+- The gateway (`legacy/dashboard/server.py`) forwards exactly the routes of `routes.py`, the pages of section 4
+  and the static patterns; `tests/test_routes.py` checks it. It needs one restart to pick a new whitelist up.
+- The art of a card is drawn inline (`K.card` fetches `/plaza/art/REF.svg` once and parses it as SVG) so it takes
+  the page's fonts; nothing else in the front parses markup.
