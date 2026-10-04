@@ -455,11 +455,84 @@ def feed_poller():
         time.sleep(3)
 
 
+LOCAL_PEERS = ("127.0.0.1", "::1")
+LOCAL_HOSTS = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?", re.I)
+ADDRESS_RX = re.compile(r"[0-9a-fA-F:.]{3,45}")
+LOGIN_TRIES, LOGIN_WINDOW_S = 20, 300.0          # wrong dashboard passwords from one address before it waits
+PLAZA_ADMIN_PUBLIC = ENV.get("PLAZA_ADMIN_PUBLIC", "") == "1"   # the market's panel through the tunnel: off unless asked
+
+
+class Logins:
+    """Wrong passwords per address. Our own machine is never made to wait."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.fails, self.lock = clock, {}, threading.Lock()
+
+    def blocked(self, who):
+        if who in LOCAL_PEERS:
+            return False
+        now = self.clock()
+        with self.lock:
+            q = [t for t in self.fails.get(who, []) if now - t < LOGIN_WINDOW_S]
+            if q:
+                self.fails[who] = q
+            else:
+                self.fails.pop(who, None)
+            return len(q) >= LOGIN_TRIES
+
+    def failed(self, who):
+        with self.lock:
+            if len(self.fails) > 5000:
+                now = self.clock()
+                self.fails = {k: v for k, v in self.fails.items() if v and now - v[-1] < LOGIN_WINDOW_S}
+            self.fails.setdefault(who, []).append(self.clock())
+
+
+LOGINS = Logins()
+
+
 class Handler(SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    timeout = 60                                  # a peer that stops sending is dropped, never parked
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        raw = self.headers.get("Content-Length")
+        if raw is not None and not re.fullmatch(r"\d{1,9}", raw.strip()):
+            self.close_connection = True
+            self.send_error(400)
+            return False
+        if self.command in ("GET", "HEAD") and (self.headers.get("Transfer-Encoding") or (raw or "0").strip() != "0"):
+            self.close_connection = True              # a body nobody reads would be taken for the next request
+        return True
+
+    def send_error(self, code, message=None, explain=None):
+        self.close_connection = True                  # the request's body may still be on the wire
+        return super().send_error(code, message, explain)
+
+    def via_public(self):
+        """True when the request came through a tunnel (cloudflared, ngrok) or any name that is not this machine."""
+        if self.client_address[0] not in LOCAL_PEERS:
+            return True
+        if any(self.headers.get(h) for h in ("CF-Connecting-IP", "CF-Ray", "X-Forwarded-For", "X-Forwarded-Host",
+                                             "Ngrok-Trace-Id", "X-Original-Host")):
+            return True
+        return not LOCAL_HOSTS.fullmatch((self.headers.get("Host") or "").strip())
+
+    def caller(self):
+        """The address a request counts against. A forwarded address is believed only from a tunnel on this
+        machine: anybody else could write that header."""
+        peer = self.client_address[0] or ""
+        if peer in LOCAL_PEERS:
+            for name in ("CF-Connecting-IP", "X-Forwarded-For"):
+                given = (self.headers.get(name) or "").split(",")[0].strip()[:45]
+                if given and ADDRESS_RX.fullmatch(given):
+                    return given
+        return peer[:45] if ADDRESS_RX.fullmatch(peer[:45]) else "0.0.0.0"
 
     def client(self):
         """'bot:<name>' for a gateway token, 'dashboard' for basic auth, else None."""
@@ -469,12 +542,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return f"bot:{name}"
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Basic ") and DASHBOARD_AUTH != ":":
+            who = self.caller()
+            if LOGINS.blocked(who):                       # too many wrong passwords from there: not even looked at
+                return None
             try:
                 given = base64.b64decode(auth[6:]).decode()
             except ValueError:
+                LOGINS.failed(who)
                 return None
             if hmac.compare_digest(given, DASHBOARD_AUTH):
                 return "dashboard"
+            LOGINS.failed(who)
         return None
 
     def deny(self):
@@ -483,6 +561,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("WWW-Authenticate", 'Basic realm="Bazaar Team 10"')
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")           # the refused request's body may still be on the wire
+        self.close_connection = True
         self.end_headers()
         self.wfile.write(body)
 
@@ -490,6 +570,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if is_plaza(path):                                # the public market board: no login, whitelisted routes
             return self.plaza_stream() if path == PLAZA_STREAM else self.plaza("GET")
+        if is_plaza_admin(path) and self.via_public() and not PLAZA_ADMIN_PUBLIC:
+            return self.send_error(404)                   # the market's panel never leaves this machine
         client = self.client()
         if client is None and path not in OPEN_WITHOUT_AUTH:
             return self.deny()
@@ -563,6 +645,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if is_plaza(path, method):                        # a team's agent declaring its sheet behind its PIN
             return self.plaza(method)
+        if is_plaza_admin(path, method) and self.via_public() and not PLAZA_ADMIN_PUBLIC:
+            return self.send_error(404)
         client = self.client()
         if client is None:
             return self.deny()
@@ -596,9 +680,12 @@ class Handler(SimpleHTTPRequestHandler):
     def plaza_stream(self):
         """The live floor (server-sent events): relays the plaza's stream line by line until either side closes."""
         parts = self.path.split("?", 1)
-        fwd = (self.headers.get("CF-Connecting-IP") or self.client_address[0] or "")[:45]
-        headers = {"X-Plaza-Client": fwd if re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd) else "0.0.0.0",
-                   "Accept": "text/event-stream"}
+        headers = {"X-Plaza-Client": self.caller(), "Accept": "text/event-stream"}
+        cookie = PLAZA_COOKIE.search(self.headers.get("Cookie") or "")
+        if cookie:                                            # a connected team has its own share of streams
+            headers["Cookie"] = cookie.group(1)
+        if self.via_public():
+            headers["X-Plaza-Public"] = "1"
         last = self.headers.get("Last-Event-ID") or ""
         if re.fullmatch(r"\d{1,9}", last):
             headers["Last-Event-ID"] = last
@@ -647,11 +734,14 @@ class Handler(SimpleHTTPRequestHandler):
             if length > PLAZA_MAX_BODY:
                 return self.send_error(413)
             body = self.rfile.read(length) if length else b"{}"
-        fwd = (self.headers.get("CF-Connecting-IP") or self.client_address[0] or "")[:45]
-        headers = {"X-Plaza-Client": fwd if re.fullmatch(r"[0-9a-fA-F:.]{3,45}", fwd) else "0.0.0.0"}
-        for name in ("Content-Type", "X-Plaza-Pin", "X-Plaza-Token"):
+        headers = {"X-Plaza-Client": self.caller()}
+        for name in ("Content-Type", "X-Plaza-Pin", "X-Plaza-Token", "Origin", "Sec-Fetch-Site"):
             if self.headers.get(name):
                 headers[name] = self.headers[name][:120]
+        if self.headers.get("Host"):
+            headers["X-Plaza-Host"] = self.headers["Host"][:120]
+        if self.via_public() and not admin:
+            headers["X-Plaza-Public"] = "1"
         cookie = PLAZA_COOKIE.search(self.headers.get("Cookie") or "")
         if cookie and not admin:                              # the browser's connection session, nothing else
             headers["Cookie"] = cookie.group(1)

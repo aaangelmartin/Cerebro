@@ -149,6 +149,74 @@ class GatewayTest(unittest.TestCase):
         self.assertIn("DASHBOARD_USER and DASHBOARD_PASSWORD empty", run.stderr)
         self.assertIn("DASHBOARD_ENV_FILE=.env", run.stderr)
 
+    def basic(self):
+        import base64
+        return {"Authorization": "Basic " + base64.b64encode(self.g.DASHBOARD_AUTH.encode()).decode()}
+
+    def test_the_markets_panel_never_leaves_this_machine(self):
+        """Through a tunnel (cloudflared, ngrok) or any other name, the panel does not exist, login or not."""
+        ok = self.basic()
+        self.assertEqual(self.status("GET", "/plaza/admin/api/overview", **ok), 502)                 # here: forwarded
+        for via in ({"CF-Connecting-IP": "203.0.113.9"}, {"CF-Ray": "8a1"}, {"X-Forwarded-For": "203.0.113.9"},
+                    {"X-Forwarded-Host": "x.ngrok-free.app"}, {"Host": "overhead-cork.trycloudflare.com"},
+                    {"Host": "192.168.1.20:8787"}):
+            for path in ("/plaza/admin/", "/plaza/admin/api/overview", "/plaza/admin/static/admin.js"):
+                self.assertEqual(self.status("GET", path, **ok, **via), 404, (via, path))
+            self.assertEqual(self.status("POST", "/plaza/admin/api/action", **ok, **via, **{"X-Dashboard": "1"}), 404, via)
+            self.assertEqual(self.status("GET", "/plaza/api/health", **via), 502, via)              # the public part passes
+            self.assertEqual(self.status("GET", "/v2/", **via), 401, via)                            # the dashboard asks its login
+
+    def test_a_forwarded_address_is_believed_from_a_tunnel_on_this_machine_only(self):
+        h = self.g.Handler.__new__(self.g.Handler)
+        h.client_address = ("127.0.0.1", 5)
+        h.headers = {"CF-Connecting-IP": "203.0.113.9"}
+        self.assertEqual((h.caller(), h.via_public()), ("203.0.113.9", True))
+        h.headers = {"X-Forwarded-For": "198.51.100.7, 10.0.0.1", "Host": "x.ngrok-free.app"}
+        self.assertEqual((h.caller(), h.via_public()), ("198.51.100.7", True))
+        h.headers = {"Host": "localhost:8787"}
+        self.assertEqual((h.caller(), h.via_public()), ("127.0.0.1", False))
+        h.client_address = ("192.168.1.50", 5)                 # not a tunnel: whatever it writes, it is itself
+        h.headers = {"CF-Connecting-IP": "203.0.113.9", "Host": "localhost:8787"}
+        self.assertEqual((h.caller(), h.via_public()), ("192.168.1.50", True))
+
+    def test_wrong_passwords_make_the_guesser_wait_not_us(self):
+        import base64
+        self.g.LOGINS.fails.clear()
+        bad = {"Authorization": "Basic " + base64.b64encode(b"tester:guess").decode()}
+        there = {"CF-Connecting-IP": "203.0.113.77"}
+        for _ in range(self.g.LOGIN_TRIES):
+            self.assertEqual(self.status("GET", "/v2/control", **bad, **there), 401)
+        self.assertEqual(self.status("GET", "/v2/control", **self.basic(), **there), 401)            # even the right one
+        self.assertNotEqual(self.status("GET", "/v2/control", **self.basic(), **{"CF-Connecting-IP": "203.0.113.78"}), 401)
+        for _ in range(self.g.LOGIN_TRIES + 5):                                                      # from this machine:
+            self.status("GET", "/v2/control", **bad)                                                 # never locked
+        self.assertNotEqual(self.status("GET", "/v2/control", **self.basic()), 401)
+        self.g.LOGINS.fails.clear()
+
+    def test_a_refused_request_never_leaves_bytes_for_the_next_one(self):
+        import socket
+
+        def raw(data):
+            with socket.create_connection(self.srv.server_address, timeout=5) as s:
+                s.sendall(data)
+                s.settimeout(1.5)
+                out = b""
+                try:
+                    while chunk := s.recv(65536):
+                        out += chunk
+                except OSError:
+                    pass
+                return out
+        nxt = b"GET /plaza/api/health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        for head in ("POST /v2/control HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: %d\r\n\r\n" % len(nxt),      # 401
+                     "GET /plaza/api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: %d\r\n\r\n" % len(nxt),
+                     "POST /plaza/api/floor HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: -1\r\n\r\n",
+                     "POST /plaza/api/floor HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 99999999\r\n\r\n"):
+            got = raw(head.encode() + nxt)
+            self.assertEqual(got.count(b"HTTP/1.1 "), 1, head)
+        self.assertRegex(raw(b"POST /plaza/api/floor HTTP/1.1\r\nHost: x\r\nContent-Length: -1\r\n\r\n")[:12], rb"HTTP/1\.1 400")
+        self.assertLessEqual(self.g.Handler.timeout, 60)
+
     def test_plaza_routes_pass_without_login(self):
         self.assertEqual(self.status("POST", "/plaza/api/connect/start"), 502)
         self.assertEqual(self.status("GET", "/plaza/api/connect/status"), 502)
