@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config
+from ..core import fastmodel
 from ..core.types import Action
 
 MAX_OPEN = 2                # team threads we keep open at once
@@ -288,7 +289,8 @@ class TeamTalk:
         res = llm.ask(purpose="market", system=PROMPT, tools=[TOOL], tool_choice={"type": "auto"},
                       messages=[{"role": "user", "content": "THREAD (JSON):\n" + json.dumps(state, ensure_ascii=False)
                                  + "\n\nCall team_reply once."}],
-                      model=self.model, max_tokens=400, deadline=(dl - 2.0) if dl else None)
+                      model=fastmodel.pick(self.model, getattr(ctx, "tick_seconds", None), dl, always_fast=True),
+                      max_tokens=400, deadline=(dl - 2.0) if dl else None)
         for call in getattr(res, "tool_calls", None) or []:
             if call.get("name") == TOOL["name"] and isinstance(call.get("input"), dict):
                 return call["input"]

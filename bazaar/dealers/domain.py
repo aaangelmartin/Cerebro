@@ -26,6 +26,7 @@ from typing import Any
 
 from .. import config
 from ..core.context import conv_key
+from ..core import fastmodel
 from ..core.types import Action, Outcome
 from ..lab import feedback
 from . import gifts, haggle, steps
@@ -1423,8 +1424,9 @@ class DealersDomain:
         self.last_prompt = {"system": system, "messages": messages}
         dl = getattr(ctx, "deadline", None)
         self.calls += 1
+        model = fastmodel.pick(self.model, getattr(ctx, "tick_seconds", None), (dl - SAFETY_S) if dl else None)
         res = llm.ask(purpose="dealers", system=system, messages=messages, tools=[DEALER_TOOL],
-                      tool_choice={"type": "auto"}, model=self.model, max_tokens=900,
+                      tool_choice={"type": "auto"}, model=model, max_tokens=900,
                       deadline=(dl - SAFETY_S) if dl else None)
         self.cost_usd += float(getattr(res, "cost_usd", 0.0) or 0.0)
         for call in getattr(res, "tool_calls", None) or []:

@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .. import config
+from ..core import fastmodel
 from ..core.types import Action, Outcome
 from ..dealers.compat import clean, lessons_block, llm_module, time_left
 from ..lab import feedback
@@ -1319,8 +1320,9 @@ class MarketDomain:
         self.last_prompt = {"system": system, "messages": messages}
         dl = getattr(ctx, "deadline", None)
         self.calls += 1
+        model = fastmodel.pick(self.model, getattr(ctx, "tick_seconds", None), dl, always_fast=True)
         res = llm.ask(purpose="market", system=system, messages=messages, tools=[MARKET_TOOL],
-                      tool_choice={"type": "auto"}, model=self.model, max_tokens=900,
+                      tool_choice={"type": "auto"}, model=model, max_tokens=900,
                       deadline=(dl - SAFETY_S) if dl else None)
         self.cost_usd += float(getattr(res, "cost_usd", 0.0) or 0.0)
         for call in getattr(res, "tool_calls", None) or []:
