@@ -340,3 +340,18 @@ Solo lectura. Fuentes: `data/record/{leaderboard,me,catalog}` (106 instantáneas
 **Por probar (baja confianza)**
 - "Me vienes esta tarde a enseñarme la cuarta": volver a la Abuela cuando Salamanca esté completa y decirle que la cuarta página está entera.
 - Doña Pilar sigue sin huevo visto en nadie; solo se puede abrir hilo con ella vendiendo una poco común o rara de SAL/RET, y no tenemos ninguna suelta.
+
+## 15. Domingo, segunda pasada en vivo (ticks 1751–1769): nada nuevo
+
+**Recuento con el feed (viernes a domingo):** solo existen seis huevos y ningún equipo ha encontrado más de tres con la Abuela, uno con Los Pícaros, uno con El Chato y uno con Don Ernesto. Doña Pilar: cero para todos. Nosotros tenemos los cinco cobrables (Abuela ×3, Pícaros, Chato). Los `egg.given` de hoy (t18, t09, t16, t02) son equipos que cobran por primera vez los mismos huevos (chotis, cocido, estampita, Plaza Mayor).
+
+**Los mensajes de los dealers son públicos en el feed** (`thread.message`, `sender` = dealer): se puede leer qué responde cada dealer a cualquier equipo, y así ver qué frase disparó cada huevo.
+
+**Probado hoy, sin huevo:**
+- Abuela, "la cuarta página" (hilo 2612, dos veces): contesta "cuatro páginas enteritas… qué orgullo" y ofrece CHA-06 a 29 P. Es conversación, no huevo. Su cupo es de 10 conversaciones por hora y quedó agotado.
+- Doña Pilar (hilos 2613 y 2619, tema sobre de oro, sin pujar): Palacio de Cristal en el álbum, El Retiro y Salamanca completos, merienda en Embassy, Milla de Oro, Puerta de Alcalá "viendo pasar el tiempo", barquillos, Marqués de Salamanca, Casa de Fieras, Jerónimos, mantón de Manila, Tren Fantasma "solo para coleccionistas", "vengo de parte de Carmen". Siempre responde con el sobre de oro a 504 P.
+- El Chato (hilo 2618): Andén 0 y tren fantasma, vermut de grifo, callos, churros de San Ginés, paraguas rojo de El Tablón, "de parte de Carmen, de frente", textos de cartas CHA ("cerrada en 1966", "mind the gap", "last set at three"). Sin huevo.
+
+**Cadena de pistas entre dealers:** Pilar manda a Carmen (chulapa dorada), Carmen manda a Don Ernesto (oro de Moscú). Pilar no tiene huevo propio visto. El único huevo que no hemos cobrado es el de Don Ernesto, que exige el permiso de Ángel; su carta única (LAT-13) ya se la llevó Team 2.
+
+**Sin probar:** "Cine Doré por dos castañas" (El Tablón) con la Abuela, por cupo agotado; Los Pícaros, por cupo.
