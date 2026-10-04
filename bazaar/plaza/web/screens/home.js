@@ -55,7 +55,7 @@ Plaza.screen("home", {
       draw("agent", [off, rows.map((r) => r.seq), S.failed, S.loaded, I18N.lang], () => {
         const body = !S.loaded && !rows.length ? (S.failed ? K.state("error", null, t("home.error")) : K.state("loading"))
           : !rows.length ? K.state("empty", t("home.agent.empty"), t("home.agent.emptyText"))
-          : K.feed(rows.map((r, i) => ({ tick: r.tick, now: i === 0 && !off, text: r.text,
+          : K.feed(rows.map((r, i) => ({ tick: r.tick, now: i === 0 && !off, text: K.say(r.text),
               extra: [r.by && r.by !== "agent" ? K.chip(t("home.by." + r.by)) : null,
                       r.match ? K.link("/plaza/offers/" + r.match, { class: "id home-mid" }, r.match) : null] })));
         return K.panel({ icon: "agent", flush: true, class: off ? "home-stopped" : null,
@@ -85,7 +85,7 @@ Plaza.screen("home", {
       const me = S.me.team, other = (tr.teams || []).find((x) => x !== me) || (tr.your_role === "seller" ? tr.buyer : tr.seller);
       const live = LIVE.includes(tr.state);
       const doing = off && live ? t("home.trade.waitingAgent")
-        : tr.next && tr.next.why ? tr.next.why : tr.next && tr.next.waiting ? tr.next.waiting
+        : tr.next && tr.next.why ? K.say(tr.next.why) : tr.next && tr.next.waiting ? K.say(tr.next.waiting)
         : tr.state === "settled" ? t("home.trade.settled", { tick: K.tick(tr.settled_tick || tr.state_tick) }) : t("state." + tr.state);
       const ids = [tr.id, typeof tr.offer === "number" ? "#" + tr.offer : null].filter(Boolean);
       return el("article", { class: "home-trade" + (live ? "" : " is-done") },

@@ -58,6 +58,7 @@
     dom.refresh = K.el("button", { class: "tb-btn", type: "button", title: t("shell.refresh"), "aria-label": t("shell.refresh"), onclick: () => {
       dom.refresh.classList.add("spin");
       setTimeout(() => dom.refresh.classList.remove("spin"), 600);
+      anon(false);
       Promise.all([loadStatus(), loadMe()]).then(render);
     } }, K.icon("refresh", 16));
     dom.topbar = K.el("header", { class: "topbar" },
@@ -119,9 +120,22 @@
     if (ADMIN) jobs.push(API.get("/admin/api/status").then((a) => { state.admin = a; }, () => {}));
     return Promise.all(jobs).then(() => { drawNav(); drawClock(); drawOverlay(); });
   }
+  function anon(set) {
+    try {
+      if (set === true) sessionStorage.setItem("plaza.anon", "1");
+      else if (set === false) sessionStorage.removeItem("plaza.anon");
+      return sessionStorage.getItem("plaza.anon") === "1";
+    } catch (e) { return false; }
+  }
   function loadMe() {
     if (ADMIN) return Promise.resolve();
-    return API.get("/api/me").then((me) => { state.me = me; }, () => { state.me = null; });
+    // A browser that was told "no session" stops asking (no 401 every poll) until Connect starts a new one.
+    if (!API.mock && anon()) { state.me = null; state.meError = false; return Promise.resolve(); }
+    return API.get("/api/me").then((me) => { state.me = me; state.meError = false; }, (e) => {
+      const none = e && [401, 403, 404].includes(e.status);
+      if (none) { state.me = null; anon(true); }
+      state.meError = !none;                        // the market did not answer: keep what we knew, say so
+    });
   }
 
   // ---- closed and paused: the dashboard's overlay over the screen
@@ -160,6 +174,10 @@
       root.appendChild(K.state("empty", t("shell.notFound"), location.pathname, K.btn(t("shell.goHome"), { onclick: () => go(ROOT + "/") })));
       return;
     }
+    if (def.needsTeam && !state.me && state.meError) {
+      root.appendChild(K.state("error", t("common.error"), t("shell.noAnswer"), K.btn(t("common.retry"), { onclick: () => loadMe().then(render) })));
+      return;
+    }
     if (def.needsTeam && !state.me) {
       root.appendChild(K.state("offline", t("shell.connectFirst"), t("shell.connectFirstText"),
         K.btn(t("shell.connect"), { kind: "primary", iconAfter: "arrow", onclick: () => go("/plaza/connect") })));
@@ -186,6 +204,6 @@
     setInterval(() => loadMe().then(drawNav), 15000);
   }
 
-  window.Plaza = { screen, adminScreen: screen, go, state, admin: ADMIN, refresh: () => Promise.all([loadStatus(), loadMe()]).then(render) };
+  window.Plaza = { screen, adminScreen: screen, go, state, admin: ADMIN, refresh: () => { anon(false); return Promise.all([loadStatus(), loadMe()]).then(render); } };
   document.addEventListener("DOMContentLoaded", boot);
 })();

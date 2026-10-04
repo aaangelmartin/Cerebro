@@ -35,3 +35,10 @@
   .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .market-pair, .market-sheet { grid-template-columns: 1fr; }
 }
+.market-sheet > * { min-width: 0; }
+.market-sheet .card-row { flex-wrap: wrap; }
+.market-price { flex-wrap: wrap; }
+.market-main { white-space: nowrap; }
+.market-pair > *, .market-small > * { min-width: 0; }
+.market-small .card-strip { flex: 1 1 100%; max-width: 100%; }
+  @media (max-width: 760px) { .market-pair { grid-template-columns: minmax(0, 1fr); } }

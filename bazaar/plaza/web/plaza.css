@@ -64,6 +64,7 @@ h1, h2, h3, p { margin: 0; }
 .bare .topbar, .bare .sidenav { display: none; }
 .bare .layout { inset: 0; }
 .no-nav .sidenav, .no-nav .tb-menu { display: none; }
+.no-nav .closed-overlay { left: 0; }
 .no-nav .page { max-width: 1180px; margin: 0 auto; }
 .bare .page { max-width: none; padding: 0; }
 
@@ -85,7 +86,7 @@ h1, h2, h3, p { margin: 0; }
 .lang-switch button:focus-visible { outline: 1px solid var(--signal); outline-offset: -2px; }
 
 /* ---------- closed and paused, as on the dashboard */
-.closed-overlay { position: absolute; inset: 0; background: rgba(8, 9, 11, .72); display: grid; place-items: center; z-index: 20; }
+.closed-overlay { position: fixed; inset: var(--topbar-h) 0 0 var(--nav-w); background: rgba(8, 9, 11, .72); display: grid; place-items: center; z-index: 20; }
 .closed-card { width: min(600px, 90%); background: var(--s1); border: 1px solid var(--bad); padding: 26px 28px; }
 .closed-card h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 19px; font-weight: 600; }
 .closed-card h2 .ic-wrap { color: var(--bad); }
@@ -137,8 +138,8 @@ h1, h2, h3, p { margin: 0; }
 .endpoint b { font-weight: 400; color: var(--ink-2); }
 .state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 36px 16px; color: var(--ink-2); text-align: center; border: 1px dashed var(--line-2); }
 .state .ic-wrap { color: var(--ink-3); }
-.state.is-error { border-color: var(--bad); } .state.is-error .ic-wrap { color: var(--bad); }
-.state.is-offline { border-color: var(--warn); } .state.is-offline .ic-wrap { color: var(--warn); }
+.state.is-error { border-color: var(--bad); } .state.is-error > .ic-wrap { color: var(--bad); }
+.state.is-offline { border-color: var(--line-2); } .state.is-offline > .ic-wrap { color: var(--ink-2); }
 .state-title { color: var(--ink); font-weight: 600; }
 .skeleton { background: linear-gradient(90deg, var(--s2), var(--s3), var(--s2)); background-size: 200% 100%; animation: sk 1.2s linear infinite; min-height: 14px; }
 @keyframes sk { to { background-position: -200% 0; } }

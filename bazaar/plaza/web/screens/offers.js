@@ -46,8 +46,8 @@ Plaza.screen("offers", {
     /** What the team's agent does next, in one line. */
     function mine(tr) {
       if (status().agent === "offline" && LIVE.includes(tr.state)) return t("offers.waitingAgent");
-      if (tr.next && tr.next.why) return tr.next.why;
-      if (tr.next && tr.next.waiting) return tr.next.waiting;
+      if (tr.next && tr.next.why) return K.say(tr.next.why);
+      if (tr.next && tr.next.waiting) return K.say(tr.next.waiting);
       return tr.state === "settled" ? t("offers.done") : t("state." + tr.state);
     }
     /** The last thing the other agent said. */
@@ -156,7 +156,7 @@ Plaza.screen("offers", {
               el("div", { class: "offers-agent" }, K.label(t("offers.yourAgent")), el("b", null, K.icon("agent", 15), team()), el("span", null, mine(tr))),
               K.swap(tr.gives, tr.receives, tr.cash || 0, "md"),
               el("div", { class: "offers-agent" }, K.label(t("offers.theirAgent")), el("b", null, K.icon("agent", 15), o), el("span", null, theirs(tr)))),
-            tr.why ? el("p", { class: "offers-why" }, tr.why) : null,
+            tr.why ? el("p", { class: "offers-why" }, K.say(tr.why)) : null,
             steps(tr),
             el("div", { class: "offers-neg-head" }, K.label(t(th.length === 1 ? "offers.neg1" : "offers.neg", { n: tr.messages || th.length })), K.label(t("offers.negNote"))),
             th.length ? K.thread(th, team(), { earlier }) : el("div", { class: "thread offers-nothread" }, t("offers.noMessages")),

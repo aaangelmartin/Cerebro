@@ -4,6 +4,7 @@
   "use strict";
   const { el } = K;
   const CHECKS = ["agent_called", "verified", "cards_listed", "agent_online"];
+  const MOCK_STEPS = { waiting: {}, called: { agent_called: true }, verified: { agent_called: true, verified: true } };
 
   Plaza.screen("connect", {
     title: "nav.connect",
@@ -74,6 +75,7 @@
           const ok = Boolean(s && s[k]);
           return el("li", { class: ok ? "is-ok" : "" }, K.icon(ok ? "check" : "close", 13), t("connect.check." + k));
         })));
+        colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.listedHint")));
         colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.auto")));
       }
 
@@ -88,6 +90,8 @@
         if (!st.start || st.left) return Promise.resolve();
         if (byHand) { st.checking = true; drawReady(); }
         return API.get("/api/connect/status").then((s) => {
+          const step = API.mock ? MOCK_STEPS[ctx.query.step] : null;      // mock only: the states before "connected"
+          if (step) s = { ...s, connected: false, agent_called: false, verified: false, cards_listed: false, agent_online: false, ...step };
           st.status = s; st.checking = false;
           if (st.left) return;
           draw();

@@ -55,7 +55,7 @@
   .how-title { font-size: 30px; }
   .how-sec { padding: 28px 0 32px; }
   .how-h { font-size: 20px; }
-  .how-zones { grid-template-columns: 1fr; }
+  .how-zones { grid-template-columns: minmax(0, 1fr); }
   .how-match { gap: 20px; }
   .how-states { grid-template-columns: 1fr 1fr; }
   .how-screens { grid-template-columns: 1fr; }

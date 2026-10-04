@@ -34,10 +34,11 @@ Plaza.screen("activity", {
       const c = S.cat[ref];
       return c || { ref, name: ref, rarity: "common", color: S.colors[String(ref).slice(0, 3)] || "#5c6b73", art: "/plaza/art/" + ref + ".svg" };
     }
-    const cardName = (ref) => { const c = S.cat[ref]; return c && c.name ? c.name : ref; };
+    const cardName = (ref) => { const c = S.cat[ref]; return c && c.name && c.name !== ref ? c.name + " (" + String(ref).replace("-", " ") + ")" : ref; };   // name, set letters and number, always
     const owns = (ref) => !me || Boolean(Plaza.state.me && (Plaza.state.me.owned || []).includes(ref));   // a visitor sees every card in colour
     const who = (x) => (/^t\d\d$/.test(String(x || "")) ? K.teamName(x) : String(x || "–"));
     const venue = (v) => (v === "rastro" ? "El Rastro" : v || "–");
+    const DEALERS = { abuela: "Abuela Carmen", carmen: "Abuela Carmen", chato: "El Chato", pilar: "Doña Pilar", picaros: "Los Pícaros", paso: "Los Pícaros", ernesto: "Don Ernesto", banco: "Don Ernesto" };
 
     /** One floor item as { tone, text, quote } : a sentence of ours, and what the agent wrote, if anything. */
     function say(it) {
@@ -52,13 +53,14 @@ Plaza.screen("activity", {
         return { tone: null, text: t("activity.t." + key, v), quote: it.text };
       }
       if (it.kind === "offer") return { tone: it.side === "bid" ? "get" : "give", text: t("activity.g." + (it.side === "bid" ? "bid" : "ask") + (it.to ? "To" : ""), v) };
-      if (it.kind === "deal") return { tone: "ok", text: it.dealer ? t("activity.g.dealer", { ...v, dealer: it.dealer }) : t("activity.g.deal", v) };
+      if (it.kind === "deal") return { tone: "ok", text: it.dealer ? t("activity.g.dealer", { ...v, dealer: DEALERS[String(it.dealer).toLowerCase()] || it.dealer }) : t("activity.g.deal", v) };
       if (it.kind === "announce") return { tone: null, text: t("activity.g.announce", v), quote: it.text };
       if (it.kind === "pack") return { tone: null, text: t("activity.g.pack", v) };
       if (it.kind === "craft") return { tone: null, text: t("activity.g.craft", { ...v, card: it.text || c || "" }) };
       return { tone: null, text: it.text || it.kind || "" };
     }
     function passes(it) {
+      if (it.kind === "announce" && it.venue !== "v07") return false;          // other venues' adverts are not this market's news
       if (S.filter === "trades") return (it.src === "plaza" && it.kind === "match") || it.kind === "deal" || (it.kind === "offer" && it.src === "game" && it.venue === "v07");
       if (S.filter === "agents") return it.src === "agent" || (it.src === "plaza" && it.kind !== "match");
       if (S.filter === "mine") return it.team === me || it.to === me;

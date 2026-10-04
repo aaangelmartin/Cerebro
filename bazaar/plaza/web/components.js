@@ -166,7 +166,7 @@
   }
   function pageHead(title, sub, ...right) {
     return el("header", { class: "page-head" }, el("div", null, el("h1", { class: "page-title" }, title), sub ? el("p", { class: "page-sub" }, sub) : null),
-              right.length ? el("div", { style: { marginLeft: "auto", display: "flex", gap: "8px" } }, right) : null);
+              right.length ? el("div", { style: { marginLeft: "auto", display: "flex", gap: "8px", flexWrap: "wrap" } }, right) : null);
   }
   function kpis(rows) {
     return el("div", { class: "kpis" }, rows.map((r) => el("div", { class: "kpi" }, label(r.label), el("span", { class: "kpi-value" }, r.value),
