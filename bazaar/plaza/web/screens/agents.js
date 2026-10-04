@@ -81,7 +81,10 @@
         el("div", null, el("h1", { class: "page-title agents-title" }, "AGENTS.md"), el("p", { class: "page-sub" }, t("agents.sub"))),
         el("div", { class: "agents-actions" }, el("a", { class: "agents-raw", href: "/plaza/AGENTS.md", target: "_blank", rel: "noopener", title: t("agents.raw") }, raw), copyBtn)));
       const cols = root.appendChild(el("div", { class: "agents-cols" }));
-      const toc = cols.appendChild(el("nav", { class: "agents-toc", "aria-label": t("agents.index") }));
+      // The index: a column on a wide screen, a fold at full width above the document on a phone.
+      const wide = window.matchMedia("(min-width: 761px)").matches;
+      const fold = cols.appendChild(el("details", { class: "agents-fold", open: wide ? "" : null }, el("summary", { class: "agents-fold-sum" }, K.icon("chevron", 14), t("agents.index"))));
+      const toc = fold.appendChild(el("nav", { class: "agents-toc", "aria-label": t("agents.index") }));
       const doc = cols.appendChild(el("article", { class: "agents-doc" }, K.state("loading")));
       root.appendChild(K.endpoint("GET /plaza/AGENTS.md", "GET /plaza/api/openapi.json"));
 
@@ -97,6 +100,7 @@
           K.add(K.clear(toc), parsed.toc.filter((h) => h.level > 1).map((h) => el("a", { class: "agents-toc-item lv" + h.level, href: "#" + h.id, onclick: (e) => {
             e.preventDefault();
             const target = document.getElementById(h.id);
+            if (!wide) fold.removeAttribute("open");
             if (target) target.scrollIntoView({ block: "start" });
             toc.querySelectorAll(".active").forEach((a) => a.classList.remove("active"));
             e.currentTarget.classList.add("active");

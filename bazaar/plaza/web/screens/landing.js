@@ -36,80 +36,106 @@
   }
 
 
-  // ---- the animated demo: one deal from match to settled, the card flying into its slot, a page completing.
-  // Everything here is a drawing with real cards of the catalog and is labelled "demo"; the counters stay real.
-  const C = (ref, name, rarity, color) => ({ ref, name, rarity, color, art: "/plaza/art/" + ref + ".svg" });
-  const SAL = "#2E86AB";
-  const PAGE = [C("SAL-01", "Escaparate de Serrano", "common", SAL), C("SAL-02", "El Portero", "common", SAL), C("SAL-03", "Perrito con Abrigo", "common", SAL),
-                C("SAL-04", "Café en Goya", "common", SAL), C("SAL-05", "Taxi Blanco", "common", SAL), C("SAL-06", "La Galería", "uncommon", SAL),
-                C("SAL-07", "Mercado de la Paz", "uncommon", SAL), C("SAL-08", "Guantería Antigua", "uncommon", SAL), C("SAL-09", "El Marqués", "rare", SAL),
-                C("SAL-10", "Museo Lázaro Galdiano", "rare", SAL)];
-  // Two swaps of the same rarity; each one brings a card the page misses, the second one completes it.
-  const DEALS = [{ gives: C("MAL-06", "Tienda de Discos", "uncommon", "#7B2CBF"), gets: PAGE[6] }, { gives: SAMPLE.gives, gets: PAGE[9] }];
+  // ---- the animated demo: one deal from match to settled, the card received dropping into its slot, and a
+  // different collection on every lap, each one at its own point. Everything here is a drawing with real cards of
+  // the catalog and is labelled "demo"; the counters stay real.
+  const SETS = {
+    LAV: ["Lavapiés", "#E4572E", ["La Corrala", "El Frutero de Argumosa", "Té Moruno", "Mural de la Esquina", "Bici de Reparto", "La Tabacalera", "Samosas de la Plaza", "Teatro Valle-Inclán", "Cine Doré", "Fiesta de San Cayetano"]],
+    MAL: ["Malasaña", "#7B2CBF", ["Vinilo de la Movida", "Plaza del Dos de Mayo", "Cartel de Conciertos", "El Tatuador", "Café de Madrugada", "Tienda de Discos", "Mercado de San Ildefonso", "La Vía Láctea", "La Heroína del Dos de Mayo", "Noche de Movida"]],
+    SAL: ["Salamanca", "#2E86AB", ["Escaparate de Serrano", "El Portero", "Perrito con Abrigo", "Café en Goya", "Taxi Blanco", "La Galería", "Mercado de la Paz", "Guantería Antigua", "El Marqués", "Museo Lázaro Galdiano"]],
+    LAT: ["La Latina", "#F4A259", ["Caña en la Cava Baja", "Puesto del Rastro", "Huevos Rotos", "Mercado de la Cebada", "El Organillero", "La Chulapa", "Vermut del Domingo", "Las Vistillas", "San Isidro", "El Mesón de la Cava"]],
+    RET: ["El Retiro", "#3BB273", ["Barca del Estanque", "La Castañera", "El Titiritero", "Paseo de Coches", "La Ardilla", "La Rosaleda", "Fuente de la Alcachofa", "Palacio de Velázquez", "El Ángel Caído", "Monumento a Alfonso XII"]],
+  };
+  const RAR = (n) => (n <= 5 ? "common" : n <= 8 ? "uncommon" : "rare");
+  const cardOf = (set, n) => { const ref = set + "-" + String(n).padStart(2, "0"); return { ref, name: SETS[set][2][n - 1], rarity: RAR(n), color: SETS[set][1], art: "/plaza/art/" + ref + ".svg" }; };
+  // One collection at a time, until it is complete: the page starts with these slots empty and one deal after
+  // another brings each card. The card given for it is the same number of the next collection (same rarity).
+  const ORDER = ["SAL", "LAV", "MAL", "RET", "LAT"];
+  const MISSING = { SAL: [3, 7, 10], LAV: [2, 5, 8, 9], MAL: [1, 6, 10], RET: [4, 7, 9], LAT: [2, 5, 6, 8] };
   const STATES = ["proposed", "offer_on_v07", "accepted", "settled"];
   const DEMO_ROWS = [["t04", "t09", "SAL-10"], ["t02", "t13", "LAV-09"], ["t07", "t16", "RET-08"], ["t11", "t03", "MAL-06"], ["t05", "t14", "LAT-02"], ["t17", "t08", "SAL-07"]];
   const short = (ref) => String(ref).replace("-", " ");
   const still = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
 
-  /** Builds the stage, the page and the ticker; start() runs the loop and returns stop(). */
+  /** Builds the animation (the deal on top, the page under it, nothing boxed) and the ticker; start() runs the
+   *  loop and returns stop(). */
   function demo() {
     const seatA = el("div", { class: "landing-seat" }), seatB = el("div", { class: "landing-seat" });
-    const talk = el("div", { class: "landing-talk", "aria-hidden": "true" });
-    const states = el("ol", { class: "landing-states" }, STATES.map((k) => el("li", { class: "landing-state" }, t("state." + k))));
-    const stage = el("div", { class: "landing-stage" },
-      el("div", { class: "landing-stage-head" }, el("span", { class: "label" }, t("landing.anim.title")), el("span", { class: "chip" }, t("landing.anim.demo"))),
-      el("div", { class: "landing-pair" },
-        el("div", { class: "landing-side" }, K.label(t("landing.anim.agentA"), "give"), seatA),
-        el("span", { class: "landing-swap" }, K.icon("swap", 22)),
-        el("div", { class: "landing-side" }, K.label(t("landing.anim.agentB"), "get"), seatB)),
-      talk, states);
-
-    const count = el("span", { class: "landing-page-count num" });
+    // The four steps of a deal, as one line of nodes: done ones carry a check, the current one is lit.
+    const states = el("ol", { class: "landing-steps4" }, STATES.map((k) => el("li", { class: "landing-s4" },
+      el("span", { class: "landing-s4-node" }, K.icon("check", 11)), el("span", { class: "landing-s4-name" }, t("state." + k)))));
+    // Each agent on its side of the deal: who it is, what it is doing and what it says.
+    const agent = (side) => {
+      const team = el("span", { class: "landing-agent-team" }), status = el("span", { class: "landing-agent-status" }), says = el("div", { class: "landing-agent-says", "aria-hidden": "true" });
+      const node = el("div", { class: "landing-agent is-" + side },
+        el("div", { class: "landing-agent-chip" }, K.icon("agent", 16), el("div", { class: "landing-agent-id" }, el("span", { class: "landing-agent-name" }, t("landing.anim.agent" + side.toUpperCase())), team), status), says);
+      return { node, team, status, says };
+    };
+    const A = agent("a"), B = agent("b");
+    const name = el("span", { class: "landing-page-name" }), count = el("span", { class: "landing-page-count num" });
     const done = el("span", { class: "landing-page-done" }, K.icon("check", 13), t("landing.anim.complete"));
     const news = el("span", { class: "landing-page-news" });
-    const grid = el("div", { class: "landing-page-grid" });
-    const page = el("section", { class: "landing-page", style: { "--set": SAL }, "aria-label": t("landing.anim.page") },
-      el("div", { class: "landing-page-head" }, el("span", { class: "landing-page-name" }, t("landing.anim.page")), el("span", { class: "label" }, "SAL · 01–10"), count, news, done), grid);
+    const slots = Array.from({ length: 10 }, () => el("div", { class: "landing-slot" }));
+    const page = el("div", { class: "landing-page" }, el("div", { class: "landing-page-head" }, name, count, news, done), el("div", { class: "landing-page-grid" }, slots));
+    // Two panels, one over the other and of the same width: the deal and the page it feeds.
+    const anim = el("div", { class: "landing-anim", role: "img", "aria-label": t("landing.anim.title") },
+      el("div", { class: "landing-box landing-deal" },
+        el("div", { class: "landing-deal-head" }, el("span", { class: "label" }, t("landing.anim.demo") + " · " + t("landing.anim.title")), states),
+        A.node,
+        el("div", { class: "landing-pair" }, seatA, el("span", { class: "landing-swap" }, K.icon("swap", 20)), seatB),
+        B.node),
+      el("div", { class: "landing-box" }, page));
 
     const tickerList = el("div", { class: "landing-ticker-list" });
     const tickerLabel = el("span", { class: "label" }, t("landing.ticker.demo"));
     const ticker = el("div", { class: "landing-ticker" }, el("div", { class: "landing-ticker-head" }, tickerLabel), tickerList);
 
-    let owned = new Set();
-    function drawPage(missing) {
-      owned = new Set(PAGE.map((c) => c.ref).filter((r) => !missing.includes(r)));
-      K.clear(grid);
-      K.add(grid, PAGE.map((c) => el("div", { class: "landing-slot", "data-ref": c.ref }, K.card(c, { owned: owned.has(c.ref), size: "fluid" }),
-        el("span", { class: "landing-slot-ref" }, short(c.ref)))));
+    let owned = 0;
+    function drawCount() {
+      count.textContent = t("landing.anim.count", { n: owned, of: 10 });
+      page.classList.toggle("is-complete", owned === 10);
+    }
+    /** Puts a collection on the page. The slots stay where they are; only what is inside them changes. */
+    function drawPage(set, missing) {
+      anim.style.setProperty("--set", SETS[set][1]);
+      name.textContent = t("landing.anim.page", { set: SETS[set][0] }) + " · " + set;
+      news.textContent = "";
+      owned = 10 - missing.length;
+      slots.forEach((slot, i) => {
+        const c = cardOf(set, i + 1);
+        K.clear(slot);
+        K.add(slot, [K.card(c, { owned: !missing.includes(i + 1), size: "fluid" }), el("span", { class: "landing-slot-ref" }, short(c.ref)), el("span", { class: "landing-slot-name" }, c.name)]);
+      });
       drawCount();
     }
-    function drawCount() {
-      count.textContent = t("landing.anim.count", { n: owned.size, of: PAGE.length });
-      page.classList.toggle("is-complete", owned.size === PAGE.length);
-    }
-    function fill(c) {
-      const slot = grid.querySelector('[data-ref="' + c.ref + '"]');
-      if (!slot) return;
-      const card = K.card(c, { size: "fluid" });
+    function fill(c, n) {
+      const slot = slots[n - 1], card = K.card(c, { size: "fluid" });
       card.classList.add("landing-pop");
       slot.replaceChild(card, slot.firstChild);
-      owned.add(c.ref);
+      owned += 1;
       news.textContent = t("landing.anim.joined", { card: c.name + " (" + short(c.ref) + ")" });
       drawCount();
     }
-    function seat(d) {
-      K.clear(seatA).appendChild(K.card(d.gives, { size: "fluid" }));
-      K.clear(seatB).appendChild(K.card(d.gets, { size: "fluid" }));
+    function seat(gives, gets) {
+      const a = K.card(gives, { size: "fluid" }), b = K.card(gets, { size: "fluid" });
+      a.classList.add("landing-enter"); b.classList.add("landing-enter");
+      K.clear(seatA).appendChild(a); K.clear(seatB).appendChild(b);
+      return [a, b];
     }
-    function setState(i) { [...states.children].forEach((li, k) => { li.classList.toggle("is-on", k <= i); li.classList.toggle("is-now", k === i); }); }
+    function setState(i) {
+      [...states.children].forEach((li, k) => { li.classList.toggle("is-done", k < i); li.classList.toggle("is-now", k === i); });
+      anim.classList.toggle("is-settled", i === 3);
+    }
+    /** One agent speaks at a time; its line comes in next to its own chip. */
     function say(who, text) {
-      K.clear(talk);
-      if (text) talk.appendChild(el("span", { class: "landing-say is-" + who }, K.icon("agent", 12), el("b", null, t("landing.anim.agent" + who.toUpperCase())), el("span", null, text)));
+      K.clear(A.says); K.clear(B.says);
+      if (who && text) (who === "a" ? A : B).says.appendChild(el("span", { class: "landing-say" }, text));
     }
+    function status(a, b) { A.status.textContent = a ? t("landing.anim.st." + a) : ""; B.status.textContent = b ? t("landing.anim.st." + b) : ""; }
+    function teams(b) { A.team.textContent = t("landing.anim.team", { n: 4 }); B.team.textContent = t("landing.anim.team", { n: b }); }
     function row(r, real) {
-      const node = el("div", { class: "landing-tick-row" }, el("span", { class: "landing-tick-teams" }, r[0] + " ⇄ " + r[1]), el("span", null, short(r[2])),
-        el("span", { class: "landing-tick-ok" }, t("state.settled").toLowerCase()), el("span", { class: "landing-tick-t" }, typeof r[3] === "number" ? K.tick(r[3]) : ""));
-      tickerList.appendChild(node);
+      tickerList.appendChild(el("div", { class: "landing-tick-row" }, el("span", { class: "landing-tick-teams" }, r[0] + " ⇄ " + r[1]), el("span", null, short(r[2])),
+        el("span", { class: "landing-tick-ok" }, t("state.settled").toLowerCase()), el("span", { class: "landing-tick-t" }, typeof r[3] === "number" ? K.tick(r[3]) : "")));
       while (tickerList.children.length > 4) tickerList.removeChild(tickerList.firstChild);
       if (real) tickerLabel.textContent = t("landing.ticker.real");
     }
@@ -128,71 +154,96 @@
         })();
       });
       const baseTick = () => ((window.Plaza.state.status || {}).tick || 1500);
+      const demoRow = (back) => { const r = rows[at++ % rows.length]; return real ? r : [r[0], r[1], r[2], baseTick() - (back || 0)]; };
 
+      for (let k = 4; k > 0; k--) row(demoRow(k), false);
       // Real deals closed on v07 replace the demo rows when there are any.
       API.get("/api/floor").then((d) => {
         const got = ((d && d.items) || []).filter((it) => it && it.team && it.to && it.ref && ((it.src === "plaza" && it.kind === "match" && it.state === "settled")
           || (it.src === "game" && it.kind === "deal" && it.venue === "v07" && !it.dealer))).slice(-6).map((it) => [it.team, it.to, it.ref, it.tick]);
-        if (got.length && !stopped) { rows = got; real = true; at = 0; K.clear(tickerList); got.slice(-3).forEach((r) => row(r, true)); }
+        if (got.length && !stopped) { rows = got; real = true; at = 0; K.clear(tickerList); got.forEach((r) => row(r, true)); }
       }, () => {});
 
-      if (still()) {                                   // no motion asked: the last frame, drawn once
-        const d = DEALS[DEALS.length - 1];
-        drawPage([]); seat({ gives: d.gets, gets: d.gives }); setState(3);
-        say("b", t("landing.anim.say2"));
-        news.textContent = t("landing.anim.joined", { card: d.gets.name + " (" + short(d.gets.ref) + ")" });
-        rows.slice(0, 3).forEach((r, i) => row(real ? r : [...r, baseTick() - 3 + i], real));
+      if (still()) {                                   // no motion asked: a completed page, drawn once
+        drawPage("SAL", []); seat(cardOf("LAV", 10), cardOf("SAL", 10)); setState(3); teams(9); status("settled", "settled"); say("a", t("landing.anim.say4"));
+        news.textContent = t("landing.anim.joined", { card: cardOf("SAL", 10).name + " (SAL 10)" });
         return () => { stopped = true; };
       }
 
       (async function tickerLoop() {
-        while (!stopped) {
-          const r = rows[at++ % rows.length];
-          row(real ? r : [r[0], r[1], r[2], baseTick()], real);
-          await wait(2400);
-        }
+        while (!stopped) { await wait(2600); if (!real || rows.length > 1) row(demoRow(0), real); }
       })();
 
       (async function loop() {
+        let first = true, deals = 0;
+        const BTEAMS = [9, 13, 16, 2, 7];
         while (!stopped) {
-          drawPage(DEALS.map((d) => d.gets.ref));
-          news.textContent = "";
-          for (const d of DEALS) {
-            if (stopped) return;
-            stage.classList.remove("is-out"); seat(d); setState(0); say(null);
-            const a = seatA.firstChild, b = seatB.firstChild;
-            await wait(900);
-            say("a", t("landing.anim.say1", { a: short(d.gives.ref), b: short(d.gets.ref) }));
-            await wait(1100);
-            say("b", t("landing.anim.say2"));
-            await wait(900);
-            setState(1); say("a", t("landing.anim.say3"));
-            await wait(900);
-            setState(2);
-            const dx = seatB.getBoundingClientRect().left - seatA.getBoundingClientRect().left;       // the cards cross
-            a.style.transform = "translateX(" + dx + "px)"; b.style.transform = "translateX(" + (-dx) + "px)";
-            await wait(800);
-            setState(3); say(null);
-            await wait(500);
-            const slot = grid.querySelector('[data-ref="' + d.gets.ref + '"]');                         // the card received flies to its slot
-            if (slot) {
-              const from = b.getBoundingClientRect(), to = slot.firstChild.getBoundingClientRect();
-              b.classList.add("is-flying");
-              b.style.transform = "translate(" + (-dx + to.left - from.left) + "px," + (to.top - from.top) + "px) scale(" + (to.width / from.width) + ")";
-              await wait(820);
+          for (let si = 0; si < ORDER.length; si++) {
+            const set = ORDER[si], other = ORDER[(si + 1) % ORDER.length];
+            if (first) { drawPage(set, MISSING[set]); first = false; }
+            else {                                                       // the next collection: slot by slot out, then in
+              anim.classList.add("is-turning");
+              await wait(700);
               if (stopped) return;
-              fill(d.gets);
-              b.style.opacity = "0";
+              K.clear(seatA); K.clear(seatB);
+              drawPage(set, MISSING[set]); setState(-1); say(null); status(null, null);
+              anim.classList.remove("is-turning");
+              await wait(500);
             }
-            await wait(owned.size === PAGE.length ? 2200 : 900);
-            stage.classList.add("is-out");
-            await wait(380);
+            for (const n of MISSING[set]) {
+              if (stopped) return;
+              const gives = cardOf(other, n), gets = cardOf(set, n);
+              const [a, b] = seat(gives, gets);
+              teams(BTEAMS[deals++ % BTEAMS.length]);
+              setState(0); say(null); status("matched", "matched");
+              await wait(800);
+              say("a", t("landing.anim.say1", { a: short(gives.ref), b: short(gets.ref) }));
+              await wait(1300);
+              say("b", t("landing.anim.say2"));
+              await wait(1200);
+              setState(1); say("a", t("landing.anim.say3")); status("posted", "matched");
+              await wait(1200);
+              setState(2); say("b", t("landing.anim.say5")); status("posted", "accepted");
+              await wait(700);
+              // The two cards cross: both lift, one passes in front and one behind along an arc, and each settles
+              // on the other side's slot. The slots stay drawn, so it shows where each card came from.
+              const dx = seatB.getBoundingClientRect().left - seatA.getBoundingClientRect().left;
+              const lift = "0 22px 44px -10px rgba(0,0,0,.85)", flat = "0 0 0 0 rgba(0,0,0,0)", arc = Math.round(a.offsetHeight * 0.16);
+              a.classList.remove("landing-enter"); b.classList.remove("landing-enter");
+              a.style.zIndex = "46"; b.style.zIndex = "44";
+              const opt = { duration: 1500, easing: "ease-in-out", fill: "forwards" };
+              a.animate([{ transform: "none", boxShadow: flat }, { transform: "translate(0," + (-arc / 3) + "px) scale(1.07)", boxShadow: lift, offset: 0.18 },
+                         { transform: "translate(" + dx / 2 + "px," + (-arc) + "px) scale(1.1)", boxShadow: lift, offset: 0.5 },
+                         { transform: "translate(" + dx + "px," + (-arc / 4) + "px) scale(1.05)", boxShadow: lift, offset: 0.84 },
+                         { transform: "translate(" + dx + "px,3px) scale(.99)", boxShadow: flat, offset: 0.94 }, { transform: "translate(" + dx + "px,0)", boxShadow: flat }], opt);
+              b.animate([{ transform: "none", boxShadow: flat }, { transform: "translate(0," + arc / 3 + "px) scale(1.02)", boxShadow: lift, offset: 0.18 },
+                         { transform: "translate(" + (-dx / 2) + "px," + arc + "px) scale(.9)", boxShadow: lift, offset: 0.5 },
+                         { transform: "translate(" + (-dx) + "px," + arc / 4 + "px) scale(1.03)", boxShadow: lift, offset: 0.84 },
+                         { transform: "translate(" + (-dx) + "px,3px) scale(.99)", boxShadow: flat, offset: 0.94 }, { transform: "translate(" + (-dx) + "px,0)", boxShadow: flat }], opt);
+              await wait(1560);
+              setState(3); say("a", t("landing.anim.say4")); status("settled", "settled");
+              await wait(600);
+              // And the one received goes on to its slot on the page, leaving its slot of the deal empty.
+              const from = b.getBoundingClientRect(), to = slots[n - 1].firstChild.getBoundingClientRect();
+              const tx = -dx + (to.left + to.width / 2) - (from.left + from.width / 2), ty = (to.top + to.height / 2) - (from.top + from.height / 2), k = to.width / from.width;
+              b.style.zIndex = "48";
+              b.animate([{ transform: "translate(" + (-dx) + "px,0)", boxShadow: flat }, { transform: "translate(" + (-dx) + "px," + (-arc / 2) + "px) scale(1.06)", boxShadow: lift, offset: 0.2 },
+                         { transform: "translate(" + tx + "px," + ty + "px) scale(" + k * 1.08 + ")", boxShadow: lift, offset: 0.9 },
+                         { transform: "translate(" + tx + "px," + ty + "px) scale(" + k + ")", boxShadow: flat }], { duration: 1150, easing: "ease-in-out", fill: "forwards" });
+              await wait(1160);
+              if (stopped) return;
+              fill(gets, n);
+              b.remove();
+              await wait(owned === 10 ? 2800 : 900);
+              a.classList.add("is-leaving");
+              await wait(320);
+            }
           }
         }
       })();
       return () => { stopped = true; };
     }
-    return { stage, page, ticker, start };
+    return { anim, ticker, start };
   }
 
   /** Steps and reasons come in as they are scrolled to. Without motion, or without the observer, they are just there. */
@@ -216,17 +267,18 @@
         : K.btn(t("landing.connect"), { kind: "primary", icon: "agent", onclick: () => ctx.go("/plaza/connect") });
       cta.classList.add("landing-cta");
 
+      const steps = el("ol", { class: "landing-steps" }, [1, 2, 3].map((n) => el("li", { class: "landing-step" },
+        el("span", { class: "landing-step-n" }, String(n)),
+        el("div", null, el("div", { class: "landing-step-title" }, t("landing.step" + n)), el("div", { class: "landing-step-text" }, t("landing.step" + n + "Text"))))));
       const D = demo();
       const hero = el("section", { class: "landing-hero" },
         el("div", { class: "landing-hero-text" },
           el("h1", { class: "landing-title" }, t("landing.title1"), el("br"), t("landing.title2"), el("br"), t("landing.title3")),
           cta,
           el("p", { class: "landing-note" }, t("landing.note"))),
-        el("div", { class: "landing-right" }, D.stage, D.ticker));
+        D.anim,
+        el("div", { class: "landing-under" }, steps, D.ticker));
 
-      const steps = el("ol", { class: "landing-steps" }, [1, 2, 3].map((n) => el("li", { class: "landing-step" },
-        el("span", { class: "landing-step-n" }, String(n)),
-        el("div", null, el("div", { class: "landing-step-title" }, t("landing.step" + n)), el("div", { class: "landing-step-text" }, t("landing.step" + n + "Text"))))));
 
       const live = el("p", { class: "landing-live" });
       const whyBox = el("section", { class: "landing-why", "aria-labelledby": "landing-why-title" },
@@ -241,7 +293,7 @@
         el("span", { class: "landing-foot-gap" }),
         langSwitch());
 
-      K.add(root, [el("div", { class: "landing-top" }, hero, D.page, steps), whyBox, foot,
+      K.add(root, [hero, whyBox, foot,
         el("div", { class: "landing-end" }, K.endpoint("GET /plaza/api/stats", "POST /plaza/api/connect/start"))]);
 
       // What has really happened on v07 so far; nothing is shown when the market does not answer.
@@ -251,7 +303,7 @@
       }, () => {});
 
       const stopDemo = D.start();
-      const stopReveal = reveal([...steps.children, ...whyBox.querySelectorAll(".landing-arg")]);
+      const stopReveal = reveal([...whyBox.querySelectorAll(".landing-arg")]);
       return () => { stopDemo(); stopReveal(); };
     },
   });
