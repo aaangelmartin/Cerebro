@@ -116,14 +116,14 @@ def joint_days_bonus(v: DuelView, days: int | None) -> float:
 
 
 def choose_days(v: DuelView, pie: float | None = None) -> int | None:
+    """The delivery days we ask for, from the sign the game gives THIS duel (days_meaning, never the role
+    alone): days pay us -> 10; days cost us -> 0 (at most the rival's own lowest days as cheap goodwill).
+    Sunday, Duels III: giving the rival "its" day and charging it in the price (the day prior) did not get
+    paid: as seller the 0-day deals averaged 15 points against 39 with 10 days, and as buyer two openings
+    with 10 days closed at -15.1 and -28.3 (duels 11231, 11544)."""
     if not v.uses_days:
         return None
     w = days_weight(v)
-    if rival_cares_more(v):
-        # Give the day to whoever cares more and charge it in the price (utility-based asks do that):
-        # days cost us -> the rival's gain is larger, so deliver late; days pay us -> its loss is larger,
-        # so deliver at once and ask for more money instead.
-        return DAYS_MAX if w < 0 else 0
     if v.days_ambiguous:
         # We do not know if days help or hurt us, so every offer is priced safe under both readings: the
         # padding is |w| x days. Give the rival its own last days only while that padding is small.
@@ -133,14 +133,44 @@ def choose_days(v: DuelView, pie: float | None = None) -> int | None:
         return 0
     if w < 0:
         return _days_when_they_cost(v, w, pie)
-    wr = rival_days_weight(v, w)
-    joint = w + wr
-    if abs(joint) < 1e-9:
-        last = next((o.days for o in reversed(v.rival_offers()) if o.days is not None), None)
-        if last is not None:
-            return last
-        return DAYS_MAX if w > 0 else 0 if w < 0 else DAYS_MAX // 2
-    return DAYS_MAX if joint > 0 else 0
+    if w > 0:
+        return DAYS_MAX
+    last = next((o.days for o in reversed(v.rival_offers()) if o.days is not None), None)
+    return last if last is not None else DAYS_MAX // 2
+
+
+def safe_days(v: DuelView, price: float, days: int | None) -> tuple[int | None, str | None]:
+    """The days an offer of ours may carry at `price`, whoever chose them (Claude or code): days that pay
+    us go out at 10; days that cost us only while they cost under COST_DAYS_GOODWILL of the price margin,
+    else 0. Returns (days, note or None)."""
+    if not v.uses_days or days is None or v.days_ambiguous:
+        return days, None
+    w = days_weight(v)
+    if w > 0 and days < DAYS_MAX:
+        return DAYS_MAX, f"each day pays us {w:g}: days {days} -> {DAYS_MAX}"
+    if w < 0 and days > 0 and abs(w) * days >= COST_DAYS_GOODWILL * max(0.0, v.surplus(price)):
+        return 0, f"each day costs us {abs(w):g}: days {days} -> 0"
+    return days, None
+
+
+def replace_losing_offer(v: DuelView, mv: Move) -> tuple[Move, list[str]]:
+    """Our standing offer is worth less than MIN_SURPLUS once days count and this tick's move would leave it
+    on the table (the rival can take it at any moment): send the same price with safe days instead."""
+    if mv.action != "wait" or not v.uses_days:
+        return mv, []
+    prev = v.our_offer or (v.our_offers()[-1] if v.our_offers() else None)
+    if prev is None or prev.days is None or v.surplus(prev.price) < MIN_SURPLUS \
+            or v.safe_utility(prev.price, prev.days) >= MIN_SURPLUS:
+        return mv, []
+    days = 0 if days_weight(v) < 0 or v.days_ambiguous else DAYS_MAX
+    if days == prev.days or v.safe_utility(prev.price, days) < MIN_SURPLUS:
+        return mv, []
+    return Move("offer", prev.price, days, text=template_text(v, prev.price, days),
+                reason=f"our standing offer {prev.price} P / {prev.days} days is worth "
+                       f"{v.utility(prev.price, prev.days):.1f} to us: replaced with {days} days",
+                expected_points=round(points(v.utility(prev.price, days), v.decay, v.rounds_if_we_send()), 2),
+                source=mv.source, econ=mv.econ, lesson_ids=list(mv.lesson_ids)), \
+        ["standing offer loses once days count: replaced"]
 
 
 # --- economics ----------------------------------------------------------------------------------------
@@ -456,9 +486,16 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
         if days is None:
             days = 0
         days = max(0, min(DAYS_MAX, days))
+    days, dnote = safe_days(v, price, days)
+    if dnote:
+        notes.append(dnote)
     if v.days_ambiguous and days is not None and v.safe_utility(price, days) < MIN_SURPLUS:
         notes.append("days sign ambiguous: price raised so the offer is safe under both readings")
         price = price_for(v.role, v.limit, MIN_SURPLUS + abs(v.days_w) * days)
+    if v.safe_utility(price, days) < MIN_SURPLUS:
+        # The rival can take any offer we send: one worth less than MIN_SURPLUS with its days is never sent.
+        notes.append(f"offer {price} P / {days} days is worth {v.safe_utility(price, days):.1f} to us: not sent")
+        return (guard(v, fallback)[0] if fallback is not None and fallback is not mv else Move("wait")), notes
     mv.price, mv.days = price, days
 
     # If the rival already offers at least this, accepting is strictly better than asking for less.
@@ -478,7 +515,7 @@ def guard(v: DuelView, mv: Move, fallback: Move | None = None) -> tuple[Move, li
 
     text = (mv.text or "").replace("\n", " ").strip()
     if not text or not re.search(rf"(?<!\d){price}(?!\d)", text) or len(text) > 280 or \
-            re.findall(r"\d+", text).count(str(price)) == 0 or _other_prices(text, price, days):
+            re.findall(r"\d+", text).count(str(price)) == 0 or _other_prices(text, price, days) or dnote:
         if text:
             notes.append("text did not carry the exact price: template")
         text = template_text(v, price, days)

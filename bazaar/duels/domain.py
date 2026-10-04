@@ -20,7 +20,7 @@ from ..core.types import Action, Outcome
 from ..lab import feedback
 from .model import MIN_SURPLUS, DuelView, parse_duel, points
 from .opponent import OpponentMemory
-from .policy import (PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_if_rival_unchanged, hold_rule,
+from .policy import (PARAMS, Move, bound_claude, claude_mode, economics, guard, hold_if_rival_unchanged, hold_rule, replace_losing_offer,
                      hold_vs_unmoved_rival, plan)
 from .prompt import DUEL_MOVE_TOOL, parse_tool, system_blocks, user_message
 
@@ -192,6 +192,8 @@ class DuelsDomain:
         if not hnotes:
             mv, hnotes = hold_if_rival_unchanged(v, mv)
         notes = notes + hnotes
+        mv, rnotes = replace_losing_offer(v, mv)
+        notes = notes + rnotes
         mv.source = "fallback"
         self.last_notes[v.id] = notes
         return opp, mv
@@ -332,12 +334,15 @@ class DuelsDomain:
                 if not hnotes:
                     safe, hnotes = hold_vs_unmoved_rival(v, safe)
                 notes = notes + hnotes
+                safe, rnotes = replace_losing_offer(v, safe)
+                notes = notes + rnotes
                 if notes:
                     self.last_notes[v.id] = notes
                     log.info("duel %s: guard %s", v.id, notes)
                 mv = safe
             else:
                 mv = self._without_claude(v, base, why.get(v.id, "not asked this tick"))
+                mv, _ = replace_losing_offer(v, mv)
             moves[v.id] = mv
         return self._finish(views, moves, bases)
 

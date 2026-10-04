@@ -1,4 +1,4 @@
-"""Duels III: the delivery day goes to whoever cares more, a duel's own length drives the time schedule, and
+"""Duels III: the delivery day follows our own sign (the day prior no longer moves it), a duel's own length drives the time schedule, and
 the buyer opens a little closer than the seller."""
 from __future__ import annotations
 
@@ -41,22 +41,23 @@ class TestRivalDayPrior(unittest.TestCase):
 
 
 class TestDayGoesToWhoCaresMore(unittest.TestCase):
-    def test_buyer_gives_ten_days_when_the_seller_gains_more(self):
+    def test_buyer_keeps_zero_days_even_when_the_seller_gains_more(self):
+        # Sunday: giving the seller its ten days and charging them in the price was not paid back (duels
+        # 11231 and 11544 closed below zero). Days that cost us stay at 0 whatever the prior says.
         v = live(9, "buyer", 1.54)                       # a day costs us 1.54
         v.rival_w_prior = 5.8                            # and pays the seller about 5.8
         self.assertTrue(rival_cares_more(v))
-        self.assertEqual(choose_days(v, pie=40), DAYS_MAX)
-        self.assertAlmostEqual(joint_days_bonus(v, DAYS_MAX), (5.8 - 1.54) * DAYS_MAX, places=3)
+        self.assertEqual(choose_days(v, pie=40), 0)
         mv = plan(v, mem().assess(v))
-        self.assertEqual((mv.action, mv.days), ("offer", DAYS_MAX))
-        self.assertGreaterEqual(v.utility(mv.price, mv.days), 1)        # the days are charged in the price
-        self.assertGreaterEqual(v.surplus(mv.price), 1)                 # and the price stays inside our limit
+        self.assertEqual((mv.action, mv.days), ("offer", 0))
+        self.assertGreaterEqual(v.utility(mv.price, mv.days), 1)
+        self.assertGreaterEqual(v.surplus(mv.price), 1)
 
-    def test_seller_delivers_at_once_when_the_buyer_loses_more(self):
+    def test_seller_keeps_ten_days_even_when_the_buyer_loses_more(self):
         v = live(9, "seller", 1.8, item="Fiesta de San Cayetano", your_limit=96)
         v.rival_w_prior = 6.6
-        self.assertEqual(choose_days(v, pie=40), 0)
-        self.assertEqual(joint_days_bonus(v, 0), 0.0)
+        self.assertEqual(choose_days(v, pie=40), DAYS_MAX)
+        self.assertEqual(joint_days_bonus(v, DAYS_MAX), 0.0)
 
     def test_close_weights_or_no_prior_keep_the_old_day(self):
         buyer = live(9, "buyer", 4.31, item="La Vía Láctea")

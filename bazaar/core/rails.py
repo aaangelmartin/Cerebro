@@ -346,6 +346,15 @@ def rail_duel(action: Action, sit=None, ctx=None) -> Verdict:
         return Verdict(False, "duel", "days required")
     if days is not None and not (0 <= _num(days, -1) <= 10):
         return Verdict(False, "duel", f"days {days} outside 0..10")
+    if days is not None and duel.get("your_days_weight") is not None:
+        # The score counts the days too: a price inside the limit can still lose (duel 11544: 75 P under a
+        # limit of 105 with 10 days at 5.83 a day = -28.3). Same reading of the sign as the duel policy.
+        from ..duels.model import parse_duel
+        v = parse_duel({**duel, "status": "live", "result": None}, 0)
+        if v is not None:
+            u = v.safe_utility(price, int(_num(days)))
+            if u < slack:
+                return Verdict(False, "duel", f"{price} P with {days} days is worth {u:.1f} to us (< {slack})")
     return OK
 
 
