@@ -548,12 +548,12 @@
   }
 
   // ------------------------------------------------------------------ boot
-  // ES | EN at the bottom of the menu; a change reloads the page in the other language
+  // EN | ES at the bottom of the menu; a change reloads the page in the other language
   function buildLang() {
     const box = $("lang-switch");
     if (!box) return;
     box.setAttribute("aria-label", t("shell.language"));
-    box.replaceChildren(...I18N.langs.map((l) => {
+    box.replaceChildren(...["en", "es"].filter((l) => I18N.langs.includes(l)).map((l) => {
       const on = l === I18N.lang;
       return el("button", { type: "button", class: ["lang-btn", on ? "on" : ""], "aria-pressed": on ? "true" : "false", lang: l,
         title: t("shell.lang." + l), "aria-label": t("shell.lang." + l), onclick: () => I18N.setLang(l) }, l.toUpperCase());
