@@ -45,8 +45,30 @@ def scene(rig: Rig) -> dict:
     if live("POST", "/api/suggestions"):
         me.api("POST", "/plaza/api/suggestions", {"text": "Show the last deals of each card " + EVIL, "topic": "feature"})
     rig.refresh()
+    # A warned team and a banned one: matched trades their agents saw, closed on El Rastro with an addressed offer.
+    warned = rig.agent("t06", wants=[{"ref": "MAL-09", "max": 95}])
+    banned = rig.agent("t08", wants=[{"ref": "RET-09", "max": 80}, {"ref": "RET-10", "max": 80}])
+    rig.agent("t07", for_sale=[{"ref": "MAL-09", "price": 80, "min": 60}], have=["MAL-09"])
+    rig.agent("t09", for_sale=[{"ref": "RET-09", "price": 70, "min": 50}, {"ref": "RET-10", "price": 70, "min": 50}],
+              have=["RET-09", "RET-10"])
+    rig.refresh()
+    for a in rig.agents.values():
+        a.queue()
+    for buyer, seller, ref in (("t06", "t07", "MAL-09"), ("t08", "t09", "RET-09"), ("t08", "t09", "RET-10")):
+        try:
+            oid = rig.game.post_offer(buyer, {"venue": "rastro", "give": {"cash": 65}, "want": {"cards": [ref]},
+                                              "to": seller})["id"]
+            rig.game.advance()
+            rig.refresh()
+            rig.game.accept(seller, oid, {"assets": [rig.game.asset_of(seller, ref)]})
+            rig.game.advance()
+            rig.refresh()
+        except Exception:  # noqa: BLE001 - a scene: go on with what there is
+            pass
+    live_now = rig.board.deals.get(mid) if mid else {}
     return {"base": rig.base, "session": me.session, "team": me.team, "admin_token": ADMIN_TOKEN, "match": mid,
-            "root": str(rig.root)}
+            "live_price": live_now.get("price"), "live_ref": live_now.get("ref"),
+            "warned_session": warned.session, "banned_session": banned.session, "root": str(rig.root)}
 
 
 def main() -> None:

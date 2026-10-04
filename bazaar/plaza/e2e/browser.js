@@ -173,6 +173,97 @@ async function navigation(browser, mode, session) {
   await close(flow);
 }
 
+async function finalChecks(browser) {
+  // The landing at four sizes: nothing spills, no console error, and it stands still when asked to.
+  for (const [w, h] of [[1600, 1000], [1440, 900], [1280, 720], [390, 844]]) {
+    for (const reduce of [false, true]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: reduce ? "reduce" : "no-preference" });
+      await ctx.route(BASE + "/**", (route) => route.continue({ headers: { ...route.request().headers(), "x-plaza-client": `10.90.${w % 250}.${reduce ? 2 : 1}` } }));
+      const page = await ctx.newPage();
+      const tag = `landing ${w}x${h}${reduce ? " reduced-motion" : ""}`;
+      const errs = [];
+      page.on("pageerror", (e) => hard.push(`${tag}: page error: ${String(e.message).slice(0, 160)}`));
+      page.on("console", (m) => { if (m.type() === "error" && !/401/.test(m.text())) errs.push(m.text().slice(0, 160)); });
+      await page.goto(`${BASE}/plaza/?lang=en&mock=0`, { waitUntil: "load" }).catch(() => null);
+      await page.waitForTimeout(1500);
+      const f = await page.evaluate(() => {
+        const vw = window.innerWidth, out = [];
+        for (const el of document.querySelectorAll("#app *")) {
+          const r = el.getBoundingClientRect();
+          if (r.width && (r.right > vw + 2 || r.left < -2) && getComputedStyle(el).position !== "fixed") {
+            let p = el.parentElement, clipped = false;
+            for (; p && p !== document.body; p = p.parentElement) if (/hidden|clip|auto|scroll/.test(getComputedStyle(p).overflowX)) { clipped = true; break; }
+            if (!clipped) out.push((el.className || el.tagName) + "");
+          }
+        }
+        const running = document.getAnimations().filter((a) => a.playState === "running" && (a.effect.getComputedTiming().duration || 0) > 50).length;
+        return { sideways: document.documentElement.scrollWidth - vw, spill: [...new Set(out)].slice(0, 5), running,
+          foldCta: (() => { const b = document.querySelector("#app button.primary, #app .btn.primary"); return b ? b.getBoundingClientRect().bottom <= window.innerHeight : null; })() };
+      });
+      if (f.sideways > 2 || f.spill.length) findings.push(`${tag}: spills sideways (${f.sideways}px): ${f.spill.join(", ")}`);
+      if (errs.length) findings.push(`${tag}: console errors: ${[...new Set(errs)].slice(0, 2).join(" | ")}`);
+      if (reduce && f.running) findings.push(`${tag}: ${f.running} animations still run with prefers-reduced-motion`);
+      if (f.foldCta === false) findings.push(`${tag}: the main button is below the fold`);
+      fs.mkdirSync(path.join(OUT, "final"), { recursive: true });
+      await page.screenshot({ path: path.join(OUT, "final", `landing-${w}x${h}${reduce ? "-reduced" : ""}.png`) });
+      pages += 1;
+      await ctx.close();
+    }
+  }
+  // A visitor: no side nav anywhere, a way back to the landing, and no price of a trade that is not settled.
+  for (const [name, route] of [["market", "/plaza/market"], ["activity", "/plaza/activity"], ["card", "/plaza/card/" + (info.live_ref || "SAL-10")], ["agents", "/plaza/agents"], ["docs", "/plaza/docs"], ["how", "/plaza/how"]]) {
+    for (const view of ["desktop", "mobile"]) {
+      const v = await visit(browser, { name: "visitor-" + name, route, lang: "en", view, mode: "final", mock: "0" });
+      if (!v) continue;
+      const f = await v.page.evaluate(() => {
+        const nav = document.querySelector(".sidenav");
+        return { nav: !!(nav && nav.offsetParent !== null && nav.getBoundingClientRect().width > 0), back: !!document.querySelector(".pubbar-back"),
+          text: document.body.innerText };
+      });
+      if (f.nav) hard.push(`visitor ${name} (${view}): the side nav of the app is shown to a visitor`);
+      if (!f.back && name !== "how") findings.push(`visitor ${name} (${view}): no Back to the landing`);
+      if (info.live_price && ["market", "activity", "card"].includes(name) && new RegExp(`(^|[^\\d.])${info.live_price}\\s*P`).test(f.text))
+        hard.push(`visitor ${name} (${view}): shows ${info.live_price} P, the price of a trade that is not settled`);
+      if (f.back && view === "desktop" && name === "market") {
+        await v.page.click(".pubbar-back");
+        await v.page.waitForTimeout(300);
+        const at = await v.page.evaluate(() => location.pathname);
+        if (at !== "/plaza/") hard.push(`visitor: Back from Market leads to ${at}`);
+      }
+      await close(v);
+    }
+  }
+  { // a team's screen opened by a visitor goes to the landing, never to an empty app
+    const v = await visit(browser, { name: "visitor-home", route: "/plaza/home", lang: "en", view: "desktop", mode: "final", mock: "0" });
+    if (v) {
+      const at = await v.page.evaluate(() => ({ path: location.pathname, nav: !!document.querySelector(".sidenav") && document.querySelector(".sidenav").offsetParent !== null }));
+      if (at.nav) hard.push(`visitor: /plaza/home shows the app to nobody (${at.path})`);
+      await close(v);
+    }
+  }
+  // A warned team: the overlay in the middle, the mark in the top bar, the Standing row. A banned one: told so.
+  for (const [who, session] of [["warned", info.warned_session], ["banned", info.banned_session]]) {
+    if (!session) { findings.push(`the scene has no ${who} team`); continue; }
+    for (const view of ["desktop", "mobile"]) {
+      const v = await visit(browser, { name: who + "-home", route: "/plaza/home", lang: view === "mobile" ? "es" : "en", view, mode: "final", session, mock: "0" });
+      if (!v) continue;
+      await v.page.waitForTimeout(700);
+      const f = await v.page.evaluate(() => {
+        const o = document.querySelector(".standing-overlay"), b = document.querySelector(".tb-standing");
+        const card = o && (o.firstElementChild || o).getBoundingClientRect();
+        const area = o && o.getBoundingClientRect();           // centred in the area it covers (the screen, beside the nav)
+        return { overlay: !!o, centred: card ? Math.abs((card.left + card.right) / 2 - (area.left + area.right) / 2) < 24 : null,
+          bar: !!(b && !b.hidden && b.getBoundingClientRect().width > 0), text: document.body.innerText };
+      });
+      if (!f.overlay) hard.push(`${who} team (${view}): no warning overlay`);
+      else if (f.centred === false) findings.push(`${who} team (${view}): the warning is not centred`);
+      if (!f.bar) findings.push(`${who} team (${view}): no mark in the top bar`);
+      await v.page.screenshot({ path: path.join(OUT, "final", `${who}-${view}.png`) });
+      await close(v);
+    }
+  }
+}
+
 (async () => {
   if (!BASE) { console.error("usage: node browser.js '<json from serve.py>' [outDir] [--quick]"); process.exit(2); }
   const browser = await launch();
@@ -193,6 +284,7 @@ async function navigation(browser, mode, session) {
     }
     await close(v);
   }
+  await finalChecks(browser);
   { // the panel does not exist without the admin proof
     const ctx = await browser.newContext();
     const res = await (await ctx.newPage()).goto(`${BASE}/plaza/admin/`, { waitUntil: "load" }).catch(() => null);
