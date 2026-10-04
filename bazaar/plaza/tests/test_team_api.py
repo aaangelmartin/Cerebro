@@ -110,6 +110,15 @@ class StatusTest(Base):
             out = ST.status(rec, "v07", True, False, now=now + 9.0 + 15.0 * 2 + 4.0)   # two whole ticks and 4 s later
             self.assertEqual((out["tick"], out["seconds_to_tick"], out["feed"]), (1449, 11.0, "ok"))
             self.assertEqual(ST.status(rec, "v07", True, False, now=now + 46.0)["feed"], "stale")
+            clock(rec, doors="closed", next_opens="2026-10-04T09:00:00+02:00")       # closed overnight: nothing to read
+            opens = ST._iso("2026-10-04T09:00:00+02:00").timestamp()
+            self.assertEqual(ST.status(rec, "v07", True, False, now=opens - 3600)["feed"], "ok")
+            self.assertEqual(ST.status(rec, "v07", True, False, now=opens + 20)["feed"], "ok")
+            self.assertEqual(ST.status(rec, "v07", True, False, now=opens + 120)["feed"], "stale")   # it never opened for us
+            clock(rec, paused=True)
+            self.assertEqual(ST.status(rec, "v07", True, False, now=time.time() + 9999)["feed"], "ok")
+            clock(rec)
+            now = (rec / "latest" / "clock.json").stat().st_mtime
             self.assertEqual(ST.status(rec, "v07", False, False, now=now)["market"], "off")
             self.assertEqual(ST.status(rec, "v07", False, False, now=now)["matchmaker"], "waiting")
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from .feed import venue_fees
 
 STALE_TICKS = 3                 # no recorder file newer than this many tick lengths: the feed is stale
-STALE_MIN_S = 45.0              # ... and never less than this: with the doors closed the recorder reads slowly
+STALE_MIN_S = 45.0              # doors that should have opened this long ago and a clock that still says closed
 
 
 def _clock(record: Path) -> tuple[dict, float | None]:
@@ -57,8 +57,14 @@ def status(record: Path, venue: str, enabled: bool, mm_paused: bool, team: str |
         else:
             left = -gone
         left = round(max(0.0, min(left, tick_s)), 1)
-    window = max(STALE_TICKS * (tick_s or 15.0), STALE_MIN_S if game != "open" else 0.0)
-    feed = "ok" if age is not None and age <= window else "stale"
+    window = STALE_TICKS * (tick_s or 15.0)
+    due = _iso(clock.get("next_opens"))
+    if age is None:
+        feed = "stale"
+    elif game == "open":
+        feed = "ok" if age <= window else "stale"
+    else:                       # doors closed or clock stopped: the recorder has nothing new to write, until it opens
+        feed = "stale" if game == "closed" and due and now > due.timestamp() + max(window, STALE_MIN_S) else "ok"
     market = "off" if not enabled else game
     matchmaker = "paused" if mm_paused else "on" if market == "open" else "waiting"
     opens = _iso(clock.get("next_opens")) if game == "closed" else None
