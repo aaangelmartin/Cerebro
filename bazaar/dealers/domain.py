@@ -1096,6 +1096,7 @@ class DealersDomain:
                           if c.item not in tried and not c.kind.endswith("pack")]
             finally:
                 plan.free = free
+            probes = self._not_held_first(probes, plan.values)
             probes.sort(key=lambda c: (not c.kind.startswith("buy"), -c.points))    # buys keep our cards at home
             if not probes:
                 continue
@@ -1103,6 +1104,15 @@ class DealersDomain:
             c.id = f"g{len(plan.forced) + 1}"
             plan.candidates.append(c)
             plan.forced.append(c.id)
+
+    @staticmethod
+    def _not_held_first(probes: list[Candidate], values: Values) -> list[Candidate]:
+        """The gift probe never asks for a card we already hold while anything else will do: a second copy is
+        worth a quarter, so that thread only burns the dealer's hourly quota (t1604 MAL-06, t1628 MAL-08). With
+        nothing else to open it stays, because the gift needs some thread."""
+        held = {ref for ref, cs in (values.held or {}).items() if cs}
+        fresh = [c for c in probes if not (c.kind.startswith("buy") and str(c.item) in held)]
+        return fresh or probes
 
     def _candidates(self, plan: Plan, sit, ctx, budget: int, probe: frozenset = frozenset()) -> list[Candidate]:
         """Deals worth opening with each free dealer. For a dealer in `probe` (gift window) the profit filters
