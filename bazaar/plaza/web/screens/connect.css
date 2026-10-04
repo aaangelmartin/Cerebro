@@ -50,3 +50,6 @@
   .connect-cols > :nth-child(2), .connect-cols > :nth-child(3) { order: 0; grid-column: auto; }
   .connect-step { padding: 16px; }
 }
+
+.connect-tell { font-size: 12px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
+.connect-stopped { color: var(--warn); display: flex; gap: 6px; align-items: flex-start; }

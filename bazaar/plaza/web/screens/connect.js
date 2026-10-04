@@ -69,30 +69,45 @@
       function drawReady() {
         const s = st.status;
         K.clear(colReady).appendChild(stepHead(3, t("connect.ready"), Boolean(s && s.connected)));
-        const btn = colReady.appendChild(K.btn(st.checking ? t("connect.checking") : t("connect.readyBtn"),
-          { disabled: !st.start || st.checking, onclick: () => check(true) }));
-        btn.classList.add("connect-ready");
-        if (!st.start) { colReady.appendChild(el("p", { class: "connect-wait" }, t("connect.readyHint"))); return; }
+        if (!st.start) {
+          colReady.appendChild(K.btn(t("connect.readyBtn"), { disabled: true })).classList.add("connect-ready");
+          colReady.appendChild(el("p", { class: "connect-wait" }, t("connect.readyHint")));
+          return;
+        }
         if (s && s.connected) {
           colReady.appendChild(el("div", { class: "connect-result is-ok", role: "status" }, K.icon("check", 18),
             el("div", null, el("div", { class: "connect-result-title" }, t("connect.connected")), el("div", null, t("connect.connectedText", { name: K.teamName(st.team) })))));
           colReady.appendChild(K.btn(t("connect.seeHow"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");
           return;
         }
-        if (s && s.verified) {                                      // the team is proved: the human may go in and watch
+        const verified = Boolean(s && s.verified);
+        if (verified) {                                             // the team is proved: the human goes in and watches,
+          colReady.appendChild(K.btn(t("connect.enter"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");   // first and biggest
           colReady.appendChild(el("div", { class: "connect-result is-ok", role: "status" }, K.icon("check", 18),
             el("div", null, el("div", { class: "connect-result-title" }, t("connect.verifiedTitle")), el("div", null, t("connect.verifiedText", { name: K.teamName(st.team) })))));
-          colReady.appendChild(K.btn(t("connect.enter"), { kind: "primary", iconAfter: "arrow", onclick: finish })).classList.add("connect-ready");
         }
         const box = colReady.appendChild(el("div", { class: "connect-result", role: "status" }));
-        box.appendChild(el("div", { class: "connect-result-title" }, s && s.agent_called ? t("connect.notYet") : t("connect.waiting")));
+        box.appendChild(el("div", { class: "connect-result-title" }, verified ? t("connect.agentLeft") : s && s.agent_called ? t("connect.notYet") : t("connect.waiting")));
         const now = CHECKS.find((k) => !(s && s[k]));                 // the checks happen in this order: the first one missing is the one to wait for
         box.appendChild(el("ol", { class: "connect-checks" }, CHECKS.map((k) => {
           const ok = Boolean(s && s[k]);
           return el("li", { class: ok ? "is-ok" : k === now ? "is-now" : "" }, K.icon(ok ? "check" : k === now ? "clock" : "close", 13),
             el("span", null, t("connect.check." + k), !ok && k === now ? el("span", { class: "connect-check-help" }, t("connect.help." + k)) : null));
         })));
-        colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.listedHint")));
+        const seen = s && s.agent_last_seen ? Math.round(Date.now() / 1000 - s.agent_last_seen) : null;
+        if (s && s.agent_called && seen !== null && seen > 60) {
+          box.appendChild(el("p", { class: "connect-hint connect-stopped" }, K.icon("warning", 13), t("connect.stopped", { n: seen })));
+        }
+        if (verified) {                                             // what to tell the agent, ready to copy
+          const say = t("connect.tell", { team: st.team });
+          box.appendChild(el("pre", { class: "connect-prompt connect-tell", tabindex: "0" }, say));
+          box.appendChild(K.btn(t("connect.copyTell"), { small: true, icon: "copy", onclick: () => K.copy(say, t("connect.copiedTell")) }));
+        }
+        const again = colReady.appendChild(K.btn(st.checking ? t("connect.checking") : verified ? t("connect.checkAgain") : t("connect.readyBtn"),
+          { disabled: st.checking, small: verified, onclick: () => check(true) }));
+        if (!verified) again.classList.add("connect-ready");
+        if (st.checked) colReady.appendChild(el("p", { class: "connect-hint", role: "status" }, st.checked));
+        if (!verified) colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.listedHint")));
         colReady.appendChild(el("p", { class: "connect-hint" }, t("connect.auto")));
       }
 
@@ -111,6 +126,7 @@
           if (step) s = { ...s, connected: false, agent_called: false, verified: false, cards_listed: false, agent_online: false, ...step };
           st.status = s; st.checking = false;
           if (st.left) return;
+          if (byHand) st.checked = s.connected ? "" : t("connect.checkedAt", { time: new Date().toLocaleTimeString(), what: (s.missing || []).map((k) => t("connect.check." + k)).join(", ") });
           if (!API.mock && !s.agent_called && !s.connected && s.code_expires_in <= 0) { pick(st.team); return; }   // the code ran out unused: a fresh prompt, by itself
           draw();
           if (s.connected) { if (st.stop) st.stop(); st.stop = null; setTimeout(() => { if (!st.left) finish(); }, 1600); }
