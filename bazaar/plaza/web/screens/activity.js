@@ -48,7 +48,11 @@ Plaza.screen("activity", {
         return { tone: it.kind === "want" ? "get" : it.kind === "offer" ? "give" : null, text: key && c ? t("activity.a." + key, v) : null, quote: it.text };
       }
       if (it.src === "plaza") {
-        if (it.kind === "match") return { tone: it.state === "settled" ? "ok" : null, text: t("activity.m." + (it.state in TONE ? it.state : "proposed"), v), chip: it.state };
+        if (it.kind === "match") {                    // a match that is not yours comes without its price until it settles
+          const key = it.state in TONE ? it.state : "proposed";
+          const priced = ["proposed", "offer_on_v07", "accepted", "settled"].includes(key);
+          return { tone: it.state === "settled" ? "ok" : null, text: t("activity.m." + key + (priced && !p ? "NoPrice" : ""), v), chip: it.state };
+        }
         const key = it.kind === "counter" ? (p ? "counterAt" : "counter") : it.kind === "accept" ? "accept" : it.kind === "pass" ? "pass" : "note";
         return { tone: null, text: t("activity.t." + key, v), quote: it.text };
       }
