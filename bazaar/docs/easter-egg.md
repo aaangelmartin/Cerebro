@@ -385,5 +385,5 @@ Lectura del feed de los tres días (6.699 respuestas de dealers) y pruebas en vi
 
 **Lecciones**
 - "Abrir el álbum" de Pilar es solo que compra la carta (RET-11 a 151, por debajo de nuestros 198). No se probó venderla: perderíamos 47 sin indicio de premio.
-- Un hilo de compra sobre una carta agotada en el dealer se cierra solo con respuesta fija y gasta cupo: antes de abrir, elegir un tema que el dealer tenga en venta. Tocomocho y trile siguen sin probar de verdad con Los Pícaros.
+- Un hilo de compra sobre una carta agotada en el dealer se cierra solo con respuesta fija y gasta cupo: antes de abrir, elegir un tema que el dealer tenga en venta. Tocomocho y trile se repitieron después en el hilo 2900 (tema buy LAT-11, ticks 2011–2014), también negativos: "Nosotros no vendemos décimos, vendemos arte… San Francisco el Grande… 187 P" y "aquí no hay bolita, hay cúpula… Levante la carta, no la taza". Ojo: la segunda oferta (#24356) decía San Francisco el Grande pero entregaba LAT-10, no LAT-11, al mismo precio: el cambiazo de siempre. No se aceptó nada.
 - Abrir un hilo de venta con una carta no cancela una oferta nuestra abierta sobre esa misma carta.
