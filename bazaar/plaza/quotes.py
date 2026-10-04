@@ -16,8 +16,10 @@ yes/no on "the buyer values it more" ever leave it. Four rules keep a limit from
    secret the same way. The share comes from the vault's key and from
    BOTH limits, so a team that moves its own limit gets a new, unrelated margin and cannot solve for the other's.
    An overlap narrower than 2 P has no inside: no match.
-3. A refusal that looked at private numbers is kept for `HOLD_TICKS`: asking again gives no new answer.
-4. A public ask or bid that changes is taken up only `HOLD_TICKS` after its last change: prices published one after
+3. An answer that looked at private numbers, a price as much as a refusal, stands for `HOLD_TICKS` whatever
+   either team does to its limits or values meanwhile: one new answer per pair and card in that long. (A team's
+   own agent queue still checks every price against that team's current limit.)
+4. A public ask or bid that changes is taken up only `PUBLIC_TICKS` after its last change: prices published one after
    another to see how the other side's agent reacts are not followed."""
 from __future__ import annotations
 
@@ -28,8 +30,10 @@ import time
 
 from . import matcher
 
-HOLD_TICKS = 20
-HOLD_S = 300.0                  # the same hold when the game clock stands still
+HOLD_TICKS = 60                 # an answer drawn from private numbers stands this long, yes or no
+PUBLIC_TICKS = 20               # a public ask or bid is followed once in this long
+HOLD_S = 900.0                  # the same holds when the game clock stands still
+PUBLIC_S = 300.0
 MAX_KEPT = 20000
 SPOT_LOW, SPOT_HIGH = 0.25, 0.75   # where in the overlap the price goes when the reference is outside it
 MIN_SHARE = 0.05                # of the overlap, on each side, at the very least
@@ -41,21 +45,21 @@ class Quoter:
         self.vault, self.hold, self.clock = vault, hold_ticks, clock
         self.lock = threading.Lock()
         self.tick = 0
-        self.kept: dict[tuple, tuple] = {}                     # (seller, buyer, ref) -> (tick, ts) of its last refusal
+        self.kept: dict[tuple, tuple] = {}                     # (seller, buyer, ref) -> (tick, ts, the answer given)
         self.public: dict[tuple, dict] = {}                    # (team, ref, side) -> the price in force and since when
 
-    def _fresh(self, tick: int, ts: float) -> bool:
+    def _fresh(self, tick: int, ts: float, public: bool = False) -> bool:
         """Is something that happened at (tick, ts) still inside the hold?"""
         if self.tick != tick:
-            return 0 <= self.tick - tick < self.hold
-        return self.clock() - ts < HOLD_S
+            return 0 <= self.tick - tick < (PUBLIC_TICKS if public else self.hold)
+        return self.clock() - ts < (PUBLIC_S if public else HOLD_S)
 
     def at(self, tick: int | None) -> "Quoter":
         with self.lock:
             self.tick = int(tick or 0)
-            self.kept = {k: v for k, v in self.kept.items() if self._fresh(*v)}
+            self.kept = {k: v for k, v in self.kept.items() if self._fresh(v[0], v[1])}
             if len(self.public) > MAX_KEPT:
-                self.public = {k: v for k, v in self.public.items() if self._fresh(v["tick"], v["ts"])}
+                self.public = {k: v for k, v in self.public.items() if self._fresh(v["tick"], v["ts"], True)}
         return self
 
     def _share(self, salt: str, lo: int, hi: int) -> float:
@@ -83,7 +87,7 @@ class Quoter:
             if price == cur["price"]:
                 cur.pop("next", None)
                 return price
-            if self._fresh(cur["tick"], cur["ts"]):
+            if self._fresh(cur["tick"], cur["ts"], True):
                 return cur["price"]                            # changed again too soon: the one in force stays
             self.public[key] = {"price": price, "tick": self.tick, "ts": self.clock()}
             return price
@@ -93,12 +97,12 @@ class Quoter:
         key = (seller, buyer, ref)
         ask, bid = self._steady(seller, ref, "ask", ask), self._steady(buyer, ref, "bid", bid)
         with self.lock:
-            if key in self.kept:                               # refused a moment ago: the same answer, unasked
-                return dict(NO)
+            if key in self.kept:                               # answered a while ago: the same answer, whatever
+                return dict(self.kept[key][2])                 # either side moved since. Nothing new to learn.
         out = self._quote(seller, buyer, ref, ref_price, floor, salt or "|".join(key), ask, bid)
         if out.pop("held", False):
             with self.lock:
-                self.kept[key] = (self.tick, self.clock())
+                self.kept[key] = (self.tick, self.clock(), dict(out))
         return out
 
     def _quote(self, seller, buyer, ref, ref_price, floor, salt, ask, bid) -> dict:
@@ -120,7 +124,7 @@ class Quoter:
         price = matcher.inside(low, high, ref_price, margin)
         if price is None:                                      # no overlap, or one with no inside
             return {**NO, "value": value, "held": True}
-        return {"price": price, "overlap": True, "value": value, "basis": "limits"}
+        return {"price": price, "overlap": True, "value": value, "basis": "limits", "held": True}
 
     def _spot(self, salt: str, lo: int, hi: int) -> float:
         """SPOT_LOW to SPOT_HIGH of the overlap, from the vault's key, the pair, the card and both limits."""

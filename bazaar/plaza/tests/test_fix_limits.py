@@ -44,15 +44,19 @@ class LimitLeakTest(Vaulted):
         self.assertEqual(self.found(137, asks), self.found(60, asks))
         self.assertEqual(self.found(137, asks), self.found(1999, asks))
 
-    def test_the_price_is_never_a_limit_and_always_inside(self):
-        for lo, hi in [(120, 150), (146, 150), (147, 150), (60, 62), (5, 9), (18, 23), (100, 2000), (40, 45)]:
+    def grid_inside(self, lo, hi):
+        return [p for p in range(lo + 1, hi) if p < 20 or p % 5 == 0]
+
+    def test_the_price_is_never_a_limit_always_inside_and_always_on_the_grid(self):
+        for lo, hi in [(120, 150), (146, 150), (147, 150), (60, 62), (5, 9), (18, 23), (100, 2000), (40, 45), (44, 46),
+                       (150, 150), (149, 150), (151, 150)]:
             for ref in (1, lo, hi, (lo + hi) // 2, 5000):
                 self.v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": hi}}}
-                p = self.q.quote("t01", "t02", "SAL-09", ref, 1)["price"]
-                self.assertTrue(lo < p < hi, (lo, hi, ref, p))
-        for lo, hi in [(150, 150), (149, 150), (151, 150)]:          # no inside: no price
-            self.v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": hi}}}
-            self.assertIsNone(quotes.Quoter(self.v).quote("t01", "t02", "SAL-09", 100, 1)["price"])
+                p = quotes.Quoter(self.v).quote("t01", "t02", "SAL-09", ref, 1)["price"]
+                if p is None:                                          # no grid point strictly inside: no match,
+                    self.assertEqual(self.grid_inside(lo, hi), [], (lo, hi))   # never a price off the grid
+                else:
+                    self.assertIn(p, self.grid_inside(lo, hi), (lo, hi, ref))
 
     def test_a_reference_outside_the_overlap_does_not_push_the_price_to_an_end(self):
         """The second cold test: book 180, the buyer's max 170, price 165: one grid step under the max."""
@@ -60,23 +64,29 @@ class LimitLeakTest(Vaulted):
         for i in range(80):
             with tempfile.TemporaryDirectory() as d:
                 v = private.Vault(Path(d) / "p")
-                q = quotes.Quoter(v)
                 for lo, hi, ref in ((55, 170, 180), (55, 170, 20), (100, 400, 450), (100, 400, 10)):
                     v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": hi}}}
-                    p = q.quote("t01", "t02", "SAL-09", ref, 1)["price"]
+                    p = quotes.Quoter(v).quote("t01", "t02", "SAL-09", ref, 1)["price"]
                     self.assertTrue(lo + (hi - lo) // 4 <= p <= hi - (hi - lo) // 4, (lo, hi, ref, p))
                     near += min(p - lo, hi - p) <= 5
         self.assertEqual(near, 0)
-        v = private.Vault(Path(self.dir.name) / "narrow")            # a minimal overlap: inside, as far as it goes
-        v.data = {"t01": {"SAL-09": {"min": 166}}, "t02": {"SAL-09": {"max": 170}}}
-        self.assertIn(quotes.Quoter(v).quote("t01", "t02", "SAL-09", 180, 1)["price"], (167, 168, 169))
 
     def test_the_grid_rounds_inwards(self):
         """The cold test: book 180, the buyer's max 150. 146 to 149 used to round up to 150, the max itself."""
         for lo in range(100, 147):
             p = M.inside(lo, 150, 180, 1)
-            self.assertTrue(lo < p < 150, (lo, p))
-        self.assertEqual(M.inside(100, 150, 180, 1), 145)
+            self.assertEqual(p, 145 if lo < 145 else None, lo)        # a step under the max, or nothing at all
+
+    def test_an_answer_stands_for_the_hold_whatever_either_side_moves(self):
+        """The ratchet: move my limit, read the new price, move again. One new answer per pair and card per hold."""
+        self.v.data = {"t01": {"SAL-09": {"min": 60, "value": 50}}, "t02": {"SAL-09": {"max": 137, "value": 90}}}
+        first = self.q.at(100).quote("t01", "t02", "SAL-09", 500, 1)
+        for tick, lo in ((120, 100), (140, 130), (159, 138)):          # even past the buyer's max: nothing to read
+            self.v.data["t01"]["SAL-09"]["min"] = lo
+            self.assertEqual(self.q.at(tick).quote("t01", "t02", "SAL-09", 500, 1), first)
+        self.assertIsNone(self.q.at(100 + quotes.HOLD_TICKS).quote("t01", "t02", "SAL-09", 500, 1)["price"])
+        self.v.data["t01"]["SAL-09"] = {"min": 60, "value": 95}        # and a value answers yes or no, held the same
+        self.assertIsNone(self.q.at(100 + quotes.HOLD_TICKS + 5).quote("t01", "t02", "SAL-09", 500, 1)["price"])
 
     def test_moving_my_limit_does_not_solve_for_yours(self):
         """Two prices seen with two limits of my own gave the other limit by a straight line (120 and 130 -> 136

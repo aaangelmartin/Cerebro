@@ -42,22 +42,27 @@ def step(price: float) -> int:
 
 def inside(lo: int, hi: int, ref_price: float, margin: int = 1) -> int | None:
     """A grid price strictly inside [lo, hi]: at least `margin` and one grid step away from each end, as near the
-    reference as that allows, rounded towards the inside and never onto an end. When the overlap is too narrow for
-    the 5 P grid the price is a whole P; when it has no inside at all (narrower than 2 P): None."""
+    reference as that allows, rounded towards the inside and never onto an end. The price is ALWAYS on the grid
+    (whole P under 20, multiples of 5 from 20): a price off the grid would say that the overlap is narrow. When
+    the margin leaves no grid point, any grid point strictly inside does; when there is none: None, no match."""
     lo, hi = int(lo), int(hi)
-    for unit in (5, 1):
-        low, high = lo + max(margin, unit), hi - max(margin, unit)
-        if unit == 5:
-            if hi < 20 + unit:                                 # the 5 P grid starts at 20
-                continue
-            low, high = -(-low // 5) * 5, (high // 5) * 5      # up to the grid from below, down to it from above
-        else:
-            low, high = lo + max(1, min(margin, (hi - lo) // 2)), hi - max(1, min(margin, (hi - lo) // 2))
-        if low > high:
-            continue
-        price = min(max(float(ref_price or 0), low), high)
-        out = int(round(price / unit)) * unit
-        return min(max(out, low), high)
+    ref = float(ref_price or 0)
+    for away in (max(1, margin), 1):
+        spots = []
+        gap = max(away, 5) if away > 1 else 1                  # last resort: on the grid, off both ends
+        low, high = -(-max(lo + gap, 20) // 5) * 5, ((hi - gap) // 5) * 5
+        if low <= high:
+            spots.append((low, high, 5))
+        low, high = lo + away, min(hi - away, 19)              # under 20 the grid is every whole P
+        if low <= high:
+            spots.append((low, high, 1))
+        best = None
+        for low, high, unit in spots:
+            p = min(max(int(round(min(max(ref, low), high) / unit)) * unit, low), high)
+            if best is None or abs(p - ref) < abs(best - ref):
+                best = p
+        if best is not None:
+            return best
     return None
 
 

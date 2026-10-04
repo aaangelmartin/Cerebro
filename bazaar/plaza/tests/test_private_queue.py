@@ -72,6 +72,7 @@ class VaultTest(unittest.TestCase):
         self.assertEqual(m["basis"], "limits")
         self.assertTrue(60 < m["price"] < 80, m["price"])                           # inside, never on a limit
         self.v.put("t02", "SAL-09", {"max": 55})
+        self.v._quoter.kept.clear()                                                 # once the answer given has run its hold
         self.assertEqual(M.find(sh, CAT, gate=self.v.gate), [])
         self.assertEqual(M.find(sh, CAT, strict=False)[0]["price"], 90)             # without the vault: public data only
         self.assertEqual(M.find(sh, CAT), [])                                       # and nothing says both gain: no match
@@ -234,6 +235,8 @@ class PrivateFlowTest(FlowTest):
         self.assertEqual(act["limits_set"], ["LAT-06"])
         # no overlap: the match is withdrawn, and nobody is told why
         self.assertEqual(self.call("POST", "/plaza/api/me/card/LAT-06?session=" + s7, {"max": 1001})[0], 200)
+        self.board.quoter.kept.clear()                                     # once the answer given has run its hold
+        self.board.stale()
         self.assertEqual(self.call("GET", "/plaza/api/team/t07")[1]["trades"], [])
         # nothing of it in the files our bot, brain and broker can read, nor in what the broker's matchmaker gets
         for path in self.live.rglob("*"):

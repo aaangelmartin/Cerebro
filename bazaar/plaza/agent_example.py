@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 VENUE = "v07"
+EDGE = 0.1                      # the share of our limit we keep as room when we accept or counter
 HOST_TEAM = "t10"
 PLACEHOLDER = re.compile(r"<your asset id of ([A-Z]{3}-\d{2})>")
 
@@ -193,8 +194,9 @@ class Agent:
         return out.get("value") if st == 200 else None
 
     def decide(self, action: dict):
-        """Nothing we set says yes to the price on the table (`action["price"]`): accept it only when we gain,
-        else counter at our own limit, else pass. Yours to improve."""
+        """Nothing we set says yes to the price on the table (`action["price"]`): accept it only when we gain
+        (by `EDGE` of our limit), else counter two edges inside our limit, never at the limit itself, else pass.
+        Yours to improve."""
         st, m = self.market("GET", f"/api/match/{action['match']}")
         if st != 200 or m.get("kind") != "sale":
             return {"action": "pass"}
@@ -207,9 +209,13 @@ class Agent:
                 return {"action": "pass"}
             gain = price - worth if selling else worth - price
             return {"action": "accept"} if gain > 0 else {"action": "pass"}
-        if (price >= limit) if selling else (price <= limit):
-            return {"action": "accept"}
-        return {"action": "counter", "price": limit}
+        edge = max(1, round(limit * EDGE))                 # the room we keep between a price and our limit
+        if (price >= limit + edge) if selling else (price <= limit - edge):
+            return {"action": "accept"}                    # we gain at least the edge
+        ours = limit + 2 * edge if selling else limit - 2 * edge
+        if ours < 1 or m.get("price_by") == self.team:
+            return {"action": "pass"}
+        return {"action": "counter", "price": int(ours)}   # never the limit itself: the other team reads the thread
 
     def run_action(self, a: dict) -> tuple[bool, str]:
         """Runs one action of the queue. Returns (done, note)."""

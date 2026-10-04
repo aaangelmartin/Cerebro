@@ -116,7 +116,8 @@ class QuoterTest(unittest.TestCase):
             self.assertNotIn(secret, numbers)
         self.assertEqual(m["recipe"]["buyer"]["body"]["give"], {"cash": 70})
         self.limits(95, 90)
-        self.assertEqual(M.find(sh, CAT, quote=self.q.at(50).quote), [])
+        self.assertEqual(len(M.find(sh, CAT, quote=self.q.at(50).quote)), 1)       # an answer stands for the hold:
+        self.assertEqual(M.find(sh, CAT, quote=self.q.at(quotes.HOLD_TICKS + 1).quote), [])   # moving a limit asks nothing new
 
 
 class StatesTest(unittest.TestCase):
