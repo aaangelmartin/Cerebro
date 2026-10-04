@@ -75,7 +75,8 @@ PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a
                        r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|collections|auctions|_kit)")                                                              # deep links
 BOARD_ALIASES = {"/plaza/board.json": "/plaza/api/board", "/plaza/board/history.json": "/plaza/api/board/history",
                  "/plaza/board/live.json": "/plaza/api/board/live", "/plaza/collections.json": "/plaza/api/collections",
-                 "/plaza/lots.json": "/plaza/api/lots"}
+                 "/plaza/lots.json": "/plaza/api/lots", "/plaza/live.json": "/plaza/api/board/live",
+                 "/plaza/history.json": "/plaza/api/board/history"}
 BOARD_VIEWS = {"/plaza/api/board": "board", "/plaza/api/board/history": "board_history", "/plaza/api/board/live": "board_live",
                "/plaza/api/collections": "collections"}
 TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)

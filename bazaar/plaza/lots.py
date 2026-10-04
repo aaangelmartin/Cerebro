@@ -25,12 +25,14 @@ VENUE = matcher.VENUE
 LIVE = ("open", "ended", "awarded")
 DONE = ("settled", "settled_elsewhere", "unsold", "cancelled")
 MOVES = {"open": {"ended", "awarded", "unsold", "cancelled"}, "ended": {"awarded", "unsold", "cancelled"},
-         "awarded": {"settled", "settled_elsewhere", "ended", "cancelled"},
+         "awarded": {"settled", "settled_elsewhere", "ended", "unsold", "cancelled"},
          "settled": set(), "settled_elsewhere": set(), "unsold": set(), "cancelled": set()}
 TICKS, MIN_TICKS, MAX_TICKS = 40, 4, 240     # how long a lot runs
 SNIPE_TICKS, MAX_EXTENSIONS = 4, 3           # a bid this close to the end moves the end, this many times
 ACCEPT_TICKS = 40                            # an ended lot waits this long for its seller
 POST_TICKS = 12                              # the winner posts its offer on the venue within this
+SELLER_TICKS = 60                            # the seller accepts that offer in the game within this (an offer's life)
+SELLER_COOL = 120                            # a seller that left a winner's offer unanswered opens no lot for this long
 LOTS_PER_TEAM, TOP_BIDS_PER_TEAM, MAX_BIDS = 5, 8, 60
 KEEP_DONE = 200
 RECENT = 30
@@ -120,7 +122,7 @@ class Lots:
         """What anybody reads of a lot. The reserve is never here; its seller is told only that it set one."""
         best = self.best(lot)
         left = max(0, lot["ends_tick"] - self.tick) if lot["state"] == "open" else 0
-        out = {k: lot.get(k) for k in ("id", "seller", "ref", "name", "rarity", "start", "state", "state_tick",
+        out = {k: lot.get(k) for k in ("id", "seller", "ref", "name", "rarity", "start", "state", "state_tick", "seller_failed",
                                        "opened_tick", "ends_tick", "extensions", "winner", "price", "match", "history")}
         out.update(best_bid=best["price"] if best else None, best_bidder=best["team"] if best else None,
                    next_bid=(best["price"] + step(best["price"])) if best else lot["start"], ticks_left=left,
@@ -162,6 +164,10 @@ class Lots:
         reserve = whole(body["reserve"], "reserve", start) if body.get("reserve") is not None else None
         ticks = whole(body.get("ticks", TICKS), "ticks", MIN_TICKS, MAX_TICKS)
         with self.lock:
+            wait = (self.seen.get("cool") or {}).get(team, 0)
+            if tick < wait:
+                raise PlazaError(429, "slow_down", "your last lot ended because you did not accept the winner's offer "
+                                                   f"in the game: you can open a lot again at tick {wait}")
             mine = [x for x in self.lots.values() if x["seller"] == team and x["state"] in LIVE]
             same = next((x for x in mine if x["ref"] == ref), None)
             if same:
@@ -284,7 +290,20 @@ class Lots:
                     if state in ("settled", "settled_elsewhere"):
                         self._move(lot, state, tick, price=rec.get("price") or lot["price"])
                         self.reserves.pop(lot["id"], None)
-                    else:
+                    elif state in ("offer_on_v07", "accepted") and not lot.get("offer_seen"):
+                        lot["offer_seen"] = tick               # the winner did its part: its offer is on the venue
+                        changed = True
+                    elif lot.get("offer_seen") and (state in (None, "proposed", "passed", "expired")
+                                                    or tick - lot["offer_seen"] > SELLER_TICKS):
+                        # The winner posted and nobody took it: the seller's silence, never the winner's fault.
+                        for b in lot["bids"]:
+                            if b["state"] == "live":
+                                b["state"] = "void"
+                        if state in ("proposed", "offer_on_v07", "accepted"):
+                            expire(lot["match"])
+                        self.seen.setdefault("cool", {})[lot["seller"]] = tick + SELLER_COOL
+                        self._move(lot, "unsold", tick, seller_failed=True)
+                    elif not lot.get("offer_seen"):
                         passed = next((m.get("team") for m in rec.get("messages") or [] if m.get("action") == "pass"), None)
                         late = state in (None, "proposed") and tick - (lot.get("award_tick") or tick) > POST_TICKS \
                             and not rec.get("reported_offer")
@@ -303,10 +322,12 @@ class Lots:
                             if nxt:
                                 nxt["state"] = "live"          # the next best bid stands again
                             self._move(lot, "ended", tick, winner=None, price=None, match=None, award_tick=None)
+                            lot["defaulted"] = broke
                 if (lot["state"], lot.get("winner")) != before:
                     changed = True
                     out.append({"lot": lot["id"], "state": lot["state"], "seller": lot["seller"], "ref": lot["ref"],
-                                "winner": lot.get("winner"), "price": lot.get("price"), "tick": tick,
+                                "winner": lot.get("winner") or before[1], "price": lot.get("price"), "tick": tick,
+                                "seller_failed": bool(lot.get("seller_failed")),
                                 "match": lot.get("match")})
             done = sorted((x for x in self.lots.values() if x["state"] in DONE), key=lambda x: x.get("state_tick", 0))
             for x in done[:max(0, len(done) - KEEP_DONE)]:
@@ -323,6 +344,15 @@ class Lots:
         with self.lock:
             told = set(self.seen.get(team) or [])
             out = []
+            for lot in self.lots.values():                     # a winner whose offer the seller left unanswered is told
+                if lot.get("seller_failed") and any(b["team"] == team and b["state"] == "void" for b in lot["bids"]):
+                    aid = "a-" + hashlib.sha1(f"auction|{team}|{lot['id']}".encode()).hexdigest()[:12]
+                    if aid not in told:
+                        out.append({"id": aid, "type": "auction", "lot": lot["id"], "card": lot["ref"],
+                                    "why": f"lot {lot['id']} ({lot['ref']}) ended: its seller did not accept your offer "
+                                           "in the game. Nothing counts against you and you owe nothing. Acknowledge it.",
+                                    "request": {"target": "plaza", "method": "GET", "auth": "X-Plaza-Token",
+                                                "path": f"/plaza/api/lot/{lot['id']}", "body": None}})
             for lot in self.lots.values():
                 if lot["state"] != "open" or lot["seller"] == team or lot["ref"] not in wants:
                     continue
@@ -427,8 +457,12 @@ def sync(board, tick) -> list[dict]:
              "cancelled": "cancelled"}
     for e in events:
         for team in {e["seller"], e.get("winner")} - {None}:
-            deals_api.note(board, team, "auction", f"lot {e['lot']} ({e['ref']}): {words.get(e['state'], e['state'])}",
-                           ref=e["ref"], tick=e.get("tick"))
+            text = words.get(e["state"], e["state"])
+            if e.get("seller_failed"):
+                text = ("ended: you did not accept the winner's offer in the game; no new lot for "
+                        f"{SELLER_COOL} ticks" if team == e["seller"] else
+                        "ended: the seller did not accept your offer in the game. Nothing counts against you")
+            deals_api.note(board, team, "auction", f"lot {e['lot']} ({e['ref']}): {text}", ref=e["ref"], tick=e.get("tick"))
     return events
 
 

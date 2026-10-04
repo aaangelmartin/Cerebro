@@ -152,6 +152,31 @@ class RulesTest(unittest.TestCase):
         self.sync(200)
         self.assertEqual((self.lots.lots[a]["state"], self.defaults), ("awarded", []))
 
+    def test_a_winner_that_posted_is_never_struck_for_the_sellers_silence(self):
+        for end in ("dropped", "never"):                       # the game drops the offer; or the feed never says so
+            self.setUp()
+            a = self.lot()["id"]
+            self.lots.bid("t05", a, {"price": 40}, 110)
+            self.lots.accept("t04", a, 111, self.award)
+            mid = self.lots.lots[a]["match"]
+            self.matches[mid]["state"] = "offer_on_v07"
+            self.sync(115)
+            self.assertEqual((self.lots.lots[a]["state"], self.lots.lots[a]["offer_seen"]), ("awarded", 115))
+            if end == "dropped":
+                self.matches[mid]["state"] = "proposed"        # cancelled or run out: the match is back to proposed
+                self.sync(130)
+            else:
+                self.sync(115 + L.SELLER_TICKS)
+                self.assertEqual(self.lots.lots[a]["state"], "awarded")
+                self.sync(116 + L.SELLER_TICKS)
+            lot = self.lots.lots[a]
+            self.assertEqual((lot["state"], lot["seller_failed"], [b["state"] for b in lot["bids"]]), ("unsold", True, ["void"]), end)
+            self.assertEqual((self.defaults, self.expired), ([], [mid]), end)             # no strike; the match is ended
+            (told,) = self.lots.actions("t05", set())
+            self.assertIn("Nothing counts against you", told["why"])
+            self.assertRaises(PlazaError, self.lots.create, "t04", {"card": "SAL-09"}, CARD, {"SAL-09"}, self.lots.tick + 1)
+            self.assertEqual(self.lots.create("t04", {"card": "SAL-09"}, CARD, {"SAL-09"}, self.lots.tick + L.SELLER_COOL)["state"], "open")
+
     def test_teams_that_want_the_card_are_told_once(self):
         a = self.lot()["id"]
         (act,) = self.lots.actions("t05", {"SAL-10"})

@@ -1063,6 +1063,8 @@ class Contract(E2E):
             s, text, h = self.rig.call("GET", path)
             self.finding(s == 200 and isinstance(text, str) and "v07" in text, "D", f"GET {path} answers {s}")
             if s == 200 and isinstance(text, str):
+                more = self.rig.call("GET", "/plaza/AGENTS-AUCTIONS.md")[1]       # auctions and signals: their own page
+                text += more if isinstance(more, str) else ""
                 for r in R.public():
                     if r.live and r.path not in ("/api/openapi.json",):
                         self.finding(r.path.split("{")[0].rstrip("/") in text, "D",

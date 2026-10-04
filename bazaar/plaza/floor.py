@@ -150,6 +150,8 @@ class Floor:
 
     @staticmethod
     def _shown(m: dict, hidden: set, blocked: set) -> bool:
+        if m.get("src") == "game" and m.get("kind") == "offer" and m.get("to"):
+            return False                                   # an offer addressed to one team is theirs, not the floor's
         if m.get("src") != "agent":
             return True
         return m.get("id") not in hidden and m.get("team") not in blocked

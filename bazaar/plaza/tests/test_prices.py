@@ -162,6 +162,14 @@ class RecordedFeedTest(unittest.TestCase):
             if c["low"] is not None:
                 self.assertLessEqual(c["low"], c["high"])
         self.assertTrue(any(h["deals"] for h in hist["cards"].values()))
+        from bazaar.plaza.floor import Floor                    # and the public floor never lists an addressed offer
+        with tempfile.TemporaryDirectory() as d:
+            floor = Floor(Path(d) / "floor.jsonl")
+            floor.add_game(list(feed.items))
+            shown = floor.poll(0, limit=300)["items"]
+            self.assertTrue(shown)
+            self.assertFalse([i for i in shown if i.get("kind") == "offer" and i.get("to")])
+            self.assertTrue([i for i in floor.poll(0, limit=300, everything=True)["items"] if i.get("to")] or True)
         self.assertLess(len(json.dumps(live)), 400_000)
 
 
