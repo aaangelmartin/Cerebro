@@ -290,8 +290,14 @@ class Board:
                         self.store.verify(sender, m["text"])
                     at = m.get("tick") if isinstance(m.get("tick"), int) else None
                     if sender in sessions and self.connect.prove(sender, m["text"], at):
-                        if not (self.store.declared().get(sender) or {}).get("verified"):
-                            self._forget_private(sender)        # limits left in its name before the proof
+                        first = not (self.store.declared().get(sender) or {}).get("verified")
+                        if first or sender in self.connect.changed:
+                            # Limits, hand and sheet go whenever the team changes hands, not only at its first
+                            # proof: whoever comes in with a new token reads nothing the last agent left. The
+                            # rightful agent publishes again in one call.
+                            self.connect.changed.discard(sender)
+                            self._forget_private(sender)
+                            self.store.wipe(sender)
                         self.store.mark_verified(sender)
                         self.hour("verified")
                         self.stale()
@@ -379,19 +385,26 @@ class Board:
             venue, tick = rec.get("settled_venue") or "another venue", e.get("tick") or 0
             refs = {r for r in (e.get("ref"), e.get("ref_back")) if r}
             born = rec.get("proposed_tick") or 0
-            maker = offer = made = None
-            for o in reversed(self.feed.venue_log):            # the addressed offer between the two, on that venue
-                if o.get("t") == "listed" and o.get("venue") == venue and {o.get("maker"), o.get("to")} == set(teams) \
-                        and (o.get("ref") in refs or o.get("ref_back") in refs) and (o.get("tick") or 0) <= tick:
-                    maker, offer, made = o["maker"], o.get("id"), o.get("tick") or 0
-                    break
-            if maker is None:                                  # or the public offer of one of them that the other took
-                mine = [o for o in self.feed.offers.values() if o.get("venue") == venue and o.get("maker") in teams
-                        and not o.get("to") and (o.get("ref") in refs or o.get("ref_back") in refs)
-                        and (o.get("created_tick") or 0) <= tick]
-                if len({o["maker"] for o in mine}) == 1:
-                    o = max(mine, key=lambda o: o.get("created_tick") or 0)
-                    maker, offer, made = o["maker"], o.get("id"), o.get("created_tick") or 0
+            # Who posted it? Only an offer ADDRESSED to the other team of the match, on that venue, for that card,
+            # listed after we proposed the trade, never cancelled, still alive when the deal closed and at the
+            # price it closed at, can be the deal. The feed's settlement carries no offer id, so anything less
+            # certain (a public listing somebody took, two offers, a cancelled one) names nobody.
+            log = self.feed.venue_log
+            done = next((x for x in reversed(log) if x.get("t") == "settled" and x.get("venue") == venue
+                         and set(x.get("parties") or []) == set(teams) and refs & set(x.get("refs") or [])
+                         and (rec.get("settlement") is None or x.get("id") == rec.get("settlement"))), None)
+            gone = {x.get("id") for x in log if x.get("t") == "cancelled"}
+            paid = (done or {}).get("price") if rec.get("kind") == "sale" else None
+            mine = [o for o in log if o.get("t") == "listed" and o.get("venue") == venue and o.get("to")
+                    and {o.get("maker"), o.get("to")} == set(teams) and (o.get("ref") in refs or o.get("ref_back") in refs)
+                    and o.get("id") not in gone and born <= (o.get("tick") or 0) <= tick
+                    and tick - (o.get("tick") or 0) <= deals_mod.OFFER_LIFE and (not paid or o.get("price") == paid)]
+            public = [o for o in self.feed.offers.values() if o.get("venue") == venue and o.get("maker") in teams
+                      and not o.get("to") and (o.get("ref") in refs or o.get("ref_back") in refs)
+                      and (o.get("created_tick") or 0) <= tick and (not paid or o.get("price") == paid)]
+            maker = offer = None
+            if done is not None and len(mine) == 1 and not public:
+                maker, offer = mine[0]["maker"], mine[0].get("id")
             declared, conn = self.store.declared(), self.connect.overview()
             proved = {t for t in teams if (declared.get(t) or {}).get("verified")}
             spoke = {m.get("team") for m in rec.get("messages") or []} | set(rec.get("agreed") or [])
@@ -399,8 +412,7 @@ class Board:
                    or ((conn.get(t) or {}).get("agent_last_seen") or 0) >= (rec.get("proposed") or float("inf"))}
             for r in self.strikes.record(f"{e['match']}|{rec.get('settlement') or tick}", match=e["match"],
                                          ref=e.get("ref"), venue=venue, tick=tick, parties=teams, maker=maker,
-                                         verified=proved, saw=saw, settlement=rec.get("settlement"), offer=offer,
-                                         predates=made is not None and made < born):
+                                         verified=proved, saw=saw, settlement=rec.get("settlement"), offer=offer):
                 self.hour("strike_" + r["kind"])
                 if r["kind"] in ("warning", "banned"):
                     deals_api.note(self, r["team"], "warning", self.strikes.standing(r["team"])["message"] or "",

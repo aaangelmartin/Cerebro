@@ -449,6 +449,17 @@ class Store:
                 if r.get("code") and r.get("pin") and not r.get("pin_proved")
                 and now - (r.get("claimed") or 0) < CLAIM_TTL_S}
 
+    def wipe(self, team: str) -> None:
+        """The team changed hands (another agent proved a new code): its sheet, overrides and PIN go; it stays
+        proved. The agent that came in publishes again."""
+        with self.lock:
+            data = self._load()
+            rec = (data.get("teams") or {}).get(self._team(team))
+            if rec:
+                for key in ("pin", "salt", "code", "claimed", "pin_proved", "declared", "overrides"):
+                    rec.pop(key, None)
+                self._save(data)
+
     def reset(self, team: str) -> None:
         """Ours: the team is unproved again, with no PIN, sheet or overrides; its settings stay."""
         with self.lock:

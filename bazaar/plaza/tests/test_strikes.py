@@ -168,6 +168,62 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.board.strikes.view()["teams"], [])
         self.assertEqual(self.board.deals.counts()["settled"], 1)
 
+    def listing(self, oid, maker, tick, to=None, price=21, venue="rastro"):
+        self.event(id=100 + oid, tick=tick, type="offer.listed", payload={"offer": {
+            "id": oid, "maker": maker, "to": to, "venue": venue, "give": {"cards": ["LAT-06"]}, "want": {"cash": price},
+            "created_tick": tick, "expires_tick": tick + 60}})
+
+    def closing(self, tick=84, price=21, venue="rastro"):
+        self.event(id=900 + tick, tick=tick, type="settlement", payload={
+            "settlement": 9, "venue": venue, "price": price, "parties": ["t09", "t07"],
+            "items": [{"ref": "LAT-06", "frm": "t09", "to": "t07"}]})
+        self.board.rebuild()
+
+    def test_a_public_listing_that_the_other_team_takes_is_nobodys_strike(self):
+        """S1: t09 lists its card publicly on El Rastro, as anyone may; t07, the other side of the match, buys it.
+        Nobody posted the matched deal elsewhere, so nobody is struck: t07 cannot get t09 warned or banned."""
+        self.connect("t07"), self.connect("t09")
+        self.mid()
+        self.listing(80, "t09", 82)                            # no addressee: its own business
+        self.closing()
+        self.assertEqual(self.board.deals.counts()["settled_elsewhere"], 1)       # a trade we lost, and that is all
+        self.assertEqual(self.board.strikes.view()["teams"], [])
+        self.assertEqual(self.board.strikes.view()["log"][0]["kind"], "unknown")
+        self.listing(81, "t09", 85, to="t07")                  # an addressed one next to a public one at that price:
+        self.board.strikes.seen.clear()                        # still not certain which closed
+        self.board._strikes([{"kind": "match", "state": "settled_elsewhere", "match": self.board.deals.closed[-1]["id"],
+                              "team": "t09", "to": "t07", "ref": "LAT-06", "tick": 86}])
+        self.assertEqual(self.board.strikes.view()["teams"], [])
+
+    def test_an_offer_that_was_cancelled_is_not_the_one_that_closed(self):
+        """S2: t09 posted the deal on El Rastro, was told to move it and cancelled it. The card later closes there
+        through something else: the cancelled offer names nobody."""
+        self.connect("t07"), self.connect("t09")
+        self.mid()
+        self.listing(77, "t09", 81, to="t07")
+        self.event(id=4, tick=82, type="offer.cancelled", payload={"offer": 77, "venue": "rastro"})
+        self.closing()
+        self.assertEqual(self.board.strikes.view()["teams"], [])
+        self.assertEqual(self.board.strikes.view()["log"][0]["kind"], "unknown")
+
+    def test_only_the_addressed_offer_at_the_price_it_closed_at_counts(self):
+        self.connect("t07"), self.connect("t09")
+        self.mid()
+        self.listing(77, "t09", 81, to="t07", price=30)        # addressed, but the deal closed at another price
+        self.closing(price=21)
+        self.assertEqual(self.board.strikes.view()["teams"], [])
+
+    def test_an_offer_older_than_the_proposal_is_not_a_strike(self):
+        self.listing(70, "t09", 7, to="t07")                   # open before we proposed anything...
+        self.event(id=55, tick=9, type="pack.opened", payload={"team": "t01", "pack": "basic"})
+        self.board.deals.matches.clear()                       # ...which we do now, at tick 9
+        self.board.rebuild()
+        self.connect("t07"), self.connect("t09")
+        self.assertEqual(self.board.deals.get(self.mid())["proposed_tick"], 9)
+        self.closing(tick=40)
+        self.assertEqual(self.board.deals.counts()["settled_elsewhere"], 1)
+        self.assertEqual(self.board.strikes.view()["teams"], [])
+
     def test_a_team_that_never_connected_is_not_struck(self):
         self.connect("t07")                                    # t09 trades through the game's API only
         self.elsewhere()

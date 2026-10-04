@@ -66,6 +66,30 @@ class IdentityTest(Base):
             self.assertNotIn("LAT-06", json.dumps(out.get("limits", {})), path)
         self.assertEqual(self.call("GET", "/plaza/api/me/cards", headers=real)[1]["want"][0]["limits"], {"max": 1777})
 
+    def test_a_team_that_changes_hands_leaves_nothing_behind(self):
+        """A code somebody talked the team's agent into sending: the newcomer gets the team, and none of what the
+        rightful agent had told us (limits, hand, sheet). The rightful agent takes it back the same way."""
+        _, real = self.agent("t03")
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t03", {"wants": [{"ref": "LAT-06", "max": 55, "value": 70}],
+                                                                  "have": ["LAT-03"]}, real)[0], 200)
+        me = self.call("GET", "/plaza/api/me", headers=real)[1]
+        self.assertEqual((me["limits"]["LAT-06"]["max"], me["owned"]), (55, ["LAT-03"]))
+        _, taker = self.agent("t03", prove=False)              # the attacker starts a session in t03's name...
+        code = self.call("POST", "/plaza/api/connect/start", {"team": "t03"})[1]   # (a fresh one, to read its code)
+        st, a, _ = self.call("POST", "/plaza/api/connect/agent", {"team": "t03", "code": code["connect_code"]})
+        taker = {"X-Plaza-Token": a["agent_token"]}
+        self.game_says("t03", code["connect_code"], "th-phished")                   # ...and t03's agent sends it
+        st, me, _ = self.call("GET", "/plaza/api/me", headers=taker)
+        self.assertEqual(st, 200, me)
+        self.assertEqual((me["limits"], me["owned"]), ({}, []))
+        self.assertNotIn("55", json.dumps(me["limits"]) + json.dumps(self.call("GET", "/plaza/api/me/cards", headers=taker)[1]))
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=real)[0], 401)
+        sheet = self.call("GET", "/plaza/api/team/t03")[1]
+        self.assertFalse([c for c in sheet.get("wanted", []) if c.get("source") == "declared"])
+        _, back = self.agent("t03")                            # the rightful team proves a fresh code: it is back,
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=back)[0], 200)   # and publishes again
+        self.assertEqual(self.call("GET", "/plaza/api/me", headers=taker)[0], 401)
+
     def test_a_proof_seen_before_the_agent_calls_puts_the_earlier_agent_out(self):
         _, planted = self.agent("t08", prove=False)                          # somebody redeemed a code for t08 first
         st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t08"})

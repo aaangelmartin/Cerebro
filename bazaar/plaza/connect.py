@@ -86,6 +86,7 @@ class Connect:
         self.path, self.host, self.clock = Path(path), host, clock
         self.lock = threading.RLock()
         self.hits: dict[tuple, list[float]] = {}
+        self.changed: set[str] = set()      # teams whose agent was just replaced by another: the board wipes them
         self.data = self._load()
         self.saved_seen = 0.0
         self.on_event = None                # (team, kind, text): set by the team API to feed the activity log
@@ -253,7 +254,10 @@ class Connect:
                         and not (isinstance(tick, int) and isinstance(v.get("tick"), int) and tick < v["tick"])), None)
             if hit is None:
                 return False
-            replaced = bool((self.data["agents"].get(team) or {}).get("verified"))
+            before = self.data["agents"].get(team) or {}
+            replaced = bool(before.get("verified"))
+            if before and before.get("token") != s[hit].get("token"):
+                self.changed.add(team)                         # another agent comes in: nothing of the last one stays
             s[hit]["verified"], s[hit]["verified_at"] = True, now
             if s[hit].get("token"):
                 self._activate(team, s[hit])

@@ -249,7 +249,9 @@ class FakeGame:
                 v["traders"].update((maker, team))
                 v["pairs"].add(tuple(sorted((maker, team))))
                 self.score["mm_points"] = round(self.score["mm_points"] + 0.4, 2)
-            self.emit("settlement", {"venue": o["venue"], "price": price, "parties": [maker, team], "offer": oid,
+            self.settlements = getattr(self, "settlements", 1000) + 1          # the real feed names the settlement,
+            self.emit("settlement", {"settlement": self.settlements,           # never the offer it came from
+                                     "venue": o["venue"], "price": price, "parties": [maker, team],
                                      "items": [{"ref": self.assets[a]["ref"], "frm": f, "to": t} for a, f, t in items]})
             self.write_state()
             return {"id": oid, "status": "settled"}
