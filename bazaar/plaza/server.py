@@ -145,6 +145,7 @@ class Board:
         self.deals = Deals(self.live / "plaza_matches.json", VENUE)
         self.vault = private.Vault(private_dir or self.live.parent / "plaza_private")
         self.queue = AgentQ(self.live / "plaza_agentq.json")
+        self.deals.now = lambda: self.now_tick(None)          # messages and their moves are dated by the game clock
         self.strikes = strikes_mod.Strikes(self.live / "plaza_strikes.json", VENUE, NAME, host)
         self.hourly: dict[str, dict] = self._load_hours()
         self.verified_at = 0.0
@@ -340,7 +341,7 @@ class Board:
         declared = self.store.declared()
         for team, c in self.connect.overview().items():        # a connected agent counts as a claimed sheet
             d = declared.setdefault(team, {"declared": None, "claimed": False, "verified": False, "seen": None})
-            d["claimed"] = d["claimed"] or c["agent"]
+            d["claimed"] = d["claimed"] or bool(c.get("agent_verified"))     # a token nobody proved claims nothing
         sheets = public.merge(public.public_sheets(report, cat, self.host), declared)
         with self.feed_lock:
             self.floor.add_game(self.feed.refresh())
@@ -508,7 +509,7 @@ class Board:
             return {k: v for k, v in m.items() if k not in BUYERS_ONLY}
         out = {k: m[k] for k in PUBLIC_MATCH if k in m}
         out["price"] = m.get("price") if m.get("state") == "settled" else None
-        out["veiled"] = True
+        out["veiled"] = m.get("state") != "settled"            # once settled the terms shown are all there is
         return out
 
     def trade_view(self, m: dict, snap: dict) -> dict:
@@ -758,6 +759,10 @@ class Board:
 
     def matches_view(self, snap: dict, team: str | None = None, limit: int = 60, viewer: str | None = None) -> dict:
         rows = matcher.for_team(snap["matches"], team) if team else snap["matches"]
+        if viewer is None or viewer != team:
+            # The board is kept by priority, and the first priority is "ends the buyer's page": to anybody who is
+            # not reading its own matches the list comes newest first, which says nothing about why.
+            rows = sorted(rows, key=lambda m: (-(m.get("state_tick") or 0), m["id"]))
         return {"tick": snap["tick"], "venue": VENUE, "team": team,
                 "matches": [self.veil(m, viewer) for m in rows[:limit]], "total": len(rows)}
 
@@ -985,6 +990,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._agent()[0]
         if q is None:
             q = self._filters({k: v[-1] for k, v in parse_qs(urlparse(self.path).query).items()})
+        if not self._session(q):                        # no credential at all: say which one an agent sends
+            raise PlazaError(401, "bad_token", f"send your agent token in {TOKEN_HEADER}")
         st = self._status(q)
         if not st["verified"]:
             raise PlazaError(403, "not_connected", "finish connecting first: " + ", ".join(st["missing"]))
@@ -1387,8 +1394,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.board.hour("match_messages")
                 self.board.stale()
                 snap = self.board.get()
-                return self._json(200, {"posted": item["msg"], "match": self.board.trade_view(
-                    self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True), snap)})
+                return self._json(200, {"posted": item["msg"], "match": self.board.trade_view(self.board.veil(
+                    self.board.match_view(rec, snap.get("hidden", (set(), set())), full=True), team), snap)})
             if self.command == "POST" and path == "/plaza/api/floor":
                 self.route = "floor_post"
                 if not isinstance(body, dict):

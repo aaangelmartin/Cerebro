@@ -195,8 +195,9 @@ class Agent:
 
     def decide(self, action: dict):
         """Nothing we set says yes to the price on the table (`action["price"]`): accept it only when we gain
-        (by `EDGE` of our limit), else counter two edges inside our limit, never at the limit itself, else pass.
-        Yours to improve."""
+        (by `EDGE` of our limit), else go back to the price the market suggested when that one suits us, else pass.
+        A counter is never worked out from our limit: the other team reads the thread, and a number that is "limit
+        plus something" tells it the limit. Yours to improve."""
         st, m = self.market("GET", f"/api/match/{action['match']}")
         if st != 200 or m.get("kind") != "sale":
             return {"action": "pass"}
@@ -212,10 +213,11 @@ class Agent:
         edge = max(1, round(limit * EDGE))                 # the room we keep between a price and our limit
         if (price >= limit + edge) if selling else (price <= limit - edge):
             return {"action": "accept"}                    # we gain at least the edge
-        ours = limit + 2 * edge if selling else limit - 2 * edge
-        if ours < 1 or m.get("price_by") == self.team:
+        fair = m.get("suggested")                          # the market's own price, the same for both teams
+        good = isinstance(fair, (int, float)) and ((fair >= limit + edge) if selling else (fair <= limit - edge))
+        if not good or fair == price or m.get("price_by") == self.team:
             return {"action": "pass"}
-        return {"action": "counter", "price": int(ours)}   # never the limit itself: the other team reads the thread
+        return {"action": "counter", "price": int(fair)}   # a public number: it says nothing about our limit
 
     def run_action(self, a: dict) -> tuple[bool, str]:
         """Runs one action of the queue. Returns (done, note)."""

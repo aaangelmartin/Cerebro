@@ -27,7 +27,7 @@ ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
 # Every team at the venue sits behind one public address, so an address is a whole room. Nothing here is counted
 # per team: nobody's own connection is spent by what somebody else asks in its name. A right code always passes.
-STARTS_PER_CLIENT = 300                             # per WINDOW_S, per address, over every team
+STARTS_PER_CLIENT = 3000                            # per WINDOW_S, per address, over every team
 TRIES_PER_CLIENT = 400                              # wrong codes per WINDOW_S, per address: only wrong ones wait
 MAX_SESSIONS, SESSIONS_PER_TEAM = 8000, 400         # unanswered ones; more than one address can start in a window
 MAX_HITS = 5000
@@ -368,7 +368,8 @@ class Connect:
             for team, a in self.data["agents"].items():
                 out[team] = {"agent": True, "agent_verified": bool(a.get("verified")),
                              "agent_last_seen": a.get("last_seen"), "agent_issued": a.get("issued"),
-                             "online": bool(a.get("last_seen") and now - a["last_seen"] < ONLINE_S),
+                             "online": bool(a.get("verified") and a.get("last_seen")
+                                            and now - a["last_seen"] < ONLINE_S),
                              "sessions": 0, "connected": False, "pending": 0}
             for v in self.data["sessions"].values():
                 if v.get("expires", 0) < now:

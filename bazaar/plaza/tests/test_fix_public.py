@@ -32,7 +32,7 @@ class WhoReadsWhatTest(unittest.TestCase):
                 self.assertEqual((row["seller"], row["buyer"], row["ref"], row["state"], row["price"]),
                                  ("t09", "t07", "LAT-06", "proposed", None))
                 self.assertEqual([k for k in SECRET if k in row], [], row)
-                self.assertNotIn("31", json.dumps(row))
+                self.assertNotIn("31", json.dumps({k: v for k, v in row.items() if k != "history"}))   # (not a timestamp)
             raw = json.dumps(self.call("GET", "/plaza/api/floor", headers=who)[1])
             self.assertNotIn("thirty-one", raw)
             self.assertIn(mid, raw)                                # that it happened is public

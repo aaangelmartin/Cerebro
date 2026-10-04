@@ -75,13 +75,31 @@ def candidates(board, sheets: dict, cat: dict) -> list[dict]:
                         traded=board.feed.traded_pairs(), paused=_paused(board))
 
 
+def _ref(x) -> str | None:
+    return x.get("ref") if isinstance(x, dict) else x if isinstance(x, str) else None
+
+
 def _done(board, e: dict) -> None:
     """A trade settled: the card left the seller and reached the buyer. What each said about that card (the
     spare, the want, its private limits and value) described a card it no longer has or no longer misses, so it
     goes: a `min` set for a duplicate must not stay on the last copy, nor a `max` on a card already bought."""
     moves = [(e["team"], ("spares", "for_sale"), e["ref"]), (e["to"], ("wants",), e["ref"])]
+    hands = [(e["team"], e["to"], e["ref"])]
     if e.get("ref_back"):
         moves += [(e["to"], ("spares", "for_sale"), e["ref_back"]), (e["team"], ("wants",), e["ref_back"])]
+        hands.append((e["to"], e["team"], e["ref_back"]))
+    for giver, taker, ref in hands:
+        # What each told us it holds follows the card: the buyer holds it now; the seller still does only if the
+        # card was a duplicate (a `spare`). Each agent's next sheet says it again from its real hand.
+        try:
+            spare = any(_ref(x) == ref for x in (board.store.sheet(giver).get("effective") or {}).get("spares") or [])
+            mine, theirs = board.vault.have(giver), board.vault.have(taker)
+            if mine is not None and ref in mine and not spare:
+                board.vault.set_have(giver, [r for r in mine if r != ref])
+            if theirs is not None and ref not in theirs:
+                board.vault.set_have(taker, theirs + [ref])
+        except Exception:  # noqa: BLE001 - a hand we cannot read is corrected by the agent's next sheet
+            pass
     for team, lists, ref in moves:
         if not team:
             continue
@@ -155,7 +173,8 @@ def _you(board, team: str | None, ref: str, snap: dict, owned: set[str] | None =
 
 def trade_for(board, rec: dict, team: str, snap: dict, queue: dict) -> dict:
     """One match as one of its teams sees it."""
-    view = board.trade_view(board.match_view(rec, snap.get("hidden", (set(), set())), full=True), snap)
+    # its own view: that a card ends the buyer's page is the buyer's to know, never the seller's
+    view = board.trade_view(board.veil(board.match_view(rec, snap.get("hidden", (set(), set())), full=True), team), snap)
     thread = view.pop("thread", [])
     view.pop("history", None)
     card = lambda ref: board.card(ref, snap)   # noqa: E731
@@ -372,8 +391,8 @@ def _message(h, mid: str, body) -> None:
     again = board.deals.repeated(rec["id"], team, body)
     if again is not None:                                          # said already: the match as it is
         snap = board.get()
-        h._json(200, {"posted": None, "repeated": True, "match": board.trade_view(
-            board.match_view(again, snap.get("hidden", (set(), set())), full=True), snap)})
+        h._json(200, {"posted": None, "repeated": True, "match": board.trade_view(board.veil(
+            board.match_view(again, snap.get("hidden", (set(), set())), full=True), team), snap)})
         return
     rec, item, moved = board.deals.message(rec["id"], team, verified, body)
     board.floor.add_game([item] + moved)
@@ -384,8 +403,8 @@ def _message(h, mid: str, body) -> None:
          by="agent", match=rec["id"], ref=rec["ref"], tick=item.get("tick"))
     board.stale()
     snap = board.get()
-    h._json(200, {"posted": item["msg"], "match": board.trade_view(
-        board.match_view(rec, snap.get("hidden", (set(), set())), full=True), snap)})
+    h._json(200, {"posted": item["msg"], "match": board.trade_view(board.veil(
+        board.match_view(rec, snap.get("hidden", (set(), set())), full=True), team), snap)})
 
 
 def write(h, method: str, path: str, body) -> bool:

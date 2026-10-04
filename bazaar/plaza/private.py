@@ -205,6 +205,8 @@ class Vault:
             if isinstance(tick, int) and not isinstance(tick, bool) and isinstance(last.get("tick"), int):
                 if 0 <= tick - last["tick"] < COOL_TICKS:
                     return True
+                if tick < last["tick"] and 0 <= self.clock() - last.get("ts", 0) < COOL_S:
+                    return True                                # the game's ticks started again: the wall clock holds it
             elif 0 <= self.clock() - last.get("ts", 0) < COOL_S:
                 return True
         return False

@@ -118,11 +118,19 @@ class Deals:
         self.log_pos = 0
         self.tick = 0
         self.notes: list[dict] = []                 # things to tell the teams' agents, drained by the caller
-        self.next_msg = max([m["n"] for r in self.matches.values() for m in r.get("messages") or []], default=0) + 1
+        self.now = None                             # the game clock's tick, when the board gives us one
 
     def _save(self) -> None:
         safe.save(self.path, {"matches": self.matches, "cool": self.cool, "forced": self.forced,
                               "totals": self.totals, "closed": self.closed[-MAX_CLOSED:]})
+
+    def _tick(self) -> int:
+        """The tick of now: the game clock's when we have it, never earlier than the last one the feed showed."""
+        try:
+            now = self.now() if self.now else None
+        except Exception:  # noqa: BLE001
+            now = None
+        return max(self.tick, now) if isinstance(now, int) and not isinstance(now, bool) else self.tick
 
     # ---- state
     def _move(self, rec: dict, state: str, tick: int, events: list, **extra) -> bool:
@@ -383,6 +391,7 @@ class Deals:
             self.rate[team] = recent + [now]
             action = msg.get("action")
             events: list[dict] = []
+            tick = self._tick()
             if action == "counter":
                 if "price" in msg and rec["kind"] == "sale":
                     rec["price"], rec["price_by"] = msg["price"], team
@@ -392,18 +401,18 @@ class Deals:
                 if team not in rec["agreed"]:
                     rec["agreed"] = rec["agreed"] + [team]
                 if rec["state"] == "offer_on_v07" and team != rec.get("offer_maker"):
-                    self._move(rec, "accepted", self.tick, events)
+                    self._move(rec, "accepted", tick, events)
             elif action == "pass":
-                self._move(rec, "passed", self.tick, events, passed_by=team)
-            item = {"n": self.next_msg, "team": team, "verified": bool(verified), "ts": now, "tick": self.tick, **msg}
-            self.next_msg += 1
+                self._move(rec, "passed", tick, events, passed_by=team)
+            n = max([m["n"] for m in rec.get("messages") or []], default=0) + 1     # numbered per thread: 1, 2, 3
+            item = {"n": n, "team": team, "verified": bool(verified), "ts": now, "tick": tick, **msg}
             rec["messages"] = (rec.get("messages") or [])[-(MAX_MESSAGES - 1):] + [item]
             rec["updated"] = now
             if action:                                         # a note alone does not keep a proposal alive
-                rec["last_tick"] = self.tick
+                rec["last_tick"] = tick
             self._save()
             other = next((t for t in parties(rec) if t != team), None)
-            floor = {"src": "plaza", "kind": action or "note", "ts": now, "tick": self.tick, "match": rec["id"],
+            floor = {"src": "plaza", "kind": action or "note", "ts": now, "tick": tick, "match": rec["id"],
                      "team": team, "to": other, "ref": rec["ref"], "ref_back": rec.get("ref_back"),
                      "verified": bool(verified), "msg": item["n"], "state": rec["state"],
                      **{k: msg[k] for k in ("price", "cards", "text") if k in msg}, "highlight": False}
