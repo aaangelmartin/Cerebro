@@ -33,7 +33,7 @@ TMP = Path(tempfile.mkdtemp(prefix="bazaar-dry-open-"))
 for name in ("live", "lab"):
     if (SRC / name).is_dir():
         shutil.copytree(SRC / name, TMP / name, ignore=shutil.ignore_patterns("*.out", "*.lock*", "*.pid", "llm.jsonl",
-                                                                              "events.jsonl", "plaza*"))
+                                                                              "plaza*"))
 (TMP / "record").mkdir()
 shutil.copytree(SRC / "record" / "latest", TMP / "record" / "latest")
 os.environ["BAZAAR_DATA_DIR"] = str(TMP)
