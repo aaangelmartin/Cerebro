@@ -245,9 +245,14 @@ class RoughAgents(E2E):
         self.assertEqual(self.rig.game.venue_stats["trades"], 1)
 
     def test_a_broken_store_file_does_not_take_the_market_down(self):
-        self.pair()
+        seller, buyer = self.pair()
         self.rig.refresh()
         self.assertEqual(self.state(), "proposed")
+        mid = self.rig.match_of("t01", "t02")["id"]
+        seller.step()                                         # a second write of every store: now there is a
+        buyer.queue()                                         # previous copy to fall back to
+        self.rig.game.advance()
+        self.rig.refresh()
         self.rig.halt()
         for name in ("plaza_matches.json", "plaza.json", "plaza_agentq.json", "plaza_connect.json"):
             path = self.rig.game.live / name
@@ -263,6 +268,10 @@ class RoughAgents(E2E):
                    if (self.rig.game.live / (n + ".bak")).exists()]
         self.finding(len(backups) == 3, "B1/B2", f"stores keep no .bak copy to load after a cut write (6.2 Files): "
                                                  f"only {backups or 'none'}")
+        self.finding(self.rig.match_of("t01", "t02") is not None and self.rig.match_of("t01", "t02")["id"] == mid,
+                     "B2", "the live match is lost after a cut write of plaza_matches.json")
+        s, q, _ = seller.api("GET", "/plaza/api/agent/next")
+        self.finding(s == 200, "B1", f"the agent's token is lost after a cut write of plaza_connect.json ({s})")
         self.close()
 
     def test_a_deal_closed_on_another_venue_is_told_apart(self):
