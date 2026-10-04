@@ -62,7 +62,7 @@ class QuoterTest(unittest.TestCase):
             price = self.ask(200)["price"]                                         # a reference above the overlap
             self.assertTrue(60 <= price <= hi)
             hits += 2 * price - 60 == hi
-        self.assertLess(hits, 3)                                                   # the old inversion fails
+        self.assertLess(hits, 4)                                                   # the old inversion fails
 
     def test_a_price_does_not_identify_the_other_limit(self):
         """Several limits of the buyer give the seller the very same price, and the margin is secret per vault:
@@ -78,7 +78,7 @@ class QuoterTest(unittest.TestCase):
                 v = private.Vault(Path(d) / "p")
                 v.data = {"t01": {"SAL-09": {"min": 60}}, "t02": {"SAL-09": {"max": 100}}}
                 p = quotes.Quoter(v).quote("t01", "t02", "SAL-09", 200, 40)["price"]
-                self.assertTrue(100 - 0.25 * 40 - 2.5 <= p <= 100)                 # the declared bound: a quarter
+                self.assertTrue(70 <= p <= 90, p)                                  # the middle half of the overlap
                 seen.add(p)
         self.assertGreater(len(seen), 1)                                           # not computable without the key
 

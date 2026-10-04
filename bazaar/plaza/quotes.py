@@ -11,7 +11,9 @@ yes/no on "the buyer values it more" ever leave it. Four rules keep a limit from
    looked at (the team's own agent queue checks it, for that team alone).
 2. The price is the public reference price pulled strictly inside the overlap: a secret share of the overlap and
    at least one step of the price grid away from each end, rounded towards the inside (`matcher.inside`), so it
-   never equals either limit. The share comes from the vault's key and from
+   never equals either limit. A reference that lies outside the overlap is not pulled to the nearest end (the
+   price would sit one step from a limit): the price goes to a point of the middle half of the overlap, drawn in
+   secret the same way. The share comes from the vault's key and from
    BOTH limits, so a team that moves its own limit gets a new, unrelated margin and cannot solve for the other's.
    An overlap narrower than 2 P has no inside: no match.
 3. A refusal that looked at private numbers is kept for `HOLD_TICKS`: asking again gives no new answer.
@@ -29,6 +31,7 @@ from . import matcher
 HOLD_TICKS = 20
 HOLD_S = 300.0                  # the same hold when the game clock stands still
 MAX_KEPT = 20000
+SPOT_LOW, SPOT_HIGH = 0.25, 0.75   # where in the overlap the price goes when the reference is outside it
 MIN_SHARE = 0.05                # of the overlap, on each side, at the very least
 NO = {"price": None, "overlap": False, "value": None, "basis": None}
 
@@ -106,11 +109,23 @@ class Quoter:
         if lo is None or hi is None:                           # not both private: only what the teams published
             return {**matcher.public_quote(seller, buyer, ref, ref_price, floor, salt, ask, bid), "value": value}
         low, high = max(int(lo), int(floor)), int(hi)
-        margin = max(1, int((high - low) * self._share(salt, int(lo), int(hi)))) if high > low else 1
+        width = high - low
+        margin = max(1, int(width * self._share(salt, int(lo), int(hi)))) if width > 0 else 1
+        if width > 0 and not low <= float(ref_price or 0) <= high:
+            # The reference lies outside the overlap. Pulling it to the nearest end would put the price one step
+            # from a limit; it goes to a point of the overlap drawn in secret from the middle half instead, so the
+            # price says "the other limit is beyond this" and nothing finer.
+            ref_price = low + width * self._spot(salt, int(lo), int(hi))
+            margin = max(margin, width // 4)
         price = matcher.inside(low, high, ref_price, margin)
         if price is None:                                      # no overlap, or one with no inside
             return {**NO, "value": value, "held": True}
         return {"price": price, "overlap": True, "value": value, "basis": "limits"}
+
+    def _spot(self, salt: str, lo: int, hi: int) -> float:
+        """SPOT_LOW to SPOT_HIGH of the overlap, from the vault's key, the pair, the card and both limits."""
+        digest = hmac.new(self.vault.key, f"spot|{salt}|{lo}|{hi}".encode(), hashlib.sha256).digest()
+        return SPOT_LOW + (int.from_bytes(digest[:4], "big") % 1000) / 999.0 * (SPOT_HIGH - SPOT_LOW)
 
     def prefers(self, team: str, get: str, give: str) -> bool | None:
         """For a swap: is the card the team gets worth more to it than the one it gives? None: it did not say."""

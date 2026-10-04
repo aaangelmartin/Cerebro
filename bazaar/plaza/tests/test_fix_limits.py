@@ -54,6 +54,23 @@ class LimitLeakTest(Vaulted):
             self.v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": hi}}}
             self.assertIsNone(quotes.Quoter(self.v).quote("t01", "t02", "SAL-09", 100, 1)["price"])
 
+    def test_a_reference_outside_the_overlap_does_not_push_the_price_to_an_end(self):
+        """The second cold test: book 180, the buyer's max 170, price 165: one grid step under the max."""
+        near = 0
+        for i in range(80):
+            with tempfile.TemporaryDirectory() as d:
+                v = private.Vault(Path(d) / "p")
+                q = quotes.Quoter(v)
+                for lo, hi, ref in ((55, 170, 180), (55, 170, 20), (100, 400, 450), (100, 400, 10)):
+                    v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": hi}}}
+                    p = q.quote("t01", "t02", "SAL-09", ref, 1)["price"]
+                    self.assertTrue(lo + (hi - lo) // 4 <= p <= hi - (hi - lo) // 4, (lo, hi, ref, p))
+                    near += min(p - lo, hi - p) <= 5
+        self.assertEqual(near, 0)
+        v = private.Vault(Path(self.dir.name) / "narrow")            # a minimal overlap: inside, as far as it goes
+        v.data = {"t01": {"SAL-09": {"min": 166}}, "t02": {"SAL-09": {"max": 170}}}
+        self.assertIn(quotes.Quoter(v).quote("t01", "t02", "SAL-09", 180, 1)["price"], (167, 168, 169))
+
     def test_the_grid_rounds_inwards(self):
         """The cold test: book 180, the buyer's max 150. 146 to 149 used to round up to 150, the max itself."""
         for lo in range(100, 147):
@@ -74,7 +91,7 @@ class LimitLeakTest(Vaulted):
                     v.data = {"t01": {"SAL-09": {"min": lo}}, "t02": {"SAL-09": {"max": 137}}}
                     seen.append((lo, q.quote("t01", "t02", "SAL-09", 5000, 1)["price"]))   # p = hi - s * (hi - lo)
                 (l1, p1), (l2, p2) = seen
-                if p1 != p2:
+                if p1 != p2 and (p1 - p2) != (l1 - l2):
                     s = (p1 - p2) / ((p1 - p2) - (l1 - l2))                                # the old attack's algebra
                     errors.append(abs((p1 - s * l1) / (1 - s) - 137) if s != 1 else 999)
                 else:
