@@ -25,11 +25,16 @@ CODE_TTL_S = 15 * 60.0
 SESSION_TTL_S = 12 * 3600.0
 ONLINE_S = 90.0
 WINDOW_S = 15 * 60.0
-STARTS_PER_CLIENT, STARTS_PER_TEAM = 10, 8          # per WINDOW_S
-TRIES_PER_CLIENT, TRIES_PER_TEAM = 10, 10           # wrong codes per WINDOW_S
-MAX_SESSIONS, SESSIONS_PER_TEAM = 400, 6
+STARTS_PER_CLIENT = 10                              # per WINDOW_S and per client: nobody spends a team's share
+TRIES_PER_CLIENT = 10                               # wrong codes per WINDOW_S, per client: a team is never locked
+MAX_SESSIONS, SESSIONS_PER_TEAM = 400, 12           # more than one client can start: it cannot push a real one out
+MAX_HITS = 5000
+REPLACE_AFTER_S = 10 * 60.0                         # a verified team's agent this silent is replaced by a proof alone
 SAVE_SEEN_EVERY_S = 10.0
 ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"       # no 0/O, 1/I
+PROVE_FIRST = ("prove it is your team first: with your own game key, open a thread with t10 in the game and send "
+               "your connection code as the text; this token reads and writes once the market has seen it "
+               "(a few seconds), so try again shortly")
 CODE_RX = re.compile(r"PLAZA-[2-9A-HJ-NP-Z]{6}")
 TOKEN_RX = re.compile(r"[A-Za-z0-9_-]{20,64}")
 COOKIE = "plaza_session"
@@ -54,7 +59,7 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
             f"Lee primero /AGENTS.md: explica cada llamada. Después, con el código {code} (un uso, 15 minutos):\n"
             f"1. POST /api/connect/agent {body}; envía el agent_token que recibes como cabecera X-Plaza-Token en "
             "todas las peticiones.\n"
-            f"2. En el juego, abre un hilo con t10 y envía {code} como texto, con TU PROPIA clave del juego. Nunca "
+            f"2. En el juego, abre un hilo con t10 en el venue {venue} y envía {code} como texto, con TU PROPIA clave del juego. Nunca "
             "envíes esa clave aquí ni a nadie.\n"
             f"3. PUT /api/team/{team} con tus wants, spares y for_sale.\n"
             "4. En cada tick: GET /api/agent/next, ejecuta cada petición en orden, POST /api/agent/ack. Cierra todos "
@@ -65,7 +70,7 @@ def prompt(team: str, code: str, base: str, venue: str = "v07", name: str = "Pla
         f"10 is never a party). Base URL, the prefix of every path below: {base}\n"
         f"Read /AGENTS.md first: it explains every call. Then, with code {code} (one use, 15 minutes):\n"
         f"1. POST /api/connect/agent {body}; send the agent_token you get as header X-Plaza-Token on every request.\n"
-        f"2. In the game, open a thread with t10 and send {code} as the text, using YOUR OWN game key. Never send "
+        f"2. In the game, open a thread with t10 on venue {venue} and send {code} as the text, using YOUR OWN game key. Never send "
         "that key here or to anyone.\n"
         f"3. PUT /api/team/{team} with your wants, spares and for_sale.\n"
         "4. Every tick: GET /api/agent/next, run each request in order, POST /api/agent/ack. Close every deal on "
@@ -114,8 +119,11 @@ class Connect:
     # ---- limits
     def _take(self, key: tuple, limit: int) -> bool:
         now = self.clock()
-        if len(self.hits) > 5000:
-            self.hits.clear()
+        if len(self.hits) > MAX_HITS:                          # forget the spent windows, then the oldest ones;
+            live = {k: v for k, v in self.hits.items() if v and now - v[-1] < WINDOW_S}      # never everybody's
+            if len(live) > MAX_HITS:
+                live = dict(sorted(live.items(), key=lambda kv: kv[1][-1])[len(live) - MAX_HITS // 2:])
+            self.hits = live
         q = [t for t in self.hits.get(key, []) if now - t < WINDOW_S]
         ok = len(q) < limit
         if ok:
@@ -139,22 +147,23 @@ class Connect:
         s = self.data["sessions"]
         for sid in [k for k, v in s.items() if v.get("expires", 0) < now]:
             s.pop(sid, None)
-        if len(s) > MAX_SESSIONS:
-            for sid in sorted(s, key=lambda k: s[k].get("created", 0))[:len(s) - MAX_SESSIONS]:
-                if not s[sid].get("verified"):
-                    s.pop(sid, None)
+        if len(s) > MAX_SESSIONS:                              # sessions nobody's agent answered go first
+            spare = sorted((k for k in s if not s[k].get("verified") and not s[k].get("agent_called")),
+                           key=lambda k: s[k].get("created", 0))
+            for sid in spare[:len(s) - MAX_SESSIONS]:
+                s.pop(sid, None)
 
     # ---- the flow
     def start(self, team, client: str) -> dict:
         team = self._team(team)
         with self.lock:
-            if not self._take(("start", "c", client), STARTS_PER_CLIENT) \
-                    or not self._take(("start", "t", team), STARTS_PER_TEAM):
+            if not self._take(("start", "c", client), STARTS_PER_CLIENT):
                 raise PlazaError(429, "slow_down", "too many connection attempts; wait a few minutes")
             self._prune()
             now = self.clock()
             s = self.data["sessions"]
-            mine = sorted((k for k, v in s.items() if v["team"] == team and not v.get("verified")),
+            mine = sorted((k for k, v in s.items() if v["team"] == team and not v.get("verified")
+                           and not v.get("agent_called")),     # a session whose agent answered is never pushed out
                           key=lambda k: s[k].get("created", 0))
             for sid in mine[:max(0, len(mine) - SESSIONS_PER_TEAM + 1)]:
                 s.pop(sid, None)
@@ -166,11 +175,13 @@ class Connect:
             return {"team": team, "connect_code": code, "session": session, "code_expires_in": int(CODE_TTL_S),
                     "session_expires_in": int(SESSION_TTL_S)}
 
-    def agent(self, team, code, client: str, team_verified: bool) -> dict:
-        """The agent's half: the code for a token. `team_verified` says the team already proved itself before."""
+    def agent(self, team, code, client: str, team_verified: bool, current: str | None = None) -> dict:
+        """The agent's half: the code for a token. `team_verified` says the team already proved itself before;
+        `current` is the token the caller already holds, when it sends one: the team's own agent asking for the
+        new one is what lets a proof replace an agent that is still at work."""
         team = self._team(team)
         with self.lock:
-            if self._count(("try", "c", client)) >= TRIES_PER_CLIENT or self._count(("try", "t", team)) >= TRIES_PER_TEAM:
+            if self._count(("try", "c", client)) >= TRIES_PER_CLIENT:
                 raise PlazaError(429, "locked", "too many wrong codes; wait a few minutes")
             now = self.clock()
             code = code.strip().upper() if isinstance(code, str) else ""
@@ -182,12 +193,15 @@ class Connect:
                         break
             if rec is None or rec.get("agent_called") or rec["code_expires"] < now or rec["expires"] < now:
                 self._take(("try", "c", client), TRIES_PER_CLIENT)
-                self._take(("try", "t", team), TRIES_PER_TEAM)
                 why = "this code was already used" if rec and rec.get("agent_called") else \
                     "this code expired; ask for a new one" if rec else "wrong code for this team"
                 raise PlazaError(403, "bad_code", why)
             token = secrets.token_urlsafe(24)
             rec["agent_called"], rec["token"] = now, _h(token)
+            a = self.data["agents"].get(team) or {}
+            if isinstance(current, str) and TOKEN_RX.fullmatch(current) and a.get("verified") \
+                    and secrets.compare_digest(a.get("token") or "", _h(current)):
+                rec["approved"] = True                         # asked for by the team's own verified agent
             active = not team_verified or rec.get("verified")
             if active:                                         # an unverified team: the newest agent is the agent
                 self._activate(team, rec)
@@ -226,9 +240,23 @@ class Connect:
                         and v.get("expires", 0) >= now and v["code"] in upper), None)
             if hit is None:
                 return False
+            a = self.data["agents"].get(team) or {}
+            busy = a.get("verified") and a.get("last_seen") and now - a["last_seen"] < REPLACE_AFTER_S
+            if busy and not s[hit].get("approved"):
+                # A code somebody else started, sent by the team's agent because it was asked to: the agent at work
+                # stays. The team's own agent asks for the new code with its token, or goes silent first.
+                if not s[hit].get("held"):
+                    s[hit]["held"] = now
+                    self._save()
+                    self._say(team, "connect", "a new connection was proved while your agent is at work: it takes "
+                                               "over once your agent asks for it with its token, or stops for "
+                                               f"{int(REPLACE_AFTER_S // 60)} minutes")
+                return False
             s[hit]["verified"], s[hit]["verified_at"] = True, now
             if s[hit].get("token"):
                 self._activate(team, s[hit])
+            else:                                              # whoever held the team before the proof is out; the
+                self.data["agents"].pop(team, None)            # proved session's agent takes over when it calls
             for k in [k for k, v in s.items() if v["team"] == team and k != hit and not v.get("verified")]:
                 s.pop(k, None)
             self._save()
@@ -251,10 +279,9 @@ class Connect:
                     return team, bool(a.get("verified"))
             for v in self.data["sessions"].values():
                 if v.get("token") and secrets.compare_digest(v["token"], h):
-                    if v.get("verified"):
+                    if v.get("verified") or v.get("expires", 0) < now:
                         break                                  # replaced by a newer agent of the same team
-                    raise PlazaError(403, "prove_first", "this team is verified: send the new code as text in a "
-                                                         "game thread with t10 before this token can write")
+                    raise PlazaError(403, "prove_first", PROVE_FIRST)
         raise PlazaError(401, "bad_token", "unknown agent token; connect again")
 
     def session(self, token) -> dict | None:

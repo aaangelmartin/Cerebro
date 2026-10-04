@@ -91,10 +91,17 @@ class Game:
         return {"team": GUEST, "prompt": got["prompt"], "code": got["connect_code"], "agents_md": got["agents_md"],
                 "game": self.url, "game_key": key, "status": self.url + "/sandbox/status"}
 
-    def handle(self, team: str, method: str, path: str, body: dict) -> dict:
+    def handle(self, team: str, method: str, path: str, body: dict, query: dict | None = None) -> dict:
+        query = query or {}
         g = self.game
         if method == "GET" and path == "/api/me":
             return self.me(team)
+        if method == "GET" and path == "/api/me/value":
+            ref = (query.get("card") or [""])[0]
+            if not re.fullmatch(r"[A-Z]{3}-\d{2}", ref):
+                raise GameError(400, "card is a card id such as LAV-09")
+            worth = card(ref)["your_value"]
+            return {"card": ref, "value": worth / 4 if ref in g.hand(team) else worth}
         if method == "GET" and path == "/api/catalog":
             return catalog()
         if method == "GET" and path == "/api/clock":
@@ -151,7 +158,9 @@ def game_server(game: Game, port: int) -> ThreadingHTTPServer:
             except ValueError:
                 return self._send(400, {"error": "bad_request", "message": "send a JSON object"})
             try:
-                self._send(200, game.handle(team, self.command, path, body))
+                from urllib.parse import parse_qs
+                query = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+                self._send(200, game.handle(team, self.command, path, body, query))
             except GameError as e:
                 self._send(e.status, {"error": "refused", "message": e.message})
             except Exception:  # noqa: BLE001 - a practice game: never a trace to the caller
