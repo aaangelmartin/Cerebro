@@ -10,12 +10,11 @@ data: the other side's limits are never in it."""
 from __future__ import annotations
 
 import hashlib
-import json
-import os
 import threading
 import time
 from pathlib import Path
 
+from . import safe
 from .store import MAX_PRICE, PlazaError
 
 MODES = ("auto", "ask_me")
@@ -35,17 +34,11 @@ class AgentQ:
     def __init__(self, path: Path | str, clock=time.time):
         self.path, self.clock = Path(path), clock
         self.lock = threading.RLock()
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
-        self.data: dict[str, dict] = data if isinstance(data, dict) else {}
+        data = safe.load(self.path)
+        self.data: dict[str, dict] = {k: v for k, v in data.items() if isinstance(v, dict)}
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.data), encoding="utf-8")
-        os.replace(tmp, self.path)
+        safe.save(self.path, self.data)
 
     def _team(self, team: str) -> dict:
         t = self.data.setdefault(team, {})
@@ -96,6 +89,8 @@ class AgentQ:
         with self.lock:
             t = self._team(team)
             a = t["acks"].get(action_id) or {"tries": 0}
+            if a.get("status") == "done":                       # acknowledged already: the same answer again
+                return {"id": action_id, **a}
             a = {"status": status, "ts": self.clock(), "tries": a["tries"] + 1,
                  **({"note": " ".join(note.split())[:200]} if note else {})}
             t["acks"][action_id] = a
@@ -136,7 +131,8 @@ class AgentQ:
             if declared_at is None or now - declared_at > SYNC_EVERY_S:
                 add("sync_cards", None, "publish your current duplicates, cards for sale and wants",
                     {"target": "plaza", "method": "PUT", "path": f"/plaza/api/team/{team}", "auth": "X-Plaza-Token",
-                     "body": {"available": ["<refs you can sell or trade>"], "wanted": ["<refs you miss>"]}},
+                     "body": {"wants": ["<refs you miss>"], "spares": ["<your duplicates>"],
+                              "for_sale": ["<refs you would sell>"], "have": ["<every ref you hold>"]}},
                     int(declared_at or 0))
             for m in matches:
                 mid, kind = m["id"], m["kind"]
@@ -178,7 +174,18 @@ class AgentQ:
                         aid = _id(team, "post_offer", mid, price, stamp)
                         if order:
                             order["id"] = aid
-                        add("post_offer", m, f"post the addressed offer on {m.get('venue', 'the venue')}", game, price, stamp)
+                        venue = m.get("venue") or first["body"].get("venue")
+                        add("post_offer", m, f"post this addressed offer in the game, on venue {venue} and nowhere "
+                            f"else: only a sale on {venue} is fee-free and counts for this market", game, price, stamp,
+                            then={"target": "plaza", "method": "POST", "auth": "X-Plaza-Token",
+                                  "path": f"/plaza/api/me/trade/{mid}",
+                                  "body": {"offer_id": "<the id the game gave your offer>"}})
+                        wrong = m.get("elsewhere_offer")
+                        if wrong and wrong.get("maker") == team:
+                            add("move_offer", m, f"your offer {wrong['id']} for this match is on {wrong['venue']}: "
+                                f"cancel it and post it on {venue}",
+                                {"target": "game", "auth": "your own game key", "method": "DELETE",
+                                 "path": f"/api/offers/{wrong['id']}", "body": {}}, wrong["id"])
                     elif team not in (m.get("agreed") or []):
                         aid = _id(team, "agree", mid, price, stamp)
                         if order:
@@ -196,7 +203,8 @@ class AgentQ:
                     aid = _id(team, "confirm", mid, m["offer"], stamp)
                     if order:
                         order["id"] = aid
-                    add("accept_offer", m, f"accept offer {m['offer']} in the game",
+                    add("accept_offer", m, f"accept offer {m['offer']} in the game (it is on venue {m.get('venue') or 'v07'}; "
+                        "it settles on the next tick)",
                         {"target": "game", "auth": "your own game key", "method": "POST",
                          "path": f"/api/offers/{m['offer']}/accept", "body": body}, m["offer"], stamp, offer=m["offer"])
                     add("confirm", m, "say on the thread that you accepted", msg({"action": "accept"}), m["offer"], stamp)

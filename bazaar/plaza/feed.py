@@ -80,7 +80,8 @@ class Feed:
         self.cancelled: set[int] = set()
         self.sales: collections.deque = collections.deque(maxlen=KEEP_SALES)
         self.items: collections.deque = collections.deque(maxlen=KEEP_ITEMS)
-        self.venue_log: list[dict] = []                        # what happened on our venue, for the match threads
+        self.venue_log: list[dict] = []                        # offers and sales between teams, for the match threads
+        self.team_deals: collections.deque = collections.deque(maxlen=KEEP_SALES)   # team-to-team sales, any venue
         self.counts = {"venue_offers": 0, "venue_deals": 0, "venue_volume": 0, "team_deals": 0}
 
     # ---- reading
@@ -130,8 +131,9 @@ class Feed:
             self.offers[o["id"]] = o
             if o["venue"] == self.venue:
                 self.counts["venue_offers"] += 1
-                self._log({"t": "listed", "tick": tick, **{k: o[k] for k in ("id", "maker", "to", "side", "ref",
-                                                                              "ref_back", "price")}})
+            if o["venue"] == self.venue or o.get("to"):       # ours, and addressed offers anywhere (wrong venue)
+                self._log({"t": "listed", "tick": tick, "venue": o["venue"],
+                           **{k: o[k] for k in ("id", "maker", "to", "side", "ref", "ref_back", "price")}})
             return {**base, "kind": "offer", "side": o["side"], "team": o["maker"], "to": o["to"],
                     "venue": o["venue"], "ref": o["ref"], "ref_back": o["ref_back"], "price": o["price"],
                     "offer": o["id"], "highlight": o["venue"] == self.venue}
@@ -139,8 +141,8 @@ class Feed:
             oid = p.get("offer")
             oid = oid.get("id") if isinstance(oid, dict) else oid
             if isinstance(oid, int):
-                if (self.offers.get(oid) or {}).get("venue") == self.venue or p.get("venue") == self.venue:
-                    self._log({"t": "cancelled", "tick": tick, "id": oid})
+                self._log({"t": "cancelled", "tick": tick, "id": oid,
+                           "venue": (self.offers.get(oid) or {}).get("venue") or p.get("venue")})
                 self.cancelled.add(oid)
                 self.offers.pop(oid, None)
             return None
@@ -160,8 +162,12 @@ class Feed:
                     self.offers.pop(oid, None)
             if len(teams) == 2:
                 self.counts["team_deals"] += 1
+                self.team_deals.append({"tick": tick, "venue": venue, "parties": teams, "refs": refs, "price": price})
+            if venue == self.venue or (len(teams) == 2 and not p.get("persona")):
+                # every sale between two teams, wherever it closed: a match that settles off our venue is lost
+                self._log({"t": "settled", "tick": tick, "venue": venue, "id": p.get("settlement"),
+                           "parties": parties, "refs": refs, "price": price})
             if venue == self.venue:
-                self._log({"t": "settled", "tick": tick, "parties": parties, "refs": refs, "price": price})
                 self.counts["venue_deals"] += 1
                 self.counts["venue_volume"] += price
             if p.get("persona") and len(teams) < 2:
@@ -225,3 +231,35 @@ class Feed:
     def sales_of(self, ref: str, limit: int = 12) -> list[dict]:
         rows = [s for s in self.sales if s["ref"] == ref]
         return rows[-limit:][::-1]
+
+    def offer(self, oid) -> dict | None:
+        """An offer the feed listed and has not seen cancelled or settled, on any venue."""
+        return self.offers.get(oid) if isinstance(oid, int) and not isinstance(oid, bool) else None
+
+    def team_prices(self, last: int = 5) -> dict[str, int]:
+        """ref -> the public reference price: the median of its last sales between two teams (dealers excluded).
+        A card nobody has traded has no entry."""
+        by: dict[str, list[int]] = {}
+        for s in self.sales:
+            if s.get("dealer") or not s.get("price"):
+                continue
+            if all(str(s.get(k) or "").startswith("t") and str(s.get(k))[1:].isdigit() for k in ("from", "to")):
+                by.setdefault(s["ref"], []).append(int(s["price"]))
+        out = {}
+        for ref, prices in by.items():
+            tail = sorted(prices[-last:])
+            out[ref] = tail[len(tail) // 2] if len(tail) % 2 else round((tail[len(tail) // 2 - 1] + tail[len(tail) // 2]) / 2)
+        return out
+
+    def traded_pairs(self, venue: str | None = None) -> set[frozenset]:
+        """Pairs of teams that have closed a sale on `venue` (ours by default)."""
+        venue = venue or self.venue
+        return {frozenset(d["parties"]) for d in self.team_deals if d["venue"] == venue}
+
+    def by_venue(self, since_tick: int = 0) -> dict[str, int]:
+        """Team-to-team sales per venue since a tick: our share of the trades teams make."""
+        out: dict[str, int] = {}
+        for d in self.team_deals:
+            if (d.get("tick") or 0) >= since_tick:
+                out[d.get("venue") or "?"] = out.get(d.get("venue") or "?", 0) + 1
+        return out

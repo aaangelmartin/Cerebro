@@ -70,7 +70,8 @@ class VaultTest(unittest.TestCase):
         self.assertEqual((m["price"], m["basis"]), (70, "limits"))
         self.v.put("t02", "SAL-09", {"max": 55})
         self.assertEqual(M.find(sh, CAT, gate=self.v.gate), [])
-        self.assertEqual(M.find(sh, CAT)[0]["price"], 90)                           # without the vault: public data only
+        self.assertEqual(M.find(sh, CAT, strict=False)[0]["price"], 90)             # without the vault: public data only
+        self.assertEqual(M.find(sh, CAT), [])                                       # and nothing says both gain: no match
 
     def test_split_and_validation(self):
         body, priv = P.split({"wants": ["LAV-07", {"ref": "RET-03", "max": 30, "value": 45}],
@@ -195,7 +196,8 @@ class PrivateFlowTest(FlowTest):
         self.assertEqual(self.call("GET", "/plaza/api/agent/cards", headers=tok7)[1]["limits"], {"LAT-06": {"max": 1771}})
         self.assertEqual(self.call("GET", "/plaza/api/me?session=" + s7)[1]["limits"], {"LAT-06": {"max": 1771}})
         st, home, _ = self.call("GET", "/plaza/api/team/t07")
-        self.assertEqual(home["trades"][0]["price"], 1552)                 # the middle of the overlap, nothing else
+        price = home["trades"][0]["price"]                                 # inside the overlap, and not its middle:
+        self.assertTrue(1333 <= price <= 1771 and price != 1552, price)    # a team cannot work the other limit out
         mid = home["trades"][0]["id"]
         self.assertNotIn("basis", home["trades"][0])
         queues = json.dumps(self.call("GET", "/plaza/api/agent/next", headers=tok7)[1])

@@ -136,17 +136,17 @@ class MatcherRulesTest(unittest.TestCase):
         ms = M.find(sheets(sheet("t01", sale=["MAL-11", "RET-03", "LAT-03"], spares=["LAT-06"], wants=["RET-07", "RET-03"]),
                            sheet("t02", wants=["MAL-11", "RET-03", "SAL-02"]),
                            sheet("t03", wants=["LAT-03"]),
-                           sheet("t04", spares=["RET-07"], wants=["LAT-06", "LAT-03"])), CAT)
+                           sheet("t04", spares=["RET-07"], wants=["LAT-06", "LAT-03"])), CAT, strict=False)
         order = [(m["priority"], m["kind"], m["ref"], m["buyer"]) for m in ms]
         self.assertEqual(order[0][0], 1)                                              # the last card of a page
-        self.assertEqual(sorted({p for p, *_ in order}), [1, 2, 3, 4])
+        self.assertEqual(sorted({p for p, *_ in order}), [1, 2, 4])                   # by the value a trade creates
         self.assertEqual([p for p, *_ in order], sorted(p for p, *_ in order))
-        self.assertIn((2, "swap", "LAT-06", "t04"), order)
-        self.assertIn((3, "sale", "MAL-11", "t02"), order)
+        self.assertIn((4, "swap", "LAT-06", "t04"), order)                           # an uncommon card
+        self.assertIn((2, "sale", "MAL-11", "t02"), order)                           # an epic
 
     def test_one_active_match_per_card_and_team(self):
         ms = M.find(sheets(sheet("t01", sale=["SAL-09"]), sheet("t02", wants=["SAL-09"]),
-                           sheet("t03", wants=["SAL-09"]), sheet("t04", wants=["SAL-09"])), CAT)
+                           sheet("t03", wants=["SAL-09"]), sheet("t04", wants=["SAL-09"])), CAT, strict=False)
         self.assertEqual(len(ms), 3)
         active = M.assign(ms)
         self.assertEqual(len(active), 1)                                              # not offered to three at once
@@ -167,7 +167,7 @@ class DealsTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.d = D.Deals(Path(self.dir.name) / "matches.json")
         self.cands = M.find(sheets(sheet("t01", sale=[{"ref": "SAL-09", "price": 60}]), sheet("t02", wants=["SAL-09"]),
-                                   sheet("t03", wants=["SAL-09"])), CAT)
+                                   sheet("t03", wants=["SAL-09"])), CAT, strict=False)   # the mechanics, not the gate
 
     def tearDown(self):
         self.dir.cleanup()
@@ -421,7 +421,7 @@ class FlowTest(unittest.TestCase):
         st, mm, _ = self.call("GET", "/plaza/admin/api/matchmaker", headers=admin)
         self.assertEqual((st, len(mm["queue"]), mm["paused"]), (200, 1, False))
         row = mm["queue"][0]
-        self.assertEqual((row["seller"], row["buyer"], row["basis"], row["priority"]), ("t09", "t07", "declared", 1))
+        self.assertEqual((row["seller"], row["buyer"], row["basis"], row["priority"]), ("t09", "t07", "public", 1))
         self.assertIn("looks for it", row["why"])
         self.assertEqual(row["overlap"], None)                                                   # nobody set limits
         st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "exclude", "team": "t09"}, admin)
