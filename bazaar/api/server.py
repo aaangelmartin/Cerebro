@@ -17,7 +17,7 @@ GET  /rec/latest/<name>  /rec/latest/books/<venue>  /rec/stream/<stream>?since_s
 GET  /values          (what each card is worth to us: exact when the bot asked the game, else estimated)
 GET  /rec/duels /rec/duels/<id> /rec/threads /rec/threads/<id> /rec/index      (the recorder's files, read-only)
 GET  /notifications?since=<ts>   (bell / toasts)        GET /screens/<id>.js|css  (dashboard screens)
-POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "page_buys", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
+POST /control          {"armed", "mode", "caps", "protected", "protected_offers", "manual_threads", "paused_domains", "duel_claude_mode", "duel_days_sign", "goal_buys", "page_buys", "no_packs", "avoid_buy_sets", "avoid_buy_exceptions", "allied_venues", "brain_backend", "mac_calls_per_hour", "brain_deep_research"}   header X-Dashboard: 1
 GET  /dealer-chat?dealer=banco   our own thread with a dealer; POST /dealer-chat/{send,accept,close,release}  (api/dealerchat.py)
 POST /lessons/{id}     {"status": "proposed|shadow|canary|active|retired"}         header X-Dashboard: 1
 POST /stop             creates bazaar/STOP and disarms;  DELETE /stop removes it      header X-Dashboard: 1
@@ -229,6 +229,10 @@ def apply_control(live: Path, body: dict) -> dict:
         if not isinstance(b, list) or not all(isinstance(x, str) and re.fullmatch(r"t\d{1,2}", x.strip().lower()) for x in b):
             raise ValueError('blocked_teams must be a list of team ids like "t06"')
         change["blocked_teams"] = sorted({x.strip().lower() for x in b})
+    if "no_packs" in body:                              # core.rails.rail_no_packs: sealed packs are never bought
+        if not isinstance(body["no_packs"], bool):
+            raise ValueError("no_packs must be true or false")
+        change["no_packs"] = body["no_packs"]
     if "matchmaker" in body:                            # broker.matchmaker: invite pairs of other teams to our venue
         if body["matchmaker"] not in ("on", "off"):
             raise ValueError("matchmaker must be \"on\" or \"off\"")

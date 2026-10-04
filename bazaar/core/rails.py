@@ -731,6 +731,32 @@ def rail_pack(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
+def _is_pack(item) -> bool:
+    return str(item or "").lower().startswith(("pack:", "sobre"))
+
+
+def rail_no_packs(action: Action, sit=None, ctx=None) -> Verdict:
+    """No sealed pack is ever bought (control.no_packs, on unless the team sets it to false): not from a
+    dealer's menu, not on a brain order, not by accepting an offer that hands us one. A pack given for
+    nothing (a gift, an easter egg) is still taken."""
+    if action.kind not in ("accept_offer", "post_offer", "thread_message", "open_thread") \
+            or _control(ctx).get("no_packs", True) is False:
+        return OK
+    p = action.params or {}
+    topic = p.get("topic")
+    if topic is None and action.kind == "thread_message":
+        topic = _get(_thread(sit, p.get("thread")), "topic")
+    if isinstance(topic, dict) and (topic.get("buy") or {}).get("pack") \
+            and (action.kind == "open_thread" or p.get("price") is not None or isinstance(p.get("offer"), dict)):
+        return Verdict(False, "no_packs", f"packs are never bought ({(topic['buy'] or {}).get('pack')})")
+    give, get = flows(action, sit)
+    packs = [t for t in get.get("types") or [] if _is_pack(t)] \
+        + [r for r in (get.get("asset_refs") or {}).values() if _is_pack(r)]
+    if packs and (give.get("cash") or give.get("assets") or give.get("types")):
+        return Verdict(False, "no_packs", f"packs are never bought ({', '.join(str(x) for x in packs)})")
+    return OK
+
+
 def rail_taller(action: Action, sit=None, ctx=None) -> Verdict:
     """The Workshop: exactly three spare cards of ours, one rarity, none promised elsewhere, one unpromised copy of
     each card kept, and an expected value (mean of a released card of the next rarity, recomputed here from the
@@ -766,7 +792,7 @@ def rail_taller(action: Action, sit=None, ctx=None) -> Verdict:
     return OK
 
 
-RAILS = [rail_armed, rail_pack, rail_taller, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
+RAILS = [rail_armed, rail_pack, rail_no_packs, rail_taller, rail_known, rail_accept_shape, rail_cards, rail_avoid_sets, rail_duel, rail_value, rail_cash, rail_pace,
          rail_fair]
 
 

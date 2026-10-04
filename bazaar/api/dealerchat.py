@@ -127,8 +127,14 @@ def check(offer: dict, gw, me: dict, control: dict) -> dict:
     known = known_get and known_give
     gain = round(get - give, 2)
     blocked = None
+    packs = [str(t) for t in (offer.get("give") or {}).get("types") or [] if str(t).startswith("pack:")] \
+        + [str(a.get("ref")) for a in (offer.get("give") or {}).get("assets") or []
+           if isinstance(a, dict) and (a.get("kind") == "pack" or str(a.get("ref") or "").startswith("sobre"))]
+    paying = pay > 0 or (offer.get("want") or {}).get("assets") or (offer.get("want") or {}).get("types")
     if offer.get("status", "open") != "open":
         blocked = f"la oferta ya no está abierta ({offer.get('status')})"
+    elif packs and paying and control.get("no_packs", True) is not False:
+        blocked = "los sobres no se compran (control.no_packs)"
     elif pay > cash - reserve:
         blocked = f"pagar {pay} P deja la caja por debajo de la reserva de {reserve} P (caja {cash} P)"
     elif pay > per_deal:
@@ -223,6 +229,11 @@ def send(live: Path, body: dict, gw=None) -> dict:
         raise ValueError("el precio debe ser un número mayor que 0")
     thread = _thread_with(gw, dealer)
     opened = False
+    if price is not None and _control(live).get("no_packs", True) is not False:
+        topic = (thread or {}).get("topic") or ({"buy": {"pack": 1}} if str(body.get("side")) == "buy"
+                                               and str(body.get("item") or "").lower().startswith("sobre") else {})
+        if (topic.get("buy") or {}).get("pack"):       # talking is fine; a priced bid for a pack is a purchase
+            raise ValueError("los sobres no se compran (control.no_packs): escribe sin precio")
     if thread is None:
         me = gw.get("/api/me") or {}
         made = gw.post("/api/threads", {"with": dealer, "topic": _topic(str(body.get("side") or ""), body.get("item"), me)}) or {}

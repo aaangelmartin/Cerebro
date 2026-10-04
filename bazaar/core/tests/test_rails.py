@@ -168,9 +168,11 @@ class ValueRail(unittest.TestCase):
         # a pack's value comes from the catalog (dealers.values.pack_value), never from the action's own estimate
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"pack": "sobre_barrio"}}, "messages": []}
         a = Action("thread_message", {"thread": 4, "price": 22, "text": "22?"}, "dealers")
-        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "value")
+        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "no_packs")    # packs are never bought...
+        allowed = ctx(control={"armed": True, "no_packs": False})                      # ...unless the team says so
+        self.assertEqual(rails.check(a, sit(threads=[th]), allowed).rail, "value")
         a.expected["value_get"] = 30
-        self.assertEqual(rails.check(a, sit(threads=[th]), ctx()).rail, "value")
+        self.assertEqual(rails.check(a, sit(threads=[th]), allowed).rail, "value")
 
     def test_dealer_item_from_its_offer(self):
         th = {"id": 4, "with": "abuela", "status": "open", "topic": {"buy": {"rarity": "rare", "set": "LAV"}},
@@ -221,7 +223,7 @@ class PaceRail(unittest.TestCase):
 
     def test_thread_limits(self):
         threads = [{"id": i, "with": f"d{i}", "status": "open"} for i in range(6)]
-        a = Action("open_thread", {"with": "abuela", "topic": {"buy": {"pack": "x"}}}, "dealers")
+        a = Action("open_thread", {"with": "abuela", "topic": {"buy": {"card": "SAL-06"}}}, "dealers")
         self.assertEqual(rails.check(a, sit(threads=threads), ctx()).rail, "pace")
         self.assertEqual(rails.check(a, sit(threads=[{"id": 1, "with": "abuela", "status": "open"}]), ctx()).rail, "pace")
         self.assertTrue(rails.check(a, sit(), ctx()).ok)

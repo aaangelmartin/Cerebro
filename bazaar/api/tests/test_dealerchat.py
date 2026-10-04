@@ -160,6 +160,30 @@ class DealerChatTest(unittest.TestCase):
         self.assertIn("perdemos valor", out["check"]["blocked"])
         self.assertEqual(self.req("/control", {"page_buys": {"LAV-11": 500}}, HDR)[0], 400)
 
+    def test_a_pack_is_never_bought_by_hand(self):
+        self.game.me["cash"] = 900
+        code, out = self.req("/dealer-chat/send", {"dealer": "banco", "text": "400", "side": "buy",
+                                                   "item": "sobre_oro", "price": 400}, HDR)
+        self.assertEqual(code, 400)                                         # a priced bid for a pack: refused
+        self.assertEqual(self.game.calls, [])
+        self.req("/dealer-chat/send", {"dealer": "banco", "text": "Buenas tardes.", "side": "buy",
+                                       "item": "sobre_oro"}, HDR)            # talking is still allowed
+        o = {"id": 900, "maker": "banco", "to": "t10", "thread": 50, "status": "open", "final": False,
+             "give": {"cash": 0, "assets": [], "types": ["pack:sobre_oro"]}, "want": {"cash": 150, "assets": [], "types": []}}
+        self.game.threads[0]["standing_offers"] = [o]
+        out = self.req("/dealer-chat/accept", {"dealer": "banco", "offer": 900, "confirm": True}, HDR)[1]
+        self.assertFalse(out["accepted"])
+        self.assertIn("sobres", out["check"]["blocked"])
+        self.assertNotIn("/api/offers/900/accept", [c[0] for c in self.game.calls])
+        o["want"]["cash"] = 0                                               # a pack given for nothing is taken
+        chk = dealerchat.check(o, self.game, self.game.me, {})
+        self.assertNotIn("sobres", str(chk["blocked"]))
+
+    def test_control_takes_the_no_packs_switch(self):
+        code, out = self.req("/control", {"no_packs": True}, HDR)
+        self.assertEqual((code, out["no_packs"]), (200, True))
+        self.assertEqual(self.req("/control", {"no_packs": "yes"}, HDR)[0], 400)
+
     def test_a_stale_offer_id_is_refused(self):
         self.req("/dealer-chat/send", {"dealer": "banco", "text": "x", "side": "buy", "item": "LAV-11"}, HDR)
         self.game.offer(100)
