@@ -778,6 +778,7 @@ class Runner:
             if sit is not None and state == "running":
                 _write_json(self.live / "tick_latest.json", {
                     **self.last_report, "deadline": sit.deadline, "tick_start": sit.tick_start,
+                    "perceived_at": sit.perceived_at, "requests": sit.requests,
                     "cash": sit.cash, "score": sit.score, "novelty": sit.novelty,
                     "duels": sit.duels, "threads": [{k: t.get(k) for k in ("id", "with", "status", "topic")}
                                                     for t in sit.threads],

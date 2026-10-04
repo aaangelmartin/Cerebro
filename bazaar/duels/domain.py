@@ -54,6 +54,8 @@ def accept_priority(pts: float, ticks_left: int, n_accepting: int = 1) -> float:
 LATE_GRACE_S = 10.0          # a duel call may run this long past the tick deadline: its answer is used next tick
 SAFETY_S = 0.25              # stop waiting for Claude this long before the tick deadline
 SHORT_TICK_S = 20.0          # Sunday's 15 s ticks: race Opus against Sonnet
+SHORT_GRACE_S = 5.0          # ...and a call may run this long past the tick deadline (to the end of a 15 s tick):
+                             # on Sunday the reads left it 1-3 s and it timed out; its answer is used next tick
 
 
 def _opus_rung(llm) -> bool:
@@ -234,7 +236,7 @@ class DuelsDomain:
         if isinstance(tick_s, (int, float)) and 0 < tick_s <= SHORT_TICK_S:
             from .. import config
             left = (deadline - SAFETY_S - time.time()) if deadline else None
-            kw["deadline"] = (deadline - SAFETY_S) if deadline else None     # short ticks: no grace
+            kw["deadline"] = (deadline - SAFETY_S + SHORT_GRACE_S) if deadline else None   # short ticks: short grace
             if left is not None and left < SONNET_ONLY_S:
                 res = llm.ask(model=config.SONNET, **kw)
             elif hasattr(llm, "race") and _opus_rung(llm):

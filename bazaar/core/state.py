@@ -402,6 +402,8 @@ def perceive(gw, prev: Situation | None, *, live: Path | None = None, slow_every
 
     # Slow reads.
     refresh = any(str(e.get("type", "")).startswith(REFRESH_TYPES) for e in fresh)
+    if refresh and sit.duels and prev is not None and prev.slow_tick >= 0:
+        refresh = False                       # a live duel: six more reads would eat the model's seconds; the rota covers it
     slow = prev is None or refresh or prev.slow_tick < 0 or tick - prev.slow_tick >= slow_every \
         or tick < prev.slow_tick
     if slow:

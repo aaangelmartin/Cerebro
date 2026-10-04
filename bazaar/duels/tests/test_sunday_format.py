@@ -78,6 +78,30 @@ class FourLiveDuelsAnswerInTheirFirstTick(unittest.TestCase):
         self.check(acts)
         self.assertTrue(all(a.source == "fallback" for a in acts))
 
+    def test_a_late_call_keeps_running_and_its_answer_waits_for_the_next_tick(self):
+        from bazaar.duels.domain import SAFETY_S, SHORT_GRACE_S
+        seen = []
+
+        class Late(LLM):
+            def ask(self, **kw):
+                seen.append(kw.get("deadline"))
+                return super().ask(**kw)
+
+        llm = Late({"action": "offer", "price": 100, "days": 10, "text": "100 P, 10 days", "reason": "",
+                    "expected_points": 5}, delay=0.6)
+        dom = DuelsDomain(memory=mem(), llm=llm)
+        dl = time.time() + 0.3                              # the reads left the model almost nothing
+        t0 = time.time()
+        acts = dom.decide(SimpleNamespace(tick=2000, duels=FOUR), ctx(deadline=dl))
+        self.assertLess(time.time() - t0, 0.5)             # the tick is not held
+        self.check(acts)                                    # ...and every duel is still answered in its first tick
+        self.assertEqual(len(seen), 4)
+        for d in seen:                                      # the call itself may run to the end of the tick
+            self.assertAlmostEqual(d, dl - SAFETY_S + SHORT_GRACE_S, places=3)
+        self.assertEqual(sorted(dom._pending), [1, 2, 3, 4])
+        for fut, _ in dom._pending.values():
+            self.assertEqual(fut.result(timeout=2).action, "offer")     # an answer, not a timeout
+
     def test_claude_down(self):
         dom = DuelsDomain(memory=mem(), llm=LLM(fail=True))
         self.check(dom.decide(SimpleNamespace(tick=2000, duels=FOUR), ctx(deadline=time.time() + 2)))
