@@ -161,3 +161,15 @@ div.scr-competicion { display: flex; flex-direction: column; gap: 16px; }
 .scr-competicion .c-g-move { font-style: normal; font-size: 10.5px; margin-left: 8px; font-family: "Geist Mono", monospace; }
 .scr-competicion .c-g-up { color: var(--ok); }
 .scr-competicion .c-g-down { color: var(--bad); }
+.scr-competicion .c-g-tabs { display: flex; margin-bottom: 10px; }
+.scr-competicion .c-g-tabs .t10-seg { font-size: 12px; padding: 6px 12px; }
+.scr-competicion .c-g-row.c-g-day { grid-template-columns: 28px minmax(130px, 1.5fr) repeat(3, minmax(96px, 1fr)) minmax(96px, 1fr); }
+.scr-competicion .c-g-row.c-g-day-sun { grid-template-columns: 28px minmax(130px, 1.5fr) repeat(3, minmax(96px, 1fr)) minmax(96px, 0.9fr) minmax(60px, 0.6fr) minmax(96px, 1fr); }
+.scr-competicion .c-g-src { font-style: normal; margin-left: 5px; color: var(--ink-3); }
+.scr-competicion .c-g-src-srv { color: var(--ok); }
+.scr-competicion .c-g-ours { border: 1px solid var(--line-2); background: var(--s2); padding: 10px 12px; margin-bottom: 12px; }
+.scr-competicion .c-g-ours-h { margin-bottom: 8px; }
+.scr-competicion .c-g-kvs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.scr-competicion .c-g-kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.scr-competicion .c-g-kv b { font-size: 20px; color: var(--ink); font-weight: 600; }
+@media (max-width: 900px) { .scr-competicion .c-g-kvs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

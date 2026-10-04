@@ -32,6 +32,89 @@ La clasificación se actualiza cada 20 ticks (5 minutos con ticks de 15 s).
 | 17 | Team 17 | 22,1 (3.º) | 27,5 (15.º) | 11,2 (0,0 · 11,2) (17.º) | 21,16 (17.º) | 19,91 |
 | 18 | Team 11 | 0,0 (18.º) | 11,2 (18.º) | 11,2 (0,0 · 11,2) (18.º) | 8,67 (18.º) | 8,99 |
 
+## Viernes
+
+Reconstruido de la tabla publicada (≈).
+
+| # | Equipo | Negociación ≈ | Mercado ≈ | Nota del día ≈ |
+|---|---|---|---|---|
+| 1 | Team 13 | 30,0 | 0,0 | 30,00 |
+| 2 | Team 12 | 27,9 | 0,0 | 27,88 |
+| 3 | Team 17 | 22,1 | 0,0 | 22,07 |
+| 4 | **Team 10** | 20,8 | 0,0 | **20,79** |
+| 5 | Team 4 | 20,5 | 0,0 | 20,53 |
+| 6 | Team 5 | 20,0 | 0,0 | 20,03 |
+| 7 | Team 18 | 19,2 | 0,0 | 19,20 |
+| 8 | Team 14 | 18,1 | 0,0 | 18,10 |
+| 9 | Team 8 | 17,6 | 0,0 | 17,65 |
+| 10 | Team 3 | 14,6 | 0,0 | 14,63 |
+| 11 | Team 6 | 12,7 | 0,0 | 12,70 |
+| 12 | Team 15 | 10,4 | 0,0 | 10,35 |
+| 13 | Team 9 | 9,5 | 0,0 | 9,54 |
+| 14 | Team 7 | 9,0 | 0,0 | 8,98 |
+| 15 | Team 1 | 8,4 | 0,0 | 8,41 |
+| 16 | Team 16 | 6,9 | 0,0 | 6,85 |
+| 17 | Team 2 | 6,8 | 0,0 | 6,84 |
+| 18 | Team 11 | 0,0 | 0,0 | 0,00 |
+
+## Sábado
+
+Reconstruido de la tabla publicada (≈).
+
+| # | Equipo | Negociación ≈ | Mercado ≈ | Nota del día ≈ |
+|---|---|---|---|---|
+| 1 | **Team 10** | 27,2 | 18,7 | **45,99** |
+| 2 | Team 12 | 20,8 | 17,9 | 38,73 |
+| 3 | Team 5 | 24,5 | 14,0 | 38,44 |
+| 4 | Team 18 | 26,1 | 11,2 | 37,31 |
+| 5 | Team 3 | 28,1 | 9,1 | 37,20 |
+| 6 | Team 6 | 19,0 | 16,9 | 35,89 |
+| 7 | Team 1 | 23,0 | 11,2 | 34,27 |
+| 8 | Team 14 | 18,5 | 13,6 | 32,12 |
+| 9 | Team 2 | 20,5 | 11,2 | 31,71 |
+| 10 | Team 16 | 16,7 | 14,7 | 31,46 |
+| 11 | Team 15 | 19,5 | 11,2 | 30,70 |
+| 12 | Team 7 | 14,4 | 15,8 | 30,22 |
+| 13 | Team 9 | 13,7 | 16,2 | 29,94 |
+| 14 | Team 8 | 15,9 | 12,5 | 28,35 |
+| 15 | Team 17 | 14,7 | 12,7 | 27,48 |
+| 16 | Team 4 | 15,8 | 11,2 | 27,07 |
+| 17 | Team 13 | 12,4 | 10,2 | 22,54 |
+| 18 | Team 11 | 0,0 | 11,2 | 11,25 |
+
+## Domingo (hasta ahora)
+
+Reconstruido de la tabla publicada (≈).
+
+| # | Equipo | Negociación ≈ | Mercado ≈ | Nota del día ≈ |
+|---|---|---|---|---|
+| 1 | Team 9 | 17,0 | 18,8 | 35,75 |
+| 2 | Team 18 | 23,5 | 11,2 | 34,72 |
+| 3 | Team 12 | 23,9 | 10,4 | 34,34 |
+| 4 | Team 13 | 22,0 | 11,2 | 33,27 |
+| 5 | Team 3 | 20,8 | 11,2 | 32,08 |
+| 6 | Team 2 | 20,3 | 11,2 | 31,55 |
+| 7 | Team 5 | 19,1 | 11,2 | 30,31 |
+| 8 | Team 15 | 11,5 | 18,7 | 30,21 |
+| 9 | Team 4 | 17,8 | 11,2 | 29,01 |
+| 10 | Team 6 | 16,8 | 11,3 | 28,10 |
+| 11 | Team 1 | 14,9 | 11,2 | 26,13 |
+| 12 | **Team 10** | 14,1 | 11,3 | **25,36** |
+| 13 | Team 8 | 15,8 | 6,1 | 21,90 |
+| 14 | Team 14 | 10,1 | 11,2 | 21,37 |
+| 15 | Team 16 | 7,6 | 11,3 | 18,86 |
+| 16 | Team 7 | 10,6 | 8,2 | 18,77 |
+| 17 | Team 17 | 0,0 | 11,2 | 11,25 |
+| 18 | Team 11 | 0,0 | 11,2 | 11,24 |
+
+### Team 10 · lo que el servidor cuenta de nuestra ronda de hoy
+
+| Tratos con equipos | Duelos | Escalera de dealers | Market Test | Tratos reales del venue |
+|---|---|---|---|---|
+| 29,5 | 10,12 | 0,195 | 0,50 (eficiencia 89,5 %) | 0,0 |
+
+El servidor solo publica estos componentes del propio equipo.
+
 ## Hoy, corte a corte
 
 | Hora | Tick | Peso domingo | t12 | t10 | t18 | t05 | t03 |

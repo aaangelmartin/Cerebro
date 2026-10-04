@@ -146,6 +146,22 @@ def markdown(doc: dict) -> str:
             f"| {t['rank_final']} | {name}{_move(t)} | {_f(t['r1'])} ({t.get('rank_r1', '—')}.º) | {_f(t['r2'])} ({t.get('rank_r2', '—')}.º) | "
             f"{_f(t['r3'])} ({_f(t['negotiating']['r3'])} · {_f(t['market']['r3'])}) ({t['rank_r3']}.º) | "
             f"{_f(t['table'], 2)} ({t['rank_table']}.º) | {b}{_f(t['final'], 2)}{b} |")
+    for key, day in (("r1", "Viernes"), ("r2", "Sábado"), ("r3", "Domingo (hasta ahora)")):
+        rows = sorted((t for t in doc["teams"] if t[key] is not None), key=lambda t: -t[key])
+        if not rows:
+            continue
+        out += ["", f"## {day}", "", "Reconstruido de la tabla publicada (≈).", "",
+                "| # | Equipo | Negociación ≈ | Mercado ≈ | Nota del día ≈ |", "|---|---|---|---|---|"]
+        for i, t in enumerate(rows, 1):
+            b = "**" if t["team"] == US else ""
+            out.append(f"| {i} | {b}{t['name']}{b} | {_f(t['negotiating'][key])} | {_f(t['market'][key])} | {b}{_f(t[key], 2)}{b} |")
+    ours = doc.get("ours") or {}
+    if ours:
+        out += ["", "### Team 10 · lo que el servidor cuenta de nuestra ronda de hoy", "",
+                "| Tratos con equipos | Duelos | Escalera de dealers | Market Test | Tratos reales del venue |", "|---|---|---|---|---|",
+                f"| {_f(ours.get('neg_points'))} | {_f(ours.get('duel_points'), 2)} | {_f(ours.get('ladder_points'), 3)} | "
+                f"{_f(ours.get('bench_points'), 2)} (eficiencia {_f((ours.get('bench_efficiency') or 0) * 100)} %) | {_f(ours.get('mm_points'))} |",
+                "", "El servidor solo publica estos componentes del propio equipo."]
     out += ["", "## Hoy, corte a corte", "", "| Hora | Tick | Peso domingo | " + " | ".join(doc["top"]) + " |",
             "|---|---|---|" + "---|" * len(doc["top"])]
     for r in doc["timeline"]:
@@ -161,6 +177,10 @@ def main() -> None:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     doc = build(cuts())
+    try:
+        doc["ours"] = (json.loads((RECORD.parent / "latest" / "me.json").read_text()) or {}).get("score") or {}
+    except (OSError, ValueError):
+        doc["ours"] = {}
     if args.json:
         print(json.dumps(doc))
         return

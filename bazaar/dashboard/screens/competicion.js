@@ -303,7 +303,8 @@
   let S = null;
 
   function mount(root) {
-    S = { mode: "rareza", drawerFor: null };
+    S = { mode: "rareza", drawerFor: null, gtab: "all" };
+    try { S.gtab = localStorage.getItem("t10.comp.gtab") || "all"; } catch (e) { /* storage blocked */ }
     root.innerHTML = "";
     let tab = "precios";
     try { tab = localStorage.getItem("t10.comp.tab") || "precios"; } catch (e) { /* storage blocked */ }
@@ -382,6 +383,8 @@
       }
       const sum = (k) => PARTS.every((p) => row.parts[p][k] != null) ? PARTS.reduce((a, p) => a + row.parts[p][k], 0) : null;
       row.r1 = sum("r1"); row.r2 = sum("r2"); row.r3 = sum("r3"); row.final = sum("final");
+      row.through2 = first3 && first3.teams[t.team] ? (num(first3.teams[t.team].score) || 0) * (w12 + (first3.phase[3] || 0)) / w12 : null;
+      row.server = { pages: num(t.pages_complete), album: num(t.album_filled), slots: num(t.album_slots), deals: num(t.deals), level: num(t.level), venue: t.venue || null };
       return row;
     });
     for (const key of ["r1", "r2", "r3", "table", "final"]) {
@@ -389,9 +392,17 @@
     }
     const top = teams.slice().sort((a, b) => b.table - a.table).slice(0, 5).map((t) => t.team); if (!top.includes(US)) top.push(US);
     teams.sort((a, b) => b.final - a.final);        // by where each team would end
+    // Sunday's own mark at every cut of today, for the five best of the day and us
+    const top3 = teams.slice().sort((a, b) => b.r3 - a.r3).slice(0, 5).map((t) => t.team); if (!top3.includes(US)) top3.push(US);
+    const base = Object.fromEntries(teams.map((t) => [t.team, t.through2]));
+    const day3 = new Map();
+    for (const c of sunday) {
+      const p = c.phase[3] || 0; if (p < 0.1) continue;      // too little of the day played to read it
+      day3.set(c.tick, { ts: c.ts, tick: c.tick, scores: Object.fromEntries(top3.map((id) => [id, c.teams[id] && base[id] != null ? ((num(c.teams[id].score) || 0) * (w12 + p) - w12 * base[id]) / p : null])) });
+    }
     const seen = new Map();
     for (const c of sunday) seen.set(c.tick, { ts: c.ts, tick: c.tick, scores: Object.fromEntries(top.map((id) => [id, c.teams[id] ? num(c.teams[id].score) : null])) });
-    return { tick: now.tick, ts: now.ts, phase: ph, teams, top, timeline: [...seen.values()], snap: now.snap, next: now.next };
+    return { tick: now.tick, ts: now.ts, phase: ph, teams, top, timeline: [...seen.values()], top3, timeline3: [...day3.values()], snap: now.snap, next: now.next };
   }
 
   // the countdown to the next cut: the server says at which tick it refreshes the table
@@ -412,43 +423,92 @@
     try { doc = globalBoard(((await D.cached("global:lb", 8000, () => api.recStream("leaderboard", { tail: 400 }))) || {}).rows); }
     catch (e) { return D.replace(box, D.state("error", D.errText(e))); }
     if (!doc) return D.replace(box, D.state("empty", tr("competicion.global.none")));
+    let me = null; try { me = await D.rec("me", 8000); } catch (e) { me = null; }
     const f = (x, nd = 1) => (x == null ? "—" : fmt(Math.abs(x) < 0.05 ? 0 : x, nd));
     const move = (t) => { const d = t.rank_table - t.rank_final; return d ? el("i", { class: "c-g-move " + (d > 0 ? "c-g-up" : "c-g-down"), title: tr(d > 0 ? "competicion.global.up" : "competicion.global.down", { n: Math.abs(d) }) }, (d > 0 ? "▲" : "▼") + Math.abs(d)) : null; };
     const cell = (v, rank, extra) => el("span", { class: "num c-g-cell" }, f(v), rank ? el("i", { class: "c-g-rank" }, "#" + rank) : null, extra || null);
-    const head = el("div", { class: "c-g-row c-g-head t10-cap" },
-      el("span", {}, "#"), el("span", {}, tr("common.team")), el("span", {}, tr("competicion.global.fri")), el("span", {}, tr("competicion.global.sat")),
-      el("span", {}, tr("competicion.global.sun")), el("span", {}, tr("competicion.global.now")), el("span", {}, tr("competicion.global.final") + " ↓"));
-    const lines = doc.teams.map((t) => el("div", { class: "c-g-row" + (t.team === US ? " c-g-us" : "") },
-      el("span", { class: "num" }, String(t.rank_final)),
-      el("span", { class: "c-g-name" }, t.team === US ? tr("common.team10us") : t.name, move(t)),
-      cell(t.r1, t.rank_r1), cell(t.r2, t.rank_r2),
-      cell(t.r3, t.rank_r3, el("i", { class: "c-g-split" }, f(t.parts.negotiating.r3) + " · " + f(t.parts.market.r3))),
-      cell(t.table, t.rank_table),
-      el("span", { class: "num c-g-cell c-g-strong" }, f(t.final, 2))));
-    // today, cut by cut: one line per team of the top five (and us)
-    const tl = doc.timeline; let chart = null;
-    if (tl.length > 1) {
-      const W = 640, H = 120, all = tl.flatMap((r) => Object.values(r.scores).filter((x) => x != null));
+    const name = (t, extra) => el("span", { class: "c-g-name" }, t.team === US ? tr("common.team10us") : t.name, extra || null);
+    // one line per team, the day's five best and us
+    function lines(tl, ids, label) {
+      if (tl.length < 2) return null;
+      const W = 640, H = 140, all = tl.flatMap((r) => Object.values(r.scores).filter((x) => x != null));
       const lo = Math.min(...all) - 0.3, hi = Math.max(...all) + 0.3;
       const x = (i) => (i / (tl.length - 1)) * (W - 70) + 4, y = (v) => H - 14 - ((v - lo) / (hi - lo || 1)) * (H - 24);
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "c-g-chart"); svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", tr("competicion.global.today"));
-      doc.top.forEach((id) => {
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "c-g-chart"); svg.setAttribute("role", "img"); svg.setAttribute("aria-label", label);
+      ids.forEach((id) => {
         const pts = tl.map((r, i) => (r.scores[id] == null ? null : x(i).toFixed(1) + "," + y(r.scores[id]).toFixed(1))).filter(Boolean);
         const pl = document.createElementNS(svg.namespaceURI, "polyline");
-        pl.setAttribute("points", pts.join(" ")); pl.setAttribute("fill", "none");
-        pl.setAttribute("class", "c-g-line" + (id === US ? " c-g-line-us" : ""));
+        pl.setAttribute("points", pts.join(" ")); pl.setAttribute("fill", "none"); pl.setAttribute("class", "c-g-line" + (id === US ? " c-g-line-us" : ""));
         svg.append(pl);
-        const last = tl[tl.length - 1].scores[id];
-        if (last != null) { const tx = document.createElementNS(svg.namespaceURI, "text"); tx.setAttribute("x", W - 62); tx.setAttribute("y", y(last) + 3); tx.setAttribute("class", "c-g-lbl" + (id === US ? " c-g-lbl-us" : "")); tx.textContent = id + " " + f(last, 2); svg.append(tx); }
       });
-      chart = el("div", { class: "c-g-today" }, el("div", { class: "t10-cap" }, tr("competicion.global.today")), svg);
+      // the labels at the end of each line, pushed apart when two teams are level
+      const ends = ids.map((id) => ({ id, v: tl[tl.length - 1].scores[id] })).filter((e) => e.v != null).sort((a, b) => b.v - a.v);
+      let prev = -Infinity;
+      for (const e of ends) {
+        const yy = Math.max(y(e.v) + 3, prev + 10); prev = yy;
+        const tx = document.createElementNS(svg.namespaceURI, "text"); tx.setAttribute("x", W - 62); tx.setAttribute("y", yy);
+        tx.setAttribute("class", "c-g-lbl" + (e.id === US ? " c-g-lbl-us" : "")); tx.textContent = e.id + " " + f(e.v, 2); svg.append(tx);
+      }
+      return el("div", { class: "c-g-today" }, el("div", { class: "t10-cap" }, label), svg);
     }
+    const src = (k) => el("i", { class: "c-g-src c-g-src-" + k, title: tr("competicion.global.src." + k + ".title") }, tr("competicion.global.src." + k));
+    function viewGlobal() {
+      const head = el("div", { class: "c-g-row c-g-head t10-cap" },
+        el("span", {}, "#"), el("span", {}, tr("common.team")), el("span", {}, tr("competicion.global.fri")), el("span", {}, tr("competicion.global.sat")),
+        el("span", {}, tr("competicion.global.sun")), el("span", {}, tr("competicion.global.now")), el("span", {}, tr("competicion.global.final") + " ↓"));
+      const rows = doc.teams.map((t) => el("div", { class: "c-g-row" + (t.team === US ? " c-g-us" : "") },
+        el("span", { class: "num" }, String(t.rank_final)), name(t, move(t)),
+        cell(t.r1, t.rank_r1), cell(t.r2, t.rank_r2),
+        cell(t.r3, t.rank_r3, el("i", { class: "c-g-split" }, f(t.parts.negotiating.r3) + " · " + f(t.parts.market.r3))),
+        cell(t.table, t.rank_table),
+        el("span", { class: "num c-g-cell c-g-strong" }, f(t.final, 2))));
+      return [el("div", { class: "c-g-table" }, head, rows), lines(doc.timeline, doc.top, tr("competicion.global.today")), el("div", { class: "t10-small t10-muted c-g-note" }, tr("competicion.global.note"))];
+    }
+    function viewDay(k) {
+      const day = { r1: "fri", r2: "sat", r3: "sun" }[k], sun = k === "r3";
+      const by = (part) => { const o = doc.teams.filter((t) => t.parts[part][k] != null).sort((a, b) => b.parts[part][k] - a.parts[part][k]); return Object.fromEntries(o.map((t, i) => [t.team, i + 1])); };
+      const rn = by("negotiating"), rm = by("market");
+      const teams = doc.teams.filter((t) => t[k] != null).sort((a, b) => b[k] - a[k]);
+      if (!teams.length) return [D.state("empty", tr("competicion.global.none"))];
+      const head = el("div", { class: "c-g-row c-g-day c-g-head t10-cap" + (sun ? " c-g-day-sun" : "") },
+        el("span", {}, "#"), el("span", {}, tr("common.team")),
+        el("span", {}, tr("competicion.global.neg"), src("calc")), el("span", {}, tr("competicion.global.mkt"), src("calc")),
+        el("span", {}, tr("competicion.global.dayMark", { day: tr("competicion.global." + (sun ? "sunShort" : day)) }) + " ↓", src("calc")),
+        sun ? el("span", {}, tr("competicion.global.pages"), src("srv")) : null,
+        sun ? el("span", {}, tr("competicion.global.deals"), src("srv")) : null,
+        el("span", {}, tr("competicion.global.now"), src("srv")));
+      const rows = teams.map((t, i) => el("div", { class: "c-g-row c-g-day" + (sun ? " c-g-day-sun" : "") + (t.team === US ? " c-g-us" : "") },
+        el("span", { class: "num" }, String(i + 1)), name(t),
+        cell(t.parts.negotiating[k], rn[t.team]), cell(t.parts.market[k], rm[t.team]),
+        el("span", { class: "num c-g-cell c-g-strong" }, f(t[k], 2)),
+        sun ? el("span", { class: "num c-g-cell" }, t.server.pages == null ? "—" : String(t.server.pages), t.server.album != null ? el("i", { class: "c-g-rank" }, t.server.album + "/" + (t.server.slots || 60)) : null) : null,
+        sun ? el("span", { class: "num c-g-cell" }, t.server.deals == null ? "—" : String(t.server.deals)) : null,
+        cell(t.table, t.rank_table)));
+      const out = [];
+      if (sun && me && me.score) {
+        const sc = me.score, kv = (label, v, hint) => el("div", { class: "c-g-kv" }, el("span", { class: "t10-cap" }, label), el("b", { class: "num" }, v), hint ? el("span", { class: "t10-small t10-muted" }, hint) : null);
+        out.push(el("div", { class: "c-g-ours" },
+          el("div", { class: "t10-cap c-g-ours-h" }, tr("competicion.global.ours"), src("srv")),
+          el("div", { class: "c-g-kvs" },
+            kv(tr("competicion.global.o.neg"), f(num(sc.neg_points), 1), tr("competicion.global.o.neg.h")),
+            kv(tr("competicion.global.o.duel"), f(num(sc.duel_points), 2), tr("competicion.global.o.duel.h")),
+            kv(tr("competicion.global.o.ladder"), f(num(sc.ladder_points), 3), tr("competicion.global.o.ladder.h")),
+            kv(tr("competicion.global.o.bench"), f(num(sc.bench_points), 2), tr("competicion.global.o.bench.h", { eff: f((num(sc.bench_efficiency) || 0) * 100, 1), venue: sc.bench_venue || "—" })),
+            kv(tr("competicion.global.o.mm"), f(num(sc.mm_points), 1), tr("competicion.global.o.mm.h")))));
+      }
+      out.push(el("div", { class: "c-g-table" }, head, rows));
+      if (sun) out.push(lines(doc.timeline3, doc.top3, tr("competicion.global.today3")));
+      out.push(el("div", { class: "t10-small t10-muted c-g-note" }, tr(sun ? "competicion.global.noteSun" : "competicion.global.noteDay")));
+      return out;
+    }
+    const tab = S.gtab || "all";
+    const tabs = el("div", { class: "c-g-tabs" }, [["all", "competicion.global.tab.all"], ["r1", "competicion.global.fri"], ["r2", "competicion.global.sat"], ["r3", "competicion.global.sunShort"]].map(([id, key]) =>
+      el("button", { class: "t10-seg" + (tab === id ? " on" : ""), type: "button", onclick: () => { S.gtab = id; try { localStorage.setItem("t10.comp.gtab", id); } catch (e) { /* storage blocked */ } renderGlobal(root).catch(() => {}); } }, tr(key))));
     S.global = { snap: doc.snap || doc.tick, next: doc.next, ts: doc.ts, pct: fmt(doc.phase * 100, 0) };
     tickGlobal(root);
     if (!S.globalTimer) S.globalTimer = setInterval(() => { if (S) tickGlobal(root); }, 1000);
-    D.replace(box, [el("div", { class: "c-g-table" }, head, lines), chart, el("div", { class: "t10-small t10-muted c-g-note" }, tr("competicion.global.note"))]);
+    D.replace(box, [tabs].concat(tab === "all" ? viewGlobal() : viewDay(tab)));
   }
 
   const settles = (rows) => rows.filter((r) => r.kind === "settle");
