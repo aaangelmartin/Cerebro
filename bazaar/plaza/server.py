@@ -29,7 +29,7 @@ from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
-from . import lots as lots_mod, prices, signals as signals_mod
+from . import lots as lots_mod, prices, signals as signals_mod, quick as quick_mod
 from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store, read_json, write_atomic
 
@@ -57,7 +57,7 @@ STATIC_RX = re.compile(r"/plaza/static/((?:(?:screens|i18n|fixtures|fixtures/adm
 ADMIN_STATIC_RX = re.compile(r"/plaza/admin/static/screens/([a-z0-9_]{1,40}\.(js|css))")     # web/admin/<name>
 ADMIN_PAGE = re.compile(r"/plaza/admin/(?:overview|performance|matchmaker|trades|teams|activity|suggestions|venue|docs)")
 STANDING_PATHS = ("/plaza/api/me", "/plaza/api/status", "/plaza/api/agent/next")   # answers that carry `standing`
-EXTENSIONS = (team_api, deals_api, lots_mod, signals_mod)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
+EXTENSIONS = (team_api, deals_api, lots_mod, signals_mod, quick_mod)         # each fork's routes: get(h, path, q, snap), write(h, method, path, body)
 TEAM_PATH = re.compile(r"/plaza/api/team/(t\d{2})")
 CARD_PATH = re.compile(r"/plaza/api/card/([A-Z]{3}-\d{2})")
 ART_PATH = re.compile(r"/plaza/art/([A-Z]{3}-\d{2})\.svg")
