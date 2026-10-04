@@ -1,19 +1,21 @@
-# Team 10 · The Bazaar
+# Cerebro
 
-An autonomous trading agent, the dashboard its humans watch it through, and a market other teams' agents can trade on.
+**Smart money in every deal.**
+
+An autonomous trading agent, the dashboard its humans watch it through, and a market other teams' agents can trade on. Built by Team 10.
 
 Built for **The Bazaar · Cromos de Madrid**, the game of the Causa Prima hackathon (Madrid, 2–4 October 2026). Eighteen teams collected and traded Madrid sticker cards for three days, against five AI dealers and against each other, through an HTTP API. Team 10 finished **2nd of 18 on the server board** (35.76 points; first place had 37.73).
 
 Our rule for the weekend: **the agent trades, the humans build.**
 
-![The album in the Team 10 Dashboard: four complete pages](docs/img/dash-coleccion.webp)
+![The album in the Cerebro Dashboard: four complete pages](docs/img/dash-coleccion.webp)
 
 ## What is in here
 
 | Piece | What it does | Where |
 |---|---|---|
-| **The agent** | Plays the whole game on its own: dealers, team trades, duels, its own venue | [`bazaar/`](bazaar/) |
-| **Team 10 Dashboard** | Every decision, what it cost, and the few switches a human may touch | [`bazaar/dashboard/`](bazaar/dashboard/) |
+| **Cerebro agent** | Plays the whole game on its own: dealers, team trades, duels, its own venue | [`bazaar/`](bazaar/) |
+| **Cerebro Dashboard** | Every decision, what it cost, and the few switches a human may touch | [`bazaar/dashboard/`](bazaar/dashboard/) |
 | **v07 Market** | A market outside the game where any team's agent connects and gets matched | [`bazaar/plaza/`](bazaar/plaza/) |
 | **Recorder and lab** | A read-only copy of the whole game, and replays that learn from it | [`bazaar/recorder/`](bazaar/recorder/), [`bazaar/lab/`](bazaar/lab/) |
 | **Workshop** | Turns a bug the strategist finds into a tested fix, deployed while the bot plays | [`bazaar/taller/`](bazaar/taller/) |
@@ -33,7 +35,7 @@ flowchart LR
   RA -->|allowed| X[Executor] --> G
   RA -->|vetoed| D[(Decision log)]
   X --> D
-  D --> UI[Team 10 Dashboard]
+  D --> UI[Cerebro Dashboard]
   S -. finds a bug .-> W[Workshop<br/>fix, tests, hot deploy] -.-> L
 ```
 
@@ -47,7 +49,7 @@ flowchart LR
 
 ![Duels: four live negotiations with the next move and its source](docs/img/dash-duelos.webp)
 
-## Team 10 Dashboard
+## Cerebro Dashboard
 
 One page per question a human has during the game: what is the bot doing, what did it spend, where are we on the table, what do the rivals hold. English and Spanish.
 
@@ -122,7 +124,9 @@ With one more day we would bring the market to the teams, not the teams to the m
 
 ## Credits
 
-Team 10: Ángel and Daniel, with Claude doing the trading and much of the building.
+Cerebro was built by Team 10: Ángel and Daniel, with Claude doing the trading and much of the building.
+
+Repository: <https://github.com/aaangelmartin/Cerebro>
 
 ## Licence
 

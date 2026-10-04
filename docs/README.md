@@ -1,4 +1,4 @@
-# Documentation index
+# Cerebro · documentation index
 
 ## The game
 - [`BAZAAR.md`](BAZAAR.md): what we learned about The Bazaar (rules, scoring, dealers, venues).
@@ -7,7 +7,7 @@
 - [`LOG.md`](LOG.md), [`INVESTIGACION-2026-10-02.md`](INVESTIGACION-2026-10-02.md): the Friday log (Spanish).
 - [`BOT.md`](BOT.md): the first bot (now in `legacy/`).
 
-## The agent (`bazaar/`)
+## Cerebro agent (`bazaar/`)
 - [`../bazaar/README.md`](../bazaar/README.md): processes, keys, tests (Spanish).
 - [`../bazaar/CONTRACTS.md`](../bazaar/CONTRACTS.md): interfaces between modules.
 - [`../bazaar/recorder/README.md`](../bazaar/recorder/README.md): the read-only recorder.
