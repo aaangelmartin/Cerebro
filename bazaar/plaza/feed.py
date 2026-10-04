@@ -45,6 +45,7 @@ def norm_offer(o: dict) -> dict | None:
         return None
     return {"id": o.get("id"), "maker": o.get("maker"), "to": o.get("to"), "venue": o.get("venue"), "side": side,
             "ref": ref, "ref_back": wants[0] if side == "swap" else None, "price": price,
+            "terms": {"gives": sorted(gives), "wants": sorted(wants), "give_cash": gcash, "want_cash": wcash},
             "created_tick": o.get("created_tick"), "expires_tick": o.get("expires_tick")}
 
 
@@ -133,7 +134,7 @@ class Feed:
                 self.counts["venue_offers"] += 1
             if o["venue"] == self.venue or o.get("to"):       # ours, and addressed offers anywhere (wrong venue)
                 self._log({"t": "listed", "tick": tick, "venue": o["venue"],
-                           **{k: o[k] for k in ("id", "maker", "to", "side", "ref", "ref_back", "price")}})
+                           **{k: o[k] for k in ("id", "maker", "to", "side", "ref", "ref_back", "price", "terms")}})
             return {**base, "kind": "offer", "side": o["side"], "team": o["maker"], "to": o["to"],
                     "venue": o["venue"], "ref": o["ref"], "ref_back": o["ref_back"], "price": o["price"],
                     "offer": o["id"], "highlight": o["venue"] == self.venue}

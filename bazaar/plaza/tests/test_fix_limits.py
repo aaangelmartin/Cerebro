@@ -207,6 +207,28 @@ class DealsTest(unittest.TestCase):
             self.d.report_offer(self.mid, "t02", 9, {"venue": "v07", "maker": "t02", "to": "t01", "ref": "SAL-09", "price": 1})
         self.assertEqual(e.exception.code, "below_floor")
 
+    def test_an_offer_with_other_terms_is_not_the_matchs_offer(self):
+        """The re-review: "I give LAT-03, I want RET-03 and 900 P" was taken for the swap and the victim's queue
+        said accept_offer."""
+        d = D.Deals(Path(self.dir.name) / "swap.json")
+        sw = [m for m in M.find(sheets(agent("t01", spares=["LAT-03"], wants=["RET-03"]),
+                                       agent("t02", spares=["RET-03"], wants=["LAT-03"])), CAT) if m["kind"] == "swap"]
+        d.sync(sw, 10, [])
+        greedy = {**listed(11, "t01", "t02", "LAT-03", 0), "ref_back": "RET-03", "side": "swap",
+                  "terms": {"gives": ["LAT-03"], "wants": ["RET-03"], "give_cash": 0, "want_cash": 900}}
+        d.sync(sw, 11, [greedy])
+        self.assertEqual((d.get(sw[0]["id"])["state"], d.notes[-1]["kind"]), ("proposed", "other_terms"))
+        with self.assertRaises(PlazaError) as e:
+            d.report_offer(sw[0]["id"], "t01", 1, {"venue": "v07", "maker": "t01", "to": "t02", "ref": "LAT-03", **greedy})
+        self.assertEqual(e.exception.status, 409)
+        plain = {**greedy, "id": 2, "terms": {"gives": ["LAT-03"], "wants": ["RET-03"], "give_cash": 0, "want_cash": 0}}
+        d.sync(sw, 12, [greedy, plain])
+        self.assertEqual(d.get(sw[0]["id"])["state"], "offer_on_v07")
+        extra = {**listed(11, "t02", "t01", "SAL-09", self.price, oid=5),
+                 "terms": {"gives": [], "wants": ["LAT-03", "SAL-09"], "give_cash": self.price, "want_cash": 0}}
+        self.d.sync(self.cands, 11, [extra])                           # a sale that asks for a second card
+        self.assertEqual(self.rec()["state"], "proposed")
+
     def test_the_same_card_going_the_other_way_is_not_the_match(self):
         back = {**settled(12, "t01", "t02", "SAL-09", 50, "v07"), "moves": [{"ref": "SAL-09", "from": "t02", "to": "t01"}]}
         self.d.sync(self.cands, 12, [back])

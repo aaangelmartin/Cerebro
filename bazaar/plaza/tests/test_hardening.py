@@ -188,10 +188,61 @@ class LimitsTest(Base):
             self.call("GET", "/plaza/api/teams", headers={"X-Plaza-Token": f"made-up-token-number-{i:04d}-xxxxxxxx"})
             self.call("GET", "/plaza/api/teams", headers={"Cookie": f"plaza_session=made-up-session-number-{i:04d}"})
         self.assertEqual(keys, {"127.0.0.1"})                                  # all of them: the address
-        _, tok = self.agent("t07")
+        s, tok = self.agent("t07", prove=False)
+        cookie = {"Cookie": "plaza_session=" + s["session"]}
+        keys.clear()
+        self.call("GET", "/plaza/api/teams", headers=tok)                      # started, never proved: anybody can do
+        self.call("GET", "/plaza/api/teams", headers=cookie)                   # that in a team's name, so it counts
+        self.assertEqual(keys, {"127.0.0.1"})                                  # against the address, not the team
+        self.game_says("t07", s["connect_code"])
+        self.assertEqual(self.call("GET", "/plaza/api/me/cards", headers=tok)[0], 200)
         keys.clear()
         self.call("GET", "/plaza/api/teams", headers=tok)
-        self.assertEqual(keys, {"k:t07"})                                      # a real one: its team
+        self.call("GET", "/plaza/api/teams", headers=cookie)
+        self.assertEqual(keys, {"k:t07"})                                      # proved: its team
+
+    def test_nobody_spends_a_teams_budget_or_its_streams(self):
+        _, real = self.agent("t09")
+        self.assertEqual(self.call("GET", "/plaza/api/agent/next", headers=real)[0], 200)
+        st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t09"}, {"X-Plaza-Client": "6.6.6.6"})
+        thief = {"Cookie": "plaza_session=" + s["session"], "X-Plaza-Client": "6.6.6.6"}
+        budget = self.srv.RequestHandlerClass.budget
+        from unittest import mock
+        with mock.patch.object(S, "READS_PER_MIN", 30):
+            codes = {self.call("GET", "/plaza/api/teams", headers=thief)[0] for _ in range(60)}
+            self.assertEqual(self.call("GET", "/plaza/api/agent/next", headers=real)[0], 200)   # t09 is untouched
+        self.assertNotIn("k:t09", {k for k, kind in budget.hits if k == "k:t09" and len(budget.hits[(k, kind)]) > 5})
+        del codes
+
+    def test_connecting_is_not_locked_by_the_shared_budget(self):
+        self.srv.RequestHandlerClass.budget.take = lambda *a: False            # the room spent every shared request
+        st, s, _ = self.call("POST", "/plaza/api/connect/start", {"team": "t07"})
+        self.assertEqual(st, 200)
+        self.assertEqual(self.call("POST", "/plaza/api/connect/agent", {"team": "t07", "code": s["connect_code"]})[0], 200)
+
+    def test_two_lengths_are_one_refusal(self):
+        got = Base.raw(self, b"POST /plaza/api/floor HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                             b"Content-Length: 2\r\nContent-Length: 44\r\n\r\n{}GET /plaza/api/health HTTP/1.1\r\nHost: x\r\n\r\n")
+        self.assertEqual((got.count(b"HTTP/1.1 "), got[:12]), (1, b"HTTP/1.1 400"))
+
+    def test_an_old_pin_claim_is_no_longer_looked_for(self):
+        self.board.store.claim("t05", "42424242")
+        self.assertIn("t05", self.board.store.pending_codes())
+        real = self.board.store.clock
+        self.board.store.clock = lambda: real() + 31 * 60
+        self.assertEqual(self.board.store.pending_codes(), {})
+
+    def test_we_can_reset_a_team(self):
+        s, tok = self.agent("t07")
+        self.assertEqual(self.call("PUT", "/plaza/api/team/t07", {"wants": [{"ref": "LAT-06", "max": 1777}]}, tok)[0], 200)
+        st, out, _ = self.call("POST", "/plaza/admin/api/action", {"action": "reset_team", "team": "t07"}, ADMIN)
+        self.assertEqual((st, out["reset"]["agent"]), (200, True))
+        self.assertEqual(self.call("GET", "/plaza/api/agent/next", headers=tok)[0], 401)
+        self.assertEqual((self.board.vault.get("t07"), self.board.store.declared()["t07"]["verified"]), ({}, False))
+        self.assertEqual(self.call("POST", "/plaza/admin/api/action", {"action": "reset_team", "team": "t10"}, ADMIN)[0], 400)
+        self.assertEqual(self.call("POST", "/plaza/admin/api/action", {"action": "reset_team", "team": "t07"})[0], 404)
+        _, again = self.agent("t07")                                           # and it connects again from nothing
+        self.assertEqual(self.call("GET", "/plaza/api/me/cards", headers=again)[1]["want"], [])
 
     def test_a_forwarded_address_is_believed_from_this_machine_only(self):
         h = S.Handler.__new__(S.Handler)

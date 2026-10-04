@@ -153,6 +153,22 @@ class Deals:
         return rec["kind"] == "sale" and bool(price) and price < matcher.FLOOR.get(rec.get("rarity") or "", 1)
 
     @staticmethod
+    def _exact(rec: dict, maker: str, terms: dict | None) -> bool:
+        """Is this offer the match and nothing but the match? Every card on each side and the cash, as the game
+        shows them: a swap that also asks for cash, or a sale with a card added, is somebody else's idea of the
+        deal and no agent is told to accept it."""
+        if not isinstance(terms, dict):
+            return True                                        # a feed line from before the terms were kept
+        gives, wants = list(terms.get("gives") or []), list(terms.get("wants") or [])
+        gcash, wcash = int(terms.get("give_cash") or 0), int(terms.get("want_cash") or 0)
+        if rec["kind"] == "swap":
+            mine, theirs = (rec["ref"], rec["ref_back"]) if maker == rec["seller"] else (rec["ref_back"], rec["ref"])
+            return gives == [mine] and wants == [theirs] and gcash == 0 and wcash == 0
+        if maker == rec["buyer"]:
+            return gives == [] and wants == [rec["ref"]] and gcash > 0 and wcash == 0
+        return gives == [rec["ref"]] and wants == [] and wcash > 0 and gcash == 0
+
+    @staticmethod
     def _offer_price(rec: dict, price, maker: str) -> dict:
         """The fields a sale takes from the offer the game shows. A price that is not the one on the table was
         chosen by the offer's maker: the other team's earlier word does not cover it."""
@@ -188,6 +204,10 @@ class Deals:
                         r["elsewhere_offer"] = {"id": e["id"], "venue": venue, "maker": e["maker"], "tick": tick}
                         r["updated"] = self.clock()
                         self.notes.append({"kind": "wrong_venue", "tick": tick, "match": r["id"], "team": e["maker"],
+                                           "to": e["to"], "ref": r["ref"], "venue": venue, "offer": e["id"]})
+                        break
+                    if not self._exact(r, e["maker"], e.get("terms")):     # other terms: not this match's offer
+                        self.notes.append({"kind": "other_terms", "tick": tick, "match": r["id"], "team": e["maker"],
                                            "to": e["to"], "ref": r["ref"], "venue": venue, "offer": e["id"]})
                         break
                     if self._giveaway(r, e.get("price")):      # under the floor of its rarity: not this match
@@ -426,6 +446,9 @@ class Deals:
                     or offer.get("ref") not in (rec["ref"], rec.get("ref_back")):
                 raise PlazaError(409, "conflict", f"offer {offer_id} is not this match: it must be yours, addressed "
                                  f"to {other}, for {rec['ref']}, on {self.venue}")
+            if not self._exact(rec, team, offer.get("terms")):
+                raise PlazaError(409, "conflict", f"offer {offer_id} is not this match: it must give and ask exactly "
+                                 "the cards of the match, with no other card and no cash beyond the price")
             if self._giveaway(rec, offer.get("price")):
                 raise PlazaError(409, "below_floor", f"offer {offer_id} sells a {rec.get('rarity')} card under "
                                  f"{matcher.FLOOR.get(rec.get('rarity') or '', 1)} P: not taken on this venue")

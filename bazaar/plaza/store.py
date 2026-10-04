@@ -27,6 +27,7 @@ LANGS = ("en", "es")
 PIN_TRIES = 5                      # wrong PINs from one client for one team before that client waits LOCK_S:
 LOCK_S = 60.0                      # the guesser waits, never the team (its own client is counted apart)
 MAX_FAILS = 5000
+CLAIM_TTL_S = 30 * 60.0            # a PIN claim nobody proved in the game stops being looked for
 HOST = "t10"
 
 
@@ -316,7 +317,7 @@ class Store:
             elif action in ("on", "off"):
                 a["enabled"] = action == "on"
             elif action not in ("hide", "block"):
-                raise PlazaError(400, "bad_request", "action: hide, unhide, block, unblock, on, off, refresh, pause, resume, exclude, include, "
+                raise PlazaError(400, "bad_request", "action: hide, unhide, block, unblock, on, off, refresh, pause, resume, exclude, include, reset_team, "
                                                     "force, expire")
             a["hidden"], a["blocked"] = hidden[-2000:], blocked
             self._save(data)
@@ -442,8 +443,20 @@ class Store:
         return {t for t, r in (self._load().get("teams") or {}).items() if (r.get("settings") or {}).get("paused")}
 
     def pending_codes(self) -> dict[str, str]:
+        now = self.clock()
         return {t: r["code"] for t, r in (self._load().get("teams") or {}).items()
-                if r.get("code") and r.get("pin") and not r.get("pin_proved")}
+                if r.get("code") and r.get("pin") and not r.get("pin_proved")
+                and now - (r.get("claimed") or 0) < CLAIM_TTL_S}
+
+    def reset(self, team: str) -> None:
+        """Ours: the team is unproved again, with no PIN, sheet or overrides; its settings stay."""
+        with self.lock:
+            data = self._load()
+            rec = (data.get("teams") or {}).get(self._team(team))
+            if rec:
+                for key in ("pin", "salt", "code", "claimed", "pin_proved", "verified", "declared", "overrides"):
+                    rec.pop(key, None)
+                self._save(data)
 
 
 def _overrides(rec: dict) -> dict:
