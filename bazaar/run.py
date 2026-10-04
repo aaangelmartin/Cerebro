@@ -41,7 +41,7 @@ from typing import Any, Callable
 
 from . import config
 from .core.context import Budget, TickContext, ValueCache, _cash_out
-from .core.state import Situation, perceive
+from .core.state import Situation, domain_share, perceive
 from .core.types import ACCEPT_KINDS, Action, Outcome, Verdict
 
 log = logging.getLogger("bazaar.run")
@@ -336,7 +336,7 @@ class Runner:
         return out
 
     def collect(self, sit: Situation, ctx: TickContext, domains: list) -> list[Action]:
-        futs = {}
+        futs, deadlines = {}, {}
         for d in domains:
             st = self.dom_status.setdefault(d.name, {})
             busy = self.running.get(d.name)
@@ -347,10 +347,20 @@ class Runner:
                 continue                                      # still thinking since an earlier tick
             if not ctx.llm_ok:
                 continue                                      # code only
-            futs[d.name] = self.running[d.name] = self.pools[d.name].submit(d.decide, sit, ctx)
+            dctx, dl = ctx, ctx.deadline
+            if sit.tick_start and sit.tick_seconds:              # a slow domain may think a little longer (short ticks)
+                dl = max(dl, sit.tick_start + domain_share(d.name, sit.tick_seconds, bool(sit.duels))
+                         * sit.tick_seconds)
+                if dl > ctx.deadline:
+                    dctx = ctx.with_deadline(dl)
+            deadlines[d.name] = dl
+            futs[d.name] = self.running[d.name] = self.pools[d.name].submit(d.decide, sit, dctx)
             self.submitted_tick[d.name] = sit.tick
         if futs:
             cf.wait(list(futs.values()), timeout=max(0.0, ctx.deadline - self.now()))
+            late = [f for n, f in futs.items() if not f.done() and deadlines[n] > ctx.deadline]
+            if late:                                             # only the slow ones are waited for, a little longer
+                cf.wait(late, timeout=max(0.0, max(deadlines.values()) - self.now()))
         actions: list[Action] = []
         for d in domains:
             st = self.dom_status[d.name]

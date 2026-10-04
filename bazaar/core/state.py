@@ -37,6 +37,21 @@ def decision_share(tick_seconds: float) -> float:
     if REAL_TICK_MIN_S <= tick_seconds <= SHORT_TICK_S:
         return max(config.DECISION_DEADLINE, SHORT_TICK_DEADLINE)
     return config.DECISION_DEADLINE
+
+
+SLOW_DOMAINS = ("dealers", "market")   # their per-tick model call starts after the reads and often needs 6-8 s
+SLOW_DOMAIN_DEADLINE = 0.70            # ...so on short ticks they may think until here (10.5 s of 15)
+
+
+def domain_share(name: str, tick_seconds: float, live_duels: bool = False) -> float:
+    """Share of the tick one domain may think. Duels keep the common share, and while a duel is live every
+    domain does: all actions of a tick are sent together and a duel answer must not wait for a haggle."""
+    share = decision_share(tick_seconds)
+    if (name in SLOW_DOMAINS and not live_duels and REAL_TICK_MIN_S <= tick_seconds <= SHORT_TICK_S):
+        return max(share, SLOW_DOMAIN_DEADLINE)
+    return share
+
+
 FEED_LIMIT = 500
 # Feed events that make the slow reads worth refreshing right away.
 REFRESH_TYPES = ("level.", "persona.", "venue.", "clock.", "announcement", "day.", "dealer.", "schedule.")

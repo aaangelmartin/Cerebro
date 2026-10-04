@@ -116,3 +116,51 @@ class DealerHourTest(unittest.TestCase):
         self.assertEqual(budget_block_ticks(60.0), 60)
         self.assertEqual(budget_block_ticks(0.05), BUDGET_BLOCK_TICKS)      # the simulator's fast clock
         self.assertEqual(budget_block_ticks(None), BUDGET_BLOCK_TICKS)
+
+
+class SlowDomainShareTest(unittest.TestCase):
+    """Dealers and market start their model call after the reads, so on short ticks they get a little longer;
+    duels keep the common share, and so does everybody while a duel is live."""
+
+    def test_only_the_slow_domains_get_the_longer_share_and_never_with_a_live_duel(self):
+        self.assertEqual(state.domain_share("dealers", 15.0), state.SLOW_DOMAIN_DEADLINE)
+        self.assertEqual(state.domain_share("market", 15.0), state.SLOW_DOMAIN_DEADLINE)
+        self.assertEqual(state.domain_share("duels", 15.0), state.SHORT_TICK_DEADLINE)
+        self.assertEqual(state.domain_share("dealers", 15.0, live_duels=True), state.SHORT_TICK_DEADLINE)
+        self.assertEqual(state.domain_share("dealers", 30.0), config.DECISION_DEADLINE)     # Saturday's ticks
+        self.assertLess(state.SLOW_DOMAIN_DEADLINE, run.SEND_CUTOFF - 0.15)                 # room to send
+
+    def _run(self, name, delay, duels=()):
+        from bazaar.core.types import Action
+        from bazaar.tests.test_run import Dom, Exe, FakeGateway, Led, rails_ok
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "control.json").write_text('{"armed": true}')
+        think = Action("thread_message", {"thread": 1, "price": 9}, name, source="opus")
+        code = Action("close_thread", {"thread": 1}, name, source="fallback")
+        exe = Exe()
+        r = run.Runner(FakeGateway(), domains=[Dom(name, [think], delay=delay, fb=[code])], mode="sim", live=tmp,
+                       make_write_gw=lambda: "W", ledger=Led(), rails=rails_ok(), executor=exe)
+        now = time.time()
+        sit = state.Situation(tick=5, day="sun", tick_seconds=5.0, tick_start=now, duels=list(duels),
+                              deadline=now + 5.0 * state.decision_share(5.0),
+                              me={"id": "t10", "cash": 300, "collection_value": 700.0, "score": {"score": 20.0}})
+        r.step(sit)
+        return [a.kind for a in exe.sent], time.time() - now
+
+    def test_a_dealer_answer_just_after_the_common_deadline_is_still_used(self):
+        late = 5.0 * (state.SHORT_TICK_DEADLINE + state.SLOW_DOMAIN_DEADLINE) / 2        # between the two deadlines
+        sent, took = self._run("dealers", late)
+        self.assertEqual(sent, ["thread_message"])
+        self.assertLess(took, 5.0 * run.SEND_CUTOFF)
+
+    def test_duels_and_a_tick_with_a_live_duel_keep_the_common_deadline(self):
+        late = 5.0 * (state.SHORT_TICK_DEADLINE + state.SLOW_DOMAIN_DEADLINE) / 2
+        self.assertEqual(self._run("duels", late)[0], ["close_thread"])                  # the code's answer goes out
+        sent, took = self._run("dealers", late, duels=[{"id": 9, "status": "live"}])
+        self.assertEqual(sent, ["close_thread"])
+        self.assertLess(took, 5.0 * state.SHORT_TICK_DEADLINE + 0.4)                     # nobody waited longer
+
+    def test_past_its_own_deadline_the_code_answers(self):
+        sent, took = self._run("dealers", 5.0 * state.SLOW_DOMAIN_DEADLINE + 0.4)
+        self.assertEqual(sent, ["close_thread"])
+        self.assertLess(took, 5.0 * run.SEND_CUTOFF)
