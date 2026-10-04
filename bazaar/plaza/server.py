@@ -120,6 +120,9 @@ class Board:
         self.hourly: dict[str, dict] = self._load_hours()
         self.verified_at = 0.0
         self.art: tuple[float, dict] = (0.0, {})
+        for ext in (team_api, deals_api, admin_api):          # a fork hangs its own stores on the board here:
+            if hasattr(ext, "attach"):                        # board.team_activity, board.suggest, board.perf
+                ext.attach(self)
 
     # ---- hourly counters for our panel
     def _load_hours(self) -> dict:
@@ -275,9 +278,13 @@ class Board:
         fees = venue_fees(self.record)
         tick = self.feed.tick or report.get("tick")
         admin = self.store.admin()
-        cands = matcher.find(sheets, cat, self.host, VENUE, gate=self.vault.gate)
-        events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
-                                 excluded_matches=frozenset(admin["excluded_matches"]))
+        if hasattr(deals_api, "candidates") and hasattr(deals_api, "sync"):     # the deals fork's own rules
+            cands = deals_api.candidates(self, sheets, cat)
+            events = deals_api.sync(self, cands, tick, admin)
+        else:
+            cands = matcher.find(sheets, cat, self.host, VENUE, gate=self.vault.gate)
+            events = self.deals.sync(cands, tick, self.feed.venue_log, paused=admin["mm_paused"],
+                                     excluded_matches=frozenset(admin["excluded_matches"]))
         proposed = [e for e in events if e["state"] == "proposed"]
         for e in events:
             self.hour("match_" + e["state"])
@@ -749,7 +756,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/plaza/i18n.json":                  # every page text in English and Spanish, as data
             return self._file("i18n.json", "application/json; charset=utf-8", cache="public, max-age=300")
         if path in ("/plaza/agents.md", "/plaza/AGENTS.md", "/AGENTS.md"):
-            return self._send(200, agents_md().encode(), "text/markdown; charset=utf-8", cors=True)
+            try:
+                md = agents_md(base=public_url(self.board.live))
+            except TypeError:
+                md = agents_md()
+            return self._send(200, md.encode(), "text/markdown; charset=utf-8", cors=True)
         m = ART_PATH.fullmatch(path)
         if m:                                           # the card as the dashboard draws it
             svg = self.board.card_art().get(m.group(1))
@@ -978,8 +989,12 @@ class Handler(BaseHTTPRequestHandler):
                 if path.endswith("/start"):
                     out = self.board.connect.start(team, self._client())
                     base = public_url(self.board.live) or LOCAL_BASE
-                    out["prompt"] = connect_mod.prompt(team, out["connect_code"], base, VENUE, NAME)
-                    out["agents_md"], out["status"] = base + "/agents.md", "/plaza/api/connect/status"
+                    lang = body.get("lang") if body.get("lang") in ("en", "es") else "en"
+                    try:
+                        out["prompt"] = connect_mod.prompt(team, out["connect_code"], base, VENUE, NAME, lang=lang)
+                    except TypeError:                         # the prompt in one language only
+                        out["prompt"] = connect_mod.prompt(team, out["connect_code"], base, VENUE, NAME)
+                    out["agents_md"], out["status"] = base + "/AGENTS.md", "/plaza/api/connect/status"
                     secure = "; Secure" if "https" in (self.headers.get("X-Plaza-Proto"),
                                                        self.headers.get("X-Forwarded-Proto")) else ""
                     self.extra = (("Set-Cookie", f"{COOKIE}={out['session']}; Path=/plaza; Max-Age="

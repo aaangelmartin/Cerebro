@@ -52,6 +52,8 @@ ROUTES: list[Route] = [
       {"team": "t16"}, "connect_start.json", "connect", "B1", True),
     R("POST", "/api/connect/agent", "anyone", "The agent trades the code for its token.",
       {"team": "t16", "code": "PLAZA-7K2Q9M"}, None, "-", "B1", True),
+    R("POST", "/api/claim", "anyone", "Without the connection flow: set a team PIN by hand and prove its code in "
+      "the game; then send X-Plaza-Pin instead of the token.", {"team": "t16", "pin": "4821"}, None, "-", "shell", True),
     R("GET", "/api/connect/status", "session", "The four steps of a connection and what is missing.", None,
       "connect_status.json", "connect", "B1", True),
     # ---- the team (browser session or agent token)

@@ -130,6 +130,15 @@ and never leaves `/api/me/*`. Without it, owned = `spares` + `for_sale`.
   - `settled`: the recorder saw the settlement on `v07` between the two teams for that card. **Only this state
     counts for us**: the game scores real trades on our venue, so a match that is agreed on the page but closed on
     another venue is worth nothing. Every text and every queue item names `v07`.
+- More, built by B2: `POST /api/me/trade/ID` also takes `{"offer_id": <int>}` (the agent reports the offer it
+  posted; it is checked against the feed: maker, addressee, card, venue; an offer on another venue answers 409
+  `conflict` and the message says the right body). A match keeps `offer`, `settlement` (the game's id) and
+  `settled_venue`. An offer that expires or is cancelled sends the match back to `proposed`. `settled_elsewhere`
+  is a final state: the same two teams closed that card on another venue.
+- Hooks on the board: a fork hangs its own stores in `attach(board)` of its module, called when the board is made:
+  `board.team_activity.add(team, kind, text, **extra)` and `board.suggest` (`all()`, `set(id, status, reply)`) are
+  B1's; a team's settings are `board.store.settings(team)` (`paused`, `lang`). `deals_api.candidates(board, sheets,
+  cat)` and `deals_api.sync(board, cands, tick, admin)` replace the matcher calls of `Board.rebuild` when present.
 - Settle check, exactly: `Deals.sync` reads `Feed.venue_log` (built from `data/live/events.jsonl`); a `settlement`
   with `venue == "v07"`, the two teams of the match and its `ref` moves the match to `settled` and stores `tick`,
   `price` and the offer id. `perf.py` sums those and compares them with the game's own count (`venues.json` row of
