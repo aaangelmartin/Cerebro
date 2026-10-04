@@ -29,6 +29,7 @@ from .agentsdoc import agents_md
 from .connect import COOKIE, Connect
 from .deals import Deals
 from .feed import Feed, fee as venue_fee, venue_fees
+from . import prices
 from .floor import KINDS, Floor
 from .store import REF_RX, TEAM_RX, PlazaError, Store, read_json, write_atomic
 
@@ -71,7 +72,10 @@ ME_CARD_PATH = re.compile(r"/plaza/api/me/card/([A-Z]{3}-\d{2})")
 ME_TRADE_PATH = re.compile(r"/plaza/api/me/trade/(m-[0-9a-f]{10})")
 MATCH_MSG_PATH = re.compile(r"/plaza/api/match/(m-[0-9a-f]{10})/message")
 PAGE_PATH = re.compile(r"/plaza/(?:team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents"
-                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|_kit)")                                                              # deep links
+                       r"|connect|me|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|board|_kit)")                                                              # deep links
+BOARD_ALIASES = {"/plaza/board.json": "/plaza/api/board", "/plaza/board/history.json": "/plaza/api/board/history",
+                 "/plaza/board/live.json": "/plaza/api/board/live"}
+BOARD_VIEWS = {"/plaza/api/board": "board", "/plaza/api/board/history": "board_history", "/plaza/api/board/live": "board_live"}
 TOKEN_HEADER = "X-Plaza-Token"             # an agent's token from the connection flow (the PIN is the manual way)
 LOCAL_BASE = "http://127.0.0.1:8787/plaza"
 VERIFY_EVERY_S = 3.0
@@ -150,6 +154,7 @@ class Board:
         self.hourly: dict[str, dict] = self._load_hours()
         self.verified_at = 0.0
         self.art: tuple[float, dict] = (0.0, {})
+        self.price_live = prices.Live()
         self.build_lock = threading.Lock()                     # one rebuild at a time, whoever asks
         self.built_in = 0.0                                    # how long the last one took
         self.wait_until = 0.0                                  # a slow board is not rebuilt again before this
@@ -371,6 +376,14 @@ class Board:
                 "art": set(self.card_art()), "hidden": hidden,
                 "matches": [self.match_view(r, hidden) for r in self.deals.live()], "stats": self._stats(),
                 "offers": self.feed.open_offers(fees), "fees": fees}
+        try:                                                # the price board: public offers and sales only
+            with self.feed_lock:
+                sales = list(self.feed.sales)
+            snap["board"], snap["board_history"] = prices.build(cat, snap["offers"], sales, sheets, fees, tick,
+                                                                self.record, snap["art"])
+            snap["board_live"] = self.price_live.update(snap["offers"], sales, fees, tick)
+        except Exception:  # noqa: BLE001 - the price board never takes the market down
+            snap["board"] = snap["board_history"] = snap["board_live"] = None
         with self.lock:
             self.snap = snap
         self.save_hours()
@@ -1043,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get(self):
         u = urlparse(self.path)
-        path = u.path
+        path = BOARD_ALIASES.get(u.path, u.path)           # the price board has two short addresses of its own
         self.route = "page"
         # The page's own files are cheap and every team at the venue may share one address: only the API is budgeted.
         if (path.startswith("/plaza/api/") or path.startswith("/plaza/admin/api/")) \
@@ -1137,6 +1150,11 @@ class Handler(BaseHTTPRequestHandler):
                                   cors=viewer is None)
         except PlazaError as e:
             return self._error(e.status, e.code, e.message)
+        if path in BOARD_VIEWS:                          # the same for everyone: public offers and sales
+            data = snap.get(BOARD_VIEWS[path])
+            if not data:
+                return self._error(503, "not_ready", "the price board is being built; try again in a few seconds")
+            return self._json(200, data, cors=True)
         if path == "/plaza/api/teams":
             return self._json(200, self.board.teams_view(snap), cors=True)
         viewer = deals_api._team_or_none(self, q) if path in VIEWED or path.startswith(VIEWED_UNDER) else None

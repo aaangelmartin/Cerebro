@@ -16,7 +16,7 @@ VENUE = matcher.VENUE
 NAME = os.environ.get("PLAZA_NAME", "v07 Market")
 FIXTURES = Path(__file__).parent / "web" / "fixtures"
 KEEP = {"agent_next.json": 2}                       # list items kept in an example; 1 everywhere else
-LONG = 90                                           # longer strings are cut in an example
+LONG = 60                                           # longer strings are cut in an example
 
 # An example answer for the routes that have no fixture (shapes fixed by CONTRACT.md, checked by the tests).
 ANSWERS: dict[tuple[str, str], object] = {
@@ -55,15 +55,27 @@ NOTES: dict[tuple[str, str], str] = {
                             "`off`; `matchmaker` is `on`, `waiting` or `paused`; `feed` is `ok` or `stale`. With "
                             "your token it adds `agent`: `connected` or `offline`. Use `seconds_to_tick` to pace "
                             "your loop.",
-    ("GET", "/api/team/{team}"): "`{team}` is a team id such as `t04`. `available` and `wanted` are the public "
-                                 "sheet; `trades` are its live matches; `offers_for_you` are open offers on any "
+    ("GET", "/api/team/{team}"): "`{team}` is a team id such as `t04`. `available`, `wanted` and "
+                                 "`looking_for` repeat the sheet; `trades` and `matches` are its live matches, "
+                                 "shaped as in `GET /api/matches` (all five left empty in this example); `offers_for_you` are open offers on any "
                                  "venue that fit it, each with its real `cost` and a `recipe`.",
+    ("GET", "/api/board"): "Also at `/board.json`. Public offers only, never one addressed to a team. `ask.cost` is "
+                           "price plus that venue's fee, `bid.nets` price minus it; `saves_on_v07` is the fee "
+                           "the same price would not pay here. `low` and `high` are the middle half of the "
+                           "card's sales between teams (null under 3), `spark` its last prices, `hot` an ask "
+                           "costing at most 80 % of `low`; `state` is `not_seen` until somebody shows the card. "
+                           "`venues` maps each venue to its name and fee (left empty here).",
+    ("GET", "/api/board/history"): "Also at `/board/history.json`. Up to 60 sales a card, oldest first.",
+    ("GET", "/api/board/live"): "Also at `/board/live.json`. `what` is `listed`, `gone` or `sold`. Poll it once a "
+                                "tick; `GET /api/floor/stream` carries the same market as server-sent events.",
     ("GET", "/api/market"): "Filters: `?set=LAV`, `?rarity=rare`. With your token every card adds `you` (do you "
                             "hold it, do you want it).",
-    ("GET", "/api/card/{ref}"): "`{ref}` is a card id such as `LAV-09`. 404 `not_found` for a card that is not "
-                                "in the catalog.",
+    ("GET", "/api/card/{ref}"): "`{ref}` is a card id such as `LAV-09`; 404 `not_found` if it is not in the "
+                                "catalog. `offers` and `matches` are shaped as in `GET /api/offers` and "
+                                "`GET /api/matches` (left empty here).",
     ("GET", "/api/offers"): "Filters: `team`, `set`, `rarity`, `venue`, `side`, `ref`. `cost` already includes "
-                            "the venue's fee, so offers on different venues compare directly.",
+                            "the venue's fee, so offers on different venues compare directly. `fees` maps each "
+                            "venue to its `bps` and `per_card` (left empty here).",
     ("GET", "/api/wall"): "Answer: `{\"tick\": N, \"wanted\": [...]}`, one row per wanted card with its `ref`, "
                           "`name`, `rarity` and `teams` (who wants it); each row also names who could sell it.",
     ("GET", "/api/teams"): "`pages` and `album` are null for a team the market has no public count for.",
@@ -150,6 +162,11 @@ NOTES: dict[tuple[str, str], str] = {
 }
 
 
+# lists left empty in an example because another entry already shows their items
+BRIEF = {"team.json": ("trades", "available", "wanted", "looking_for", "matches"), "card.json": ("offers", "matches"),
+         "offers.json": ("fees",), "board.json": ("venues",)}
+
+
 def _shrink(value, keep: int = 1):
     """The same shape with one item per list and short strings, so an example stays readable."""
     if isinstance(value, dict):
@@ -175,7 +192,8 @@ def example(route: routes.Route):
             data = json.loads((FIXTURES / route.fixture).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        return _shrink(data, KEEP.get(route.fixture, 1))
+        return {k: (type(v)() if k in BRIEF.get(route.fixture, ()) else v)
+                for k, v in _shrink(data, KEEP.get(route.fixture, 1)).items()}
     return ANSWERS.get((route.method, route.path))
 
 
@@ -482,6 +500,12 @@ When do you get a match? Only when both declared sides gain. These are the only 
 So declare every duplicate in `spares` and every missing card in `wants`, and set `min` and `max` where you have
 a view. An accurate, fresh sheet is what gets you deals: publish it again when your hand changes.
 {human}
+### Prices on every venue
+`{plaza}/board.json` lists every card with its cheapest public ask and highest public bid on any venue, fees
+included; `{plaza}/board/live.json` what changed in the last two ticks; `{plaza}/board/history.json` what each
+card sold for. To trade one here put it in `wants` with your `max`, or in `spares` with your `min`: connected
+agents on the other side get the trade proposed on `v07`, at 0 fee. A card nobody offers is asked for the same way.
+
 ## 7. A deal, from match to settlement
 A match is a `sale` (card for cash), a `swap` (card for card) or a `triangle` (three-way swap, agreed on the
 thread by hand). It moves through these states:

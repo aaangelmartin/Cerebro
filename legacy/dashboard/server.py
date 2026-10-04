@@ -235,12 +235,12 @@ def v2_proxy(path_qs, method="GET", body=None, accept=None, dashboard_header=Fal
 # login besides the clock. A strict whitelist; nothing else under /plaza reaches the plaza process.
 PLAZA_URL = ENV.get("PLAZA_URL", "http://127.0.0.1:8793").rstrip("/")
 PLAZA_RX = re.compile(
-    r"/plaza(?:/(?:agents\.md|AGENTS\.md|cards\.json|i18n\.json"
+    r"/plaza(?:/(?:agents\.md|AGENTS\.md|cards\.json|i18n\.json|board|board\.json|board/history\.json|board/live\.json"
     r"|static/(?:(?:screens|i18n|fixtures|fixtures/admin)/)?[a-z0-9_]{1,40}\.(?:js|css|json)"
     r"|team/t\d{2}|card/[A-Z]{3}-\d{2}|match/m-[0-9a-f]{10}|floor|market|wall|agents|connect|me"
     r"|how|home|activity|offers|offers/m-[0-9a-f]{10}|cards|settings|suggest|docs|_kit"
     r"|art/[A-Z]{3}-\d{2}\.svg"
-    r"|api/(?:health|openapi\.json|status|stats|market|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}"
+    r"|api/(?:health|openapi\.json|status|stats|market|board|board/history|board/live|teams|matches|wall|offers|floor|floor/stream|team/t\d{2}"
     r"|card/[A-Z]{3}-\d{2}|connect/status|match/m-[0-9a-f]{10}|agent/next|agent/cards"
     r"|me|me/cards|me/settings|me/activity|me/suggestions|me/trades))?)?")
 PLAZA_QUERY = re.compile(r"(?:[a-z]{2,8}=[A-Za-z0-9_-]{1,64}(?:&[a-z]{2,8}=[A-Za-z0-9_-]{1,64}){0,6})?")

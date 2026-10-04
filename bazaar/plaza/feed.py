@@ -157,7 +157,8 @@ class Feed:
             for i in p.get("items") or []:
                 if isinstance(i, dict) and i.get("ref"):
                     self.sales.append({"ref": i["ref"], "tick": tick, "price": price, "venue": venue,
-                                       "from": i.get("frm"), "to": i.get("to"), "dealer": p.get("persona")})
+                                       "from": i.get("frm"), "to": i.get("to"), "dealer": p.get("persona"),
+                                       "n": len(refs)})       # a trade of several cards has no price per card
             for oid, o in list(self.offers.items()):           # an addressed offer between these two is done
                 if o.get("to") and {o["maker"], o["to"]} == set(parties) and o["ref"] in refs:
                     self.offers.pop(oid, None)

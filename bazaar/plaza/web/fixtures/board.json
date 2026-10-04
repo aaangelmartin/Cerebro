@@ -1,0 +1,761 @@
+{
+ "tick": 1445,
+ "venue": "v07",
+ "unreleased_sets": [
+  {
+   "id": "CHA",
+   "name": "Chamberí",
+   "color": "#C1666B"
+  }
+ ],
+ "sets": [
+  {
+   "id": "LAT",
+   "name": "La Latina",
+   "color": "#F4A259"
+  },
+  {
+   "id": "LAV",
+   "name": "Lavapiés",
+   "color": "#E4572E"
+  },
+  {
+   "id": "MAL",
+   "name": "Malasaña",
+   "color": "#7B2CBF"
+  },
+  {
+   "id": "RET",
+   "name": "El Retiro",
+   "color": "#3BB273"
+  },
+  {
+   "id": "SAL",
+   "name": "Salamanca",
+   "color": "#2E86AB"
+  }
+ ],
+ "venues": {
+  "rastro": {
+   "name": "El Rastro",
+   "fee_bps": 500,
+   "fee_per_card": 1,
+   "status": "open"
+  },
+  "v07": {
+   "name": "Team 10 · fair broker, 0 fee",
+   "fee_bps": 0,
+   "fee_per_card": 0,
+   "status": "open"
+  },
+  "v21": {
+   "name": "Mercado Team 9 · 0 % fee",
+   "fee_bps": 0,
+   "fee_per_card": 0,
+   "status": "open"
+  }
+ },
+ "cards": [
+  {
+   "ref": "LAT-01",
+   "name": "Caña en la Cava Baja",
+   "rarity": "common",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 10,
+   "art": "/plaza/art/LAT-01.svg",
+   "ask": {
+    "price": 8,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t09",
+    "offer": 20253,
+    "expires_tick": 1505,
+    "on_v07": false,
+    "cost": 9,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 2,
+   "bids": 0,
+   "last": 8,
+   "last_tick": 904,
+   "low": 6,
+   "median": 6,
+   "high": 7,
+   "deals": 4,
+   "trend": "up",
+   "hot": false,
+   "spark": [
+    5,
+    7,
+    6,
+    8
+   ],
+   "holders": [
+    "t06",
+    "t09"
+   ],
+   "seekers": [
+    "t16"
+   ],
+   "moved": 10,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-08",
+   "name": "Las Vistillas",
+   "rarity": "uncommon",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 25,
+   "art": "/plaza/art/LAT-08.svg",
+   "ask": {
+    "price": 30,
+    "fee": 2,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t06",
+    "offer": 20123,
+    "expires_tick": 1446,
+    "on_v07": false,
+    "cost": 32,
+    "saves_on_v07": 2
+   },
+   "bid": {
+    "price": 5,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t08",
+    "offer": 20266,
+    "expires_tick": 1455,
+    "on_v07": false,
+    "nets": 4,
+    "saves_on_v07": 1
+   },
+   "asks": 1,
+   "bids": 1,
+   "last": 10,
+   "last_tick": 1133,
+   "low": null,
+   "median": 18,
+   "high": null,
+   "deals": 2,
+   "trend": "down",
+   "hot": false,
+   "spark": [
+    25,
+    10
+   ],
+   "holders": [
+    "t06"
+   ],
+   "seekers": [
+    "t08"
+   ],
+   "moved": 10,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-02",
+   "name": "Puesto del Rastro",
+   "rarity": "common",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 10,
+   "art": "/plaza/art/LAT-02.svg",
+   "ask": {
+    "price": 8,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t09",
+    "offer": 20254,
+    "expires_tick": 1505,
+    "on_v07": false,
+    "cost": 9,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 2,
+   "bids": 0,
+   "last": 4,
+   "last_tick": 648,
+   "low": null,
+   "median": 4,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    4
+   ],
+   "holders": [
+    "t06",
+    "t09"
+   ],
+   "seekers": [
+    "t05",
+    "t08"
+   ],
+   "moved": 7,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-03",
+   "name": "Huevos Rotos",
+   "rarity": "common",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 10,
+   "art": "/plaza/art/LAT-03.svg",
+   "ask": {
+    "price": 8,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t09",
+    "offer": 20255,
+    "expires_tick": 1505,
+    "on_v07": false,
+    "cost": 9,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 6,
+   "last_tick": 634,
+   "low": 7,
+   "median": 8,
+   "high": 8,
+   "deals": 3,
+   "trend": "down",
+   "hot": false,
+   "spark": [
+    9,
+    8,
+    6
+   ],
+   "holders": [
+    "t09"
+   ],
+   "seekers": [
+    "t08"
+   ],
+   "moved": 8,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-04",
+   "name": "Mercado de la Cebada",
+   "rarity": "common",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 10,
+   "art": "/plaza/art/LAT-04.svg",
+   "ask": {
+    "price": 8,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t09",
+    "offer": 20256,
+    "expires_tick": 1505,
+    "on_v07": false,
+    "cost": 9,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 2,
+   "bids": 0,
+   "last": 4,
+   "last_tick": 715,
+   "low": null,
+   "median": 4,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    4
+   ],
+   "holders": [
+    "t06",
+    "t09"
+   ],
+   "seekers": [
+    "t16"
+   ],
+   "moved": 7,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-05",
+   "name": "El Organillero",
+   "rarity": "common",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 10,
+   "art": "/plaza/art/LAT-05.svg",
+   "ask": {
+    "price": 7,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t02",
+    "offer": 20250,
+    "expires_tick": 1462,
+    "on_v07": false,
+    "cost": 8,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 2,
+   "bids": 0,
+   "last": 5,
+   "last_tick": 286,
+   "low": null,
+   "median": 5,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    5
+   ],
+   "holders": [
+    "t02",
+    "t09"
+   ],
+   "seekers": [
+    "t16"
+   ],
+   "moved": 8,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-06",
+   "name": "La Chulapa",
+   "rarity": "uncommon",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 25,
+   "art": "/plaza/art/LAT-06.svg",
+   "ask": {
+    "price": 30,
+    "fee": 2,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t06",
+    "offer": 20138,
+    "expires_tick": 1447,
+    "on_v07": false,
+    "cost": 32,
+    "saves_on_v07": 2
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 20,
+   "last_tick": 1303,
+   "low": null,
+   "median": 20,
+   "high": null,
+   "deals": 2,
+   "trend": "flat",
+   "hot": false,
+   "spark": [
+    20,
+    20
+   ],
+   "holders": [
+    "t06"
+   ],
+   "seekers": [
+    "t16"
+   ],
+   "moved": 10,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-07",
+   "name": "Vermut del Domingo",
+   "rarity": "uncommon",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 25,
+   "art": "/plaza/art/LAT-07.svg",
+   "ask": {
+    "price": 30,
+    "fee": 2,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t06",
+    "offer": 20218,
+    "expires_tick": 1455,
+    "on_v07": false,
+    "cost": 32,
+    "saves_on_v07": 2
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 14,
+   "last_tick": 1204,
+   "low": 14,
+   "median": 14,
+   "high": 15,
+   "deals": 4,
+   "trend": "up",
+   "hot": false,
+   "spark": [
+    13,
+    19,
+    14,
+    14
+   ],
+   "holders": [
+    "t06"
+   ],
+   "seekers": [],
+   "moved": 13,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-11",
+   "name": "San Francisco el Grande",
+   "rarity": "epic",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 180,
+   "art": "/plaza/art/LAT-11.svg",
+   "ask": {
+    "price": 247,
+    "fee": 13,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t16",
+    "offer": 20229,
+    "expires_tick": 1447,
+    "on_v07": false,
+    "cost": 260,
+    "saves_on_v07": 13
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 160,
+   "last_tick": 631,
+   "low": null,
+   "median": 160,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    160
+   ],
+   "holders": [
+    "t16"
+   ],
+   "seekers": [
+    "t08",
+    "t14"
+   ],
+   "moved": 1,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAT-12",
+   "name": "El Rastro al Amanecer",
+   "rarity": "legendary",
+   "set": "LAT",
+   "set_name": "La Latina",
+   "color": "#F4A259",
+   "book": 450,
+   "art": "/plaza/art/LAT-12.svg",
+   "ask": null,
+   "bid": null,
+   "asks": 0,
+   "bids": 0,
+   "last": null,
+   "last_tick": null,
+   "low": null,
+   "median": null,
+   "high": null,
+   "deals": 0,
+   "trend": null,
+   "hot": false,
+   "spark": [],
+   "holders": [],
+   "seekers": [
+    "t05"
+   ],
+   "moved": 0,
+   "state": "not_seen"
+  },
+  {
+   "ref": "LAV-02",
+   "name": "El Frutero de Argumosa",
+   "rarity": "common",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 10,
+   "art": "/plaza/art/LAV-02.svg",
+   "ask": {
+    "price": 10,
+    "fee": 2,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t04",
+    "offer": 20062,
+    "expires_tick": 1481,
+    "on_v07": false,
+    "cost": 12,
+    "saves_on_v07": 2
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 3,
+   "last_tick": 1194,
+   "low": null,
+   "median": 3,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    3
+   ],
+   "holders": [
+    "t04"
+   ],
+   "seekers": [],
+   "moved": 8,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAV-04",
+   "name": "Mural de la Esquina",
+   "rarity": "common",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 10,
+   "art": "/plaza/art/LAV-04.svg",
+   "ask": {
+    "price": 10,
+    "fee": 2,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t08",
+    "offer": 20242,
+    "expires_tick": 1446,
+    "on_v07": false,
+    "cost": 12,
+    "saves_on_v07": 2
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 9,
+   "last_tick": 353,
+   "low": null,
+   "median": 9,
+   "high": null,
+   "deals": 1,
+   "trend": null,
+   "hot": false,
+   "spark": [
+    9
+   ],
+   "holders": [
+    "t08"
+   ],
+   "seekers": [],
+   "moved": 4,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAV-05",
+   "name": "Bici de Reparto",
+   "rarity": "common",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 10,
+   "art": "/plaza/art/LAV-05.svg",
+   "ask": {
+    "price": 9,
+    "fee": 1,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t08",
+    "offer": 20267,
+    "expires_tick": 1451,
+    "on_v07": false,
+    "cost": 10,
+    "saves_on_v07": 1
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": 4,
+   "last_tick": 712,
+   "low": 4,
+   "median": 6,
+   "high": 7,
+   "deals": 4,
+   "trend": "down",
+   "hot": false,
+   "spark": [
+    7,
+    8,
+    4,
+    4
+   ],
+   "holders": [
+    "t08"
+   ],
+   "seekers": [],
+   "moved": 12,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAV-06",
+   "name": "La Tabacalera",
+   "rarity": "uncommon",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 25,
+   "art": "/plaza/art/LAV-06.svg",
+   "ask": {
+    "price": 45,
+    "fee": 3,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t16",
+    "offer": 20231,
+    "expires_tick": 1447,
+    "on_v07": false,
+    "cost": 48,
+    "saves_on_v07": 3
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": null,
+   "last_tick": null,
+   "low": null,
+   "median": null,
+   "high": null,
+   "deals": 0,
+   "trend": null,
+   "hot": false,
+   "spark": [],
+   "holders": [
+    "t16"
+   ],
+   "seekers": [
+    "t09",
+    "t12",
+    "t17"
+   ],
+   "moved": 16,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAV-09",
+   "name": "Cine Doré",
+   "rarity": "rare",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 70,
+   "art": "/plaza/art/LAV-09.svg",
+   "ask": {
+    "price": 80,
+    "fee": 5,
+    "venue": "rastro",
+    "venue_name": "El Rastro",
+    "team": "t16",
+    "offer": 20230,
+    "expires_tick": 1447,
+    "on_v07": false,
+    "cost": 85,
+    "saves_on_v07": 5
+   },
+   "bid": null,
+   "asks": 1,
+   "bids": 0,
+   "last": null,
+   "last_tick": null,
+   "low": null,
+   "median": null,
+   "high": null,
+   "deals": 0,
+   "trend": null,
+   "hot": false,
+   "spark": [],
+   "holders": [
+    "t16"
+   ],
+   "seekers": [
+    "t04",
+    "t05",
+    "t06",
+    "t09",
+    "t12"
+   ],
+   "moved": 12,
+   "state": "in_play"
+  },
+  {
+   "ref": "LAV-12",
+   "name": "El Gato de Lavapiés",
+   "rarity": "legendary",
+   "set": "LAV",
+   "set_name": "Lavapiés",
+   "color": "#E4572E",
+   "book": 450,
+   "art": "/plaza/art/LAV-12.svg",
+   "ask": null,
+   "bid": null,
+   "asks": 0,
+   "bids": 0,
+   "last": null,
+   "last_tick": null,
+   "low": null,
+   "median": null,
+   "high": null,
+   "deals": 0,
+   "trend": null,
+   "hot": false,
+   "spark": [],
+   "holders": [],
+   "seekers": [
+    "t06",
+    "t14"
+   ],
+   "moved": 0,
+   "state": "not_seen"
+  }
+ ],
+ "total": 16,
+ "offers": 42
+}

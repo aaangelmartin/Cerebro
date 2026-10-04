@@ -38,6 +38,12 @@ ROUTES: list[Route] = [
       None, "market.json", "market", "B2", True),
     R("GET", "/api/card/{ref}", "anyone", "One card: holders, seekers, open offers, last deals, possible matches.",
       None, "card.json", "card", "B2", True),
+    R("GET", "/api/board", "anyone", "Every card with its best public ask and bid on any venue and what they "
+      "really cost after the venue's fee.", None, "board.json", "board", "shell", True),
+    R("GET", "/api/board/history", "anyone", "Every card's sales between teams and their statistics.", None,
+      "board_history.json", "board", "shell", True),
+    R("GET", "/api/board/live", "anyone", "What changed in the last two ticks: public offers listed or gone, and "
+      "sales.", None, "board_live.json", "board", "shell", True),
     R("GET", "/api/offers", "anyone", "Open offers on every venue with their real cost.", None, "offers.json",
       "market", "shell", True),
     R("GET", "/api/matches", "anyone", "Live matches, by priority.", None, "matches.json", "activity", "shell", True),

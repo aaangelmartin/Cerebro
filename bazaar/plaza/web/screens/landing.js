@@ -289,6 +289,7 @@
       const foot = el("footer", { class: "landing-foot" },
         K.link("/plaza/how", { class: "btn sm" }, K.icon("how", 13), t("nav.how")),
         K.link("/plaza/agents", { class: "btn sm" }, K.icon("doc", 13), "AGENTS.md"),
+        K.link("/plaza/board", { class: "btn sm" }, K.icon("performance", 13), t("nav.board")),
         K.link("/plaza/market", { class: "btn sm" }, K.icon("market", 13), t("nav.market")),
         K.link("/plaza/activity", { class: "btn sm" }, K.icon("activity", 13), t("nav.activity")),
         el("span", { class: "landing-foot-gap" }),
