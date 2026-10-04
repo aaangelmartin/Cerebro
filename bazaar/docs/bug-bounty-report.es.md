@@ -247,3 +247,77 @@ se rechazaron limpiamente.
   malo → 400, método erróneo → 405. Sin trazas ni rutas internas en ningún error.
 - No probado, a propósito: leer por id el hilo de otro equipo, ni nada que cree una oferta, gaste dinero o
   acepte un trato.
+
+## Hallazgos de puntuación, ronda 2 (domingo 11:20–11:40, solo lectura)
+
+Método: cada corte de la tabla del domingo se ha convertido en valores de la ronda 3 con
+`ronda3 = (tabla × (1,5 + fase) − 1,5 × final del sábado) / fase`, y se ha comparado con los componentes de
+nuestro `me.score` y con los settlements entre equipos del feed público. No se ha escrito nada en el juego.
+
+### S1. Un solo trato en un venue da a su dueño toda la parte de "valor creado", incluso en el puesto inicial sin tocar
+
+- **Regla:** RULES.md l.77 "Your market earns when *other* teams trade well on it"; l.119 "value created
+  between other teams on your venue"; l.7 "Scores come only from value created, never from activity."
+- **Observado:** el market de la ronda 3 es 11,25 para todo equipo con venue probado. Settlement en el tick
+  1858 en **v15** (dueño t15, `starter: true`, mecanismo `auto`, fianza 0): SAL-11 t04→t02 a 220, comisión 0.
+  En el corte siguiente (1862) el market de ronda 3 de t15 pasa de 11,2 a **18,7** (+7,5, toda la parte del
+  venue). Settlement en el tick 1886 en **v21** (dueño t09): SAL-12 t12→t16 a 380. En el corte 1902 t09 pasa
+  de 11,0 a **18,6** (+7,6).
+- **Esperado:** una parte proporcional al valor creado (220 frente a 380 de volumen, un trato cada uno, dan
+  el mismo +7,5), y nada por un puesto que su dueño nunca configuró.
+- **Impacto:** +7,5 puntos de ronda ≈ +2,4 puntos de tabla con fase 0,71 (+3,0 al congelar) por un único
+  trato en el que el dueño no participó. t15 y t09 lideran el market de la ronda con un trato cada uno.
+- **Comprobación:** `GET /api/leaderboard` → `venues[]` de v15 y v21 (`trades: 1`) y `teams[].market` en los
+  cortes 1842, 1862, 1882 y 1902; settlements del feed en los ticks 1858 y 1886.
+
+### S2. Una carta de un premio de la organización crea valor puntuado al revenderla
+
+- **Regla:** l.122 "What never counts: … what you pulled from a pack (shown as *luck*), gifts, easter eggs, and
+  organiser grants."
+- **Observado:** SAL-12 (legendaria) llegó a t12 por el sobre que le dio la organización; t12 la vendió a t16
+  a 380 (tick 1886, v21). Ese settlement movió tres notas: negociación de t12 (22,3 → 24,1), negociación de
+  t16 (3,2 → 7,6) y market de t09 (+7,6, ver S1).
+- **Esperado:** el valor de una carta regalada no se convierte en nota por venderla un tick después.
+- **Comprobación:** `pack.opened` de t12 en el feed y el settlement del tick 1886; cortes 1882 y 1902.
+
+### S3. Dos tratos entre los mismos dos equipos llenan toda la nota de negociación de la ronda
+
+- **Regla:** l.118 "the value you gained in trades with other teams, at your private values"; l.131–132 (si un
+  equipo le entrega a otro el valor de sus tratos, no cuentan hasta que la organización lo mire).
+- **Observado:** t18 vendió SAL-11 a t13 a 238 (tick 1494, El Rastro) y 19 ticks después le compró CHA-01,
+  una común de valor de libro 10, a 72 (tick 1513). Negociación de ronda 3 de t18: 0,2 (corte 1482) → 25,2
+  (corte 1502) → **30,0** (corte 1522), el máximo, donde siguió hasta el tick 1702. Nuestros datos muestran
+  que un trato entre equipos tiene tope de +50 (tick 1033 del sábado: `neg_points` 26,9 → 76,9), así que
+  bastaron dos tratos con tope.
+- **Esperado / pregunta:** ni el tope de +50 por trato ni la escala respecto al mejor equipo están en las
+  reglas. Con ambos, los 30 puntos de la ronda se ganan con dos tratos con un solo socio, y una común a siete
+  veces su valor de libro cuenta entera para los dos lados.
+- **Comprobación:** settlements del feed en los ticks 1494 y 1513; `teams[].negotiating` de t18 en los cortes
+  1482–1522.
+
+### S4. La nota de negociación de un equipo baja sin ningún evento suyo
+
+- **Regla:** l.7 y l.118 hablan solo del valor propio; nada dice que la nota sea relativa a otros equipos.
+- **Observado:** entre los cortes 1742 y 1822 los componentes de nuestro `me.score` no empeoraron
+  (`neg_points` −5,0 → −0,5, `ladder_points` 0,195, `duel_points` 0) y aun así nuestra negociación de ronda 3
+  fue 10,15 → 9,41 → 8,60 → 7,75 → 7,00. t18 pasó de 30,0 a 27,3 en el corte 1722 sin ningún settlement suyo.
+- **Impacto:** un equipo pierde puntos por lo que hacen otros; con las reglas publicadas no se puede prever.
+- **Comprobación:** `score` de `GET /api/me` en esos ticks frente a `teams[].negotiating` de t10.
+
+### S5. La ronda 3 contó el market como cero para todos hasta la primera sesión de prueba
+
+- **Regla:** l.125 "a new round counts by the share of its day played"; l.78–82 el Market Test se promedia
+  entre las sesiones de la ronda.
+- **Observado:** del corte 1462 al 1702 el market de ronda 3 de los 18 equipos fue 0,0 mientras la ronda ya
+  pesaba hasta 0,40; en el corte 1722, tras la primera sesión, pasó a 11,25 para casi todos. En esos 240
+  ticks todas las notas de la tabla bajaron por un market que aún no se había medido (el nuestro 12,50 →
+  9,85).
+- **Esperado:** un componente sin medir conserva el valor anterior o queda fuera de la media.
+- **Comprobación:** `teams[].market` en los cortes 1702 y 1722; `bench.started` en el feed.
+
+### S6. `GET /api/me` no va en vivo para `negotiating` y `score`
+
+- **Regla:** l.126 "`GET /api/me` shows your own live numbers".
+- **Observado:** `neg_points` subió de 9,5 a 29,5 en el tick 1930 y `duel_points` creció desde el tick 1865,
+  pero `negotiating` siguió en 21,65 hasta el corte del tick 1942 (22,22). Además las banderas entran en
+  `neg_points` (+10 cada una en los ticks 1078, 1088 y 1090 del sábado), que la l.118 no lista en Negociación.

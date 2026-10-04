@@ -217,3 +217,74 @@ refuse (unknown offer id, malformed JSON); all were refused cleanly.
   wrong method → 405. No stack trace or internal path in any error.
 - Not tested, on purpose: reading another team's thread by id, and anything that would create an offer,
   spend cash or accept a trade.
+
+## Scoring findings, round 2 (Sunday 11:20–11:40, read-only)
+
+Method: every leaderboard cut of Sunday was turned back into round-3 values with
+`round3 = (table × (1.5 + phase) − 1.5 × Saturday final) / phase`, and compared with our own `me.score`
+components and with the team-to-team settlements in the public feed. Nothing was written to the game.
+
+### S1. One trade on a venue gives its owner the full "value created" share, even on the untouched starter stall
+
+- **Rule:** RULES.md l.77 "Your market earns when *other* teams trade well on it"; l.119 "value created
+  between other teams on your venue"; l.7 "Scores come only from value created, never from activity."
+- **Observed:** round-3 market is 11.25 for every team with a tested venue. Settlement at tick 1858 on
+  **v15** (owner t15, `starter: true`, mechanism `auto`, bond 0): SAL-11 t04→t02 at 220, fee 0. At the next
+  cut (1862) t15's round-3 market goes 11.2 → **18.7** (+7.5, the whole venue share). Settlement at tick 1886
+  on **v21** (owner t09): SAL-12 t12→t16 at 380. At cut 1902 t09 goes 11.0 → **18.6** (+7.6).
+- **Expected:** a share in proportion to the value created (220 against 380 of volume, one trade each, give
+  the same +7.5), and nothing for a stall its owner never configured.
+- **Impact:** +7.5 round points ≈ +2.4 table points at phase 0.71 (+3.0 at the freeze) for a single trade the
+  owner took no part in. t15 and t09 lead the round's market on one trade each.
+- **Check:** `GET /api/leaderboard` → `venues[]` for v15 and v21 (`trades: 1`), and `teams[].market` at cuts
+  1842, 1862, 1882, 1902; feed settlements at ticks 1858 and 1886.
+
+### S2. A card from an organiser grant creates scored value when resold
+
+- **Rule:** l.122 "What never counts: … what you pulled from a pack (shown as *luck*), gifts, easter eggs, and
+  organiser grants."
+- **Observed:** SAL-12 (legendary) reached t12 through the pack the organisers awarded; t12 sold it to t16 at
+  380 (tick 1886, v21). That one settlement moved three scores: t12 negotiating (22.3 → 24.1), t16
+  negotiating (3.2 → 7.6) and t09 market (+7.6, see S1).
+- **Expected:** the value of a granted card does not turn into score by selling it one tick later.
+- **Check:** feed `pack.opened` for t12 and the settlement at tick 1886; leaderboard cuts 1882 and 1902.
+
+### S3. Two trades between the same two teams fill the whole negotiation score of the round
+
+- **Rule:** l.118 "the value you gained in trades with other teams, at your private values"; l.131–132 (one
+  team handing another the value of its deals counts for nothing until the organisers look).
+- **Observed:** t18 sold SAL-11 to t13 at 238 (tick 1494, El Rastro) and 19 ticks later bought CHA-01, a
+  common with book value 10, from t13 at 72 (tick 1513). t18's round-3 negotiating: 0.2 (cut 1482) → 25.2
+  (cut 1502) → **30.0** (cut 1522), the maximum, where it stayed until tick 1702. Our own data shows a team
+  trade is capped at +50 (tick 1033 on Saturday: `neg_points` 26.9 → 76.9), so two capped trades were enough.
+- **Expected / question:** neither the +50 cap per trade nor the scaling against the best team is in the
+  rules. With both, the round's 30 points are won by two trades with one partner, and a common at seven times
+  its book value counts in full for both sides.
+- **Check:** feed settlements at ticks 1494 and 1513; `teams[].negotiating` for t18 at cuts 1482–1522.
+
+### S4. A team's negotiation score falls with no event of its own
+
+- **Rule:** l.7 and l.118 describe own value only; nothing says the score is relative to other teams.
+- **Observed:** between cuts 1742 and 1822 our `me.score` raw components did not get worse (`neg_points`
+  −5.0 → −0.5, `ladder_points` 0.195, `duel_points` 0), yet our round-3 negotiating went 10.15 → 9.41 → 8.60 →
+  7.75 → 7.00. t18 went 30.0 → 27.3 at cut 1722 with no settlement of its own.
+- **Impact:** a team loses points because of what others do; the published rules do not let anyone predict it.
+- **Check:** `GET /api/me` `score` at those ticks against `teams[].negotiating` for t10.
+
+### S5. Round 3 counted market as zero for every team until the first test session
+
+- **Rule:** l.125 "a new round counts by the share of its day played"; l.78–82 the Market Test is averaged
+  over the round's sessions.
+- **Observed:** from cut 1462 to cut 1702 the round-3 market of all 18 teams was 0.0 while the round already
+  weighed up to 0.40; at cut 1722, after the first session, it became 11.25 for almost everyone. In those
+  240 ticks every table score was pulled down by a market that had not yet been measured (ours 12.50 →
+  9.85).
+- **Expected:** an unmeasured component keeps the previous value or stays out of the average.
+- **Check:** `teams[].market` at cuts 1702 and 1722; feed `bench.started`.
+
+### S6. `GET /api/me` is not live for `negotiating` and `score`
+
+- **Rule:** l.126 "`GET /api/me` shows your own live numbers".
+- **Observed:** `neg_points` rose 9.5 → 29.5 at tick 1930 and `duel_points` grew from tick 1865, but
+  `negotiating` stayed 21.65 until the cut of tick 1942 (22.22). Flags also land in `neg_points` (+10 each at
+  ticks 1078, 1088, 1090 on Saturday), which l.118 does not list under Negotiating.
