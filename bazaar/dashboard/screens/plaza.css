@@ -1,0 +1,34 @@
+/* Market v07: what our market earns (#plaza). Classes start with .pz- */
+.scr-plaza { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.scr-plaza .pz-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.scr-plaza .pz-head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.scr-plaza .pz-sub { color: var(--ink-2); font-size: 13px; }
+.scr-plaza .pz-open { margin-left: auto; text-decoration: none; font-weight: 600; }
+.scr-plaza .pz-api { font-size: 10.5px; color: var(--ink-3); }
+.scr-plaza .pz-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.scr-plaza .pz-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.scr-plaza .pz-kpis .kpi + .kpi { border-left: 0; }
+.scr-plaza .pz-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1300px) { .scr-plaza .pz-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .scr-plaza .pz-kpis .kpi:nth-child(4) { border-left: 1px solid var(--line-2); } .scr-plaza .pz-kpis .kpi:nth-child(n+4) { border-top: 0; } .scr-plaza .pz-two { grid-template-columns: minmax(0, 1fr); } }
+.scr-plaza .pz-chart { padding: 14px 16px 12px; }
+.scr-plaza .pz-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-3); margin-top: 6px; }
+.scr-plaza .pz-alerts { display: flex; flex-direction: column; }
+.scr-plaza .pz-alert { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.scr-plaza .pz-alert:last-child { border-bottom: 0; }
+.scr-plaza .pz-alert-text { flex: 1; min-width: 0; }
+.scr-plaza .pz-alert .btn { text-decoration: none; }
+.scr-plaza .pz-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
+.scr-plaza .pz-alert.tone-bad .pz-dot { background: var(--bad); }
+.scr-plaza .pz-rows { display: flex; flex-direction: column; }
+.scr-plaza .pz-row { display: flex; justify-content: space-between; gap: 16px; padding: 9px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.scr-plaza .pz-row:last-child { border-bottom: 0; }
+.scr-plaza .pz-row .num { color: var(--ink); text-align: right; }
+.scr-plaza .pz-row .tone-ok { color: var(--ok); } .scr-plaza .pz-row .tone-bad { color: var(--bad); }
+.scr-plaza .pz-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.scr-plaza .pz-table th { text-align: left; font-family: var(--font-num); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.scr-plaza .pz-table td { padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.scr-plaza .pz-table tr:last-child td { border-bottom: 0; }
+.scr-plaza .pz-table .num { text-align: right; } .scr-plaza .pz-table td:first-child .num { text-align: left; }
+.scr-plaza .pz-table tr.is-ours td { color: var(--signal); font-weight: 600; }
+.scr-plaza .pz-id { color: var(--ink-3); font-size: 10.5px; }
+.scr-plaza .pz-note { color: var(--ink-3); font-size: 12px; margin: 0; max-width: 900px; }

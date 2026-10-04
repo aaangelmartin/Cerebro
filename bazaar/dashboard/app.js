@@ -8,7 +8,7 @@
   const I18N = window.I18N, t = I18N.t;
   // [id, label, icon]; labels are shell.nav.<id>
   const NAV = [
-    ["home", "home"], ["cerebro", "cerebro"], ["noticias", "bell"], ["coleccion", "coleccion"], ["mercado", "mercado"], ["broker", "broker"],
+    ["home", "home"], ["cerebro", "cerebro"], ["noticias", "bell"], ["coleccion", "coleccion"], ["mercado", "mercado"], ["broker", "broker"], ["plaza", "plaza"],
     ["duelos", "duelo"], ["competicion", "competicion"], ["rivales", "rivales"],
     ["supervision", "supervision"], ["laboratorio", "laboratorio"], ["bot", "bot"],
   ].map(([id, ic]) => [id, t("shell.nav." + id), ic]);
