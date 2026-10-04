@@ -4,7 +4,10 @@
   "market": 12.5,
   "mm_points": 31.4,
   "rank": 1,
-  "total": 37.58
+  "total": 37.58,
+  "bench_points": 0.5,
+  "bench_efficiency": 0.854,
+  "best_other_market": 11.87
  },
  "venue": {
   "venue": "v07",
@@ -13,21 +16,32 @@
   "traders": 11,
   "pairs": 19,
   "fee_bps": 0,
-  "status": "open"
+  "status": "open",
+  "name": "Team 10 · fair broker, 0 fee",
+  "value_created": 212.4
  },
  "ours": {
   "settled": 23,
   "volume": 1012,
-  "saved_fees": 74
+  "saved_fees": 74,
+  "settled_elsewhere": 1,
+  "by_rarity": {
+   "legendary": 0,
+   "epic": 2,
+   "rare": 6,
+   "uncommon": 5,
+   "common": 10
+  }
  },
- "alert": null,
+ "alert": "1 matched trade(s) closed off v07 (last: m-77ee88ff99 on rastro): tell both agents to close on v07.",
  "funnel": {
   "proposed": 118,
   "offer_on_v07": 37,
   "accepted": 29,
   "settled": 23,
   "passed": 31,
-  "expired": 41
+  "expired": 41,
+  "settled_elsewhere": 1
  },
  "settle": {
   "rate": 0.19,
@@ -40,7 +54,8 @@
    "volume": 310,
    "as_seller": 4,
    "as_buyer": 2,
-   "connected": true
+   "connected": true,
+   "venue_deals": 9
   },
   {
    "team": "t05",
@@ -48,7 +63,8 @@
    "volume": 262,
    "as_seller": 1,
    "as_buyer": 4,
-   "connected": true
+   "connected": true,
+   "venue_deals": 7
   },
   {
    "team": "t04",
@@ -56,7 +72,8 @@
    "volume": 201,
    "as_seller": 2,
    "as_buyer": 2,
-   "connected": false
+   "connected": false,
+   "venue_deals": 5
   }
  ],
  "per_hour": [
@@ -88,7 +105,9 @@
    "trades": 41,
    "volume": 1870,
    "traders": 11,
-   "ours": true
+   "ours": true,
+   "pairs": 19,
+   "market": 12.5
   },
   {
    "venue": "v01",
@@ -98,17 +117,226 @@
    "trades": 3,
    "volume": 101,
    "traders": 3,
-   "ours": false
+   "ours": false,
+   "pairs": 3,
+   "market": 11.87
   },
   {
    "venue": "rastro",
    "name": "El Rastro",
-   "owner": null,
+   "owner": "world",
    "fee_bps": 500,
    "trades": 412,
    "volume": 15230,
    "traders": 18,
-   "ours": false
+   "ours": false,
+   "pairs": 0,
+   "market": null
   }
- ]
+ ],
+ "feed": {
+  "venue_deals": 41,
+  "venue_volume": 1870,
+  "team_deals": 137,
+  "by_venue": {
+   "rastro": 89,
+   "v07": 41,
+   "v01": 3,
+   "v02": 4
+  },
+  "share": 0.3
+ },
+ "lost": [
+  {
+   "id": "m-77ee88ff99",
+   "tick": 1431,
+   "seller": "t04",
+   "buyer": "t09",
+   "ref": "RET-06",
+   "price": 28,
+   "venue": "rastro",
+   "settlement": 17890
+  }
+ ],
+ "alerts": [
+  {
+   "kind": "lost",
+   "text": "1 matched trade(s) closed off v07 (last: m-77ee88ff99 on rastro): tell both agents to close on v07."
+  },
+  {
+   "kind": "flat",
+   "text": "no value created for 60 ticks while teams closed 3 trade(s) on other venues: announce, and talk to teams."
+  }
+ ],
+ "now": {
+  "proposed": 8,
+  "offer_on_v07": 3,
+  "accepted": 1,
+  "settled": 23,
+  "passed": 31,
+  "expired": 41,
+  "settled_elsewhere": 1
+ },
+ "per_tick": [
+  {
+   "tick": 1402,
+   "settled": 1,
+   "elsewhere": 0,
+   "volume": 9
+  },
+  {
+   "tick": 1421,
+   "settled": 2,
+   "elsewhere": 0,
+   "volume": 66
+  },
+  {
+   "tick": 1431,
+   "settled": 0,
+   "elsewhere": 1,
+   "volume": 0
+  },
+  {
+   "tick": 1436,
+   "settled": 1,
+   "elsewhere": 0,
+   "volume": 24
+  },
+  {
+   "tick": 1439,
+   "settled": 3,
+   "elsewhere": 0,
+   "volume": 118
+  },
+  {
+   "tick": 1445,
+   "settled": 1,
+   "elsewhere": 0,
+   "volume": 80
+  }
+ ],
+ "teams": {
+  "total": 17,
+  "connected": 9,
+  "verified": 6,
+  "online": 5
+ },
+ "series": {
+  "value": [
+   {
+    "tick": 1386,
+    "value_created": 120.0,
+    "mm_points": 22.1,
+    "market": 12.5,
+    "trades": 31,
+    "pairs": 19
+   },
+   {
+    "tick": 1391,
+    "value_created": 131.5,
+    "mm_points": 23.0,
+    "market": 12.5,
+    "trades": 32,
+    "pairs": 19
+   },
+   {
+    "tick": 1396,
+    "value_created": 131.5,
+    "mm_points": 23.0,
+    "market": 12.5,
+    "trades": 32,
+    "pairs": 19
+   },
+   {
+    "tick": 1401,
+    "value_created": 140.2,
+    "mm_points": 24.4,
+    "market": 12.5,
+    "trades": 33,
+    "pairs": 19
+   },
+   {
+    "tick": 1406,
+    "value_created": 151.0,
+    "mm_points": 25.8,
+    "market": 12.5,
+    "trades": 34,
+    "pairs": 19
+   },
+   {
+    "tick": 1411,
+    "value_created": 151.0,
+    "mm_points": 25.8,
+    "market": 12.5,
+    "trades": 34,
+    "pairs": 19
+   },
+   {
+    "tick": 1416,
+    "value_created": 163.7,
+    "mm_points": 27.0,
+    "market": 12.5,
+    "trades": 35,
+    "pairs": 19
+   },
+   {
+    "tick": 1421,
+    "value_created": 178.3,
+    "mm_points": 28.6,
+    "market": 12.5,
+    "trades": 37,
+    "pairs": 19
+   },
+   {
+    "tick": 1426,
+    "value_created": 178.3,
+    "mm_points": 28.6,
+    "market": 12.5,
+    "trades": 37,
+    "pairs": 19
+   },
+   {
+    "tick": 1431,
+    "value_created": 175.0,
+    "mm_points": 28.2,
+    "market": 12.5,
+    "trades": 38,
+    "pairs": 19
+   },
+   {
+    "tick": 1436,
+    "value_created": 190.6,
+    "mm_points": 29.7,
+    "market": 12.5,
+    "trades": 39,
+    "pairs": 19
+   },
+   {
+    "tick": 1441,
+    "value_created": 204.8,
+    "mm_points": 30.9,
+    "market": 12.5,
+    "trades": 40,
+    "pairs": 19
+   },
+   {
+    "tick": 1446,
+    "value_created": 212.4,
+    "mm_points": 31.4,
+    "market": 12.5,
+    "trades": 41,
+    "pairs": 19
+   }
+  ],
+  "market": []
+ },
+ "broker": {
+  "state": "on",
+  "updated": 1791073807.9,
+  "tick": 1446,
+  "matches_total": 12,
+  "mode": "smart",
+  "detail": "last beat 9 s ago"
+ },
+ "scoring": "the game scores the value created between other teams on v07, not the count of trades"
 }

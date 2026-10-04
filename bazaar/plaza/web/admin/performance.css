@@ -1,1 +1,6 @@
 /* admin performance: classes start with .adm-performance- */
+.adm-performance-mid { grid-template-columns: repeat(3, 1fr); }
+.adm-performance-low { grid-template-columns: 5fr 7fr; }
+@media (max-width: 1100px) { .adm-performance-mid, .adm-performance-low { grid-template-columns: 1fr; } }
+.adm-bars.is-plain { gap: 2px; }
+.adm-bars.is-plain .adm-bar-label { overflow: visible; }
