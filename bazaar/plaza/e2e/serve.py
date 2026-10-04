@@ -64,6 +64,8 @@ def main() -> None:
                 try:
                     rig.game.advance()
                     rig.refresh()
+                    for a in rig.agents.values():             # every agent calls in, so it shows as connected
+                        a.queue()
                 except Exception:  # noqa: BLE001 - a scene, not a test: keep serving
                     pass
 

@@ -145,18 +145,30 @@ async function navigation(browser, mode, session) {
   const flow = await visit(browser, { name: "flow-landing", route: "/plaza/", lang: "en", view: "desktop", mode, mock: mode === "mock" ? "1" : "0" });
   if (!flow) return;
   try {
-    const cta = await flow.page.$('a[href^="/plaza/connect"]');
+    const cta = await flow.page.$('#app a[href^="/plaza/connect"], #app main button.primary, #app button.btn.primary, #app .landing-hero button');
     if (!cta) hard.push(`${mode}: the landing has no link to Connect`);
     else {
       await cta.click();
       await flow.page.waitForTimeout(400);
-      if (!(await flow.page.evaluate(() => location.pathname)).startsWith("/plaza/connect")) hard.push(`${mode}: the landing's Connect link does not open Connect`);
+      const at = await flow.page.evaluate(() => location.pathname);     // Connect, or Home when a team is already in
+      if (!/^\/plaza\/(connect|home)/.test(at)) hard.push(`${mode}: the landing's main button leads to ${at}`);
     }
     await flow.page.goto(`${BASE}/plaza/how?lang=en`, { waitUntil: "load" });
     await flow.page.waitForTimeout(400);
-    const how = await flow.page.evaluate(() => ({ shell: !!document.querySelector(".sidenav"), enter: [...document.querySelectorAll('a[href^="/plaza/home"]')].length }));
+    const how = await flow.page.evaluate(() => {
+      const nav = document.querySelector(".sidenav");
+      return { shell: !!(nav && nav.offsetParent !== null && nav.getBoundingClientRect().width > 0),
+        enter: [...document.querySelectorAll('#app a[href^="/plaza/home"], #app button')].length };
+    });
     if (how.shell) findings.push(`${mode}: How it works shows the app's side nav (it is a full page without the shell)`);
-    if (!how.enter) hard.push(`${mode}: How it works has no "Enter the market" link to Home`);
+    if (!how.enter) hard.push(`${mode}: How it works has no "Enter the market" button`);
+    else {
+      const enter = (await flow.page.$('#app .how-enter')) || (await flow.page.$$('#app a[href^="/plaza/home"], #app button')).pop();
+      await enter.click();
+      await flow.page.waitForTimeout(400);
+      const at = await flow.page.evaluate(() => location.pathname);
+      if (!/^\/plaza\/(home|connect)/.test(at)) findings.push(`${mode}: the last button of How it works leads to ${at}, not to Home (or to Connect when no team is connected)`);
+    }
   } catch (e) { hard.push(`${mode}: flow: ${String(e.message).split("\n")[0].slice(0, 160)}`); }
   await close(flow);
 }

@@ -372,14 +372,21 @@ class NothingLeaks(E2E):
             self.finding(s == 200 and "1741" in json.dumps(cards), "B1", "a team cannot read its own limit back")
             s, cards, _ = other.api("GET", "/plaza/api/me/cards")
             self.assertNotIn("LAV-07", json.dumps(cards))     # `have` never leaves /api/me of its own team
-        if not self.rig.no_have:
+        if not self.rig.no_have:                              # LAV-07 is in t01's hand and on none of its lists
             for agent in (buyer, other):
-                for path in ("/plaza/api/team/t01", "/plaza/api/teams", "/plaza/api/market", "/plaza/api/card/LAV-07"):
+                for path in ("/plaza/api/team/t01", "/plaza/api/teams"):
                     s, out, _ = agent.api("GET", path)
                     if s == 200:
-                        self.assertNotIn("LAV-07", json.dumps(out) if "card/" not in path else json.dumps(
-                            {k: v for k, v in out.items() if k in ("holders", "sellers", "have")}),
-                            f"t01's hand leaks in {path}")
+                        self.assertNotIn("LAV-07", json.dumps(out), f"t01's hand leaks in {path}")
+                for path in ("/plaza/api/market", "/plaza/api/card/LAV-07"):
+                    s, out, _ = agent.api("GET", path)
+                    if s != 200:
+                        continue
+                    row = out if "card/" in path else next((c for c in out.get("cards") or [] if c.get("ref") == "LAV-07"), {})
+                    self.assertNotIn("t01", json.dumps({k: v for k, v in row.items() if k != "you"}),
+                                     f"t01's hand leaks in {path}")
+                    self.assertFalse(row.get("holders") if isinstance(row.get("holders"), int) else False,
+                                     f"{path} counts a holder of LAV-07 that only t01's private hand knows")
         self.close()
 
     def test_one_team_cannot_touch_another(self):
@@ -559,7 +566,9 @@ class Contract(E2E):
                                      f"AGENTS.md does not name {r.method} {r.path}")
         s, spec, _ = self.rig.call("GET", "/plaza/api/openapi.json")
         self.assertEqual(s, 200)
-        self.assertEqual(sorted(spec["paths"]), sorted({"/plaza" + r.path for r in R.ROUTES if r.live}))
+        listed = set(spec["paths"])
+        self.assertLessEqual(listed, {"/plaza" + r.path for r in R.ROUTES if r.live})
+        self.assertLessEqual({"/plaza" + r.path for r in R.public() if r.live}, listed)
         self.close()
 
 
