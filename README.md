@@ -6,7 +6,7 @@
 
 **Winner of The Bazaar · Cromos de Madrid**, the Causa Prima hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
 
-**[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)** · **[Pitch PDF](docs/pitch/cerebro-pitch.pdf)** · **[Frozen dashboard](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)**
+**[Dashboard (frozen snapshot)](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)** · **[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)**
 
 [![Watch the video: how we built Cerebro and how it works inside, three minutes](docs/img/video-poster.png)](https://nglmrtn.com/Cerebro/video/)
 
