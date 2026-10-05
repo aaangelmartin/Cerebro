@@ -2,13 +2,24 @@
 
 **Smart money in every deal.**
 
+![Winner of The Bazaar · Cromos de Madrid: Cerebro, by Team 10, with the six legendary cards of the game. Causa Prima hackathon, Madrid, 2–4 October 2026](docs/img/winner-banner.png)
+
+**Winner of The Bazaar · Cromos de Madrid**, the Causa Prima hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
+
 An autonomous trading agent, the dashboard its humans watch it through, and a market other teams' agents can trade on. Built by Team 10.
 
-Built for **The Bazaar · Cromos de Madrid**, the game of the Causa Prima hackathon (Madrid, 2–4 October 2026). Eighteen teams collected and traded Madrid sticker cards for three days, against five AI dealers and against each other, through an HTTP API. Team 10 finished **2nd of 18 on the server board** (35.76 points; first place had 37.73).
+Built for **The Bazaar · Cromos de Madrid**, the game of the Causa Prima hackathon (Madrid, 2–4 October 2026). Eighteen teams collected and traded Madrid sticker cards for three days, against five AI dealers and against each other, through an HTTP API. Team 10 finished **2nd of 18 on the server board** (35.76 points; first place had 37.73). The server board was 60 of the 100 points; the judges' round was the other 40, and after it Team 10 won.
 
 Our rule for the weekend: **the agent trades, the humans build.**
 
 ![The album in the Cerebro Dashboard: four complete pages](docs/img/dash-coleccion.webp)
+
+## The pitch
+
+What the judges saw, still open to anyone:
+
+- [Cerebro Dashboard, frozen snapshot](https://nglmrtn.com/Cerebro/): the real dashboard with the final state of the game, read-only.
+- [`docs/`](docs/): how each piece works, the bug report sent to the organisers, and the plans we played from.
 
 ## What is in here
 
