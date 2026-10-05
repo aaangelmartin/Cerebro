@@ -1,0 +1,1 @@
+{"stream":"feed","rows":[{"seq":39358,"ts":1791119420.534,"key":"118104|2816|offer.cancelled","seen_tick":2816,"seen_at":1791119420.528,"id":118104,"tick":2816,"t":19.3417,"type":"offer.cancelled","scope":"public","actor":"","payload":{"offer":29533,"venue":"v15"}}],"last_seq":39358,"stream_last_seq":39358,"more":false}
