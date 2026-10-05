@@ -24,6 +24,8 @@
       return Promise.resolve(json(403, FROZEN));
     }
     if (method !== "GET") { flash(); return Promise.resolve(json(403, FROZEN)); }
+    // Recorded data still names the live paths ("/plaza/art/LAV-01.svg"): they live under this snapshot.
+    if (u.pathname.indexOf("/plaza/") === 0) u = new URL(BASE + u.pathname.slice(6) + u.search, location.origin);
     var inBase = u.pathname.indexOf(BASE + "/") === 0;
     var rel = inBase ? u.pathname.slice(BASE.length + 1) : null;
     if (rel === "AGENTS.md" || u.pathname === "/AGENTS.md") return realFetch(BASE + "/AGENTS.md");
