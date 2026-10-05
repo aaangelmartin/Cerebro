@@ -2,7 +2,7 @@
 
 ## Pitch materials (`docs/pitch/`)
 - [`pitch/README.md`](pitch/README.md): the deck (PDF), the video, its script, the live narration and the text sent to the judges.
-- Live: [the video](https://nglmrtn.com/Cerebro/video/), [the animated deck](https://nglmrtn.com/Cerebro/pitch/), [the frozen dashboard](https://nglmrtn.com/Cerebro/).
+- Live: [the video](https://nglmrtn.com/Cerebro/video/), [the animated deck](https://nglmrtn.com/Cerebro/pitch/), [the frozen dashboard](https://nglmrtn.com/Cerebro/dashboard/).
 - [`market-announcements/`](market-announcements/README.md): the three messages that announced v07 Market to the other teams.
 
 ## Screen by screen
