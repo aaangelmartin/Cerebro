@@ -6,9 +6,9 @@
 
 **Winner of The Bazaar · Cromos de Madrid**, the Causa Prima hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
 
-**[Watch the film](https://nglmrtn.com/Cerebro/film/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)** · **[Pitch PDF](docs/pitch/cerebro-pitch.pdf)** · **[Frozen dashboard](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)**
+**[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)** · **[Pitch PDF](docs/pitch/cerebro-pitch.pdf)** · **[Frozen dashboard](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)**
 
-[![Watch the film: how we built Cerebro and how it works inside, three minutes](docs/img/film-poster.png)](https://nglmrtn.com/Cerebro/film/)
+[![Watch the video: how we built Cerebro and how it works inside, three minutes](docs/img/video-poster.png)](https://nglmrtn.com/Cerebro/video/)
 
 <sub>Live market: https://market.nglmrtn.com (only while our machine is on). Everything from the pitch is in [`docs/pitch/`](docs/pitch/).</sub>
 
@@ -24,9 +24,9 @@ Our rule for the weekend: **the agent trades, the humans build.**
 
 What the judges saw, still open to anyone:
 
-- [The film](https://nglmrtn.com/Cerebro/film/): three minutes on how we built it and how it works inside. A 720p copy is in [`docs/pitch/cerebro-film.mp4`](docs/pitch/cerebro-film.mp4).
+- [The video](https://nglmrtn.com/Cerebro/video/): three minutes on how we built it and how it works inside. A 720p copy is in [`docs/pitch/cerebro-video.mp4`](docs/pitch/cerebro-video.mp4).
 - [The pitch deck](https://nglmrtn.com/Cerebro/pitch/), animated (arrow keys or click; `N` for speaker notes), and as a [PDF](docs/pitch/cerebro-pitch.pdf).
-- [`docs/pitch/`](docs/pitch/): the film script, what we said live over the silent cut, and the text we wrote for the judges' form.
+- [`docs/pitch/`](docs/pitch/): the video script, what we said live over the silent cut, and the text we wrote for the judges' form.
 - [Cerebro Dashboard, frozen snapshot](https://nglmrtn.com/Cerebro/): the real dashboard with the final state of the game, read-only.
 - [`docs/`](docs/): how each piece works, the bug report sent to the organisers, and the plans we played from.
 

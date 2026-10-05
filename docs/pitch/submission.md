@@ -168,7 +168,7 @@ NUMBERS
 | Label | URL |
 |---|---|
 | Repository | https://github.com/aaangelmartin/Cerebro |
-| Film: how Cerebro works (narrated, 3 min) | https://nglmrtn.com/Cerebro/film/ |
+| Video: how Cerebro works (narrated, 3 min) | https://nglmrtn.com/Cerebro/video/ |
 | Pitch deck (animated) | https://nglmrtn.com/Cerebro/pitch/ |
 | Pitch deck (PDF) | [cerebro-pitch.pdf](cerebro-pitch.pdf) |
 | Cerebro Dashboard (frozen snapshot, read-only) | https://nglmrtn.com/Cerebro/ |

@@ -1,6 +1,6 @@
-# Film script
+# Video script
 
-The narrated cut of the film (`cerebro-film.mp4`, 3:00) uses this text, read by a synthetic voice, with burned-in English subtitles.
+The narrated cut of the video (`cerebro-video.mp4`, 3:00) uses this text, read by a synthetic voice, with burned-in English subtitles.
 
 This is Cerebro, by Team 10. Smart money in every deal. Our agent trades, and the humans build. This is what we built, and how it works inside.
 

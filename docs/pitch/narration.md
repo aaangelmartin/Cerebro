@@ -1,6 +1,6 @@
 # Live narration for the silent cut
 
-The silent cut of the film (2:38) has no audio and no subtitles: we talked over it on stage. The section name and a clock sit in the top right corner, and a progress bar by section runs along the bottom. Each line below is one shot; the time code is the one in the silent cut.
+The silent cut of the video (2:38) has no audio and no subtitles: we talked over it on stage. The section name and a clock sit in the top right corner, and a progress bar by section runs along the bottom. Each line below is one shot; the time code is the one in the silent cut.
 
 ## One line per section
 
