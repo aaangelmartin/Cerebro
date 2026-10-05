@@ -1,0 +1,14 @@
+Cerebro
+Copyright 2026 Ángel, Daniel and Luca (Team 10)
+
+Built for The Bazaar · Cromos de Madrid, the Causa Prima hackathon
+(Madrid, 2–4 October 2026).
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE.
+
+Third-party material, not covered by this licence:
+
+- sdk/ is the organisers' starter kit, including its RULES. It belongs to its
+  authors and is included for reference only.
+- The card artwork and the card names belong to the game and its organisers.
+  They are included for reference only.

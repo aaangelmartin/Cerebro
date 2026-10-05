@@ -321,4 +321,4 @@ Repository: <https://github.com/aaangelmartin/Cerebro>
 
 ## Licence
 
-[MIT](LICENSE) for our code. `sdk/` is the organisers' starter kit and the card artwork and names belong to the game; they are included for reference and are not covered by the licence.
+[Apache License 2.0](LICENSE) for our code, copyright 2026 Ángel, Daniel and Luca (Team 10); see [NOTICE](NOTICE). `sdk/` is the organisers' starter kit and the card artwork and names belong to the game; they are included for reference and are not covered by the licence.
