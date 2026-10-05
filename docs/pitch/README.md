@@ -10,4 +10,4 @@ What we showed the judges of The Bazaar · Cromos de Madrid on Sunday 4 October 
 | [narration.md](narration.md) | What we said live over the silent cut, shot by shot, with time codes. |
 | [submission.md](submission.md) | The text we prepared for the judges' form: pitch, how it works, one more day, links. |
 
-The frozen, read-only dashboard is at https://nglmrtn.com/Cerebro/.
+The frozen, read-only dashboard is at https://nglmrtn.com/Cerebro/dashboard/.

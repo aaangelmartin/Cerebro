@@ -6,7 +6,7 @@
 
 **Winner of The Bazaar · Cromos de Madrid**, the Causa Prima × Claude hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
 
-**[Dashboard (frozen snapshot)](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)** · **[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)**
+**[Cerebro site](https://nglmrtn.com/Cerebro/)** · **[Dashboard (frozen snapshot)](https://nglmrtn.com/Cerebro/dashboard/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)** · **[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)**
 
 [![Watch the video: how we built Cerebro and how it works inside, three minutes](docs/img/video-poster.png)](https://nglmrtn.com/Cerebro/video/)
 
@@ -27,7 +27,7 @@ What the judges saw, still open to anyone:
 - [The video](https://nglmrtn.com/Cerebro/video/): three minutes on how we built it and how it works inside. A 720p copy is in [`docs/pitch/cerebro-video.mp4`](docs/pitch/cerebro-video.mp4).
 - [The pitch deck](https://nglmrtn.com/Cerebro/pitch/), animated (arrow keys or click; `N` for speaker notes), and as a [PDF](docs/pitch/cerebro-pitch.pdf).
 - [`docs/pitch/`](docs/pitch/): the video script, what we said live over the silent cut, and the text we wrote for the judges' form.
-- [Cerebro Dashboard, frozen snapshot](https://nglmrtn.com/Cerebro/): the real dashboard with the final state of the game, read-only.
+- [Cerebro Dashboard, frozen snapshot](https://nglmrtn.com/Cerebro/dashboard/): the real dashboard with the final state of the game, read-only.
 - [`docs/`](docs/): how each piece works, the bug report sent to the organisers, and the plans we played from.
 
 ## What is in here
@@ -71,35 +71,35 @@ flowchart LR
 
 ## The dashboard, screen by screen
 
-One page per question a human has during the game. English and Spanish. Every screenshot links to that screen in the [frozen snapshot](https://nglmrtn.com/Cerebro/), which holds the final state of the game and is read-only. The full walkthrough is also in [`docs/dashboard.md`](docs/dashboard.md).
+One page per question a human has during the game. English and Spanish. Every screenshot links to that screen in the [frozen snapshot](https://nglmrtn.com/Cerebro/dashboard/), which holds the final state of the game and is read-only. The full walkthrough is also in [`docs/dashboard.md`](docs/dashboard.md).
 
-**[Home](https://nglmrtn.com/Cerebro/#home)**
+**[Home](https://nglmrtn.com/Cerebro/dashboard/#home)**
 
-[![Cerebro Dashboard, Home screen](docs/img/dashboard/home.webp)](https://nglmrtn.com/Cerebro/#home)
+[![Cerebro Dashboard, Home screen](docs/img/dashboard/home.webp)](https://nglmrtn.com/Cerebro/dashboard/#home)
 
 Everything at a glance: today's score split into negotiation and market, the next event on the schedule, market activity, and one feed of what we and the 17 rivals are doing, filterable by type and team.
 
 The side panel stays on every screen: whether the bot, the market and the recorder are on, how many accepts, threads and offers this tick has used, and how much of each dealer's hourly quota is left. Nothing is decided here. It is where a human looks first.
 
-**[Brain](https://nglmrtn.com/Cerebro/#cerebro)**
+**[Brain](https://nglmrtn.com/Cerebro/dashboard/#cerebro)**
 
-[![Cerebro Dashboard, Brain screen](docs/img/dashboard/cerebro.webp)](https://nglmrtn.com/Cerebro/#cerebro)
+[![Cerebro Dashboard, Brain screen](docs/img/dashboard/cerebro.webp)](https://nglmrtn.com/Cerebro/dashboard/#cerebro)
 
 The Brain's own page. It shows how hard it is thinking and why (it speeds up on events and slows down when nothing happens), its last plan, the situation as it reads it, and what it spent today.
 
 On the right is the chat. A human writes a hint or an order in plain language and the Brain turns it into a numbered policy it keeps re-checking; the council votes on the big changes. Below, the code changes and tasks the Brain has filed for the team.
 
-**[Bot](https://nglmrtn.com/Cerebro/#bot)**
+**[Bot](https://nglmrtn.com/Cerebro/dashboard/#bot)**
 
-[![Cerebro Dashboard, Bot screen](docs/img/dashboard/bot.webp)](https://nglmrtn.com/Cerebro/#bot)
+[![Cerebro Dashboard, Bot screen](docs/img/dashboard/bot.webp)](https://nglmrtn.com/Cerebro/dashboard/#bot)
 
 The only screen with controls. Processes and latency, API spend against the day's cap by purpose, key and model, and the switches: pause, turn off, stop, decision mode (auto, observe, manual), how Claude plays duels (bounded, free, code only), which domains are active, and the caps per deal and per hour.
 
 The agent plays inside whatever is set here. The rails read these values every tick, so a cap lowered by a human binds on the next action.
 
-**[Oversight](https://nglmrtn.com/Cerebro/#supervision)**
+**[Oversight](https://nglmrtn.com/Cerebro/dashboard/#supervision)**
 
-[![Cerebro Dashboard, Oversight screen](docs/img/dashboard/supervision.webp)](https://nglmrtn.com/Cerebro/#supervision)
+[![Cerebro Dashboard, Oversight screen](docs/img/dashboard/supervision.webp)](https://nglmrtn.com/Cerebro/dashboard/#supervision)
 
 What the bot is about to do and what it just did. Each action shows its source (Opus, the council, a fallback, plain code) and its result (sent, vetoed, refused). The council's votes are listed with each voter's reason, and the vetoes are counted by rail.
 
@@ -108,65 +108,65 @@ In manual mode the next actions wait here for Approve, Edit or Reject. The log o
 <details>
 <summary><b>The other eight screens:</b> Duels, Collection, Market, Broker, Standings, Rivals, News, Lab</summary>
 
-**[Duels](https://nglmrtn.com/Cerebro/#duelos)**
+**[Duels](https://nglmrtn.com/Cerebro/dashboard/#duelos)**
 
-[![Cerebro Dashboard, Duels screen](docs/img/dashboard/duelos.webp)](https://nglmrtn.com/Cerebro/#duelos)
+[![Cerebro Dashboard, Duels screen](docs/img/dashboard/duelos.webp)](https://nglmrtn.com/Cerebro/dashboard/#duelos)
 
 Every duel as a conversation: our limit, each offer with its price and delivery days, where the two sides stand on a line, and the result in points. The header counts played, won, lost and no deal, with the average per duel.
 
 A human watches and can change the duel mode in Bot. The agent writes every message; a guard in code recomputes the margin with the delivery days before anything is sent.
 
-**[Collection](https://nglmrtn.com/Cerebro/#coleccion)**
+**[Collection](https://nglmrtn.com/Cerebro/dashboard/#coleccion)**
 
-[![Cerebro Dashboard, Collection screen](docs/img/dashboard/coleccion.webp)](https://nglmrtn.com/Cerebro/#coleccion)
+[![Cerebro Dashboard, Collection screen](docs/img/dashboard/coleccion.webp)](https://nglmrtn.com/Cerebro/dashboard/#coleccion)
 
 The album, card by card and set by set: which cards we hold, which are protected, on sale or wanted, and what each is worth to us with the page bonus. The header gives album slots, complete pages, our value, market value and duplicates.
 
 Protecting a card or a whole page here is a rail: the agent cannot sell, swap or craft it, whatever it is offered.
 
-**[Market](https://nglmrtn.com/Cerebro/#mercado)**
+**[Market](https://nglmrtn.com/Cerebro/dashboard/#mercado)**
 
-[![Cerebro Dashboard, Market screen](docs/img/dashboard/mercado.webp)](https://nglmrtn.com/Cerebro/#mercado)
+[![Cerebro Dashboard, Market screen](docs/img/dashboard/mercado.webp)](https://nglmrtn.com/Cerebro/dashboard/#mercado)
 
 Our conversations with other teams and the public feed of offers, bids, swaps and dealer trades on every venue. Each thread shows who opened it, on which venue, and every message in it.
 
 The agent opens and answers threads by itself. A human can read any of them and talk to a dealer from here; the rails still check whatever gets posted.
 
-**[Broker](https://nglmrtn.com/Cerebro/#broker)**
+**[Broker](https://nglmrtn.com/Cerebro/dashboard/#broker)**
 
-[![Cerebro Dashboard, Broker screen](docs/img/dashboard/broker.webp)](https://nglmrtn.com/Cerebro/#broker)
+[![Cerebro Dashboard, Broker screen](docs/img/dashboard/broker.webp)](https://nglmrtn.com/Cerebro/dashboard/#broker)
 
 The matcher we ran in the Market Tests and on our own venue v07. One row per test session: the organisers' official efficiency, the free stall's, our own estimate, matches, surplus and the market points it earned.
 
 There is no model on this path. The broker crosses every pair of quotes that can cross and falls back to matching like the free stall if a session drops below it.
 
-**[Standings](https://nglmrtn.com/Cerebro/#competicion)**
+**[Standings](https://nglmrtn.com/Cerebro/dashboard/#competicion)**
 
-[![Cerebro Dashboard, Standings screen](docs/img/dashboard/competicion.webp)](https://nglmrtn.com/Cerebro/#competicion)
+[![Cerebro Dashboard, Standings screen](docs/img/dashboard/competicion.webp)](https://nglmrtn.com/Cerebro/dashboard/#competicion)
 
 The table over the three days and by day, with negotiation and market split, the weight each day carries, and what the final score would be if the game ended now. A second tab compares prices and venues.
 
 Read-only. It is recomputed from the recorder's cuts, which is how we found scoring behaviour worth reporting to the organisers.
 
-**[Rivals](https://nglmrtn.com/Cerebro/#rivales)**
+**[Rivals](https://nglmrtn.com/Cerebro/dashboard/#rivales)**
 
-[![Cerebro Dashboard, Rivals screen](docs/img/dashboard/rivales.webp)](https://nglmrtn.com/Cerebro/#rivales)
+[![Cerebro Dashboard, Rivals screen](docs/img/dashboard/rivales.webp)](https://nglmrtn.com/Cerebro/dashboard/#rivales)
 
 One page per rival team: points over time split by component, the gap to us and to the leader, affinities inferred from their bids and buys, their open offers, the cards they moved and a feed of what they do.
 
 The Brain reads the same data to decide who to sell to and at what price. A human uses it before walking over to another team's table.
 
-**[News](https://nglmrtn.com/Cerebro/#noticias)**
+**[News](https://nglmrtn.com/Cerebro/dashboard/#noticias)**
 
-[![Cerebro Dashboard, News screen](docs/img/dashboard/noticias.webp)](https://nglmrtn.com/Cerebro/#noticias)
+[![Cerebro Dashboard, News screen](docs/img/dashboard/noticias.webp)](https://nglmrtn.com/Cerebro/dashboard/#noticias)
 
 Every news item from the game's three sources, with how often each source has turned out true, and a status per item: confirmed, false, pending or unverified.
 
 A human can send any item to the Brain with a note. The Brain decides whether it changes the plan; false rumours cost nothing because nothing acts on them directly.
 
-**[Lab](https://nglmrtn.com/Cerebro/#laboratorio)**
+**[Lab](https://nglmrtn.com/Cerebro/dashboard/#laboratorio)**
 
-[![Cerebro Dashboard, Lab screen](docs/img/dashboard/laboratorio.webp)](https://nglmrtn.com/Cerebro/#laboratorio)
+[![Cerebro Dashboard, Lab screen](docs/img/dashboard/laboratorio.webp)](https://nglmrtn.com/Cerebro/dashboard/#laboratorio)
 
 The lesson cycle. The lab replays our own recordings, proposes lessons, backtests them, and moves each one through shadow (decides in parallel, does not act), canary (acts in part of the cases) and active, or retires it. Each lesson shows its scope, weight, evidence and measured effect.
 
