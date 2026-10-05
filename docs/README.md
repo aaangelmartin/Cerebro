@@ -5,6 +5,10 @@
 - Live: [the film](https://nglmrtn.com/Cerebro/film/), [the animated deck](https://nglmrtn.com/Cerebro/pitch/), [the frozen dashboard](https://nglmrtn.com/Cerebro/).
 - [`market-announcements/`](market-announcements/README.md): the three messages that announced v07 Market to the other teams.
 
+## Screen by screen
+- [`dashboard.md`](dashboard.md): the twelve screens of the Cerebro Dashboard, with a screenshot and what each one is for.
+- [`market.md`](market.md): the twelve pages of v07 Market, the same way.
+
 ## The game
 - [`BAZAAR.md`](BAZAAR.md): what we learned about The Bazaar (rules, scoring, dealers, venues).
 - [`NEGOTIATION.md`](NEGOTIATION.md): negotiation notes.
