@@ -300,6 +300,7 @@ legacy/        the first bot and the gateway that fronts the game API
 docs/          game notes, API reference, screenshots (index: docs/README.md)
 design/        v07 Market design rounds, dashboard screens, card art
 tools/         leaderboard reconstruction and helpers
+site/          sources of the public site on gh-pages (landing, frozen copies, video page)
 sdk/           the organisers' starter kit, unchanged
 ```
 

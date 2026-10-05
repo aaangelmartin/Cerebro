@@ -5,6 +5,9 @@
 - Live: [the video](https://nglmrtn.com/Cerebro/video/), [the animated deck](https://nglmrtn.com/Cerebro/pitch/), [the frozen dashboard](https://nglmrtn.com/Cerebro/dashboard/).
 - [`market-announcements/`](market-announcements/README.md): the three messages that announced v07 Market to the other teams.
 
+## The public site
+- [`../site/README.md`](../site/README.md): what is served at <https://nglmrtn.com/Cerebro/>, how each piece is rebuilt and how it is published on `gh-pages`.
+
 ## Screen by screen
 - [`dashboard.md`](dashboard.md): the twelve screens of the Cerebro Dashboard, with a screenshot and what each one is for.
 - [`market.md`](market.md): the twelve pages of v07 Market, the same way.
