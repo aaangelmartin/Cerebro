@@ -61,67 +61,75 @@ h1 .d{display:block;color:var(--legendary)}
 .c:hover{transform:translateY(calc((var(--y) - 16)*var(--cw)/140)) rotate(0deg) scale(1.05);z-index:30 !important}
 
 
-/* A live, quiet ground: the product grid, a warm drift and ticks that travel the lines. */
-body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:40px 40px;opacity:.42;-webkit-mask-image:radial-gradient(120% 90% at 50% 45%,#000 30%,transparent 95%);mask-image:radial-gradient(120% 90% at 50% 45%,#000 30%,transparent 95%)}
-body::after{content:"";position:fixed;left:-20vw;top:-30vh;width:140vw;height:160vh;z-index:0;pointer-events:none;background:radial-gradient(38% 34% at 72% 30%,rgba(255,196,77,.075),transparent 70%),radial-gradient(34% 30% at 20% 78%,rgba(76,155,232,.05),transparent 70%)}
-#bg{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+
+/* A still ground: the product black. The two panels carry the grid. */
 main{z-index:1}
 
-/* Below the poster: how it works on the left, where to go on the right. */
-.below{flex:1 1 0;min-height:0;display:grid;grid-template-columns:minmax(0,1.34fr) minmax(0,1fr);gap:var(--gap)}
-.works{min-width:0;min-height:0;display:flex;flex-direction:column;background:rgba(14,16,19,.62);border:1px solid var(--line);position:relative}
-.map{flex:1 1 0;min-height:0;width:100%;display:block;padding:clamp(4px,1vh,10px) clamp(4px,.6vw,10px) 0}
-.map .e{fill:none;stroke:#3A414B;stroke-width:1.2;transition:stroke .16s,opacity .16s}
-.map .el{font-family:var(--font-num);font-size:11px;letter-spacing:.04em;fill:var(--ink-3);text-anchor:middle;paint-order:stroke;stroke:#0d0f12;stroke-width:5px;stroke-linejoin:round;transition:fill .16s,opacity .16s}
-.map .hub{font-family:var(--font-ui);font-weight:800;font-size:19px;letter-spacing:.14em;fill:var(--ink);text-anchor:middle}
-.map .hub2{font-family:var(--font-num);font-size:10px;letter-spacing:.06em;fill:var(--ink-3);text-anchor:middle}
-.map .n{cursor:default;outline:none}
-.map .nb{fill:var(--s2);stroke:var(--line-2);stroke-width:1;transition:fill .16s,stroke .16s}
-.map .nk{fill:var(--k)}
-.map .n text{font-family:var(--font-ui);font-weight:600;font-size:13.5px;fill:var(--ink);text-anchor:middle;transition:fill .16s}
-.map.focus .e,.map.focus .el{opacity:.28}
-.map.focus .n:not(.on) .nb{fill:var(--s1)}
-.map.focus .n:not(.on) text{fill:var(--ink-3)}
-.map .e.on{stroke:var(--ink);opacity:1}.map .el.on{fill:var(--ink);opacity:1}
-.map .n.on .nb,.map .n:focus-visible .nb{stroke:var(--k);fill:var(--s3)}
-.cap{flex:none;display:flex;align-items:baseline;gap:12px;min-height:clamp(34px,5.4vh,46px);padding:clamp(7px,1.2vh,11px) clamp(12px,1.3vw,20px);border-top:1px solid var(--line);font-size:clamp(13px,1.08vw,16px);line-height:1.25;white-space:nowrap;overflow:hidden}
+/* Below the poster: the system map from the pitch deck on the left, where to go on the right. */
+.below{flex:1 1 0;min-height:0;display:grid;grid-template-columns:minmax(0,2.72fr) minmax(0,1fr);gap:var(--gap)}
+.works{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden}
+.works::before{content:"";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:44px 44px;opacity:.34;-webkit-mask-image:radial-gradient(90% 90% at 50% 45%,#000 20%,transparent 100%);mask-image:radial-gradient(90% 90% at 50% 45%,#000 20%,transparent 100%)}
+.net{position:relative;flex:1 1 0;min-height:0;width:100%;display:block;padding:clamp(6px,1.2vh,14px) clamp(6px,.8vw,14px) clamp(2px,.6vh,8px)}
+.net .e{fill:none;stroke:#2D323A;stroke-width:2;transition:stroke .16s,opacity .16s,stroke-width .16s}
+.net .e.dash{stroke-dasharray:6 6}
+.net .lb rect{fill:var(--bg)}
+.net .lb text{font-family:var(--font-num);font-size:19px;fill:#A4ABB3;text-anchor:middle;transition:fill .16s}
+.net .lb{transition:opacity .16s}
+.net .n{cursor:default;outline:none;transition:opacity .16s}
+.net .nb{fill:#0E1013;stroke:#2D323A;stroke-width:1;transition:stroke .16s,fill .16s}
+.net .nk{fill:var(--k)}
+.net .nt{font-family:var(--font-ui);font-weight:700;font-size:28px;fill:#ECEEF0}
+.net .ns{font-family:var(--font-ui);font-size:19px;fill:#A4ABB3}
+.net .hum .nb{fill:#F4F1EA}.net .hum .nt,.net .hum .ns{fill:#08090B}
+.net .hubn .nb{fill:#14171B;stroke:#E3A33B;stroke-width:3}
+.net .hubn .ns{fill:#E3A33B;text-anchor:middle}
+.net .ct{font-family:var(--font-display);font-weight:800;font-size:96px;fill:#ECEEF0;letter-spacing:.01em;text-anchor:middle}
+/* Hover or focus a part: its lines light up, the rest steps back. */
+.net.focus .e{opacity:.22}.net.focus .lb{opacity:.2}.net.focus .n{opacity:.42}
+.net.focus .e.on{opacity:1;stroke:#ECEEF0;stroke-width:2.6}
+.net.focus .lb.on{opacity:1}.net.focus .lb.on text{fill:#ECEEF0}
+.net.focus .n.on,.net.focus .n.near{opacity:1}
+.net .n.on .nb,.net .n:focus-visible .nb{stroke:var(--k);stroke-width:2.5}
+.net .hum.on .nb,.net .hum:focus-visible .nb{stroke:#E3A33B;stroke-width:4}
+.net .hubn.on .nb{stroke-width:4.5}
+.cap{position:relative;flex:none;display:flex;align-items:baseline;gap:12px;min-height:clamp(34px,5.2vh,46px);padding:clamp(7px,1.15vh,11px) clamp(12px,1.3vw,20px);border-top:1px solid var(--line);background:var(--s1);font-size:clamp(13px,1.05vw,16px);line-height:1.25;white-space:nowrap;overflow:hidden}
 .cap b{font-weight:700;letter-spacing:-.01em;color:var(--ink);flex:none}
-.cap span{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis}
+.cap .d{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;min-width:0}
 .cap.idle b{font-size:1.06em}
+.legend{margin-left:auto;flex:none;display:flex;gap:clamp(10px,1.1vw,18px);padding-left:14px;font-family:var(--font-num);font-size:clamp(10px,.78vw,12px);letter-spacing:.02em;color:var(--ink-2)}
+.legend i{font-style:normal;display:inline-flex;align-items:center;gap:7px}
+.legend i::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--t);flex:none}
 .parts{display:none}
 
-nav.go{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1.55fr) repeat(4,minmax(0,1fr));gap:var(--gap)}
-.row{--d:3.2s;position:relative;min-width:0;min-height:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:clamp(12px,1.3vw,22px);padding:0 clamp(14px,1.5vw,24px);background:rgba(14,16,19,.86);border:1px solid var(--line);color:var(--ink);overflow:hidden;transition:border-color .14s,background .14s}
+nav.go{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1.5fr) repeat(4,minmax(0,1fr));gap:var(--gap)}
+.row{position:relative;min-width:0;min-height:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:clamp(11px,1.05vw,17px);padding:0 clamp(13px,1.25vw,20px);background:var(--s1);border:1px solid var(--line);color:var(--ink);overflow:hidden;transition:border-color .14s,background .14s}
 .row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ink);transform:scaleY(0);transform-origin:50% 100%;transition:transform .2s cubic-bezier(.2,.75,.2,1)}
-.row:hover,.row:focus-visible{--d:1.1s;border-color:var(--ink-3);background:var(--s2)}
+.row:hover,.row:focus-visible{border-color:var(--ink-3);background:var(--s2)}
 .row:hover::before,.row:focus-visible::before{transform:scaleY(1)}
 .row:focus-visible{outline:1px solid var(--signal);outline-offset:3px}
-.row .mo{width:clamp(52px,5vw,78px);height:auto;color:var(--ink-2);flex:none;overflow:visible}
-.row .mo .dim{opacity:.38}.row .mo .mv{stroke:var(--ok)}.row .mo rect.mv{fill:var(--ok)}
-.row .mo .ov{fill:var(--ok);opacity:.16}
-.row .mo .s{stroke:var(--ink-3)}
+.row .ic{width:clamp(19px,1.5vw,23px);height:clamp(19px,1.5vw,23px);color:var(--ink-2);flex:none;transition:color .14s}
+.row:hover .ic,.row:focus-visible .ic{color:var(--ink)}
 .row .tx{min-width:0;display:flex;flex-direction:column;gap:3px}
-.row .nm{display:flex;align-items:center;flex-wrap:wrap;gap:2px 12px;min-width:0}
-.row b{font-size:clamp(16px,1.5vw,23px);font-weight:700;letter-spacing:-.018em;line-height:1.1;white-space:nowrap}
-.row em{display:inline-flex;align-items:center;gap:6px;font-style:normal;font-family:var(--font-num);font-size:clamp(9px,.7vw,10.5px);letter-spacing:.08em;text-transform:uppercase;color:var(--ok);white-space:nowrap}
+.row .nm{display:flex;align-items:center;flex-wrap:wrap;gap:3px 10px;min-width:0}
+.row b{font-size:clamp(15.5px,1.32vw,20px);font-weight:700;letter-spacing:-.018em;line-height:1.1;white-space:nowrap}
+.row em{display:inline-flex;align-items:center;gap:6px;font-style:normal;font-family:var(--font-num);font-size:clamp(8.5px,.66vw,10px);letter-spacing:.08em;text-transform:uppercase;color:var(--ok);white-space:nowrap}
 .row em::before{content:"";width:6px;height:6px;background:currentColor;flex:none}
-.row .ds{font-size:clamp(11.5px,.95vw,14px);line-height:1.3;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row svg.go{width:18px;height:18px;color:var(--ink-3);flex:none;transition:transform .16s,color .14s}
+.row .ds{font-size:clamp(11.5px,.88vw,13px);line-height:1.3;color:var(--ink-2);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.row svg.go{width:17px;height:17px;color:var(--ink-3);flex:none;transition:transform .16s,color .14s}
 .row:hover svg.go,.row:focus-visible svg.go{color:var(--ink);transform:translateX(5px)}
 .row.repo{background:var(--signal);border-color:var(--signal);color:var(--bg)}
-.row.repo::before{background:var(--bg)}
+.row.repo::before{background:var(--bg);width:3px}
 .row.repo:hover,.row.repo:focus-visible{background:#fff;border-color:#fff}
 .row.repo:focus-visible{outline-color:var(--ok)}
-.row.repo .mo{width:clamp(64px,6.4vw,100px);color:var(--bg)}
-.row.repo .mo .mv{fill:#0B7A4B;stroke:none}
-.row.repo b{font-size:clamp(23px,2.5vw,38px);font-weight:800;letter-spacing:-.03em;line-height:1}
-.row.repo .ds{color:#2D323A;font-size:clamp(12px,1.02vw,15px)}
-.row.repo .url{font-family:var(--font-num);font-size:clamp(10.5px,.82vw,12.5px);letter-spacing:.02em;color:#1C2026;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row.repo svg.go{width:24px;height:24px;color:var(--bg)}
+.row.repo .ic{width:clamp(22px,1.8vw,28px);height:clamp(22px,1.8vw,28px);color:var(--bg)}
+.row.repo b{font-size:clamp(20px,1.95vw,29px);font-weight:800;letter-spacing:-.03em;line-height:1}
+.row.repo .ds{color:#2D323A;font-size:clamp(11.5px,.9vw,13.5px)}
+.row.repo .url{font-family:var(--font-num);font-size:clamp(9.5px,.72vw,11px);letter-spacing:.01em;color:#1C2026;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row.repo svg.go{width:21px;height:21px;color:var(--bg)}
 .row.repo:hover svg.go,.row.repo:focus-visible svg.go{color:var(--bg);transform:translate(3px,-3px)}
 
-@media (min-width:901px) and (max-height:760px){.row .ds{display:none}.row.repo .ds{display:block}.row.repo .url{display:none}.cap{min-height:32px}}
-@media (min-width:901px) and (max-width:1180px){.row em{display:none}}
+@media (min-width:901px) and (max-height:760px){.row .ds{display:none}.row.repo .ds{display:-webkit-box;-webkit-line-clamp:1}.row.repo .url{display:none}.cap{min-height:32px}}
+@media (min-width:901px) and (max-width:1180px){.legend i:nth-child(n+2){display:none}.legend{display:none}}
 @media (min-width:901px) and (max-height:600px){.poster{max-height:33dvh;min-height:0}.row.repo .ds{display:none}}
 
 @media (max-width:900px){
@@ -142,20 +150,21 @@ nav.go{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1.55fr)
   .below{display:flex;flex-direction:column-reverse;flex:none}
   nav.go{grid-template-rows:none;grid-auto-rows:auto}
   .row{padding:13px 14px;column-gap:14px}
-  .row .ds{white-space:normal}
+  .row .ic{width:22px;height:22px}
   .row.repo{padding:16px 14px}
   .row.repo .url{display:none}
-  .works{background:rgba(14,16,19,.8)}
-  .map{display:none}
+  .works::before{display:none}
+  .net{display:none}
   .cap{white-space:normal;flex-direction:column;gap:2px;padding:14px;border-top:0;border-bottom:1px solid var(--line)}
-  .cap span{display:none}
+  .cap .d,.legend{display:none}
   .parts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px;list-style:none;padding:0;background:var(--line)}
   .parts li{background:var(--s1);border-left:2px solid var(--k);padding:9px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+  .parts li:first-child{grid-column:1/-1}
   .parts b{font-size:13.5px;font-weight:700}
   .parts span{font-size:12px;line-height:1.3;color:var(--ink-2)}
 }
 
-/* Motion. The poster keeps its entrance; the map draws itself, the doors wipe in, and each door's motif keeps time. */
+/* Motion. The poster keeps its entrance; the map assembles and its lines draw; the doors wipe in. */
 @media (prefers-reduced-motion:no-preference){
   .poster .bar{animation:bar .5s cubic-bezier(.6,0,.2,1) backwards}
   .poster .grid{animation:gridin .7s ease-out .12s backwards}
@@ -177,43 +186,25 @@ nav.go{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1.55fr)
   @keyframes glowin{from{opacity:0}to{opacity:1}}
   @keyframes sheen{0%{transform:translateX(-130%)}16%{transform:translateX(130%)}100%{transform:translateX(130%)}}
 
-  body::after{animation:drift 46s ease-in-out infinite alternate}
-  @keyframes drift{from{transform:translate3d(-3vw,-2vh,0)}to{transform:translate3d(4vw,3vh,0)}}
-
   .works{animation:frame .5s ease-out .95s backwards}
-  .map .n .nb,.map .n .nk,.map .n text{animation:pop .42s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(1.1s + var(--o)*.06s)}
-  .map .e{stroke-dasharray:1;animation:draw .7s cubic-bezier(.4,0,.2,1) backwards;animation-delay:calc(1.55s + var(--o)*.05s)}
-  .map .el,.map .hub,.map .hub2{animation:fadein .5s ease-out 2.35s backwards}
-  .map .ps{animation:fadein .4s ease-out 2.8s backwards}
+  .net .n>*{animation:pop .42s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(1.1s + var(--o)*.06s)}
+  .net .e:not(.dash){stroke-dasharray:1;animation:draw .7s cubic-bezier(.4,0,.2,1) backwards;animation-delay:calc(1.7s + var(--o)*.05s)}
+  .net .e.dash{animation:fadein .6s ease-out 2.3s backwards}
+  .net .lbs{animation:fadein .5s ease-out 2.6s backwards}
+  .net .ps{animation:fadein .4s ease-out 3s backwards}
   .cap{animation:fadein .5s ease-out 2.2s backwards}
   @keyframes frame{from{opacity:0}to{opacity:1}}
-  @keyframes pop{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pop{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
   @keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
   @keyframes fadein{from{opacity:0}to{opacity:1}}
-
   .row{animation:wipe .55s cubic-bezier(.2,.75,.2,1) backwards;animation-delay:calc(1.15s + var(--r)*.08s)}
   @keyframes wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-  .a-commit{animation:commit var(--d) linear infinite}
-  @keyframes commit{from{transform:translateX(0)}to{transform:translateX(58px)}}
-  .a-spark{stroke-dasharray:1;animation:spark var(--d) cubic-bezier(.5,0,.3,1) infinite}
-  @keyframes spark{0%{stroke-dashoffset:1}70%,100%{stroke-dashoffset:0}}
-  .a-price{animation:price var(--d) ease-in-out infinite alternate}
-  @keyframes price{from{transform:translateX(0)}to{transform:translateX(14px)}}
-  .a-play{stroke-dasharray:1;animation:play var(--d) linear infinite}
-  @keyframes play{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
-  .a-deck{animation:deck var(--d) steps(1,end) infinite}
-  @keyframes deck{0%{transform:translateX(0)}33%{transform:translateX(21px)}66%{transform:translateX(42px)}}
-  .row .mo .s1{animation:slide var(--d) steps(1,end) infinite}
-  .row .mo .s2{animation:slide var(--d) steps(1,end) infinite;animation-delay:calc(var(--d)/-1.5)}
-  .row .mo .s3{animation:slide var(--d) steps(1,end) infinite;animation-delay:calc(var(--d)/-3)}
-  @keyframes slide{0%{stroke:var(--ok)}33%,100%{stroke:var(--ink-3)}}
 }
-@media (prefers-reduced-motion:reduce){.row,.row svg,.row::before,.c,.map *{transition:none}.map .ps{display:none}#bg{display:none}}
+@media (prefers-reduced-motion:reduce){.row,.row svg,.row::before,.c,.net *{transition:none}.net .ps{display:none}}
 
 </style>
 </head>
 <body>
-<canvas id="bg" aria-hidden="true"></canvas>
 <main>
   <section class="poster" aria-label="Winner of The Bazaar · Cromos de Madrid">
     <div class="grid" aria-hidden="true"></div><div class="glow" aria-hidden="true"></div><div class="fade" aria-hidden="true"></div>
@@ -227,79 +218,44 @@ nav.go{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1.55fr)
     <div class="bar" aria-hidden="true"></div>
   </section>
   <div class="below">
-    <section class="works" aria-label="How Cerebro works"><svg class="map" viewBox="0 0 800 440" preserveAspectRatio="xMidYMid meet" role="group" aria-label="How Cerebro works: the parts and what they pass each other"><g class="es"><path class="e" style="--o:0" data-n="rec brain" pathLength="1" d="M260,160 L400,105"/><path class="e" style="--o:1" data-n="brain fast" pathLength="1" d="M400,105 L540,160"/><path class="e" style="--o:2" data-n="fast rails" pathLength="1" d="M540,160 L540,270"/><path class="e" style="--o:3" data-n="rails exec" pathLength="1" d="M540,270 L400,325"/><path class="e" style="--o:4" data-n="exec game" pathLength="1" d="M400,325 L260,270"/><path class="e" style="--o:5" data-n="game rec" pathLength="1" d="M260,270 L260,160"/><path class="e" style="--o:6" data-n="signals brain" pathLength="1" d="M235,42 L400,105"/><path class="e" style="--o:7" data-n="brain council" pathLength="1" d="M400,105 L565,42"/><path class="e" style="--o:8" data-n="human brain" pathLength="1" d="M712,105 L400,105"/><path class="e" style="--o:9" data-n="dash human" pathLength="1" d="M712,215 L712,105"/><path class="e" style="--o:10" data-n="fast dash" pathLength="1" d="M540,160 L712,215"/><path class="e" style="--o:11" data-n="rec lab" pathLength="1" d="M260,160 L85,215"/><path class="e" style="--o:12" data-n="lab brain" pathLength="1" d="M85,215 C85,95 250,100 400,105"/><path class="e" style="--o:13" data-n="brain workshop" pathLength="1" d="M400,105 C650,112 640,200 640,300 L700,325"/><path class="e" style="--o:14" data-n="workshop exec" pathLength="1" d="M700,325 L400,325"/><path class="e" style="--o:15" data-n="game market" pathLength="1" d="M260,270 L88,325"/><path class="e" style="--o:16" data-n="exec duels" pathLength="1" d="M400,325 L300,400"/><path class="e" style="--o:17" data-n="exec broker" pathLength="1" d="M400,325 L500,400"/></g><g class="els" aria-hidden="true"><text class="el" data-n="rec brain" x="318" y="122">events</text><text class="el" data-n="brain fast" x="486" y="122">policies</text><text class="el" data-n="fast rails" x="562" y="218">moves</text><text class="el" data-n="rails exec" x="488" y="308">vetoes</text><text class="el" data-n="exec game" x="318" y="308">orders</text><text class="el" data-n="game rec" x="242" y="218">feed</text><text class="el" data-n="signals brain" x="338" y="70">signals</text><text class="el" data-n="brain council" x="474" y="66">vote</text><text class="el" data-n="human brain" x="560" y="99">approvals</text><text class="el" data-n="dash human" x="734" y="162">watch</text><text class="el" data-n="fast dash" x="640" y="180">state</text><text class="el" data-n="rec lab" x="166" y="180">recordings</text><text class="el" data-n="lab brain" x="150" y="112">lessons</text><text class="el" data-n="brain workshop" x="662" y="262">tickets</text><text class="el" data-n="workshop exec" x="566" y="319">fixes</text><text class="el" data-n="game market" x="172" y="290">trades</text></g><text class="hub" x="400" y="212" aria-hidden="true">CEREBRO</text><text class="hub2" x="400" y="230" aria-hidden="true">one tick, every 15 s</text><g class="ps" aria-hidden="true"><rect class="p" x="-3.5" y="-3.5" width="7" height="7" opacity="0" style="fill:var(--signal)"><set attributeName="opacity" to="1" begin="2.8s" fill="freeze"/><animateMotion dur="6.0s" begin="2.8s" repeatCount="indefinite" path="M260,160 L400,105 L540,160 L540,270 L400,325 L260,270 Z"/></rect><rect class="p" x="-3.5" y="-3.5" width="7" height="7" opacity="0" style="fill:var(--ok)"><set attributeName="opacity" to="1" begin="3.9s" fill="freeze"/><animateMotion dur="5.2s" begin="3.9s" repeatCount="indefinite" path="M260,160 L85,215 C85,95 250,100 400,105"/></rect><rect class="p" x="-3.5" y="-3.5" width="7" height="7" opacity="0" style="fill:var(--warn)"><set attributeName="opacity" to="1" begin="5.1s" fill="freeze"/><animateMotion dur="6.4s" begin="5.1s" repeatCount="indefinite" path="M400,105 C650,112 640,200 640,300 L700,325 L400,325"/></rect><rect class="p" x="-3.5" y="-3.5" width="7" height="7" opacity="0" style="fill:var(--info)"><set attributeName="opacity" to="1" begin="6.2s" fill="freeze"/><animateMotion dur="4.6s" begin="6.2s" repeatCount="indefinite" path="M712,215 L712,105 L400,105"/></rect></g><g class="ns"><g class="n" tabindex="0" role="img" aria-label="Recorder: Keeps every event of the game." data-id="rec" data-name="Recorder" data-d="Keeps every event of the game." style="--o:0;--k:var(--info)" transform="translate(260,160)"><rect class="nb" x="-52" y="-17" width="104" height="34"/><rect class="nk" x="-52" y="-17" width="3" height="34"/><text x="2" y="4.6">Recorder</text></g><g class="n" tabindex="0" role="img" aria-label="Brain: Writes numbered policies in plain language." data-id="brain" data-name="Brain" data-d="Writes numbered policies in plain language." style="--o:1;--k:var(--legendary)" transform="translate(400,105)"><rect class="nb" x="-46" y="-17" width="92" height="34"/><rect class="nk" x="-46" y="-17" width="3" height="34"/><text x="2" y="4.6">Brain</text></g><g class="n" tabindex="0" role="img" aria-label="Fast loop: Turns policies into moves, every tick." data-id="fast" data-name="Fast loop" data-d="Turns policies into moves, every tick." style="--o:2;--k:var(--ok)" transform="translate(540,160)"><rect class="nb" x="-52" y="-17" width="104" height="34"/><rect class="nk" x="-52" y="-17" width="3" height="34"/><text x="2" y="4.6">Fast loop</text></g><g class="n" tabindex="0" role="img" aria-label="Rails: Code that vetoes any move that loses value." data-id="rails" data-name="Rails" data-d="Code that vetoes any move that loses value." style="--o:3;--k:var(--bad)" transform="translate(540,270)"><rect class="nb" x="-46" y="-17" width="92" height="34"/><rect class="nk" x="-46" y="-17" width="3" height="34"/><text x="2" y="4.6">Rails</text></g><g class="n" tabindex="0" role="img" aria-label="Executor: Sends the surviving orders to the game." data-id="exec" data-name="Executor" data-d="Sends the surviving orders to the game." style="--o:4;--k:var(--signal)" transform="translate(400,325)"><rect class="nb" x="-52" y="-17" width="104" height="34"/><rect class="nk" x="-52" y="-17" width="3" height="34"/><text x="2" y="4.6">Executor</text></g><g class="n" tabindex="0" role="img" aria-label="The Bazaar: The game: five dealers, eighteen teams, duels." data-id="game" data-name="The Bazaar" data-d="The game: five dealers, eighteen teams, duels." style="--o:5;--k:var(--ink-3)" transform="translate(260,270)"><rect class="nb" x="-56" y="-17" width="112" height="34"/><rect class="nk" x="-56" y="-17" width="3" height="34"/><text x="2" y="4.6">The Bazaar</text></g><g class="n" tabindex="0" role="img" aria-label="Signals watcher: Reads the news and the feed for signals." data-id="signals" data-name="Signals watcher" data-d="Reads the news and the feed for signals." style="--o:6;--k:var(--info)" transform="translate(235,42)"><rect class="nb" x="-68" y="-17" width="136" height="34"/><rect class="nk" x="-68" y="-17" width="3" height="34"/><text x="2" y="4.6">Signals watcher</text></g><g class="n" tabindex="0" role="img" aria-label="Council: Three opinions vote on the big moves." data-id="council" data-name="Council" data-d="Three opinions vote on the big moves." style="--o:7;--k:var(--legendary)" transform="translate(565,42)"><rect class="nb" x="-48" y="-17" width="96" height="34"/><rect class="nk" x="-48" y="-17" width="3" height="34"/><text x="2" y="4.6">Council</text></g><g class="n" tabindex="0" role="img" aria-label="Human in the loop: Sets policy, caps and the big calls." data-id="human" data-name="Human in the loop" data-d="Sets policy, caps and the big calls." style="--o:8;--k:var(--signal)" transform="translate(712,105)"><rect class="nb" x="-74" y="-17" width="148" height="34"/><rect class="nk" x="-74" y="-17" width="3" height="34"/><text x="2" y="4.6">Human in the loop</text></g><g class="n" tabindex="0" role="img" aria-label="Dashboard: Shows every decision and what it cost." data-id="dash" data-name="Dashboard" data-d="Shows every decision and what it cost." style="--o:9;--k:var(--signal)" transform="translate(712,215)"><rect class="nb" x="-56" y="-17" width="112" height="34"/><rect class="nk" x="-56" y="-17" width="3" height="34"/><text x="2" y="4.6">Dashboard</text></g><g class="n" tabindex="0" role="img" aria-label="Workshop: Ships a tested fix while the bot plays." data-id="workshop" data-name="Workshop" data-d="Ships a tested fix while the bot plays." style="--o:10;--k:var(--warn)" transform="translate(700,325)"><rect class="nb" x="-54" y="-17" width="108" height="34"/><rect class="nk" x="-54" y="-17" width="3" height="34"/><text x="2" y="4.6">Workshop</text></g><g class="n" tabindex="0" role="img" aria-label="Lab: Replays our recordings and tests each lesson." data-id="lab" data-name="Lab" data-d="Replays our recordings and tests each lesson." style="--o:11;--k:var(--ok)" transform="translate(85,215)"><rect class="nb" x="-42" y="-17" width="84" height="34"/><rect class="nk" x="-42" y="-17" width="3" height="34"/><text x="2" y="4.6">Lab</text></g><g class="n" tabindex="0" role="img" aria-label="v07 Market: Private matching for other teams&#x27; agents." data-id="market" data-name="v07 Market" data-d="Private matching for other teams&#x27; agents." style="--o:12;--k:var(--info)" transform="translate(88,325)"><rect class="nb" x="-56" y="-17" width="112" height="34"/><rect class="nk" x="-56" y="-17" width="3" height="34"/><text x="2" y="4.6">v07 Market</text></g><g class="n" tabindex="0" role="img" aria-label="Duels + guard: Prices each duel as price plus days." data-id="duels" data-name="Duels + guard" data-d="Prices each duel as price plus days." style="--o:13;--k:var(--bad)" transform="translate(300,400)"><rect class="nb" x="-62" y="-17" width="124" height="34"/><rect class="nk" x="-62" y="-17" width="3" height="34"/><text x="2" y="4.6">Duels + guard</text></g><g class="n" tabindex="0" role="img" aria-label="Fair broker: Matches every crossing pair in the Market Test." data-id="broker" data-name="Fair broker" data-d="Matches every crossing pair in the Market Test." style="--o:14;--k:var(--ok)" transform="translate(500,400)"><rect class="nb" x="-56" y="-17" width="112" height="34"/><rect class="nk" x="-56" y="-17" width="3" height="34"/><text x="2" y="4.6">Fair broker</text></g></g></svg>
-      <p class="cap idle"><b>The model proposes. The code disposes.</b><span>Point at a part to see what it does.</span></p>
-      <ul class="parts" aria-label="The parts of Cerebro"><li style="--k:var(--info)"><b>Recorder</b><span>Keeps every event of the game.</span></li><li style="--k:var(--legendary)"><b>Brain</b><span>Writes numbered policies in plain language.</span></li><li style="--k:var(--ok)"><b>Fast loop</b><span>Turns policies into moves, every tick.</span></li><li style="--k:var(--bad)"><b>Rails</b><span>Code that vetoes any move that loses value.</span></li><li style="--k:var(--signal)"><b>Executor</b><span>Sends the surviving orders to the game.</span></li><li style="--k:var(--ink-3)"><b>The Bazaar</b><span>The game: five dealers, eighteen teams, duels.</span></li><li style="--k:var(--info)"><b>Signals watcher</b><span>Reads the news and the feed for signals.</span></li><li style="--k:var(--legendary)"><b>Council</b><span>Three opinions vote on the big moves.</span></li><li style="--k:var(--signal)"><b>Human in the loop</b><span>Sets policy, caps and the big calls.</span></li><li style="--k:var(--signal)"><b>Dashboard</b><span>Shows every decision and what it cost.</span></li><li style="--k:var(--warn)"><b>Workshop</b><span>Ships a tested fix while the bot plays.</span></li><li style="--k:var(--ok)"><b>Lab</b><span>Replays our recordings and tests each lesson.</span></li><li style="--k:var(--info)"><b>v07 Market</b><span>Private matching for other teams&#x27; agents.</span></li><li style="--k:var(--bad)"><b>Duels + guard</b><span>Prices each duel as price plus days.</span></li><li style="--k:var(--ok)"><b>Fair broker</b><span>Matches every crossing pair in the Market Test.</span></li></ul>
+    <section class="works" aria-label="How Cerebro works"><svg class="net" viewBox="30 6 1686 788" preserveAspectRatio="xMidYMid meet" role="group" aria-label="System map: Cerebro in the centre, connected to recorder, signals watcher, council, lab, fast loop, rails, executor, duels, broker, workshop, dashboard, market and the human"><g class="es"><path class="e dash" style="--o:0" data-n="game rec" d="M1655 560 L1700 560 L1700 30 L170 30 L170 77"/><path class="e" style="--o:1" data-n="rec cerebro" pathLength="1" d="M170 120 L864 390"/><path class="e" style="--o:2" data-n="signals cerebro" pathLength="1" d="M170 300 L864 390"/><path class="e" style="--o:3" data-n="cerebro council" pathLength="1" d="M864 390 L864 90"/><path class="e" style="--o:4" data-n="cerebro fast" pathLength="1" d="M864 390 L1230 150"/><path class="e" style="--o:5" data-n="fast rails" pathLength="1" d="M1230 150 L1540 150"/><path class="e" style="--o:6" data-n="rails exec" pathLength="1" d="M1540 150 L1540 350"/><path class="e" style="--o:7" data-n="exec game" pathLength="1" d="M1540 350 L1540 560"/><path class="e" style="--o:8" data-n="rec lab" pathLength="1" d="M170 120 L170 660"/><path class="e" style="--o:9" data-n="lab cerebro" pathLength="1" d="M170 660 L864 390"/><path class="e" style="--o:10" data-n="cerebro workshop" pathLength="1" d="M864 390 L520 700"/><path class="e" style="--o:11" data-n="dash cerebro" pathLength="1" d="M864 700 L864 390"/><path class="e" style="--o:12" data-n="human dash" pathLength="1" d="M1210 740 L864 700"/><path class="e" style="--o:13" data-n="human cerebro" pathLength="1" d="M1210 740 L864 390"/><path class="e" style="--o:14" data-n="fast duels" pathLength="1" d="M1230 150 L1230 380"/><path class="e" style="--o:15" data-n="cerebro broker" pathLength="1" d="M864 390 L1230 580"/><path class="e" style="--o:16" data-n="market cerebro" pathLength="1" d="M170 480 L864 390"/></g><g class="lbs" aria-hidden="true"><g class="lb" data-n="game rec"><rect x="880" y="16" width="86" height="28"/><text x="923" y="37">feed</text></g><g class="lb" data-n="rec cerebro"><rect x="472" y="240" width="90" height="28"/><text x="517" y="261">events</text></g><g class="lb" data-n="signals cerebro"><rect x="484" y="330" width="66" height="28"/><text x="517" y="351">news</text></g><g class="lb" data-n="cerebro council"><rect x="831" y="225" width="66" height="28"/><text x="864" y="246">vote</text></g><g class="lb" data-n="cerebro fast"><rect x="990" y="255" width="114" height="28"/><text x="1047" y="276">policies</text></g><g class="lb" data-n="fast rails"><rect x="1340" y="135" width="90" height="28"/><text x="1385" y="156">orders</text></g><g class="lb" data-n="rails exec"><rect x="1465" y="235" width="150" height="28"/><text x="1540" y="256">pass / veto</text></g><g class="lb" data-n="exec game"><rect x="1495" y="440" width="90" height="28"/><text x="1540" y="461">offers</text></g><g class="lb" data-n="rec lab"><rect x="125" y="375" width="90" height="28"/><text x="170" y="396">replay</text></g><g class="lb" data-n="lab cerebro"><rect x="466" y="510" width="102" height="28"/><text x="517" y="531">lessons</text></g><g class="lb" data-n="cerebro workshop"><rect x="593" y="530" width="198" height="28"/><text x="692" y="551">tickets · fixes</text></g><g class="lb" data-n="dash cerebro"><rect x="825" y="576" width="78" height="28"/><text x="864" y="597">state</text></g><g class="lb" data-n="human dash"><rect x="1004" y="705" width="66" height="28"/><text x="1037" y="726">sees</text></g><g class="lb" data-n="human cerebro"><rect x="1068" y="646" width="126" height="28"/><text x="1131" y="667">approvals</text></g><g class="lb" data-n="fast duels"><rect x="1191" y="250" width="78" height="28"/><text x="1230" y="271">duels</text></g><g class="lb" data-n="cerebro broker"><rect x="1053" y="498" width="102" height="28"/><text x="1104" y="519">overlay</text></g><g class="lb" data-n="market cerebro"><rect x="466" y="420" width="102" height="28"/><text x="517" y="441">matches</text></g></g><g class="ps" aria-hidden="true"><circle class="p" r="9" fill="#F4F1EA" opacity="0"><set attributeName="opacity" to="1" begin="3.0s" fill="freeze"/><animateMotion dur="7s" begin="3.0s" repeatCount="indefinite" path="M170 120 L864 390 L1230 150 L1540 150 L1540 350 L1540 560 L1700 560 L1700 30 L170 30 L170 120"/></circle><circle class="p" r="7" fill="#45B883" opacity="0"><set attributeName="opacity" to="1" begin="3.0s" fill="freeze"/><animateMotion dur="5s" begin="3.0s" repeatCount="indefinite" path="M170 120 L170 660 L864 390"/></circle><circle class="p" r="7" fill="#E2564D" opacity="0"><set attributeName="opacity" to="1" begin="3.0s" fill="freeze"/><animateMotion dur="5s" begin="3.0s" repeatCount="indefinite" path="M864 390 L520 700 L864 390"/></circle><circle class="p" r="7" fill="#E3A33B" opacity="0"><set attributeName="opacity" to="1" begin="3.0s" fill="freeze"/><animateMotion dur="5s" begin="3.0s" repeatCount="indefinite" path="M1210 740 L864 700 L864 390"/></circle><circle class="p" r="6" fill="#E3A33B" opacity="0"><set attributeName="opacity" to="1" begin="3.0s" fill="freeze"/><animateMotion dur="4s" begin="3.0s" repeatCount="indefinite" path="M1210 740 L864 390"/></circle></g><g class="ns_"><g class="n" tabindex="0" role="img" aria-label="Recorder: Records every event of the game, replayable." data-id="rec" data-name="Recorder" data-d="Records every event of the game, replayable." style="--o:0;--k:#4C9BE0"><rect class="nb" x="45" y="77" width="250" height="86"/><rect class="nk" x="45" y="77" width="8" height="86"/><text class="nt" x="69" y="116">Recorder</text><text class="ns" x="69" y="144">every event, replayable</text></g><g class="n" tabindex="0" role="img" aria-label="Signals watcher: Reads the news and the rumours, and weighs their sources." data-id="signals" data-name="Signals watcher" data-d="Reads the news and the rumours, and weighs their sources." style="--o:1;--k:#4C9BE0"><rect class="nb" x="45" y="257" width="250" height="86"/><rect class="nk" x="45" y="257" width="8" height="86"/><text class="nt" x="69" y="296">Signals watcher</text><text class="ns" x="69" y="324">news, rumours, sources</text></g><g class="n" tabindex="0" role="img" aria-label="v07 Market: Private matching and auctions for other teams&#x27; agents." data-id="market" data-name="v07 Market" data-d="Private matching and auctions for other teams&#x27; agents." style="--o:2;--k:#45B883"><rect class="nb" x="45" y="437" width="250" height="86"/><rect class="nk" x="45" y="437" width="8" height="86"/><text class="nt" x="69" y="476">v07 Market</text><text class="ns" x="69" y="504">private matching, auctions</text></g><g class="n" tabindex="0" role="img" aria-label="Lab: Replays the recordings, tests each lesson, and a gate promotes it." data-id="lab" data-name="Lab" data-d="Replays the recordings, tests each lesson, and a gate promotes it." style="--o:3;--k:#45B883"><rect class="nb" x="45" y="617" width="250" height="86"/><rect class="nk" x="45" y="617" width="8" height="86"/><text class="nt" x="69" y="656">Lab</text><text class="ns" x="69" y="684">replay, lessons, gate</text></g><g class="n" tabindex="0" role="img" aria-label="Council: Three opinions vote on the big moves; the majority decides." data-id="council" data-name="Council" data-d="Three opinions vote on the big moves; the majority decides." style="--o:4;--k:#E3A33B"><rect class="nb" x="739" y="47" width="250" height="86"/><rect class="nk" x="739" y="47" width="8" height="86"/><text class="nt" x="763" y="86">Council</text><text class="ns" x="763" y="114">three opinions, majority</text></g><g class="n" tabindex="0" role="img" aria-label="Fast loop: Acts every tick on the policies in force." data-id="fast" data-name="Fast loop" data-d="Acts every tick on the policies in force." style="--o:5;--k:#45B883"><rect class="nb" x="1115" y="107" width="230" height="86"/><rect class="nk" x="1115" y="107" width="8" height="86"/><text class="nt" x="1139" y="146">Fast loop</text><text class="ns" x="1139" y="174">acts every tick</text></g><g class="n" tabindex="0" role="img" aria-label="Rails: Code that vetoes any move that loses value." data-id="rails" data-name="Rails" data-d="Code that vetoes any move that loses value." style="--o:6;--k:#E2564D"><rect class="nb" x="1425" y="107" width="230" height="86"/><rect class="nk" x="1425" y="107" width="8" height="86"/><text class="nt" x="1449" y="146">Rails</text><text class="ns" x="1449" y="174">veto in code</text></g><g class="n" tabindex="0" role="img" aria-label="Executor: Sends what survives the rails, then verifies it." data-id="exec" data-name="Executor" data-d="Sends what survives the rails, then verifies it." style="--o:7;--k:#F4F1EA"><rect class="nb" x="1425" y="307" width="230" height="86"/><rect class="nk" x="1425" y="307" width="8" height="86"/><text class="nt" x="1449" y="346">Executor</text><text class="ns" x="1449" y="374">sends, then verifies</text></g><g class="n" tabindex="0" role="img" aria-label="The game: The Bazaar: five dealers, eighteen teams and the duels." data-id="game" data-name="The game" data-d="The Bazaar: five dealers, eighteen teams and the duels." style="--o:8;--k:#6A727B"><rect class="nb" x="1425" y="517" width="230" height="86" stroke-dasharray="6 6"/><rect class="nk" x="1425" y="517" width="8" height="86"/><text class="nt" x="1449" y="556">The game</text><text class="ns" x="1449" y="584">dealers, teams, duels</text></g><g class="n" tabindex="0" role="img" aria-label="Duels + guard: A bounded model plays each duel, with a code fallback and a guard." data-id="duels" data-name="Duels + guard" data-d="A bounded model plays each duel, with a code fallback and a guard." style="--o:9;--k:#9B7FE6"><rect class="nb" x="1115" y="337" width="230" height="86"/><rect class="nk" x="1115" y="337" width="8" height="86"/><text class="nt" x="1139" y="376">Duels + guard</text><text class="ns" x="1139" y="404">model, code fallback</text></g><g class="n" tabindex="0" role="img" aria-label="Fair broker: Matches the crossing pairs in the Market Test." data-id="broker" data-name="Fair broker" data-d="Matches the crossing pairs in the Market Test." style="--o:10;--k:#9B7FE6"><rect class="nb" x="1115" y="537" width="230" height="86"/><rect class="nk" x="1115" y="537" width="8" height="86"/><text class="nt" x="1139" y="576">Fair broker</text><text class="ns" x="1139" y="604">the Market Test</text></g><g class="n" tabindex="0" role="img" aria-label="Workshop: Writes the fix, runs the tests and deploys while the bot plays." data-id="workshop" data-name="Workshop" data-d="Writes the fix, runs the tests and deploys while the bot plays." style="--o:11;--k:#E2564D"><rect class="nb" x="395" y="657" width="250" height="86"/><rect class="nk" x="395" y="657" width="8" height="86"/><text class="nt" x="419" y="696">Workshop</text><text class="ns" x="419" y="724">fix, tests, deploy</text></g><g class="n" tabindex="0" role="img" aria-label="Dashboard: Shows every decision before it is sent." data-id="dash" data-name="Dashboard" data-d="Shows every decision before it is sent." style="--o:12;--k:#4C9BE0"><rect class="nb" x="739" y="657" width="250" height="86"/><rect class="nk" x="739" y="657" width="8" height="86"/><text class="nt" x="763" y="696">Dashboard</text><text class="ns" x="763" y="724">every decision visible</text></g><g class="n hum" tabindex="0" role="img" aria-label="Human: Sets policy, approvals and caps." data-id="human" data-name="Human" data-d="Sets policy, approvals and caps." style="--o:13;--k:#F4F1EA"><rect class="nb" x="1085" y="697" width="250" height="86"/><rect class="nk" x="1085" y="697" width="8" height="86"/><text class="nt" x="1109" y="736">Human</text><text class="ns" x="1109" y="764">policy, approvals, caps</text></g><g class="n hubn" tabindex="0" role="img" aria-label="Cerebro: The strategist: writes policy in plain language." data-id="cerebro" data-name="Cerebro" data-d="The strategist: writes policy in plain language." style="--o:14;--k:#E3A33B"><rect class="nb" x="674" y="300" width="380" height="180"/><text class="ct" x="864" y="398">CEREBRO</text><text class="ns" x="864" y="442">strategist · policy in plain language</text></g></g></svg>
+      <p class="cap idle"><b>The model proposes. The code disposes.</b><span class="d">Point at a part to see what it does.</span><span class="legend" aria-hidden="true"><i style="--t:#F4F1EA">tick</i><i style="--t:#45B883">improve</i><i style="--t:#E2564D">repair</i><i style="--t:#E3A33B">human in the loop</i></span></p>
+      <ul class="parts" aria-label="The parts of Cerebro"><li style="--k:#E3A33B"><b>Cerebro</b><span>The strategist: writes policy in plain language.</span></li><li style="--k:#4C9BE0"><b>Recorder</b><span>Records every event of the game, replayable.</span></li><li style="--k:#4C9BE0"><b>Signals watcher</b><span>Reads the news and the rumours, and weighs their sources.</span></li><li style="--k:#45B883"><b>v07 Market</b><span>Private matching and auctions for other teams&#x27; agents.</span></li><li style="--k:#45B883"><b>Lab</b><span>Replays the recordings, tests each lesson, and a gate promotes it.</span></li><li style="--k:#E3A33B"><b>Council</b><span>Three opinions vote on the big moves; the majority decides.</span></li><li style="--k:#45B883"><b>Fast loop</b><span>Acts every tick on the policies in force.</span></li><li style="--k:#E2564D"><b>Rails</b><span>Code that vetoes any move that loses value.</span></li><li style="--k:#F4F1EA"><b>Executor</b><span>Sends what survives the rails, then verifies it.</span></li><li style="--k:#6A727B"><b>The game</b><span>The Bazaar: five dealers, eighteen teams and the duels.</span></li><li style="--k:#9B7FE6"><b>Duels + guard</b><span>A bounded model plays each duel, with a code fallback and a guard.</span></li><li style="--k:#9B7FE6"><b>Fair broker</b><span>Matches the crossing pairs in the Market Test.</span></li><li style="--k:#E2564D"><b>Workshop</b><span>Writes the fix, runs the tests and deploys while the bot plays.</span></li><li style="--k:#4C9BE0"><b>Dashboard</b><span>Shows every decision before it is sent.</span></li><li style="--k:#F4F1EA"><b>Human</b><span>Sets policy, approvals and caps.</span></li></ul>
     </section>
-    <nav class="go" aria-label="Where to go"><a style="--r:0" class="row repo" href="https://github.com/aaangelmartin/Cerebro" rel="noopener"><svg class="mo" viewBox="0 0 72 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 28h60M30 28c6 0 6-14 14-14h10"/><g fill="currentColor" stroke="none"><rect x="11" y="25" width="6" height="6"/><rect x="27" y="25" width="6" height="6"/><rect x="51" y="11" width="6" height="6"/><rect x="59" y="25" width="6" height="6"/></g><rect class="mv a-commit" x="4" y="25.5" width="5" height="5" stroke="none"/></svg><span class="tx"><span class="nm"><b>GitHub repo</b></span><span class="ds">All the code, the docs and the story of the weekend.</span><span class="url">github.com/aaangelmartin/Cerebro</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a><a style="--r:1" class="row " href="dashboard/"><svg class="mo" viewBox="0 0 72 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path class="dim" d="M6 38h60M6 6v32"/><path class="mv a-spark" pathLength="1" d="M6 30 16 26 24 31 33 17 41 22 50 10 58 15 66 8"/></svg><span class="tx"><span class="nm"><b>Dashboard</b><em>Frozen snapshot</em></span><span class="ds">What the team watched: the Brain, the bot, duels and the lab.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:2" class="row " href="market/"><svg class="mo" viewBox="0 0 72 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect class="ov" x="30" y="7" width="18" height="30" stroke="none"/><path d="M6 15h42M30 29h36"/><path class="dim" d="M6 11v8M48 11v8M30 25v8M66 25v8"/><path class="mv a-price" d="M32 5v34"/></svg><span class="tx"><span class="nm"><b>v07 Market</b><em>Frozen snapshot</em></span><span class="ds">The market we built for other teams' agents.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:3" class="row " href="video/"><svg class="mo" viewBox="0 0 72 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 11v22l17-11z" fill="currentColor" stroke="none"/><path class="dim" d="M32 22h34"/><path class="mv a-play" pathLength="1" d="M32 22h34"/></svg><span class="tx"><span class="nm"><b>Video</b></span><span class="ds">How we built it and how it works inside, in three minutes.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:4" class="row " href="pitch/"><svg class="mo" viewBox="0 0 72 44" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect class="s s1" x="6" y="12" width="18" height="13"/><rect class="s s2" x="27" y="12" width="18" height="13"/><rect class="s s3" x="48" y="12" width="18" height="13"/><path class="dim" d="M6 33h60"/><path class="mv a-deck" d="M6 33h18"/></svg><span class="tx"><span class="nm"><b>Pitch deck</b></span><span class="ds">The pitch that won, slide by slide.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></nav>
+    <nav class="go" aria-label="Where to go"><a style="--r:0" class="row repo" href="https://github.com/aaangelmartin/Cerebro" rel="noopener"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true"><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.6 4.5l-3.2 15"/></svg><span class="tx"><span class="nm"><b>GitHub repo</b></span><span class="ds">All the code, the docs and the story of the weekend.</span><span class="url">github.com/aaangelmartin/Cerebro</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a><a style="--r:1" class="row " href="dashboard/"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true"><rect x="3" y="4" width="18" height="16"/><path d="M3 9.5h18M9.5 9.5V20"/></svg><span class="tx"><span class="nm"><b>Dashboard</b><em>Frozen snapshot</em></span><span class="ds">What the team watched: the Brain, the bot, duels and the lab.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:2" class="row " href="market/"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true"><path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4"/></svg><span class="tx"><span class="nm"><b>v07 Market</b><em>Frozen snapshot</em></span><span class="ds">The market we built for other teams' agents.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:3" class="row " href="video/"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true"><rect x="3" y="5" width="18" height="14"/><path d="M10 9.2v5.6l5-2.8z"/></svg><span class="tx"><span class="nm"><b>Video</b></span><span class="ds">How we built it and how it works inside, in three minutes.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a style="--r:4" class="row " href="pitch/"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" aria-hidden="true"><rect x="3" y="4" width="18" height="12"/><path d="M12 16v4M8 20h8"/></svg><span class="tx"><span class="nm"><b>Pitch deck</b></span><span class="ds">The pitch that won, slide by slide.</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></nav>
   </div>
 </main>
 <script>
 (function () {
   /* The map: hover or focus a part to see what it does and what it talks to. */
-  var map = document.querySelector('.map'), cap = document.querySelector('.cap');
-  if (map && cap) {
-    var cb = cap.querySelector('b'), cs = cap.querySelector('span'), idleB = cb.textContent, idleS = cs.textContent;
-    var links = map.querySelectorAll('.e,.el');
-    function show(n) {
-      var id = n.getAttribute('data-id');
-      map.classList.add('focus'); n.classList.add('on');
-      links.forEach(function (l) { if ((' ' + l.getAttribute('data-n') + ' ').indexOf(' ' + id + ' ') > -1) l.classList.add('on'); });
-      cb.textContent = n.getAttribute('data-name'); cs.textContent = n.getAttribute('data-d'); cap.classList.remove('idle');
-    }
-    function hide() {
-      map.classList.remove('focus');
-      map.querySelectorAll('.on').forEach(function (x) { x.classList.remove('on'); });
-      cb.textContent = idleB; cs.textContent = idleS; cap.classList.add('idle');
-    }
-    map.querySelectorAll('.n').forEach(function (n) {
-      n.addEventListener('mouseenter', function () { hide(); show(n); });
-      n.addEventListener('mouseleave', hide);
-      n.addEventListener('focus', function () { hide(); show(n); });
-      n.addEventListener('blur', hide);
+  var map = document.querySelector('.net'), cap = document.querySelector('.cap');
+  if (!map || !cap) return;
+  var cb = cap.querySelector('b'), cs = cap.querySelector('.d'), idleB = cb.textContent, idleS = cs.textContent;
+  var links = map.querySelectorAll('.e,.lb'), nodes = map.querySelectorAll('.n');
+  function show(n) {
+    var id = n.getAttribute('data-id'), near = {};
+    map.classList.add('focus'); n.classList.add('on');
+    links.forEach(function (l) {
+      var ids = l.getAttribute('data-n').split(' ');
+      if (ids.indexOf(id) > -1) { l.classList.add('on'); ids.forEach(function (x) { near[x] = 1; }); }
     });
-    document.addEventListener('visibilitychange', function () {
-      try { document.hidden ? map.pauseAnimations() : map.unpauseAnimations(); } catch (e) {}
-    });
+    nodes.forEach(function (m) { if (near[m.getAttribute('data-id')]) m.classList.add('near'); });
+    cb.textContent = n.getAttribute('data-name'); cs.textContent = n.getAttribute('data-d'); cap.classList.remove('idle');
   }
-  /* The ground: a few ticks travelling the grid lines. Cheap, paused when hidden, off with reduced motion. */
-  var cv = document.getElementById('bg');
-  if (!cv || !cv.getContext || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
-  var cx = cv.getContext('2d'), W = 0, H = 0, D = 1, G = 40, T = [], raf = 0, last = 0;
-  function size() { D = Math.min(window.devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * D; cv.height = H * D; cx.setTransform(D, 0, 0, D, 0, 0); }
-  function spawn(t) {
-    var h = Math.random() < .5, dir = Math.random() < .5 ? 1 : -1;
-    t.h = h; t.dir = dir; t.len = 46 + Math.random() * 70; t.v = 18 + Math.random() * 34;
-    t.line = Math.round(Math.random() * ((h ? H : W) / G)) * G;
-    t.pos = dir > 0 ? -t.len : (h ? W : H) + t.len;
-    t.warm = Math.random() < .28;
-    return t;
+  function hide() {
+    map.classList.remove('focus');
+    map.querySelectorAll('.on,.near').forEach(function (x) { x.classList.remove('on'); x.classList.remove('near'); });
+    cb.textContent = idleB; cs.textContent = idleS; cap.classList.add('idle');
   }
-  function frame(now) {
-    raf = requestAnimationFrame(frame);
-    var dt = Math.min((now - last) / 1000, .05); last = now;
-    cx.clearRect(0, 0, W, H);
-    for (var i = 0; i < T.length; i++) {
-      var t = T[i]; t.pos += t.v * t.dir * dt;
-      var a = t.pos, b = t.pos - t.len * t.dir, lim = (t.h ? W : H);
-      if ((t.dir > 0 && b > lim) || (t.dir < 0 && b < 0)) { spawn(t); continue; }
-      var g = t.h ? cx.createLinearGradient(b, 0, a, 0) : cx.createLinearGradient(0, b, 0, a);
-      var c = t.warm ? '255,196,77' : '236,238,240';
-      g.addColorStop(0, 'rgba(' + c + ',0)'); g.addColorStop(1, 'rgba(' + c + ',' + (t.warm ? .5 : .32) + ')');
-      cx.strokeStyle = g; cx.lineWidth = 1; cx.beginPath();
-      if (t.h) { cx.moveTo(b, t.line + .5); cx.lineTo(a, t.line + .5); } else { cx.moveTo(t.line + .5, b); cx.lineTo(t.line + .5, a); }
-      cx.stroke();
-      cx.fillStyle = 'rgba(' + c + ',' + (t.warm ? .8 : .55) + ')';
-      if (t.h) cx.fillRect(a - 1, t.line - 1, 3, 3); else cx.fillRect(t.line - 1, a - 1, 3, 3);
-    }
-  }
-  function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
-  function stop() { cancelAnimationFrame(raf); raf = 0; }
-  size();
-  for (var k = 0; k < 16; k++) { var t = spawn({}); t.pos = Math.random() * (t.h ? W : H); T.push(t); }
-  addEventListener('resize', size);
-  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
-  start();
+  nodes.forEach(function (n) {
+    n.addEventListener('mouseenter', function () { hide(); show(n); });
+    n.addEventListener('mouseleave', hide);
+    n.addEventListener('focus', function () { hide(); show(n); });
+    n.addEventListener('blur', hide);
+  });
+  document.addEventListener('visibilitychange', function () {
+    try { document.hidden ? map.pauseAnimations() : map.unpauseAnimations(); } catch (e) {}
+  });
 })();
 </script>
 </body>
