@@ -1,0 +1,4 @@
+.frozen-ribbon{position:fixed;right:12px;bottom:10px;z-index:9999;background:#111;color:#f2f2f2;border:1px solid #3fd0a0;font:600 11px/1.3 "Geist Mono",ui-monospace,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;padding:7px 11px;max-width:calc(100vw - 24px)}
+.frozen-ribbon a{color:#3fd0a0;text-decoration:none;margin-left:10px}.frozen-ribbon a:hover{text-decoration:underline}
+.frozen-ribbon.flash{background:#3fd0a0;color:#06110d}.frozen-ribbon.flash a{color:#06110d}
+@media (max-width:700px){.frozen-ribbon .fr-links{display:none}}

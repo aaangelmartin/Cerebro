@@ -1,0 +1,1471 @@
+<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><title>v07 Market · api/opportunities (frozen)</title><body style="background:#0b0c0e;color:#e8e8e8;font:13px/1.5 ui-monospace,Menlo,monospace;padding:16px"><p>Frozen snapshot · read-only · recorded after the game closed (4 Oct 2026). The calls inside are not live.</p><pre style="white-space:pre-wrap">{
+ &quot;tick&quot;: 2816,
+ &quot;venue&quot;: &quot;v07&quot;,
+ &quot;fee&quot;: 0,
+ &quot;how&quot;: &quot;One team posts its public offer on v07 with its own key; the other accepts it. 0 % fee for both.&quot;,
+ &quot;source&quot;: &quot;public offers of the game only&quot;,
+ &quot;opportunities&quot;: [
+  {
+   &quot;ref&quot;: &quot;LAV-11&quot;,
+   &quot;name&quot;: &quot;La Casa Encendida&quot;,
+   &quot;rarity&quot;: &quot;epic&quot;,
+   &quot;page&quot;: false,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t01&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 240,
+   &quot;price&quot;: 240,
+   &quot;bid_venue&quot;: &quot;v05&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t01&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;LAV-11&quot;,
+     &quot;price&quot;: 240,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 240
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;LAV-11&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of LAV-11: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 4.0
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-11&quot;,
+   &quot;name&quot;: &quot;San Francisco el Grande&quot;,
+   &quot;rarity&quot;: &quot;epic&quot;,
+   &quot;page&quot;: false,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t06&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 114,
+   &quot;price&quot;: 114,
+   &quot;bid_venue&quot;: &quot;v24&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t06&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;LAT-11&quot;,
+     &quot;price&quot;: 114,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 114
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;LAT-11&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of LAT-11: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 4.0
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-10&quot;,
+   &quot;name&quot;: &quot;Casa de las Flores&quot;,
+   &quot;rarity&quot;: &quot;rare&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t13&quot;,
+   &quot;ask&quot;: 66,
+   &quot;price&quot;: 66,
+   &quot;ask_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;CHA-10&quot;,
+     &quot;price&quot;: 66,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of CHA-10: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 66
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 2.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-09&quot;,
+   &quot;name&quot;: &quot;Museo Sorolla&quot;,
+   &quot;rarity&quot;: &quot;rare&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t07&quot;,
+   &quot;ask&quot;: 64,
+   &quot;price&quot;: 64,
+   &quot;ask_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;CHA-09&quot;,
+     &quot;price&quot;: 64,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of CHA-09: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 64
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 2.5
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-10&quot;,
+   &quot;name&quot;: &quot;El Mesón de la Cava&quot;,
+   &quot;rarity&quot;: &quot;rare&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t17&quot;,
+   &quot;ask&quot;: 53,
+   &quot;price&quot;: 53,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 4,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t17&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-10&quot;,
+     &quot;price&quot;: 53,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-10: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 53
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 2.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-06&quot;,
+   &quot;name&quot;: &quot;Estación de Chamberí&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t07&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 22,
+   &quot;price&quot;: 22,
+   &quot;bid_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-06&quot;,
+     &quot;price&quot;: 22,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 22
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-06&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-06: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-07&quot;,
+   &quot;name&quot;: &quot;Club de Jazz&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t07&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 22,
+   &quot;price&quot;: 22,
+   &quot;bid_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-07&quot;,
+     &quot;price&quot;: 22,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 22
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-07&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-07: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-08&quot;,
+   &quot;name&quot;: &quot;El Instituto&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t09&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 15,
+   &quot;price&quot;: 15,
+   &quot;bid_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 2,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t09&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-08&quot;,
+     &quot;price&quot;: 15,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 15
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-08&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-08: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-04&quot;,
+   &quot;name&quot;: &quot;Mercado de Vallehermoso&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t07&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 9,
+   &quot;price&quot;: 9,
+   &quot;bid_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-04&quot;,
+     &quot;price&quot;: 9,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 9
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-04&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-04: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-03&quot;,
+   &quot;name&quot;: &quot;La Churrería&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t13&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 6,
+   &quot;price&quot;: 6,
+   &quot;bid_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-03&quot;,
+     &quot;price&quot;: 6,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 6
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-03&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-03: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-05&quot;,
+   &quot;name&quot;: &quot;Plaza de Olavide&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t13&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 6,
+   &quot;price&quot;: 6,
+   &quot;bid_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-05&quot;,
+     &quot;price&quot;: 6,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 6
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-05&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-05: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-01&quot;,
+   &quot;name&quot;: &quot;Andén de Metro&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t13&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 5,
+   &quot;price&quot;: 5,
+   &quot;bid_venue&quot;: &quot;v13&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-01&quot;,
+     &quot;price&quot;: 5,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 5
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-01&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-01: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;CHA-02&quot;,
+   &quot;name&quot;: &quot;Kiosco de Prensa&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t13&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 5,
+   &quot;price&quot;: 5,
+   &quot;bid_venue&quot;: &quot;v13&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;CHA-02&quot;,
+     &quot;price&quot;: 5,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 5
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;CHA-02&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of CHA-02: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-01&quot;,
+   &quot;name&quot;: &quot;Caña en la Cava Baja&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;wanted&quot;,
+   &quot;buyer&quot;: &quot;t13&quot;,
+   &quot;seller&quot;: null,
+   &quot;bid&quot;: 4,
+   &quot;price&quot;: 4,
+   &quot;bid_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your bid on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;buy&quot;,
+     &quot;ref&quot;: &quot;LAT-01&quot;,
+     &quot;price&quot;: 4,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;cash&quot;: 4
+      },
+      &quot;want&quot;: {
+       &quot;cards&quot;: [
+        &quot;LAT-01&quot;
+       ]
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;holder&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {
+      &quot;assets&quot;: [
+       &quot;&lt;your asset id of LAT-01: the id of that card in GET /api/me&gt;&quot;
+      ]
+     }
+    }
+   ],
+   &quot;score&quot;: 1.5
+  },
+  {
+   &quot;ref&quot;: &quot;RET-08&quot;,
+   &quot;name&quot;: &quot;Palacio de Velázquez&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t01&quot;,
+   &quot;ask&quot;: 33,
+   &quot;price&quot;: 33,
+   &quot;ask_venue&quot;: &quot;v05&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t01&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;RET-08&quot;,
+     &quot;price&quot;: 33,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of RET-08: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 33
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;RET-06&quot;,
+   &quot;name&quot;: &quot;La Rosaleda&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t01&quot;,
+   &quot;ask&quot;: 31,
+   &quot;price&quot;: 31,
+   &quot;ask_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t01&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;RET-06&quot;,
+     &quot;price&quot;: 31,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of RET-06: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 31
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-08&quot;,
+   &quot;name&quot;: &quot;Las Vistillas&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t17&quot;,
+   &quot;ask&quot;: 19,
+   &quot;price&quot;: 19,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 2,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t17&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-08&quot;,
+     &quot;price&quot;: 19,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-08: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 19
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;MAL-07&quot;,
+   &quot;name&quot;: &quot;Mercado de San Ildefonso&quot;,
+   &quot;rarity&quot;: &quot;uncommon&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t01&quot;,
+   &quot;ask&quot;: 19,
+   &quot;price&quot;: 19,
+   &quot;ask_venue&quot;: &quot;v05&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t01&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;MAL-07&quot;,
+     &quot;price&quot;: 19,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of MAL-07: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 19
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;RET-05&quot;,
+   &quot;name&quot;: &quot;La Ardilla&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t01&quot;,
+   &quot;ask&quot;: 16,
+   &quot;price&quot;: 16,
+   &quot;ask_venue&quot;: &quot;v07&quot;,
+   &quot;offer&quot;: 29270,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers/29270/accept&quot;,
+     &quot;ref&quot;: &quot;RET-05&quot;,
+     &quot;body&quot;: {},
+     &quot;note&quot;: &quot;Accept it with your own team key: it is on v07, so nobody pays a fee.&quot;
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;RET-03&quot;,
+   &quot;name&quot;: &quot;El Titiritero&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t13&quot;,
+   &quot;ask&quot;: 10,
+   &quot;price&quot;: 10,
+   &quot;ask_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;RET-03&quot;,
+     &quot;price&quot;: 10,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of RET-03: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 10
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAV-02&quot;,
+   &quot;name&quot;: &quot;El Frutero de Argumosa&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t18&quot;,
+   &quot;ask&quot;: 9,
+   &quot;price&quot;: 9,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t18&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAV-02&quot;,
+     &quot;price&quot;: 9,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAV-02: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 9
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAV-05&quot;,
+   &quot;name&quot;: &quot;Bici de Reparto&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t18&quot;,
+   &quot;ask&quot;: 9,
+   &quot;price&quot;: 9,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t18&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAV-05&quot;,
+     &quot;price&quot;: 9,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAV-05: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 9
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-02&quot;,
+   &quot;name&quot;: &quot;Puesto del Rastro&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t17&quot;,
+   &quot;ask&quot;: 8,
+   &quot;price&quot;: 8,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t17&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-02&quot;,
+     &quot;price&quot;: 8,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-02: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 8
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-03&quot;,
+   &quot;name&quot;: &quot;Huevos Rotos&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t09&quot;,
+   &quot;ask&quot;: 8,
+   &quot;price&quot;: 8,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t09&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-03&quot;,
+     &quot;price&quot;: 8,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-03: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 8
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-05&quot;,
+   &quot;name&quot;: &quot;El Organillero&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t17&quot;,
+   &quot;ask&quot;: 8,
+   &quot;price&quot;: 8,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t17&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-05&quot;,
+     &quot;price&quot;: 8,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-05: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 8
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;SAL-02&quot;,
+   &quot;name&quot;: &quot;El Portero&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t07&quot;,
+   &quot;ask&quot;: 8,
+   &quot;price&quot;: 8,
+   &quot;ask_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;SAL-02&quot;,
+     &quot;price&quot;: 8,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of SAL-02: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 8
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;SAL-04&quot;,
+   &quot;name&quot;: &quot;Café en Goya&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t07&quot;,
+   &quot;ask&quot;: 8,
+   &quot;price&quot;: 8,
+   &quot;ask_venue&quot;: &quot;v15&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t07&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;SAL-04&quot;,
+     &quot;price&quot;: 8,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of SAL-04: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 8
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;MAL-02&quot;,
+   &quot;name&quot;: &quot;Plaza del Dos de Mayo&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t18&quot;,
+   &quot;ask&quot;: 7,
+   &quot;price&quot;: 7,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t18&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;MAL-02&quot;,
+     &quot;price&quot;: 7,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of MAL-02: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 7
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;LAT-04&quot;,
+   &quot;name&quot;: &quot;Mercado de la Cebada&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t13&quot;,
+   &quot;ask&quot;: 6,
+   &quot;price&quot;: 6,
+   &quot;ask_venue&quot;: &quot;v10&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 0,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t13&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;LAT-04&quot;,
+     &quot;price&quot;: 6,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of LAT-04: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 6
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;RET-04&quot;,
+   &quot;name&quot;: &quot;Paseo de Coches&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t17&quot;,
+   &quot;ask&quot;: 6,
+   &quot;price&quot;: 6,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t17&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;RET-04&quot;,
+     &quot;price&quot;: 6,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of RET-04: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 6
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  },
+  {
+   &quot;ref&quot;: &quot;RET-01&quot;,
+   &quot;name&quot;: &quot;Barca del Estanque&quot;,
+   &quot;rarity&quot;: &quot;common&quot;,
+   &quot;page&quot;: true,
+   &quot;kind&quot;: &quot;for_sale&quot;,
+   &quot;seller&quot;: &quot;t18&quot;,
+   &quot;ask&quot;: 5,
+   &quot;price&quot;: 5,
+   &quot;ask_venue&quot;: &quot;rastro&quot;,
+   &quot;offer&quot;: null,
+   &quot;saves&quot;: 1,
+   &quot;steps&quot;: [
+    {
+     &quot;team&quot;: &quot;t18&quot;,
+     &quot;do&quot;: &quot;post your ask on v07 too&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;path&quot;: &quot;/api/offers&quot;,
+     &quot;side&quot;: &quot;sell&quot;,
+     &quot;ref&quot;: &quot;RET-01&quot;,
+     &quot;price&quot;: 5,
+     &quot;body&quot;: {
+      &quot;venue&quot;: &quot;v07&quot;,
+      &quot;give&quot;: {
+       &quot;assets&quot;: [
+        &quot;&lt;your asset id of RET-01: the id of that card in GET /api/me&gt;&quot;
+       ]
+      },
+      &quot;want&quot;: {
+       &quot;cash&quot;: 5
+      }
+     },
+     &quot;note&quot;: &quot;Send it to the game with your own team key. The other team accepts it on v07: 0 % fee. Replace the asset id with your copy&#x27;s id from GET /api/me.&quot;
+    },
+    {
+     &quot;team&quot;: &quot;buyer&quot;,
+     &quot;do&quot;: &quot;accept it on v07&quot;,
+     &quot;path&quot;: &quot;/api/offers/&lt;its id on v07&gt;/accept&quot;,
+     &quot;method&quot;: &quot;POST&quot;,
+     &quot;venue&quot;: &quot;v07&quot;,
+     &quot;body&quot;: {}
+    }
+   ],
+   &quot;score&quot;: 1
+  }
+ ],
+ &quot;total&quot;: 31
+}</pre>

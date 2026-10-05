@@ -1,0 +1,67 @@
+/* how: styles of this screen only, classes start with .how- */
+.page.scr-how { gap: 0; min-height: 100%; padding: 0; max-width: none; }
+body:not(.bare) .how-body { padding-top: 40px; }
+.how-who { display: flex; align-items: center; gap: 8px; font-family: var(--font-num); font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.how-dot { width: 6px; height: 6px; background: var(--ok); flex: none; }
+.how-body { max-width: 1120px; width: 100%; margin: 0 auto; padding: 64px 24px 56px; display: flex; flex-direction: column; }
+.how-top { padding-bottom: 52px; }
+.how-title { font-size: 44px; line-height: 1.12; font-weight: 600; letter-spacing: -.01em; }
+.how-lead { color: var(--ink-2); font-size: 15px; margin-top: 18px; }
+.how-sec { border-top: 1px solid var(--line); padding: 40px 0 52px; display: flex; flex-direction: column; gap: 18px; }
+.how-h { display: flex; align-items: baseline; gap: 14px; font-size: 24px; font-weight: 500; }
+.how-n { font-family: var(--font-num); font-size: 11px; color: var(--ink-3); }
+.how-p { color: var(--ink-2); font-size: 14px; max-width: 880px; }
+.how-fine { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 12px; }
+.how-zones { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.how-box { border: 1px solid var(--line); background: var(--s1); padding: 20px; }
+.how-match { display: flex; align-items: center; gap: 40px; flex-wrap: wrap; }
+.how-match-cards { display: flex; align-items: center; gap: 18px; }
+.how-match-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.how-match-card .label.get { color: var(--zone-get); } .how-match-card .label.give { color: var(--zone-give); }
+.how-swap { color: var(--ink-3); margin-top: 18px; }
+.how-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); font-size: 13.5px; }
+.how-list li { display: flex; align-items: center; gap: 10px; }
+.how-list .ic-wrap { color: var(--ok); }
+.how-deal { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 28px; align-items: center; }
+.how-talk { display: flex; flex-direction: column; gap: 10px; }
+.how-bubble { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line-2); background: var(--s2); font-family: var(--font-num); font-size: 12.5px; align-self: flex-start; }
+.how-bubble.is-b { align-self: flex-end; border-color: var(--ink-3); }
+.how-bubble-who { color: var(--ink-3); font-size: 10.5px; }
+.how-states { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.how-state { border: 1px solid var(--line-2); background: var(--s2); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.how-state.is-now { background: var(--signal); border-color: var(--signal); color: var(--bg); }
+.how-state-name { font-weight: 500; }
+.how-state-sub { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-3); }
+.how-state.is-now .how-state-sub { color: #4b4a46; }
+.how-screens { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.how-screen { border: 1px solid var(--line); background: var(--s1); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 210px; }
+.how-screen-name { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; }
+.how-screen-text { color: var(--ink-2); font-size: 12.5px; }
+.how-screen-cards { display: flex; gap: 6px; margin-top: auto; }
+.how-why .landing-also { margin-top: 26px; }
+.how-end { border: 1px solid var(--line-2); background: var(--s1); padding: 22px 24px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
+.how-end-title { font-size: 20px; font-weight: 500; }
+.how-end-sub { font-family: var(--font-num); font-size: 11px; color: var(--ink-3); margin-top: 6px; }
+.how-enter.btn { font-size: 16px; font-weight: 600; padding: 14px 24px; }
+.how-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+
+@media (max-width: 1000px) {
+  .how-screens { grid-template-columns: repeat(2, 1fr); }
+  .how-deal { grid-template-columns: 1fr; }
+  .how .landing-why-grid, .how-why .landing-why-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 760px) {
+  .how-body { padding: 32px 16px 40px; }
+  .how-top { padding-bottom: 32px; }
+  .how-title { font-size: 30px; }
+  .how-sec { padding: 28px 0 32px; }
+  .how-h { font-size: 20px; }
+  .how-zones { grid-template-columns: minmax(0, 1fr); }
+  .how-match { gap: 20px; }
+  .how-states { grid-template-columns: 1fr 1fr; }
+  .how-screens { grid-template-columns: 1fr; }
+  .how-screen { min-height: 0; }
+  .how-who { display: none; }
+  .how-end { flex-direction: column; align-items: stretch; }
+  .how-enter.btn { justify-content: center; }
+}

@@ -1,0 +1,49 @@
+/* activity: styles of this screen only, classes start with .activity- */
+.activity-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.activity-title .page-sub { margin: 0; }
+.activity-tabs { margin-left: auto; display: flex; border: 1px solid var(--line-2); background: var(--s1); }
+.activity-tabs button { all: unset; cursor: pointer; padding: 6px 12px; font-size: 12.5px; color: var(--ink-3); border-left: 1px solid var(--line-2); white-space: nowrap; }
+.activity-tabs button:first-child { border-left: 0; }
+.activity-tabs button:hover { color: var(--ink); }
+.activity-tabs button.active { background: var(--s3); color: var(--ink); }
+.activity-tabs button:focus-visible { outline: 1px solid var(--signal); outline-offset: -2px; }
+
+.activity-warn:empty, .activity-strip:empty { display: none; }
+.activity-stale { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--ink-2); font-size: 13px; }
+
+.activity-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.activity-deal { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 12px; border: 1px solid var(--line-2); background: var(--s1); min-width: 0; }
+a.activity-deal:hover { border-color: var(--ink-3); }
+.activity-deal-who { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.activity-deal-who b { font-weight: 600; }
+.activity-deal-who .ic-wrap { color: var(--ink-3); }
+.activity-deal-cards { display: flex; gap: 10px; }
+.activity-deal-cards .card.sz-md { --card-w: 96px; }
+.activity-deal-state, .activity-deal-ids { display: flex; align-items: center; justify-content: center; gap: 4px 10px; flex-wrap: wrap; }
+
+.activity-row { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--line); min-width: 0; }
+.activity-row:first-child { border-top: 0; }
+.activity-row.is-mine { background: var(--signal-soft); }
+.activity-row.is-high .activity-main { color: var(--ink); }
+.activity-tag { display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border: 1px solid var(--line-2); background: var(--s2); font-family: var(--font-num); font-size: 11px; flex: none; min-width: 58px; }
+.activity-dir { width: 16px; flex: none; color: var(--ink-3); display: inline-flex; }
+.activity-dir.tone-give { color: var(--zone-give); } .activity-dir.tone-get { color: var(--zone-get); } .activity-dir.tone-ok { color: var(--ok); }
+.activity-row .card.sz-sm { --card-w: 40px; flex: none; }
+.activity-nocard { width: 40px; flex: none; }
+.activity-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.activity-quote { font-size: 14.5px; color: var(--ink); overflow-wrap: anywhere; }
+.activity-main { font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.activity-what { font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.activity-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px 10px; flex-wrap: wrap; flex: none; max-width: 42%; }
+.activity-meta a.id:hover { color: var(--ink); }
+
+@media (max-width: 760px) {
+  .activity-tabs { margin-left: 0; width: 100%; }
+  .activity-tabs button { flex: 1; text-align: center; padding: 6px 4px; }
+  .activity-strip { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .activity-deal { padding: 10px 6px; }
+  .activity-deal-cards .card.sz-md { --card-w: 68px; }
+  .activity-row { flex-wrap: wrap; gap: 8px 10px; padding: 9px 12px; }
+  .activity-text { flex-basis: calc(100% - 140px); }
+  .activity-meta { max-width: none; flex-basis: 100%; justify-content: flex-start; }
+}

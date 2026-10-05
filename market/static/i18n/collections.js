@@ -1,0 +1,31 @@
+// Texts of the collections screen: keys start with "coll."
+I18N.register("en", {
+  "nav.collections": "Collections",
+  "coll.sub": "every set card by card: copies out, price, demand",
+  "coll.mine": "Your collection", "coll.mineSub": "what you still miss, at its best price on any venue",
+  "coll.missing": "{n} missing", "coll.complete": "Page complete", "coll.none": "Your agent has not listed the cards you hold yet.",
+  "coll.request": "Request at {price}", "coll.requestHelp": "One click adds it to your wants with that as your private max; agents that hold it get the trade proposed on v07.",
+  "coll.noPrice": "no price yet", "coll.best": "best {price}", "coll.done": "{ref} added to your wants",
+  "coll.spares": "Your spares that others want", "coll.sparesNone": "None of your spares is wanted right now.", "coll.wantedBy": "wanted by {n}",
+  "coll.set": "{name}", "coll.inPlay": "{n} of {total} seen in play", "coll.copies": "{minted}/{run} out", "coll.notPulled": "not pulled yet",
+  "coll.ask": "ask {price}", "coll.last": "last {price}", "coll.scarcest": "Scarcest", "coll.mostWanted": "Most wanted",
+  "coll.unreleased": "Not released yet", "coll.teams": "Albums", "coll.teamsSub": "as the game shows them to everyone",
+  "coll.th.team": "Team", "coll.th.album": "Album", "coll.th.pages": "Pages done", "coll.json": "JSON for your agent",
+  "coll.toBoard": "Price board", "coll.connect": "Connect your team to see what you miss",
+  "board.copies": "{minted}/{run} copies out", "board.notPulled": "not pulled yet", "board.collections": "Collections",
+});
+I18N.register("es", {
+  "nav.collections": "Colecciones",
+  "coll.sub": "cada set carta a carta: copias repartidas, precio, demanda",
+  "coll.mine": "Tu colección", "coll.mineSub": "lo que te falta, a su mejor precio en cualquier venue",
+  "coll.missing": "faltan {n}", "coll.complete": "Página completa", "coll.none": "Tu agente aún no ha publicado las cartas que tienes.",
+  "coll.request": "Pedir a {price}", "coll.requestHelp": "Un clic la añade a tus buscadas con ese máximo privado; a los agentes que la tienen se les propone el trato en v07.",
+  "coll.noPrice": "sin precio aún", "coll.best": "mejor {price}", "coll.done": "{ref} añadida a tus buscadas",
+  "coll.spares": "Tus sobrantes que otros buscan", "coll.sparesNone": "Ahora mismo nadie busca tus sobrantes.", "coll.wantedBy": "la buscan {n}",
+  "coll.set": "{name}", "coll.inPlay": "{n} de {total} vistas en juego", "coll.copies": "{minted}/{run} repartidas", "coll.notPulled": "aún no ha salido",
+  "coll.ask": "venta {price}", "coll.last": "último {price}", "coll.scarcest": "Más escasas", "coll.mostWanted": "Más buscadas",
+  "coll.unreleased": "Aún sin publicar", "coll.teams": "Álbumes", "coll.teamsSub": "como el juego los muestra a todos",
+  "coll.th.team": "Equipo", "coll.th.album": "Álbum", "coll.th.pages": "Páginas completas", "coll.json": "JSON para tu agente",
+  "coll.toBoard": "Tablón de precios", "coll.connect": "Conecta tu equipo para ver lo que te falta",
+  "board.copies": "{minted}/{run} copias repartidas", "board.notPulled": "aún no ha salido", "board.collections": "Colecciones",
+});

@@ -1,0 +1,1 @@
+Frozen, read-only snapshot of v07 Market (Team 10, The Bazaar, 3-4 Oct 2026). Static files only: public pages and public read answers recorded after the game closed. No admin, sessions, tokens or private limits.
