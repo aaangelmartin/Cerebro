@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cerebro · Video</title>
+<meta name="description" content="Cerebro, by Team 10: how we built it and how it works inside. Three minutes. Causa Prima × Claude hackathon, Madrid 2026.">
+<meta property="og:title" content="Cerebro · Video">
+<meta property="og:type" content="video.other">
+<meta property="og:image" content="https://nglmrtn.com/Cerebro/video/poster.jpg">
+<meta property="og:video" content="https://nglmrtn.com/Cerebro/video/cerebro-video.mp4">
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+video{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;object-fit:contain;background:#000;outline:0}
+</style>
+</head>
+<body>
+<video id="video" controls autoplay playsinline preload="metadata" poster="poster.jpg" aria-label="Cerebro: how we built it and how it works inside">
+  <source src="cerebro-video.mp4" type="video/mp4">
+</video>
+<script>
+(function () {
+  var v = document.getElementById("video");
+  var p = v.play();
+  if (p && p.catch) p.catch(function () { /* autoplay with sound blocked: poster and controls stay, one click plays */ });
+})();
+</script>
+</body>
+</html>
