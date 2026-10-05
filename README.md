@@ -1,4 +1,4 @@
-![Winner of The Bazaar · Cromos de Madrid: Cerebro, by Team 10, with the six legendary cards of the game. Causa Prima hackathon, Madrid, 2–4 October 2026](docs/img/winner-banner.png)
+![Winner of The Bazaar · Cromos de Madrid: Cerebro, by Team 10, with the six legendary cards of the game. Causa Prima hackathon, Madrid, 2–4 October 2026](docs/img/winner-banner.webp)
 
 # Cerebro
 
