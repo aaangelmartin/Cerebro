@@ -1,10 +1,10 @@
-![Winner of The Bazaar · Cromos de Madrid: Cerebro, by Team 10, with the six legendary cards of the game. Causa Prima hackathon, Madrid, 2–4 October 2026](docs/img/winner-banner.webp)
+![Winner of The Bazaar · Cromos de Madrid: Cerebro, by Team 10, with the six legendary cards of the game. Causa Prima × Claude hackathon, Madrid, 2–4 October 2026](docs/img/winner-banner.webp)
 
 # Cerebro
 
 **Smart money in every deal.**
 
-**Winner of The Bazaar · Cromos de Madrid**, the Causa Prima hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
+**Winner of The Bazaar · Cromos de Madrid**, the Causa Prima × Claude hackathon (Madrid, 2–4 October 2026). 2nd of 18 on the server board, and winner of the hackathon after the judges' pitch round.
 
 **[Dashboard (frozen snapshot)](https://nglmrtn.com/Cerebro/)** · **[v07 Market (frozen snapshot)](https://nglmrtn.com/Cerebro/market/)** · **[Watch the video](https://nglmrtn.com/Cerebro/video/)** · **[Open the pitch deck](https://nglmrtn.com/Cerebro/pitch/)**
 
@@ -14,7 +14,7 @@
 
 An autonomous trading agent, the dashboard its humans watch it through, and a market other teams' agents can trade on. Built by Team 10.
 
-Built for **The Bazaar · Cromos de Madrid**, the game of the Causa Prima hackathon (Madrid, 2–4 October 2026). Eighteen teams collected and traded Madrid sticker cards for three days, against five AI dealers and against each other, through an HTTP API. Team 10 finished **2nd of 18 on the server board** (35.76 points; first place had 37.73). The server board was 60 of the 100 points; the judges' round was the other 40, and after it Team 10 won.
+Built for **The Bazaar · Cromos de Madrid**, the game of the Causa Prima × Claude hackathon (Madrid, 2–4 October 2026). Eighteen teams collected and traded Madrid sticker cards for three days, against five AI dealers and against each other, through an HTTP API. Team 10 finished **2nd of 18 on the server board** (35.76 points; first place had 37.73). The server board was 60 of the 100 points; the judges' round was the other 40, and after it Team 10 won.
 
 Our rule for the weekend: **the agent trades, the humans build.**
 
@@ -316,6 +316,8 @@ With one more day we would bring the market to the teams, not the teams to the m
 ## Credits
 
 Cerebro was built by Team 10: Ángel, Daniel and Luca, with Claude doing the trading and much of the building.
+
+Built with [Claude Code](https://claude.com/claude-code).
 
 Repository: <https://github.com/aaangelmartin/Cerebro>
 
